@@ -125,6 +125,23 @@ type AgentRunReq struct {
 	// 「这个对话属于哪个项目」不会因为子任务缩到 src/ 就变。拿 Cwd 当范围会让
 	// 子 agent 连项目的 go.mod 都读不到。
 	ScopeCwd string
+
+	// ── 定时任务专用（见 ai_schedule.go）──
+	//
+	// 不复用 ToolFilter：那个非 nil 会让 agentScope 把自己当子 agent 处理，
+	// 连带改掉上下文组装。定时任务只是想收窄工具面，不该捎带改变编排语义。
+	// ScheduledNoTools 优先级高于 ScheduledReadOnly。
+	ScheduledNoTools  bool
+	ScheduledReadOnly bool
+
+	// 一次运行的费用护栏（0 = 沿用默认预算，普通 SSE 会话不传）。
+	//
+	// 无人值守的定时任务没有人在旁边点「停止」：默认的 120 轮工具 +
+	// 20 倍上下文 token 预算是为「有人盯着的长任务」留的余量，放到到点自动跑
+	// 的任务上，一次打转就能烧掉整月额度。两者都是收尾而非报错——撞线时撤掉
+	// 工具让模型把已有结果说完，与现有的轮次/token 预算走同一条路径。
+	MaxToolRounds    int
+	TurnBudgetFactor int
 }
 
 // AgentRunResult 一次运行的结果。
@@ -532,7 +549,21 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 第三层过滤是 role（阶段 2）：子 agent 的工具面由 agentRoleSpec 收窄，
 	// 并且一旦不能再派活就把 spawn_agent 撤下——让它根本不知道有这个能力。
 	filter := spawnFilterFor(req.ToolFilter, sc.CanSpawn())
+	// 定时任务的只读档：MaxLevel=0 即只留 LevelRead 工具。改的是 spawnFilterFor
+	// 返回的副本，不会污染编排传进来的 base。
+	if req.ScheduledReadOnly {
+		if filter == nil {
+			filter = &ToolFilter{MaxLevel: 0, NoSpawn: true}
+		} else {
+			filter.MaxLevel = 0
+			filter.NoSpawn = true
+		}
+	}
 	tools, extTrimmed := aiToolsPayloadFor(mode, filter)
+	// 纯问答档：工具一个都不挂，模型看不到自然不会调，审批闸门也就无从触发。
+	if req.ScheduledNoTools {
+		tools = nil
+	}
 	// 原型副本：收尾轮会把 tools 置 nil（模型只该收尾），但用户中途插话时
 	// 工具得能挂回去——他新提的那句可能要读文件、跑命令（见循环里的插入接入点）。
 	baseTools := tools
@@ -643,11 +674,26 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 收尾那一轮不带 tools：轮次用尽还允许调工具的话，用户会看到卡片一路往外冒、
 	// 就是等不到答案。
 	loopBudget := aiLoopBudget(cfg)
+	// 工具总轮次预算：默认仍是 120 轮（病态兜底），无人值守入口可以传更紧的值。
+	// 只收窄不放大，脏参数不会把预算撑得比默认还高；limit 是「这一批」的上界，
+	// 初值同样不能越过总预算，否则下面所有 limit > maxRounds 的收敛都白写。
+	maxRounds := aiToolMaxTotalRounds
+	if req.MaxToolRounds > 0 && req.MaxToolRounds < maxRounds {
+		maxRounds = req.MaxToolRounds
+	}
 	limit := aiToolMaxRounds
+	if limit > maxRounds {
+		limit = maxRounds
+	}
 	// 本次提问的 token 预算（见 aiChatTurnBudget）。撞线不是报错，而是「收尾并说明」：
 	// 走的是与轮次用尽完全相同的那条路（撤工具 + 一句 notice + 再跑一轮），
 	// 不新增错误语义，用户说一句「接着做」就是新的一轮、预算重新计。
 	chatBudget := aiChatTurnBudget(cfg)
+	if req.TurnBudgetFactor > 0 {
+		if b := aiContextBudget(cfg); b > 0 {
+			chatBudget = b * req.TurnBudgetFactor
+		}
+	}
 	budgetClosed := false
 
 	for turnIdx := 1; turnIdx <= limit+1; turnIdx++ {
@@ -704,8 +750,8 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 				// 轮次预算同理补一批：上一问跑满的是上一问的事，不该卡住新提的这句。
 				if turnIdx > limit {
 					limit = turnIdx + aiToolMaxRounds
-					if limit > aiToolMaxTotalRounds {
-						limit = aiToolMaxTotalRounds
+					if limit > maxRounds {
+						limit = maxRounds
 					}
 				}
 
@@ -831,8 +877,8 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			if injects != nil && injects.consumeInterrupt() {
 				if turnIdx >= limit {
 					limit += aiToolMaxRounds
-					if limit > aiToolMaxTotalRounds {
-						limit = aiToolMaxTotalRounds
+					if limit > maxRounds {
+						limit = maxRounds
 					}
 				}
 				logger.I("[ai] 立即发送：已打断当前生成 conv=%s 已完成=%d字 turn=%d limit=%d",
@@ -852,8 +898,8 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			if injects != nil && injects.pending() {
 				if turnIdx >= limit {
 					limit += aiToolMaxRounds
-					if limit > aiToolMaxTotalRounds {
-						limit = aiToolMaxTotalRounds
+					if limit > maxRounds {
+						limit = maxRounds
 					}
 				}
 				if turnIdx <= limit {
@@ -933,7 +979,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		// 这里刻意不再有「36 轮到了，让用户发一句继续」：轮次该用多少取决于活儿本身，
 		// 拍一个数字当墙，表现就是模型干到一半自己收尾，用户被迫再打一句「继续」；
 		// 而那句话会被当成新的用户诉求记进会话和记忆，下次它真会拿「继续」当任务。
-		// aiToolMaxTotalRounds 只是病态情况的预算兜底（每次换参数空转），正常任务碰不到。
+		// maxRounds 是本次运行的硬兜底：默认 120 轮防病态空转，定时任务会收得更紧。
 		if turnIdx >= limit {
 			if !madeProgress(recs) {
 				// 一整批都没有新动作：再给多少批也是同一个结果，早停省下来的
@@ -942,15 +988,15 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 					"message": fmt.Sprintf("连续 %d 轮工具调用没有新进展（在重复或未获授权），先收尾", aiToolMaxRounds),
 				})
 				tools = nil
-			} else if limit >= aiToolMaxTotalRounds {
+			} else if limit >= maxRounds {
 				sink.Event("notice", map[string]any{
 					"message": fmt.Sprintf("本次提问已连续执行 %d 轮工具，达到单次预算，先收尾；没做完的部分说一声「接着做」就行", turnIdx),
 				})
 				tools = nil
 			} else {
 				limit += aiToolMaxRounds
-				if limit > aiToolMaxTotalRounds {
-					limit = aiToolMaxTotalRounds
+				if limit > maxRounds {
+					limit = maxRounds
 				}
 				logger.I("[ai] 工具轮次已用满 %d 轮，仍有新调用，自动延长到 %d conv=%s",
 					turnIdx, limit, res.ConvID)

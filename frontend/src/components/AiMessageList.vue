@@ -74,6 +74,13 @@ const props = defineProps<{
   jobRows: Map<string, AIJobRow>
   /** jobRows 的版本号：进 v-memo 依赖，否则任务结束后历史消息里那行不会翻状态 */
   jobSeq: number
+  /**
+   * 定时任务的会话：在每条用户消息旁标出执行时刻。
+   *
+   * 定时任务是「一个任务一条会话、每次执行往后追加一轮」，一轮的提问文字通常
+   * 一模一样；不标时间的话，两次运行在界面上就是两段看不出区别的问答。
+   */
+  schedTimes?: boolean
 }>()
 
 // —— 流式状态从 runs 里自己取 ——
@@ -399,6 +406,16 @@ function jobSeqOf(m: AIMessage): number {
   return toolsOf(m).some((tc) => jobIdOf(tc)) ? props.jobSeq : 0
 }
 
+// msgClock 从 created_at 截出「MM-DD HH:mm」，给定时任务的每轮执行标时间。
+//
+// 用切片而不是 Date 解析：库里存的是带 +08:00 的字面量，交给 Date 再按本地时区
+// 格式化会多一次换算，跨时区或夏令时会凭空偏几小时；这里要的就是「当时看到的钟点」。
+function msgClock(s: string | undefined): string {
+  const v = (s || '').trim()
+  if (v.length < 16 || v[7] !== '-' || v[13] !== ':') return ''
+  return v.slice(5, 10) + ' ' + v.slice(11, 16)
+}
+
 // —— 工具卡片的展开状态 ——
 //
 // 工具详情一律默认收起，历史消息和流式期同一口径，是否展开完全交给用户点
@@ -600,11 +617,13 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
           v-for="m in shownMessages"
           :key="m.id"
           :data-msg-id="m.id"
-          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), costLines.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id, expandedInMessage(m), editingId === m.id]"
+          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), costLines.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id, expandedInMessage(m), editingId === m.id, schedTimes, m.created_at]"
           :class="['ai-msg', m.role]"
         >
           <div class="ai-msg-role">
             {{ m.role === 'user' ? t('aiYou') : 'AI' }}
+            <!-- 定时任务每轮执行的时刻：同一个任务只有一条会话，靠它把各次运行分开 -->
+            <span v-if="schedTimes && m.role === 'user' && msgClock(m.created_at)" class="ai-msg-clock">{{ msgClock(m.created_at) }}</span>
             <!-- 多档案（不同模型/档案）混着聊时，不写模型名就分不清这句是谁答的 -->
             <span v-if="m.role === 'assistant' && m.model" class="ai-msg-model">{{ m.model }}</span>
           </div>
@@ -1309,6 +1328,12 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   font-size: 10px; color: var(--color-text-disabled);
   background: var(--color-bg-tertiary); padding: 0 5px;
   border-radius: var(--radius-xs); opacity: 0.85;
+}
+
+/* 定时任务每轮执行的时刻。等宽数字，纵向看下来时间列是齐的。 */
+.ai-msg-clock {
+  font-size: 10px; color: var(--color-text-disabled);
+  font-variant-numeric: tabular-nums;
 }
 
 .ai-msg-content {

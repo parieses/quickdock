@@ -55,6 +55,25 @@ type AppService struct {
 	// AI 服务构造失败等）。
 	AskAIFn func(system, question string, timeoutSec int) (text string, model string, err error)
 
+	// RunAIScheduledFn 注入「定时任务到点跑一段 AI 提示词」（实现在 services/ai 包）。
+	//
+	// 与 AskAIFn 同因：services/ai 反向 import services，这里不能持具体类型。
+	// runAgent 又刻意非导出（EventSink 参数过不了 JSON 绑定），只能由 ai 包内部
+	// 提供一个收基本类型的包装方法，再由 main.go 装配成这个函数字段。
+	// 未注入（AI 服务没起来）时定时任务返回明确失败，而不是静默跳过。
+	//
+	// onProgress 是执行期的步骤回调（工具名 + 参数摘要），可为 nil。定时任务
+	// 没有 SSE 连接，不给这条通道的话用户在界面上只能看到一个转圈——不知道
+	// 它到底在读文件、跑命令，还是卡住了。
+	RunAIScheduledFn func(in ScheduledAIRun, onProgress func(tool, args string)) ScheduledAIRunResult
+
+	// EnsureScheduleSpaceFn / SyncScheduleSpaceNameFn 注入「定时任务专属空间」的
+	// 建与改名同步（实现在 services/ai 包，原因同 RunAIScheduledFn）。
+	// 保存 AI 任务时就要把空间建出来，不能等第一次执行；空间被用户删掉时
+	// 执行前也会再 ensure 一次，按原 created_at 重建，名字不会随时间漂移。
+	EnsureScheduleSpaceFn   func(taskID, taskName, createdAt string) string
+	SyncScheduleSpaceNameFn func(taskID, oldName, newName, createdAt string)
+
 	// AskAIFnStream 与 AskAIFn 同源，但 onToken 逐段回调增量文本，供前端流式渲染。
 	// 调用方（SSH / 剪贴板面板）在 onToken 里把增量经 Wails 事件推给前端即可。
 	// onToken 允许为 nil（如插件这类拿不到前端通道的调用方，退化成一次性返回）。

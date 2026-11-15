@@ -506,6 +506,36 @@ func main() {
 	// AI 服务门面：承载 AI 档案/对话/聊天领域方法（门面即实现，纯 DB 依赖），单独绑定为独立 Wails service
 	aiSvc := aisvc.NewAIService(appService)
 
+	// 定时任务的 AI 动作：把 ai 包内的无头执行入口回注宿主。
+	//
+	// 不直接把 *aisvc.AIService 存进 AppService：services/ai 反向 import services，
+	// 持具体类型会成环。这里只做一层同构结构的搬运，参数全是基本类型。
+	appService.RunAIScheduledFn = func(in services.ScheduledAIRun, onProgress func(tool, args string)) services.ScheduledAIRunResult {
+		r := aiSvc.RunScheduledPrompt(aisvc.ScheduledPromptRequest{
+			Prompt:        in.Prompt,
+			Cwd:           in.Cwd,
+			Mode:          in.Mode,
+			TaskID:        in.TaskID,
+			TaskName:      in.TaskName,
+			TaskCreatedAt: in.TaskCreatedAt,
+			TimeoutSec:    in.TimeoutSec,
+			OnProgress:    onProgress,
+		})
+		return services.ScheduledAIRunResult{
+			ConvID: r.ConvID,
+			Text:   r.Text,
+			ErrMsg: r.ErrMsg,
+		}
+	}
+	// 保存 AI 任务时就把专属空间建好：用户建完应该立刻能在侧栏看到那个闹钟分组，
+	// 而不是等第一次触发。改名同步同理，但要避开用户手动改过的空间名（判定在 db 层）。
+	appService.EnsureScheduleSpaceFn = func(taskID, taskName, createdAt string) string {
+		return aiSvc.EnsureTaskSpace(taskID, taskName, createdAt)
+	}
+	appService.SyncScheduleSpaceNameFn = func(taskID, oldName, newName, createdAt string) {
+		aiSvc.SyncTaskSpaceName(taskID, oldName, newName, createdAt)
+	}
+
 	// 把「一次性 AI 问答」能力回注宿主，供 SSH 面板与插件复用。
 	//
 	// 走一次性接口（不落库、不占流式 convId）而不是复用流式对话：

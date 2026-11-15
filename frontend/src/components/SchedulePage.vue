@@ -28,7 +28,7 @@ import QdBarChart from './charts/QdBarChart.vue'
 import {
   Plus, Play, Pause, Pencil, Trash2, AlarmClock, AppWindow, FolderOpen,
   Globe, TerminalSquare, Zap, CheckCircle2, XCircle, History,
-  Search, LoaderCircle, GripVertical, Bell, BarChart3, FolderSearch,
+  Search, LoaderCircle, GripVertical, Bell, BarChart3, FolderSearch, Bot, MessagesSquare,
 } from '@lucide/vue'
 
 const { t, locale } = useI18n()
@@ -41,9 +41,9 @@ const error = ref('')
 const formErr = ref('')
 
 // ---- 动作类型元信息 ----
-const ACTIONS = ['app', 'dir', 'url', 'command', 'http'] as const
+const ACTIONS = ['app', 'dir', 'url', 'command', 'http', 'ai'] as const
 const actionIcon: Record<string, any> = {
-  app: AppWindow, dir: FolderOpen, url: Globe, command: TerminalSquare, http: Zap,
+  app: AppWindow, dir: FolderOpen, url: Globe, command: TerminalSquare, http: Zap, ai: Bot,
 }
 function actionLabel(a: string) { return t('sched_action_' + a) }
 
@@ -72,6 +72,7 @@ function targetPlaceholder(a: string) {
     case 'url': return 'https://example.com'
     case 'command': return 'ping -n 1 example.com'
     case 'http': return 'https://api.example.com/webhook'
+    case 'ai': return t('sched_ai_prompt_ph')
   }
   return ''
 }
@@ -158,11 +159,14 @@ const stats = computed(() => {
   const idx = new Map(days.map((x, i) => [x.date, i]))
   let total = 0, fail = 0
   for (const r of runs.value) {
+    // skipped 不是一次执行（关机错过 / 未到生效时间 / 已过有效期），
+    // 留痕归运行历史，但不该把「近 7 天成功率」拉低——那会让人以为任务坏了。
+    if (r.status === 'skipped') continue
     const i = idx.get((r.runAt || '').slice(0, 10))
     if (i === undefined) continue
     days[i].total++
     total++
-    if (r.status !== 'ok') { days[i].fail++; fail++ }
+    if (r.status === 'fail') { days[i].fail++; fail++ }
   }
   return { days, total, fail, rate: total ? Math.round((fail / total) * 100) : 0 }
 })
@@ -333,6 +337,11 @@ const fNotifySystem = ref(true)
 const fNotifyWebhook = ref(true)
 // 失败重试次数（0 = 不重试）。只在定时任务上有意义，once 任务后端会归零。
 const fRetry = ref(0)
+// action='ai' 的执行权限 / 有效期 / 通知策略：老任务没有这些字段，编辑时按默认值回填
+const fAIMode = ref('chat')
+const fValidFrom = ref('')        // datetime-local
+const fValidUntil = ref('')       // datetime-local
+const fNotifyPolicy = ref('always')
 
 function toInput(s: string): string { return s ? s.replace(' ', 'T') : '' }
 function fromInput(s: string): string { return s ? s.replace('T', ' ') : '' }
@@ -383,6 +392,10 @@ function openCreate() {
   fNotifySystem.value = true
   fNotifyWebhook.value = true
   fRetry.value = 0
+  fAIMode.value = 'chat'
+  fValidFrom.value = ''
+  fValidUntil.value = ''
+  fNotifyPolicy.value = 'always'
   showModal.value = true
 }
 
@@ -416,6 +429,10 @@ function openEdit(t0: ScheduledTask) {
   fNotifySystem.value = chans.includes('system')
   fNotifyWebhook.value = chans.includes('webhook')
   fRetry.value = t0.retryCount || 0
+  fAIMode.value = t0.aiMode || 'chat'
+  fValidFrom.value = toInput(t0.validFrom)
+  fValidUntil.value = toInput(t0.validUntil)
+  fNotifyPolicy.value = t0.notifyPolicy || 'always'
   showModal.value = true
 }
 
@@ -483,6 +500,12 @@ function buildPayload(): ScheduledTask {
     // once 任务没有「下一次调度」，重试次数无意义：后端会归零，这里也置 0，
     // 免得切回其他调度类型时又冒出一个用户没设过的数字。
     retryCount: fKind.value === 'once' ? 0 : fRetry.value,
+    aiMode: fAIMode.value,
+    // 会话作用域目前只有一种：每次执行追加到任务那条会话（后端也会强制归一）。
+    aiScope: 'continue',
+    validFrom: fromInput(fValidFrom.value),
+    validUntil: fromInput(fValidUntil.value),
+    notifyPolicy: fNotifyPolicy.value,
     nextRun: '', lastRun: '', lastStatus: '', lastResult: '', sort: 0, createdAt: '',
   } as ScheduledTask
 }
@@ -497,6 +520,10 @@ async function save() {
   if (p.scheduleKind === 'weekly' && !p.weekdays) { formErr.value = t('sched_err_weekday'); return }
   // 完整语法交给后端校验（前端只挡空值）：两边各写一份解析器迟早会不一致。
   if (p.scheduleKind === 'cron' && !p.cronExpr) { formErr.value = t('sched_err_cron'); return }
+  // 有效期两端都填了才比较：datetime-local 经 fromInput 后同为 'YYYY-MM-DD HH:MM(:SS)'，字符串序即时间序
+  if (p.validFrom && p.validUntil && p.validUntil <= p.validFrom) {
+    formErr.value = t('sched_err_valid_range'); return
+  }
   saving.value = true
   try {
     if (editingId.value) {
@@ -553,6 +580,13 @@ async function runNow(t0: ScheduledTask) {
   }
 }
 
+// 定时任务页看不到「空间」这层：AI 任务的产出全在它的专属空间里。
+// 从这里直接跳过去，省得绕「运行历史 → 查看会话」（那条还得先有一次运行）。
+// 只带 taskId：任务可能一次都没跑过、没有会话，但空间在建任务时就建好了。
+function openAISpace(t0: ScheduledTask) {
+  try { Events.Emit('ai:open-space', { id: t0.id }) } catch { /* 事件通道未就绪时静默 */ }
+}
+
 async function remove(t0: ScheduledTask) {
   delTask.value = t0
   showDelConfirm.value = true
@@ -560,6 +594,16 @@ async function remove(t0: ScheduledTask) {
 
 const delTask = ref<ScheduledTask | null>(null)
 const showDelConfirm = ref(false)
+
+// 删除确认语按动作分支：AI 任务的对话落在专属空间里，删任务不会带走它们。
+// 沿用通用的「删除任务?」会让人以为历史一起没了，删完才发现空间还在。
+const delConfirmMsg = computed(() => {
+  const t0 = delTask.value
+  if (!t0) return ''
+  return t0.action === 'ai'
+    ? t('sched_delete_ai_confirm', { name: t0.name })
+    : t('sched_delete') + '?'
+})
 
 // ---- 运行历史 ----
 const historyTask = ref<ScheduledTask | null>(null)
@@ -598,6 +642,13 @@ function stopPage() {
 onMounted(() => { void refresh(); startPage() })
 onActivated(startPage)
 onDeactivated(stopPage)
+
+// 后端每次运行收尾都会广播一次。异步 AI 任务常常是在用户看着列表/历史时才结束，
+// 不刷新就一直停在旧快照，看起来像「没跑过」或「只跑了一次」。
+// 用 On 返回的 off 单独注销：Events.Off(事件名) 是按名字整体移除的，历史弹窗
+// 和 AI 页也监听同一事件，这里卸一次会把它们的监听一起清掉。
+const offRunUpdated = Events.On('schedule:run-updated', () => { void refresh() })
+onBeforeUnmount(() => { offRunUpdated?.() })
 
 // ---- 通知中心深链定位 ----
 // 点一条定时任务通知后停在对应那条上，而不是回到列表顶部。
@@ -733,6 +784,13 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
           <div class="item-target" :title="task.target">{{ task.target }}</div>
           <div class="item-meta">
             <span class="meta-sched">{{ scheduleDesc(task) }}</span>
+            <span v-if="task.action === 'ai'" class="meta-ai-mode">{{ t('sched_ai_mode_' + (task.aiMode || 'chat')) }}</span>
+            <span v-if="task.validFrom || task.validUntil" class="meta-valid">
+              {{ t('sched_valid_badge', {
+                from: (task.validFrom || '').slice(5, 16) || '…',
+                until: (task.validUntil || '').slice(5, 16) || '…',
+              }) }}
+            </span>
             <span v-if="task.enabled && task.nextRun" class="meta-next">
               {{ t('sched_next') }} {{ task.nextRun.slice(5, 16) }}
               <span v-if="leftText(task)" class="meta-left">({{ leftText(task) }})</span>
@@ -759,6 +817,10 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
             <Play v-else :size="14" />
           </button>
           <button class="act" @click="openHistory(task)" :title="t('sched_history')"><History :size="14" /></button>
+          <!-- 只有 AI 任务有空间：命令/HTTP/应用都没有「产出落哪儿」这回事 -->
+          <button v-if="task.action === 'ai'" class="act" @click="openAISpace(task)" :title="t('sched_open_space')">
+            <MessagesSquare :size="14" />
+          </button>
           <button class="act" @click="openEdit(task)" :title="t('sched_edit')"><Pencil :size="14" /></button>
           <button class="act danger" @click="remove(task)" :title="t('sched_delete')"><Trash2 :size="14" /></button>
         </div>
@@ -782,17 +844,31 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
           </button>
         </div>
 
-        <!-- 目标 -->
+        <!-- 目标：ai 动作存的是多行提示词，用 textarea；路径类动作才显示应用/场景选择器 -->
         <label>{{ targetLabel(fAction) }}</label>
         <AppTargetPicker v-if="fAction === 'app'" v-model="fTarget" :placeholder="targetPlaceholder(fAction)" />
+        <textarea v-else-if="fAction === 'ai'" v-model="fTarget" class="modal-input modal-area" rows="4"
+                  :placeholder="targetPlaceholder(fAction)"></textarea>
         <input v-else v-model="fTarget" class="modal-input" :placeholder="targetPlaceholder(fAction)" />
         <!-- 不必手填路径：从已有的场景/集合/项目里挑一个，自动带出 target 与对应动作类型 -->
-        <button type="button" class="qd-btn qd-btn-sm sched-pick-btn" @click="showPicker = true">
+        <button v-if="fAction !== 'ai'" type="button" class="qd-btn qd-btn-sm sched-pick-btn" @click="showPicker = true">
           <FolderSearch :size="13" /> {{ t('sched_pick_scene_item') }}
         </button>
 
-        <!-- 工作目录（app/command） -->
-        <template v-if="fAction === 'app' || fAction === 'command'">
+        <!-- 执行权限（仅 ai）：chat / readonly / agent -->
+        <template v-if="fAction === 'ai'">
+          <p class="form-hint sched-ai-scope-hint">{{ t('sched_ai_scope_hint') }}</p>
+          <label>{{ t('sched_ai_mode') }}</label>
+          <select v-model="fAIMode" class="modal-input">
+            <option value="chat">{{ t('sched_ai_mode_chat') }}</option>
+            <option value="readonly">{{ t('sched_ai_mode_readonly') }}</option>
+            <option value="agent">{{ t('sched_ai_mode_agent') }}</option>
+          </select>
+          <p class="form-hint">{{ t('sched_ai_mode_hint') }}</p>
+        </template>
+
+        <!-- 工作目录（app/command/ai） -->
+        <template v-if="fAction === 'app' || fAction === 'command' || fAction === 'ai'">
           <label>{{ t('sched_working_dir') }}</label>
           <input v-model="fWorkingDir" class="modal-input" :placeholder="t('sched_working_dir_ph')" />
         </template>
@@ -886,6 +962,13 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
           </div>
         </template>
 
+        <!-- 有效期：留空 = 不限，对所有动作通用 -->
+        <label>{{ t('sched_valid_from') }}</label>
+        <input v-model="fValidFrom" type="datetime-local" step="1" class="modal-input" />
+        <label>{{ t('sched_valid_until') }}</label>
+        <input v-model="fValidUntil" type="datetime-local" step="1" class="modal-input" />
+        <p class="form-hint">{{ t('sched_valid_hint') }}</p>
+
         <!-- 开关 -->
         <div class="toggle-row">
           <label class="toggle-label">
@@ -907,6 +990,15 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
             <span class="nf-link" @click="openNotifySettings">{{ t('notifyGoSettings') }}</span>
           </template>
         </div>
+
+        <!-- 通知策略：与总开关/渠道叠加，决定「什么时候发」 -->
+        <label>{{ t('sched_notify_policy') }}</label>
+        <select v-model="fNotifyPolicy" class="modal-input">
+          <option value="always">{{ t('sched_notify_policy_always') }}</option>
+          <option value="failed">{{ t('sched_notify_policy_failed') }}</option>
+          <option value="never">{{ t('sched_notify_policy_never') }}</option>
+        </select>
+        <p class="form-hint">{{ t('sched_notify_policy_hint') }}</p>
 
         <!-- 失败重试：只在非一次性任务上出现——once 没有「下一次调度」，
              重试与「已经跑完了、失败了就结束了」这个语义冲突（后端也会归零）。 -->
@@ -934,7 +1026,7 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 
     <ConfirmDialog
       :visible="showDelConfirm"
-      :message="t('sched_delete') + '?'"
+      :message="delConfirmMsg"
       @confirm="confirmDel"
       @cancel="showDelConfirm = false"
     />
@@ -1097,6 +1189,8 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 .meta-last { display: inline-flex; align-items: center; gap: 3px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meta-last.ok { color: var(--color-text-muted); }
 .meta-last.fail { color: var(--color-danger); }
+.meta-ai-mode { color: var(--color-accent); }
+.meta-valid { color: var(--color-text-muted); }
 
 .item-actions { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
 .act {

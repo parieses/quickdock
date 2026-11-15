@@ -13,6 +13,8 @@ import (
 // ScheduledTask 定时任务
 // 动作(action)：app=打开软件/文件  dir=打开目录  url=打开网页  command=执行命令  http=HTTP 请求
 //
+//	ai=跑一段 AI 提示词（每次新建一个会话，结果落进 AI 会话库供回看）
+//
 //	todo=重复待办（由待办的重复规则在内部创建，用户不能直接新建这种动作，
 //	故 validateScheduledTask 的动作白名单里没有它）
 //
@@ -55,18 +57,33 @@ type ScheduledTask struct {
 	// 与 Notify 是「总开关 × 分渠道」的关系：Notify 关掉就都不发，
 	// Notify 开着时再按这里决定发往哪几处。
 	NotifyChannels string `json:"notifyChannels"`
-	NextRun        string `json:"nextRun"`    // 下次运行 YYYY-MM-DD HH:MM:SS（'' 表示不再运行）
-	LastRun        string `json:"lastRun"`    // 上次运行 YYYY-MM-DD HH:MM:SS
-	LastStatus     string `json:"lastStatus"` // ok | fail | ''
-	LastResult     string `json:"lastResult"` // 上次运行简要结果
-	Sort           int    `json:"sort"`
-	CreatedAt      string `json:"createdAt"`
+	// AIMode 只对 action='ai' 生效：chat=纯问答（不挂工具）/ agent=可用工具。
+	// 空串按 chat 处理，老数据（非 AI 动作）永远不读这一列。
+	AIMode string `json:"aiMode"`
+	// AIScope 预留「回到同一会话」（continue）。当前只实现 new；字段先落下来，
+	// 免得将来支持续跑时要再动一次表结构。
+	AIScope string `json:"aiScope"`
+	// ValidFrom / ValidUntil 有效期（YYYY-MM-DD HH:MM:SS，空 = 不限）。
+	// 对所有动作通用：过了 ValidUntil 的任务自动停用，不再排下一次。
+	ValidFrom  string `json:"validFrom"`
+	ValidUntil string `json:"validUntil"`
+	// NotifyPolicy 通知策略：always=每次 / failed=仅失败 / never=都不发。
+	// 与 Notify 总开关、NotifyChannels 分渠道是三层叠加，不是替代关系。
+	// 老库补列默认 always，升级后行为不变。
+	NotifyPolicy string `json:"notifyPolicy"`
+	NextRun      string `json:"nextRun"`    // 下次运行 YYYY-MM-DD HH:MM:SS（'' 表示不再运行）
+	LastRun      string `json:"lastRun"`    // 上次运行 YYYY-MM-DD HH:MM:SS
+	LastStatus   string `json:"lastStatus"` // ok | fail | ''
+	LastResult   string `json:"lastResult"` // 上次运行简要结果
+	Sort         int    `json:"sort"`
+	CreatedAt    string `json:"createdAt"`
 }
 
 const schedCols = `id, name, action, target, working_dir, http_method, http_headers, http_body,
 	schedule_kind, run_at, interval_sec, time_of_day, weekdays, cron_expr, day_of_month,
 	enabled, notify, notify_channels,
-	retry_count, next_run, last_run, last_status, last_result, sort, created_at`
+	retry_count, ai_mode, ai_scope, valid_from, valid_until, notify_policy,
+	next_run, last_run, last_status, last_result, sort, created_at`
 
 func scanScheduledTask(rows interface{ Scan(...interface{}) error }) (ScheduledTask, error) {
 	var t ScheduledTask
@@ -76,6 +93,7 @@ func scanScheduledTask(rows interface{ Scan(...interface{}) error }) (ScheduledT
 		&t.ScheduleKind, &t.RunAt, &t.IntervalSec, &t.TimeOfDay, &t.Weekdays,
 		&t.CronExpr, &t.DayOfMonth,
 		&enabled, &notify, &t.NotifyChannels, &t.RetryCount,
+		&t.AIMode, &t.AIScope, &t.ValidFrom, &t.ValidUntil, &t.NotifyPolicy,
 		&t.NextRun, &t.LastRun, &t.LastStatus, &t.LastResult,
 		&t.Sort, &t.CreatedAt)
 	t.Enabled = enabled != 0
@@ -138,12 +156,15 @@ func (d *Database) CreateScheduledTask(t *ScheduledTask) (*ScheduledTask, error)
 			(id, name, action, target, working_dir, http_method, http_headers, http_body,
 			 schedule_kind, run_at, interval_sec, time_of_day, weekdays, cron_expr, day_of_month,
 			 enabled, notify, notify_channels,
-			 retry_count, next_run, last_run, last_status, last_result, sort, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '', ?, ?)`,
+			 retry_count, ai_mode, ai_scope, valid_from, valid_until, notify_policy,
+			 next_run, last_run, last_status, last_result, sort, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '', ?, ?)`,
 		t.ID, t.Name, t.Action, t.Target, t.WorkingDir, t.HTTPMethod, t.HTTPHeaders, t.HTTPBody,
 		t.ScheduleKind, t.RunAt, t.IntervalSec, t.TimeOfDay, t.Weekdays, t.CronExpr, t.DayOfMonth,
 		b2i(t.Enabled), b2i(t.Notify),
-		t.NotifyChannels, t.RetryCount, t.NextRun, t.Sort, t.CreatedAt,
+		t.NotifyChannels, t.RetryCount,
+		t.AIMode, t.AIScope, t.ValidFrom, t.ValidUntil, t.NotifyPolicy,
+		t.NextRun, t.Sort, t.CreatedAt,
 	)
 	return t, err
 }
@@ -197,12 +218,15 @@ func (d *Database) UpdateScheduledTask(t *ScheduledTask) error {
 			name = ?, action = ?, target = ?, working_dir = ?, http_method = ?, http_headers = ?, http_body = ?,
 			schedule_kind = ?, run_at = ?, interval_sec = ?, time_of_day = ?, weekdays = ?,
 			cron_expr = ?, day_of_month = ?, enabled = ?, notify = ?,
-			notify_channels = ?, retry_count = ?, next_run = ?
+			notify_channels = ?, retry_count = ?, ai_mode = ?, ai_scope = ?,
+			valid_from = ?, valid_until = ?, notify_policy = ?, next_run = ?
 		 WHERE id = ?`,
 		t.Name, t.Action, t.Target, t.WorkingDir, t.HTTPMethod, t.HTTPHeaders, t.HTTPBody,
 		t.ScheduleKind, t.RunAt, t.IntervalSec, t.TimeOfDay, t.Weekdays,
 		t.CronExpr, t.DayOfMonth, b2i(t.Enabled), b2i(t.Notify),
-		t.NotifyChannels, t.RetryCount, t.NextRun, t.ID,
+		t.NotifyChannels, t.RetryCount,
+		t.AIMode, t.AIScope, t.ValidFrom, t.ValidUntil, t.NotifyPolicy,
+		t.NextRun, t.ID,
 	)
 	return err
 }
@@ -360,6 +384,51 @@ const (
 	// scheduleRunMaxAgeDays 全局保留天数：超过该天数的记录一律清理
 	scheduleRunMaxAgeDays = 30
 )
+
+// NormalizeScheduledRunConvRefs 把某个任务历史运行结果里的「会话 <id>」统一指向它的主会话。
+//
+// 用途：AI 定时任务现在是「一个任务一条会话」，但早期每次运行各开一条，那些会话后来
+// 被并进主会话、旧 id 随之消失，而运行历史里还留着旧 id——点「查看会话」就跳到空处。
+// 这里按「这个任务只该有一条会话」的事实把引用改对；摘要、时间、状态一律不动。
+//
+// 幂等：已经指向主会话的行不会再被写。
+func (d *Database) NormalizeScheduledRunConvRefs(taskID, keepConvID string) (int, error) {
+	taskID = strings.TrimSpace(taskID)
+	keepConvID = strings.TrimSpace(keepConvID)
+	if taskID == "" || keepConvID == "" {
+		return 0, nil
+	}
+	rows, err := d.ListTableWhere("schedule_runs",
+		"task_id = ? AND result LIKE '会话 %'", taskID)
+	if err != nil {
+		return 0, err
+	}
+	const marker = "会话 "
+	fixed := 0
+	for _, r := range rows {
+		id, result := str(r["id"]), str(r["result"])
+		if id == "" || !strings.HasPrefix(result, marker) {
+			continue
+		}
+		rest := result[len(marker):]
+		sep := strings.Index(rest, " · ")
+		if sep <= 0 {
+			continue
+		}
+		if rest[:sep] == keepConvID {
+			continue
+		}
+		next := marker + keepConvID + rest[sep:]
+		if err := d.ExecuteParams(
+			`UPDATE schedule_runs SET result = ? WHERE id = ?`,
+			[]interface{}{next, id},
+		); err != nil {
+			return fixed, err
+		}
+		fixed++
+	}
+	return fixed, nil
+}
 
 // InsertScheduleRun 追加一条执行历史，并就地执行保留策略清理（避免无限增长）。
 // 清理与插入在同一把写锁内，保证「写入即收敛」：

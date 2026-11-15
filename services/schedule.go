@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"quickdock/internal/db"
+	"quickdock/internal/logger"
 	"quickdock/internal/validators"
 )
 
@@ -32,6 +33,11 @@ func (a *AppService) CreateScheduledTask(t db.ScheduledTask) *ApiResult {
 	if err != nil {
 		return Fail(err)
 	}
+	// AI 任务一保存就在侧栏建好专属的闹钟空间，不用等第一次执行才冒出来。
+	// 用库里刚写入的 created_at 命名（RFC3339），保证空间名里的创建时间是历史事实。
+	if t.Action == "ai" && a.EnsureScheduleSpaceFn != nil {
+		a.EnsureScheduleSpaceFn(t.ID, t.Name, created.CreatedAt)
+	}
 	a.wakeScheduler()
 	return Ok(created)
 }
@@ -56,11 +62,12 @@ func (a *AppService) UpdateScheduledTask(t db.ScheduledTask) *ApiResult {
 	if err := validateScheduledTask(&t); err != nil {
 		return Fail(err)
 	}
+	// 提前取一次旧值：改名同步空间名、重算 next_run 都要用，别在各分支里重复查。
+	prev, perr := a.DB.GetScheduledTask(t.ID)
 	if t.Enabled {
 		// 只有调度规则本身变了才重算 next_run。
 		// 过去无条件重算：改个名字、换条命令，间隔任务的节拍就从「3 分钟后」被推回
 		// 「一整个周期之后」，用户以为任务丢了。
-		prev, perr := a.DB.GetScheduledTask(t.ID)
 		recalc := perr != nil || prev == nil || prev.NextRun == "" || !sameSchedule(prev, &t)
 		if recalc {
 			t.NextRun = computeNextRun(&t, nowStr())
@@ -78,6 +85,26 @@ func (a *AppService) UpdateScheduledTask(t db.ScheduledTask) *ApiResult {
 	}
 	if err := a.DB.UpdateScheduledTask(&t); err != nil {
 		return Fail(err)
+	}
+	if t.Action == "ai" {
+		// created_at 以库里的旧值为准：前端回传的字段可能被漏掉，
+		// 而空间名里的创建时间一旦漂移，同一个任务就会有两个不同名字的空间。
+		createdAt := t.CreatedAt
+		if perr == nil && prev != nil && prev.CreatedAt != "" {
+			createdAt = prev.CreatedAt
+		}
+		if a.EnsureScheduleSpaceFn != nil {
+			a.EnsureScheduleSpaceFn(t.ID, t.Name, createdAt)
+		}
+		// 改名只在空间名还是旧自动名时同步；用户手动改过名就不动它。
+		if perr == nil && prev != nil && prev.Name != t.Name && a.SyncScheduleSpaceNameFn != nil {
+			a.SyncScheduleSpaceNameFn(t.ID, prev.Name, t.Name, createdAt)
+		}
+		// 空间刚被认领时（升级后第一次编辑），老会话可能还是「一次运行一条」，
+		// 顺手收拢成一条；幂等，平时是空操作。
+		if _, merr := a.DB.MergeScheduledConversations(t.ID); merr != nil {
+			logger.W("[schedule] 合并定时任务历史会话失败 task=%s: %v", t.ID, merr)
+		}
 	}
 	a.wakeScheduler()
 	return Ok(nil)
@@ -201,6 +228,12 @@ func (a *AppService) RunScheduledTaskNow(id string) *ApiResult {
 	if err != nil {
 		return Fail(err)
 	}
+	// AI 动作一轮可能跑好几分钟（工具循环十几轮），走同步 RPC 会把前端卡到超时。
+	// 命令/HTTP 最长 30 秒还能等，AI 不行：改成后台跑 + 立即返回，结果与定时
+	// 触发走同一套收尾（运行历史 + 通知），只是不动 next_run / enabled。
+	if t.Action == "ai" {
+		return a.runAITaskAsync(t)
+	}
 	startedAt := time.Now()
 	status, result := a.executeTask(t)
 	durationMs := time.Since(startedAt).Milliseconds()
@@ -208,9 +241,11 @@ func (a *AppService) RunScheduledTaskNow(id string) *ApiResult {
 	// 那些该去定时任务自己的执行记录里看）。
 	a.NoteActivity(db.ActivityScheduleRun, t.ID, t.Name)
 	// 手动执行只更新运行结果，不改动 next_run / enabled
-	_ = a.DB.SetTaskRunResult(t.ID, nowStr(), status, result, t.NextRun, t.Enabled)
+	runAt := nowStr()
+	_ = a.DB.SetTaskRunResult(t.ID, runAt, status, result, t.NextRun, t.Enabled)
 	// 追加一条执行历史（含耗时）
 	_ = a.DB.InsertScheduleRun(t.ID, t.Name, status, result, durationMs)
+	a.emitScheduleRunUpdated(t, status, result, runAt)
 	// 执行结果按 t.Notify 推送给系统通知 + 已配置机器人（结果/耗时统一拼进消息体）
 	a.notifyScheduleRun(t, status, result, durationMs)
 	if status != "ok" {
@@ -233,7 +268,23 @@ func sameSchedule(a, b *db.ScheduledTask) bool {
 		a.TimeOfDay == b.TimeOfDay &&
 		a.Weekdays == b.Weekdays &&
 		a.CronExpr == b.CronExpr &&
-		a.DayOfMonth == b.DayOfMonth
+		a.DayOfMonth == b.DayOfMonth &&
+		a.ValidFrom == b.ValidFrom &&
+		a.ValidUntil == b.ValidUntil
+}
+
+// normalizeNotifyPolicy 把通知策略归一到 always / failed / never。
+// 空值（老库补列前、或调用方漏传）一律 always —— 与升级前行为一致，
+// 不能因为一次升级就让用户突然收不到通知。
+func normalizeNotifyPolicy(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "failed":
+		return "failed"
+	case "never":
+		return "never"
+	default:
+		return "always"
+	}
 }
 
 // validateScheduledTask 基础字段校验
@@ -245,7 +296,7 @@ func validateScheduledTask(t *db.ScheduledTask) error {
 
 	// 验证动作类型
 	switch t.Action {
-	case "app", "dir", "url", "command", "http":
+	case "app", "dir", "url", "command", "http", "ai":
 	default:
 		return fmt.Errorf("未知的动作类型: %s", t.Action)
 	}
@@ -329,6 +380,14 @@ func validateScheduledTask(t *db.ScheduledTask) error {
 		if len(t.Target) > 1000 {
 			return fmt.Errorf("命令长度不能超过 1000 字符")
 		}
+	case "ai":
+		if strings.TrimSpace(t.Target) == "" {
+			return fmt.Errorf("AI 提示词不能为空")
+		}
+		// 提示词要进系统提示 + 用户消息两处，过长会把小模型的上下文挤爆。
+		if len([]rune(t.Target)) > 8000 {
+			return fmt.Errorf("AI 提示词不能超过 8000 字")
+		}
 	}
 
 	// 验证工作时间
@@ -386,6 +445,57 @@ func validateScheduledTask(t *db.ScheduledTask) error {
 			return fmt.Errorf("无效的 HTTP 方法: %s", t.HTTPMethod)
 		}
 	}
+
+	// AI 动作：档位与作用域归一。脏值回落而不是报错，免得旧前端漏传字段时
+	// 整条任务保存不了；但绝不把未知值当成 agent —— 那会静默放开工具权限。
+	if t.Action == "ai" {
+		switch strings.TrimSpace(t.AIMode) {
+		case "readonly", "agent":
+			t.AIMode = strings.TrimSpace(t.AIMode)
+		default:
+			t.AIMode = "chat"
+		}
+		// 会话作用域：现在只有一种口径——每次执行追加到任务那条会话。
+		// 早期版本存过 'new'（每次运行开一条），那批老任务也一并归到 continue，
+		// 否则升级后它们还会每跑一次就多出一条同名会话。
+		// 列本身留着：将来若要做「每次独立运行」，改这里 + ai_schedule 的取会话逻辑即可。
+		t.AIScope = "continue"
+	} else {
+		t.AIMode = ""
+		t.AIScope = "continue"
+	}
+
+	// 有效期：空 = 不限。归一成与 next_run 同一格式，字典序即时间序。
+	// 前端 datetime-local 的 'T' 分隔由 parseSchedTime 兼容。
+	t.ValidFrom = strings.TrimSpace(t.ValidFrom)
+	t.ValidUntil = strings.TrimSpace(t.ValidUntil)
+	if t.ValidFrom != "" {
+		v, ok := parseSchedTime(t.ValidFrom)
+		if !ok {
+			return fmt.Errorf("生效时间格式无效")
+		}
+		t.ValidFrom = v.Format(schedTimeLayout)
+	}
+	if t.ValidUntil != "" {
+		v, ok := parseSchedTime(t.ValidUntil)
+		if !ok {
+			return fmt.Errorf("失效时间格式无效")
+		}
+		t.ValidUntil = v.Format(schedTimeLayout)
+	}
+	if t.ValidFrom != "" && t.ValidUntil != "" && t.ValidUntil <= t.ValidFrom {
+		return fmt.Errorf("失效时间必须晚于生效时间")
+	}
+	// once 只有一个调度点：生效时间若晚于它，computeNextRun 永远返回 ""，
+	// 任务会在第一次扫描时被静默停用。这种配置保存时就该说清楚，而不是
+	// 让用户对着一条「已启用但从不运行」的任务卡猜原因。
+	if t.ScheduleKind == "once" && t.ValidFrom != "" {
+		if at, ok := parseSchedTime(t.RunAt); ok && t.ValidFrom > at.Format(schedTimeLayout) {
+			return fmt.Errorf("生效时间晚于一次性任务的运行时间，该任务永远不会执行")
+		}
+	}
+
+	t.NotifyPolicy = normalizeNotifyPolicy(t.NotifyPolicy)
 
 	return nil
 }

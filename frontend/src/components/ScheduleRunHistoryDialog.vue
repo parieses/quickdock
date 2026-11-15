@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { GetScheduleRuns } from '../../bindings/quickdock/services/appservice'
 import { downloadCsv } from '../utils/csv'
-import { History, CheckCircle2, XCircle, Download } from '@lucide/vue'
+import { History, CheckCircle2, XCircle, Download, Ban } from '@lucide/vue'
 
 const props = defineProps<{
   visible: boolean
@@ -35,16 +36,22 @@ const error = ref('')
 // 保留策略负责（不会因为前端要得多就无限增长）。
 const LIMIT = 500
 
-/** 只看失败：排查时最常用的视角，省得在几百条 ok 里找红点。 */
+/** 只看失败：排查时最常用的视角，省得在几百条 ok 里找红点。
+ *  skipped（关机错过 / 未到生效期 / 已过有效期）不是执行失败，不计入。 */
 const onlyFail = ref(false)
 
-const failed = computed(() => runs.value.filter((r) => r.status !== 'ok'))
+const failed = computed(() => runs.value.filter((r) => r.status === 'fail'))
 
 const shown = computed(() => (onlyFail.value ? failed.value : runs.value))
 
+/** 导出状态列：skipped 原文对看表的人不友好，翻成与列表一致的文案。 */
+function statusLabel(s: string): string {
+  return s === 'skipped' ? t('sched_history_status_skipped') : s
+}
+
 function exportCsv() {
   const head = [t('sched_history_col_time'), t('sched_history_col_status'), t('sched_history_col_duration'), t('sched_history_col_result')]
-  const rows = shown.value.map((r) => [r.runAt, r.status, r.durationMs || 0, r.result || ''])
+  const rows = shown.value.map((r) => [r.runAt, statusLabel(r.status), r.durationMs || 0, r.result || ''])
   const name = (props.task?.name || 'schedule').replace(/[\\/:*?"<>|]/g, '_')
   downloadCsv(`schedule-${name}-${new Date().toISOString().slice(0, 10)}.csv`, [head, ...rows])
 }
@@ -53,6 +60,23 @@ function fmtDuration(ms: number): string {
   if (!ms || ms < 0) return '—'
   if (ms < 1000) return ms + ' ms'
   return (ms / 1000).toFixed(2) + ' s'
+}
+
+/** AI 动作的执行结果串形如 '会话 <convID> · <摘要>'，能提取出 convID 就给个跳转入口。 */
+function convIdOf(result: string): string {
+  const m = /会话 ([a-zA-Z0-9_-]+)/.exec(result || '')
+  return m ? m[1] : ''
+}
+
+function openConv(id: string) {
+  // 只发事件，页面跳转由 AIPage.vue 监听；事件通道未就绪时静默，不阻塞查看历史
+  try { Events.Emit('ai:open-conversation', { id }) } catch { /* 事件通道未就绪时静默 */ }
+}
+
+/** skipped 行的结果串是跳过原因，前面补一个状态文案才看得出是「被跳过」而非失败。 */
+function resultText(r: RunItem): string {
+  if (r.status === 'skipped') return t('sched_history_status_skipped') + (r.result ? ' · ' + r.result : '')
+  return r.result || r.status
 }
 
 async function load() {
@@ -78,6 +102,19 @@ watch(
   },
   { immediate: true },
 )
+
+// 弹窗开着时后台跑完一轮也要立刻冒出来。异步 AI 任务最长十分钟，
+// 用户往往是「点完运行 → 打开历史等着看」，不监听就永远停在打开那一刻的快照。
+// 只在本弹窗对应任务有更新时重载，别的任务跑完不打扰。
+let offRunUpdated: (() => void) | null = null
+onMounted(() => {
+  offRunUpdated = Events.On('schedule:run-updated', (ev: any) => {
+    const p = (ev?.data ?? ev) as { taskId?: string }
+    if (!props.visible || !props.task || p?.taskId !== props.task.id) return
+    void load()
+  })
+})
+onBeforeUnmount(() => { offRunUpdated?.(); offRunUpdated = null })
 
 function close() {
   emit('cancel')
@@ -120,11 +157,18 @@ function close() {
           <div v-for="r in shown" :key="r.id" class="run-row" :class="r.status">
             <div class="run-status">
               <CheckCircle2 v-if="r.status === 'ok'" :size="14" />
+              <Ban v-else-if="r.status === 'skipped'" :size="14" />
               <XCircle v-else :size="14" />
             </div>
             <div class="run-time">{{ r.runAt }}</div>
             <div class="run-dur">{{ fmtDuration(r.durationMs) }}</div>
-            <div class="run-result" :title="r.result">{{ r.result || r.status }}</div>
+            <div class="run-result">
+              <span class="run-result-text" :title="r.result">{{ resultText(r) }}</span>
+              <button v-if="convIdOf(r.result)" class="qd-btn qd-btn-sm run-open-conv"
+                      @click="openConv(convIdOf(r.result))">
+                {{ t('sched_ai_open_conv') }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -177,12 +221,18 @@ function close() {
 .run-status { display: flex; align-items: center; }
 .run-row.ok .run-status { color: var(--color-success); }
 .run-row.fail .run-status { color: var(--color-danger); }
+.run-row.skipped .run-status { color: var(--color-text-muted); }
 .run-time { font-size: 12px; color: var(--color-text-secondary); white-space: nowrap; }
 .run-dur { font-size: 12px; color: var(--color-text-muted); text-align: right; font-variant-numeric: tabular-nums; }
 .run-result {
   font-size: 12px; color: var(--color-text-secondary);
+  display: flex; align-items: center; gap: var(--space-2); min-width: 0;
+}
+.run-result-text {
+  flex: 1 1 auto; min-width: 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.run-open-conv { flex-shrink: 0; }
 
 .dlg-foot {
   display: flex; align-items: center; justify-content: space-between;

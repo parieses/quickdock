@@ -69,8 +69,43 @@ func parseTimeOfDay(s string) (int, int, int, bool) {
 	return h, m, sec, true
 }
 
-// computeNextRun 根据调度规则计算严格晚于 from 的下一次运行时间；无有效时间返回 ""
+// schedCatchupWindow 关机期间错过的调度点，最多回补这么久以内的。
+//
+// 本地应用夜间关机是常态：完全不补等于早上 9 点的日报永久消失；全补则会在
+// 开机瞬间把一周的日报连跑 7 次（还可能是下单/重启类动作）。7 天是竞品里
+// Claude Desktop 的同口径，且现有执行路径天然只补一次——跑完用「当前时刻」
+// 重算 next_run，中间错过的点自动跳过，不需要额外记数。
+const schedCatchupWindow = 7 * 24 * time.Hour
+
+// computeNextRun 在原始调度计算外再套一层有效期。
+//
+// 单独包一层而不是往每个 case 里塞判断：once/interval/daily/weekly/monthly/cron
+// 六个分支各有早退，逐个加会漏，而且「超出有效期」是横切规则，不该散在调度算法里。
 func computeNextRun(t *db.ScheduledTask, fromStr string) string {
+	from, ok := parseSchedTime(fromStr)
+	if !ok {
+		from = time.Now()
+	}
+	// 起点不早于生效时间：拨到 validFrom 前一秒，让原始逻辑「严格晚于 from」
+	// 有机会取到生效当天那个点（生效首日时刻已过则顺延到下一周期）。
+	if vf, ok := parseSchedTime(t.ValidFrom); ok && vf.After(from) {
+		from = vf.Add(-time.Second)
+		fromStr = from.Format(schedTimeLayout)
+	}
+	next := computeNextRunRaw(t, fromStr)
+	if next == "" {
+		return ""
+	}
+	if vu, ok := parseSchedTime(t.ValidUntil); ok {
+		if at, ok := parseSchedTime(next); ok && at.After(vu) {
+			return ""
+		}
+	}
+	return next
+}
+
+// computeNextRunRaw 根据调度规则计算严格晚于 from 的下一次运行时间；无有效时间返回 ""
+func computeNextRunRaw(t *db.ScheduledTask, fromStr string) string {
 	from, ok := parseSchedTime(fromStr)
 	if !ok {
 		from = time.Now()
@@ -419,6 +454,10 @@ func validateCronExpr(expr string) error {
 // 任务被增删改/启停时用 schedWake 立即唤醒重排。这正是调度库内部的核心机制，
 // 但无需引入额外依赖，且与进程内状态天然一致。
 func (a *AppService) StartScheduleRunner() {
+	// 启动时给每个 AI 任务补一次专属空间：升级前所有任务共用一个「定时任务」分组，
+	// 且老会话都堆在里面。不做这一步，重启后仍看不到闹钟空间，得等下一次执行
+	// 或手动编辑任务才出现——用户会以为「改了没生效」。
+	a.ensureAllAISpaces()
 	a.schedWake = make(chan struct{}, 1)
 	a.schedWG.Add(1)
 	// 常驻循环：panic 落盘后不重抛，避免一次异常让整个调度器静默停摆
@@ -426,6 +465,40 @@ func (a *AppService) StartScheduleRunner() {
 		defer a.schedWG.Done()
 		a.scheduleLoop()
 	})()
+}
+
+// ensureAllAISpaces 启动时幂等补齐 AI 任务的专属空间，并把历史会话收敛成一条。
+//
+// 空间幂等由 db 层按 task_id 保证；旧共享空间只在其会话全属于同一任务时被原地认领。
+// 收拢会话是「一个任务一条会话」的必要一步：旧口径每个运行点开一条，
+// 一个跑了几天的任务会在侧栏里攒出一串同名兄弟。合并本身幂等（0/1 条时不动库），
+// 所以每次启动都调一次没有额外代价。
+func (a *AppService) ensureAllAISpaces() {
+	if a.EnsureScheduleSpaceFn == nil || a.DB == nil {
+		return
+	}
+	tasks, err := a.DB.ListScheduledTasks()
+	if err != nil {
+		logger.W("QuickDock: 启动补齐定时任务空间失败: %v", err)
+		return
+	}
+	for i := range tasks {
+		t := tasks[i]
+		if t.Action != "ai" {
+			continue
+		}
+		a.EnsureScheduleSpaceFn(t.ID, t.Name, t.CreatedAt)
+		if _, merr := a.DB.MergeScheduledConversations(t.ID); merr != nil {
+			logger.W("QuickDock: 合并定时任务历史会话失败 task=%s: %v", t.ID, merr)
+		}
+		// 并掉的会话 id 会留在历史结果串里（早期版本每条运行一条会话），
+		// 统一改成主会话的 id，运行历史里的「查看会话」才不会跳到已删的会话上。
+		if c, cerr := a.DB.FindScheduledConversation(t.ID); cerr == nil && c != nil {
+			if _, nerr := a.DB.NormalizeScheduledRunConvRefs(t.ID, c.ID); nerr != nil {
+				logger.W("QuickDock: 修正运行历史的会话引用失败 task=%s: %v", t.ID, nerr)
+			}
+		}
+	}
 }
 
 // wakeScheduler 非阻塞唤醒调度循环，使其立即重新计算并扫描到期任务
@@ -453,6 +526,11 @@ func (a *AppService) RescheduleAfterRestore(id string) {
 	t, err := a.DB.GetScheduledTask(id)
 	if err != nil || t == nil {
 		return
+	}
+	// AI 任务的空间在删除时也一并进了回收站（或用户单独删过），恢复任务后立刻补回来：
+	// 不补的话要等下一次到点执行才出现，用户会以为「恢复了但侧栏什么都没有」。
+	if t.Action == "ai" && a.EnsureScheduleSpaceFn != nil {
+		a.EnsureScheduleSpaceFn(t.ID, t.Name, t.CreatedAt)
 	}
 	now := nowStr()
 	if t.NextRun != "" && t.NextRun > now {
@@ -527,6 +605,14 @@ func (a *AppService) checkScheduledTasks() {
 	}
 	for i := range tasks {
 		t := &tasks[i]
+
+		// 先过闸门：关机期间堆下来的过期任务、还没到生效时间的任务、
+		// 以及已经过了有效期的任务，都不该真的执行一次。
+		if skip, stop, note := scheduleGate(t, now); skip {
+			a.handleSkippedTask(t, now, note, stop)
+			continue
+		}
+
 		// inflight 标记：慢任务（http 阻塞 30s / command·open 挂起）在 SetTaskRunResult 重排前，
 		// 可能被下一轮调度循环再次选为「到期」并启动第二个重叠协程。LoadOrStore 原子保证同一时刻
 		// 仅一个执行协程通过，避免重复执行与重复通知（参照 monitor_checker 的 monitorInflight）。
@@ -601,11 +687,104 @@ func (a *AppService) checkScheduledTasks() {
 			_ = a.DB.SetTaskRunResult(t.ID, now, status, result, nextRun, enabled)
 			// 追加一条执行历史（含耗时），供「运行历史」回看逐次执行情况
 			_ = a.DB.InsertScheduleRun(t.ID, t.Name, status, result, durationMs)
+			a.emitScheduleRunUpdated(t, status, result, now)
 
 			// 执行结果按 t.Notify 推送给系统通知 + 已配置机器人（结果/耗时统一拼进消息体）
 			a.notifyScheduleRun(t, status, result, durationMs)
 		}(t)
 	}
+}
+
+// scheduleGate 判断一条「已到期」的任务该不该真的执行。
+// 返回 (跳过本次, 永久停用, 原因)。
+//
+// 注意 next_run 是关机前写入的最后一个调度点：应用正常运行时它最多过期一分钟，
+// 所以「过期」几乎只可能来自关机/休眠。这也正是回补窗口能安全放在这里的原因。
+func scheduleGate(t *db.ScheduledTask, now string) (bool, bool, string) {
+	nowT, ok := parseSchedTime(now)
+	if !ok {
+		return false, false, ""
+	}
+	if vu, ok := parseSchedTime(t.ValidUntil); ok && nowT.After(vu) {
+		return true, true, "已过有效期，任务自动停用"
+	}
+	if vf, ok := parseSchedTime(t.ValidFrom); ok && nowT.Before(vf) {
+		return true, false, "尚未到生效时间，本次跳过"
+	}
+	if due, ok := parseSchedTime(t.NextRun); ok && nowT.Sub(due) > schedCatchupWindow {
+		return true, false, "错过时间超过 7 天，未补跑"
+	}
+	return false, false, ""
+}
+
+// handleSkippedTask 把「为什么没跑」写进运行历史，并把任务重排到未来。
+//
+// 不写 last_run/last_status/last_result：跳过不是一次执行，覆盖掉上一次真实结果
+// 会让任务卡上显示的信息凭空倒退。SetTaskRunResult 一并改 next_run 与 enabled，
+// 所以这里传的是任务快照里的原值。
+func (a *AppService) handleSkippedTask(t *db.ScheduledTask, now, note string, stop bool) {
+	next := ""
+	// stop=true 是「已过有效期，永久停用」：SetTaskRunResult 按传入值写 enabled，
+	// 这里不置 false 的话任务卡会一直显示「已启用」，却再也没有下一次调度。
+	enabled := !stop
+	if !stop {
+		next = computeNextRun(t, now)
+		// 只有真的排不出下一次才停用。原来额外判了 kind=="once"：
+		// 「尚未到生效时间」的一次性任务已经算出了未来的 next，却被它一并禁掉，
+		// 任务从此再也不会跑（生效时间到了也没人再叫醒它）。
+		if next == "" {
+			enabled = false
+		}
+	}
+	if err := a.DB.SetTaskRunResult(t.ID, t.LastRun, t.LastStatus, t.LastResult, next, enabled); err != nil {
+		logger.W("QuickDock: 跳过定时任务后重排失败 (id=%s): %v", t.ID, err)
+	}
+	// status 用 skipped 而不是 fail：历史里它能和「跑了但失败」区分开，
+	// 否则用户会以为任务出错，其实是电脑关机。
+	_ = a.DB.InsertScheduleRun(t.ID, t.Name, "skipped", note, 0)
+	a.emitScheduleRunUpdated(t, "skipped", note, now)
+	logger.I("[schedule] 任务「%s」跳过：%s", t.Name, note)
+}
+
+// ScheduleRunUpdatedEvent 一次运行收尾后通知前端刷新。
+//
+// 为什么必须有：后端跑完只写库，界面上三处（任务卡的运行结果、运行历史弹窗、
+// AI 页的空间/会话列表）都停在各自上次拉取的快照。尤其 AI 是异步后台跑的，
+// 用户点完「立即运行」再打开历史，看到的仍是执行前的那一份——数据明明在库里，
+// 却像「没跑过」/「只跑了一次」。事件只负责提醒刷新，数据仍以 DB 为准。
+const ScheduleRunUpdatedEvent = "schedule:run-updated"
+
+// emitScheduleRunUpdated 广播一次运行的结果。
+// Wails 事件没人监听就丢，所以每个界面都要自己有兜底（打开时重新拉一次），
+// 这里不保证送达，只负责「界面正开着时立刻可见」。
+func (a *AppService) emitScheduleRunUpdated(t *db.ScheduledTask, status, result, runAt string) {
+	if a.app == nil {
+		return
+	}
+	a.app.Event.Emit(ScheduleRunUpdatedEvent, map[string]any{
+		"taskId":   t.ID,
+		"taskName": t.Name,
+		"status":   status,
+		"result":   result,
+		"convId":   schedConvIDFromResult(result),
+		"runAt":    runAt,
+	})
+}
+
+// schedConvIDFromResult 从 executeAITask 的结果串里取出会话 id，供前端直接跳转。
+// 用固定前缀解析而不是再加一列：schedule_runs 的快照/回收站/CSV 都已经按字符串
+// 处理 result，加列要动的地方多得多。
+func schedConvIDFromResult(result string) string {
+	const marker = "会话 "
+	i := strings.Index(result, marker)
+	if i < 0 {
+		return ""
+	}
+	s := result[i+len(marker):]
+	if j := strings.Index(s, " · "); j >= 0 {
+		s = s[:j]
+	}
+	return strings.TrimSpace(s)
 }
 
 // hasNotifyChannel 判断某个通知渠道是否被勾选。
@@ -657,6 +836,11 @@ func (a *AppService) notifyScheduleRun(t *db.ScheduledTask, status, result strin
 	if !t.Notify {
 		return
 	}
+	// 通知策略只管「主动打扰」的两个外发渠道；通知中心是被动留档，
+	// 定时任务恰恰是「没人盯着的时候发生的事」，成功也该能事后查到。
+	// 老库补列默认 always，升级后不会突然收不到通知。
+	policy := normalizeNotifyPolicy(t.NotifyPolicy)
+	pushExternal := policy == "always" || (policy == "failed" && status != "ok")
 	icon := "✅"
 	if status != "ok" {
 		icon = "⚠️"
@@ -681,14 +865,14 @@ func (a *AppService) notifyScheduleRun(t *db.ScheduledTask, status, result strin
 
 	// 分渠道：系统通知与机器人各自可关。此前是一个 notify 布尔同时决定两者，
 	// 于是「只想在桌面看到、不想往手机机器人推」这种最普通的诉求无处表达。
-	if hasNotifyChannel(t.NotifyChannels, "system") && a.Notifier != nil {
+	if pushExternal && hasNotifyChannel(t.NotifyChannels, "system") && a.Notifier != nil {
 		_ = a.Notifier.SendNotification(notifications.NotificationOptions{
 			ID:    "schedtask-" + t.ID + "-" + time.Now().Format("150405"),
 			Title: title,
 			Body:  b.String(),
 		})
 	}
-	if hasNotifyChannel(t.NotifyChannels, "webhook") {
+	if pushExternal && hasNotifyChannel(t.NotifyChannels, "webhook") {
 		a.sendWebhookNotify(title, b.String())
 	}
 	// 进通知中心：定时任务是「没人盯着的时候发生的事」，正是最需要事后留档的一类。
@@ -717,6 +901,9 @@ func (a *AppService) executeTask(t *db.ScheduledTask) (string, string) {
 
 	case "todo":
 		return a.executeRecurringTodo(t)
+
+	case "ai":
+		return a.executeAITask(t)
 	}
 	return "fail", "未知的动作类型：" + t.Action
 }

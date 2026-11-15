@@ -7,9 +7,9 @@
  * （都在 AIPage），所以两边能无缝接上：在落地页贴了一张图，发出去之后
  * 聊天区那排缩略图显示的是同一张。
  */
-import { ref, type Component } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowUp, GitBranch, Image as ImageIcon, Link2, Plus } from '@lucide/vue'
+import { AlarmClock, ArrowUp, ChevronDown, Folder, GitBranch, Image as ImageIcon, Link2, Plus } from '@lucide/vue'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { AIConnector, AIMentionItem, AIPrompt, AISkill, AISpace } from '../types/ai'
 import type { PendingImage } from '../types'
@@ -133,13 +133,50 @@ defineExpose({
   takeSelectedText: () => heroInputEl.value?.takeSelectedText() || '',
 })
 
-function onSpaceSelect(e: Event) {
-  const v = (e.target as HTMLSelectElement).value
+// ---- 归属空间下拉 ----
+//
+// 原来是原生 <select>：选项里塞不进图标，而侧栏空间列表已经用「闹钟 = 定时任务 / 目录 = 普通空间」
+// 区分了，两处不一致会让人觉得不是同一个东西。换成自建下拉。
+const spacePickOpen = ref(false)
+const spacePickEl = ref<HTMLElement | null>(null)
+const curSpace = computed(() => props.spaces.find((s) => s.id === props.newTaskSpace) || null)
+const curSpaceLabel = computed(() => {
+  if (props.newTaskSpace === props.newSpace) return t('aiNewTaskSpaceNew')
+  return curSpace.value?.name || t('aiNewTaskSpaceNone')
+})
+
+// kind 是升级时补的列，老库迁移没跑完时是空串——用 task_id 兜一下，
+// 否则同一类空间升级前后会在闹钟与目录之间跳（侧栏也是这个判断，见 AiConversationSidebar）。
+function isSchedSpace(s: AISpace): boolean {
+  return s.kind === 'schedule' || !!s.task_id
+}
+
+function pickSpace(v: string) {
+  spacePickOpen.value = false
   emit('update:newTaskSpace', v)
   // 「新建空间…」= 选一个目录（空间按目录唯一）：选中就当场上目录选择器，
   // 而不是让下拉先停在「新建空间…」等用户再点一次右边的按钮。
   if (v === props.newSpace) emit('pick-dir')
 }
+
+function onSpaceDocDown(e: MouseEvent) {
+  if (!spacePickOpen.value) return
+  const el = spacePickEl.value
+  if (el && e.target instanceof Node && el.contains(e.target)) return
+  spacePickOpen.value = false
+}
+// Esc 关闭：这条底栏在落地页是主入口，键盘用户按 Esc 应当能退出菜单
+function onSpaceDocKey(e: KeyboardEvent) {
+  if (e.key === 'Escape') spacePickOpen.value = false
+}
+onMounted(() => {
+  document.addEventListener('mousedown', onSpaceDocDown)
+  document.addEventListener('keydown', onSpaceDocKey)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('mousedown', onSpaceDocDown)
+  document.removeEventListener('keydown', onSpaceDocKey)
+})
 
 /** 先回写选中的档案，再通知父组件去应用（顺序反了 onModelChange 读到的还是旧值） */
 function onModelSelect(e: Event) {
@@ -251,11 +288,56 @@ function onModelSelect(e: Event) {
             <!-- 归属空间：不选就是普通任务（后端会自动给它建一个专属目录）。
                  已有空间直接选；选「新建空间…」会立刻弹出目录选择器——空间按目录唯一，
                  所以不需要「先选新建、再点一个按钮选目录」这两步。选到的目录见下方产物去向。 -->
-            <select :value="props.newTaskSpace" class="ai-hero-select" :title="t('aiNewTaskSpace')" @change="onSpaceSelect($event)">
-              <option value="">{{ t('aiNewTaskSpaceNone') }}</option>
-              <option v-for="s in props.spaces" :key="s.id" :value="s.id" :title="s.cwd">{{ s.name }}</option>
-              <option :value="props.newSpace">{{ t('aiNewTaskSpaceNew') }}</option>
-            </select>
+            <div ref="spacePickEl" class="ai-space-pick">
+              <button
+                type="button"
+                class="ai-hero-select ai-space-pick-btn"
+                :class="{ 'is-open': spacePickOpen }"
+                :title="t('aiNewTaskSpace')"
+                @click="spacePickOpen = !spacePickOpen"
+              >
+                <AlarmClock v-if="curSpace && isSchedSpace(curSpace)" :size="12" class="ai-space-pick-ico" />
+                <Folder v-else-if="curSpace" :size="12" class="ai-space-pick-ico" />
+                <span class="ai-space-pick-label">{{ curSpaceLabel }}</span>
+                <ChevronDown :size="11" class="ai-space-pick-caret" />
+              </button>
+              <div v-if="spacePickOpen" class="ai-space-pick-menu">
+                <button
+                  type="button"
+                  class="ai-space-pick-item"
+                  :class="{ 'is-sel': !props.newTaskSpace }"
+                  @click="pickSpace('')"
+                >
+                  <span class="ai-space-pick-ico"></span>
+                  <span class="ai-space-pick-name">{{ t('aiNewTaskSpaceNone') }}</span>
+                </button>
+                <button
+                  v-for="s in props.spaces"
+                  :key="s.id"
+                  type="button"
+                  class="ai-space-pick-item"
+                  :class="{ 'is-sel': s.id === props.newTaskSpace }"
+                  :title="s.cwd || s.name"
+                  @click="pickSpace(s.id)"
+                >
+                  <span class="ai-space-pick-ico">
+                    <AlarmClock v-if="isSchedSpace(s)" :size="12" />
+                    <Folder v-else :size="12" />
+                  </span>
+                  <span class="ai-space-pick-name">{{ s.name }}</span>
+                </button>
+                <div class="ai-space-pick-sep"></div>
+                <button
+                  type="button"
+                  class="ai-space-pick-item"
+                  :class="{ 'is-sel': props.newTaskSpace === props.newSpace }"
+                  @click="pickSpace(props.newSpace)"
+                >
+                  <span class="ai-space-pick-ico"><Plus :size="12" /></span>
+                  <span class="ai-space-pick-name">{{ t('aiNewTaskSpaceNew') }}</span>
+                </button>
+              </div>
+            </div>
             <!-- 没有可用模型（还没配 key）时不给这个空下拉：一个没有选项的胶囊
                  只会让人以为点它就能选。此时下方的「去设置」才是该走的路。 -->
             <select
@@ -501,7 +583,8 @@ function onModelSelect(e: Event) {
    原来它是一套独立的表单样式——28px 高、6px 圆角、实心边框、12px 字，
    跟旁边 22px 的圆角 chip 摆在一排，高低、圆角、字重三种都不一样，
    整条底栏就显乱；而且聚焦时整块描成强调色，看着像「被选中了」。 */
-select.ai-hero-select {
+/* 自定义空间下拉的触发按钮也吃这套胶囊样式，所以选择器不再挂 select 前缀 */
+.ai-hero-select {
   box-sizing: border-box;
   display: inline-block;
   height: 22px;
@@ -524,7 +607,7 @@ select.ai-hero-select {
     background-color var(--transition-fast);
 }
 
-select.ai-hero-select:hover {
+.ai-hero-select:hover {
   color: var(--color-text-primary);
   border-color: var(--color-border);
   background: var(--color-bg-secondary);
@@ -538,6 +621,75 @@ select.ai-hero-select:focus-visible {
   border-color: var(--color-border-light);
   background: var(--color-bg-active);
 }
+
+/* ---- 归属空间下拉 ---- */
+.ai-space-pick {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+/* 按钮版胶囊：内容用 flex 排，文字过长时靠中间的 label 省略，
+   不能让 max-width 落在整个 button 上——那样箭头会被裁掉 */
+.ai-space-pick-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 170px;
+  overflow: hidden;
+}
+
+.ai-space-pick-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-space-pick-caret { flex-shrink: 0; opacity: 0.6; }
+.ai-space-pick-btn.is-open {
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
+  background: var(--color-bg-active);
+}
+
+/* 向上弹：与旁边的分支下拉（AiWorktreeToggle）一致，往下会盖住输入区 */
+.ai-space-pick-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  min-width: 180px;
+  max-width: 300px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 4px;
+  background: var(--color-popover-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: 40;
+}
+
+.ai-space-pick-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ai-space-pick-item:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.ai-space-pick-item.is-sel { color: var(--color-accent); }
+.ai-space-pick-ico { display: inline-flex; flex-shrink: 0; width: 12px; opacity: 0.8; }
+.ai-space-pick-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-space-pick-sep { height: 1px; margin: 4px 6px; background: var(--color-border); }
 
 .ai-hero-send {
   display: flex; align-items: center; justify-content: center;

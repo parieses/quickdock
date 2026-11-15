@@ -404,6 +404,31 @@ onMounted(async () => {
     pendingOpenTodoId.value = id
     navigate('todo')
   })
+  // 定时任务运行历史点「查看会话」：复用 navigateTo 的 pendingTarget 深链，
+  // AIPage 的 consumePendingTarget 会取走并 focusConv 到那次跑出来的会话。
+  // 不在 AIPage 里监听这条事件——用户从定时任务页点过来时，AI 页可能还没挂载，
+  // 事件会丢；根组件始终在，由它负责切页最稳。
+  Events.On('ai:open-conversation', (ev: any) => {
+    if (window.location.hash) return
+    const raw = ev?.data ?? ev
+    const id = typeof raw === 'string'
+      ? raw
+      : (raw && typeof raw === 'object' ? String(raw.id || '') : '')
+    if (!id.trim()) return
+    navigateTo('ai', id.trim())
+  })
+  // 定时任务页「打开任务空间」：只带 taskId（任务可能一次都没跑过，没有会话可点）。
+  // 走同一条 pendingTarget 单值通道，用 `task:` 前缀和上一条的 convId 区分——
+  // 造两个 ref 反而要维护两套「取走即清空」的时序。
+  Events.On('ai:open-space', (ev: any) => {
+    if (window.location.hash) return
+    const raw = ev?.data ?? ev
+    const id = typeof raw === 'string'
+      ? raw
+      : (raw && typeof raw === 'object' ? String(raw.id || '') : '')
+    if (!id.trim()) return
+    navigateTo('ai', 'task:' + id.trim())
+  })
   // 命令面板「快速导航」：面板浮窗经后端广播页面 id，主窗口直接切页。
   // 走 setPage 而不是 navigate setNavigator 那条：这里就在主窗口内，没有
   // 「导航器尚未注册」的问题，且需要保留 registry 的 activate 分发语义。

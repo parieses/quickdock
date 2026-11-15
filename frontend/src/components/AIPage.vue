@@ -19,9 +19,12 @@ import AiHero from './AiHero.vue'
 import AiComposer from './AiComposer.vue'
 import AiMessageList from './AiMessageList.vue'
 import AiRoundBar from './AiRoundBar.vue'
+import AiSchedRunBar from './AiSchedRunBar.vue'
+import ScheduleRunHistoryDialog from './ScheduleRunHistoryDialog.vue'
 import AiJobsBar from './AiJobsBar.vue'
 import AiApprovalBar from './AiApprovalBar.vue'
-import { SetAIPageVisible } from '../../bindings/quickdock/services/appservice'
+import { SetAIPageVisible, RunScheduledTaskNow, ListScheduledTasks } from '../../bindings/quickdock/services/appservice'
+import type { ScheduledTask } from '../../bindings/quickdock/internal/db/models'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 import { downloadText, safeFileName } from '../utils/download'
@@ -69,6 +72,7 @@ import {
   AIStreamInfo,
   AIRegenerateTitle,
   AISetConversationStar,
+  AIMarkConversationRead,
   AISummarizeConversation,
   AIRenameConversation,
   AIListConversations,
@@ -826,6 +830,13 @@ const msgHits = ref<AIConvHit[]>([])
 const msgHitsOpen = ref(true)
 const msgHitsLoading = ref(false)
 let msgSearchTimer: ReturnType<typeof setTimeout> | undefined
+// 定时任务在后端无头跑完一轮后广播；用 On 返回的 off 单独注销。
+// 不能用 Events.Off('schedule:run-updated')：它按事件名整体移除，会顺手
+// 把定时任务页与运行历史弹窗的监听一起清掉。
+let offScheduleRunUpdated: (() => void) | null = null
+// 执行期步骤事件（见 services/schedule_ai.go 的 ScheduleRunProgressEvent）。
+// 与上面那条分开注销，原因同上：Off 按名字整体移除会互删。
+let offScheduleRunProgress: (() => void) | null = null
 // 后发的请求可能先回（库在忙时尤其明显），用代数把过期结果丢掉——
 // 否则列表会停在上一两个关键词的命中上，看起来像「搜错了」。
 let msgSearchGen = 0
@@ -916,6 +927,13 @@ async function selectConv(id: string, msgId?: string) {
   if (runOf(id)) convRunState.value[id] = 'running'
   else delete convRunState.value[id]
   const conv = conversations.value.find((c) => c.id === id)
+  // 定时任务在后台跑完的会话带未读点：人已经切进来了就消。
+  // 先改本地数组再发请求，避免后端往返期间点还在闪；写失败只留日志，
+  // 不弹 toast——未读只是提示，不该打断一次正常的切会话。
+  if (conv?.unread) {
+    conv.unread = false
+    void AIMarkConversationRead(id).catch((e) => logErr('ai:markRead', e))
+  }
   // 工作目录跟着任务走：两条对话可以绑不同项目，切回来时要还原成它自己的那个。
   convCwd.value = (conv?.cwd || '').trim()
   // 模式是这个任务创建时选定的属性，切回来要还原——否则「这条是用来翻译的」
@@ -1612,11 +1630,26 @@ async function resolveNewTaskTarget(): Promise<{ spaceId: string; dir: string }>
 // 任务落进某个空间时把它在侧栏展开，好让用户看到新任务排到哪了；
 // 整组若被收起、或这个空间落在折叠线之外，也一并打开——否则「建完了侧栏那没有」
 // 看起来像没建成。
-function revealSpace(spaceId: string) {
+//
+// flash：从定时任务运行历史 / 通知跳进来的场合。展开只保证它「在列表里」，
+// 侧栏几十条任务时用户还得自己翻，所以再滚进视口并亮一下。
+const flashSpaceId = ref('')
+let flashSpaceTimer = 0
+function flashSpace(spaceId: string) {
+  flashSpaceId.value = spaceId
+  window.clearTimeout(flashSpaceTimer)
+  flashSpaceTimer = window.setTimeout(() => { flashSpaceId.value = '' }, 1800)
+  nextTick(() => {
+    document.getElementById('ai-space-' + spaceId)?.scrollIntoView({ block: 'nearest' })
+  })
+}
+
+function revealSpace(spaceId: string, opts?: { flash?: boolean }) {
   if (!spaceId) return
   spacesOpen.value = true
   toggleSpace(spaceId, true)
   if (spaces.value.findIndex((s) => s.id === spaceId) >= FOLD_SPACES) spacesExpanded.value = true
+  if (opts?.flash) flashSpace(spaceId)
 }
 
 // 落地页里直接发送：先把归属与模式定下来（会话本身仍由后端在收到第一条消息时创建），
@@ -1676,6 +1709,58 @@ function beginBlankTask() {
   permissionFull.value = false
 }
 
+// ---- 空间行上的「立即运行一次」----
+//
+// 定时任务跑完就堆在空间里，想再跑一次以前只能去定时任务页。空间行右侧给个按钮，
+// 点一下就走后端同一条手动执行路径（不动 next_run / enabled）。
+//
+// AI 一轮可能好几分钟，后端 runAITaskAsync 是立即返回的，所以「执行中」只能等
+// schedule:run-updated 事件来收尾；再加一个超时兜底（后端 10 分钟强制超时，
+// 正常情况下事件一定比它早到，收不到事件时才靠它把按钮亮回来）。
+const spaceRunBusy = ref<string[]>([])
+const spaceRunTimers = new Map<string, number>()
+const SPACE_RUN_BUSY_TIMEOUT = 10 * 60 * 1000
+
+function markSpaceRunning(taskID: string) {
+  if (!taskID) return
+  if (!spaceRunBusy.value.includes(taskID)) spaceRunBusy.value = [...spaceRunBusy.value, taskID]
+  const old = spaceRunTimers.get(taskID)
+  if (old) window.clearTimeout(old)
+  spaceRunTimers.set(taskID, window.setTimeout(() => clearSpaceRunning(taskID), SPACE_RUN_BUSY_TIMEOUT))
+}
+
+function clearSpaceRunning(taskID: string) {
+  if (!taskID) return
+  const t0 = spaceRunTimers.get(taskID)
+  if (t0) {
+    window.clearTimeout(t0)
+    spaceRunTimers.delete(taskID)
+  }
+  if (spaceRunBusy.value.includes(taskID)) {
+    spaceRunBusy.value = spaceRunBusy.value.filter((x) => x !== taskID)
+  }
+}
+
+async function runTaskFromSpace(s: AISpace) {
+  const taskID = (s.task_id || '').trim()
+  // 没有 task_id 的空间不是定时任务空间（普通目录空间），按钮也不会显示；
+  // 这里再挡一次，防的是「老库 kind 有、task_id 却空」这类脏数据打一趟空 RPC。
+  // task_gone 同理：任务已删，空间只留历史。
+  if (!taskID || s.task_gone || spaceRunBusy.value.includes(taskID)) return
+  try {
+    const r = await RunScheduledTaskNow(taskID)
+    // code≠0 的文案是后端给的（例如「该任务正在执行中」），原样透出比前端猜一句准。
+    if (r && r.code !== 0) {
+      toast.error(r.msg || t('aiSpaceRunBusy'))
+      return
+    }
+    markSpaceRunning(taskID)
+    toast.success(t('aiSpaceRunStarted'))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
+}
+
 // ---- 空间 ----
 
 function isSpaceExpanded(id: string): boolean {
@@ -1694,7 +1779,12 @@ function toggleSpace(id: string, force?: boolean) {
 // 删空间比删任务危险得多：一次带走它下面全部任务。确认语里必须带数量。
 async function delSpace(s: AISpace) {
   const n = conversations.value.filter((c) => (c.space_id || '') === s.id).length
-  const msg = n > 0 ? t('aiDelSpaceConfirmWithTasks', { name: s.name, n }) : t('aiDelSpaceConfirm', { name: s.name })
+  // 定时任务空间要说清楚「删的是对话，不是定时任务」：任务本身在定时任务页还在，
+  // 下次执行会按原创建时间再建一个空空间。按普通空间的「连同 n 个任务」提示，
+  // 用户会以为把定时任务也删了，或者以为历史还在。
+  const msg = (s.kind === 'schedule' || s.task_id)
+    ? t('aiDelScheduleSpaceConfirm', { name: s.name })
+    : (n > 0 ? t('aiDelSpaceConfirmWithTasks', { name: s.name, n }) : t('aiDelSpaceConfirm', { name: s.name }))
   if (!(await toast.confirm(msg))) return
   // 空间里有正在流的任务：先掐流，否则后端会往一个已被删掉的会话里写内容。
   // 注意判的是「当前任务是否属于这个空间」而不是「当前任务是否正在流」：
@@ -2093,6 +2183,61 @@ function jumpToMsg(id: string) {
 }
 
 const activeConv = computed(() => conversations.value.find((c) => c.id === activeId.value) || null)
+// 定时任务那条会话：消息列表要给每条用户消息标出执行时刻。
+// 一个任务一条会话、每次执行往后追加，不标时间就分不清哪段回答属于哪一次运行。
+const activeIsScheduled = computed(() => !!activeConv.value?.schedule_id)
+
+// ---- 定时任务会话顶部的运行条 ----
+//
+// 一个定时空间里只有一条会话，用户点进来看到的是一段段问答，但「这个任务跑过几次、
+// 上次什么时候、现在是不是正在跑」这三个问题，从消息流里读不出来。这条横条补上它，
+// 顺手把「再跑一次 / 运行记录」搬到手指边——以前要么回定时任务页，要么点侧栏空间行。
+const activeSchedSpace = computed(
+  () => spaces.value.find((s) => s.id === (activeConv.value?.space_id || '')) || null,
+)
+const activeSchedTaskId = computed(() => (activeSchedSpace.value?.task_id || '').trim())
+const schedTask = ref<ScheduledTask | null>(null)
+const schedHistoryOpen = ref(false)
+// 执行期步骤（来自 schedule:run-progress）。只记当前会话所属任务的，
+// 别的任务在后台跑时不该在这条横条上串台。
+const schedStep = ref('')
+const schedStepArgs = ref('')
+const schedTaskLoadedFor = ref('')
+
+async function loadSchedTask() {
+  const id = activeSchedTaskId.value
+  if (!id) {
+    schedTask.value = null
+    schedTaskLoadedFor.value = ''
+    return
+  }
+  if (schedTaskLoadedFor.value === id) return
+  try {
+    const list = unwrap<ScheduledTask[]>(await ListScheduledTasks()) ?? []
+    schedTask.value = list.find((x) => x.id === id) || null
+    schedTaskLoadedFor.value = id
+  } catch (e) {
+    // 任务列表读不到不影响看对话，横条降级成只有「运行记录」入口
+    schedTask.value = null
+    logErr('ai:loadSchedTask', e)
+  }
+}
+
+// 切会话时重置步骤并重取任务快照：上一个任务的「正在读取文件」不该留在这一条上
+watch(
+  activeSchedTaskId,
+  () => {
+    schedStep.value = ''
+    schedStepArgs.value = ''
+    void loadSchedTask()
+  },
+  { immediate: true },
+)
+
+function runActiveSchedTask() {
+  const sp = activeSchedSpace.value
+  if (sp) void runTaskFromSpace(sp)
+}
 
 async function runDigest() {
   if (!activeId.value || digestBusy.value || runOf(activeId.value)) return
@@ -2366,6 +2511,10 @@ function reportAIPageVisible(visible: boolean) {
   }
 }
 
+// 侧栏列表首次加载完成的标志：onActivated 在 KeepAlive 首次挂载时也会跑一次，
+// 那一次还没数据、也由 onMounted 负责，不能重复拉。
+let listsLoadedOnce = false
+
 onActivated(() => {
   pageActive.value = true
   aiFinishedUnread.value = false
@@ -2374,6 +2523,13 @@ onActivated(() => {
   reportAIPageVisible(true)
   // 回来时停在原位会看不到后面生成的内容：流式期间一直是贴底的，直接拉到底
   if (streamingHere.value) nextTick(scrollToBottom)
+  // 侧栏是「进页面那一刻」的快照。定时任务在后端无头执行、空间在后端被认领/改名，
+  // 两条路都不经过本页——切回来若不重拉，用户看到的就是旧快照：空间还挂着老名字
+  // （早期那版叫「定时任务」）、刚跑出来的任务也不在空间里。
+  if (listsLoadedOnce) {
+    void loadConversations()
+    void loadSpaces()
+  }
 })
 onDeactivated(() => {
   pageActive.value = false
@@ -2630,16 +2786,48 @@ async function focusConv(id: string) {
   if (!conv) return
   // 侧栏搜索会把目标过滤掉，切过去也看不见它，先清掉
   if (convQuery.value) convQuery.value = ''
+  const spaceId = (conv.space_id || '').trim()
+  // 空间可能是这次运行才建的：侧栏快照里还没有它，展开也无处可展。先补一次。
+  if (spaceId && !spaces.value.some((s) => s.id === spaceId)) await loadSpaces()
+  // 定时任务的会话挂在专属空间下：只切会话的话，侧栏空间折叠着，看上去像「进到任务、
+  // 没进到空间」。先把它所属空间展开并亮一下，再切会话。
+  revealSpace(spaceId, { flash: true })
   await selectConv(id)
+}
+
+// 定时任务页「打开任务空间」的落点：目标不是会话而是任务 id。
+// 空间与任务是 1:1（按 ai_spaces.task_id 唯一），找到就展开 + 高亮。
+// 这里不自动切会话——用户是来看这个空间里都跑了些什么，切走当前对话反而跳戏。
+async function focusTaskSpace(taskId: string) {
+  let sp = spaces.value.find((s) => (s.task_id || '') === taskId)
+  if (!sp) {
+    // 空间可能是刚建的（定时任务页那条列表比侧栏快照新）
+    await loadSpaces()
+    sp = spaces.value.find((s) => (s.task_id || '') === taskId)
+  }
+  if (!sp) {
+    // 任务还在、空间却没有：早期版本建空间失败，或用户手动删了空间。
+    // 不在这里补建——下次执行会自己建；补建要走 Go 侧一条 RPC，为一次跳转不值当。
+    toast.error(t('aiSpaceNotFound'))
+    return
+  }
+  if (convQuery.value) convQuery.value = ''
+  revealSpace(sp.id, { flash: true })
 }
 
 function consumePendingTarget() {
   const p = pendingTarget.value
   if (!p || p.page !== 'ai' || !p.target) return
-  const id = p.target
+  const raw = p.target
   // 取走即清空：AI 页被 KeepAlive 保活，留着会在切走再回来时重复切到旧会话
   pendingTarget.value = null
-  void focusConv(id)
+  // `task:<id>` = 打开某个定时任务的空间（见 App.vue 的 ai:open-space）；
+  // 其余都是会话 id。前缀由 App.vue 拼，这里只负责拆。
+  if (raw.startsWith('task:')) {
+    void focusTaskSpace(raw.slice(5))
+    return
+  }
+  void focusConv(raw)
 }
 watch(pendingTarget, consumePendingTarget, { immediate: true })
 // 双重兜底：immediate 那次若撞上会话列表未就绪，挂载后再补一次（已消费则是 no-op）
@@ -2654,6 +2842,7 @@ onMounted(async () => {
   window.setTimeout(() => { void import('../utils/aiCodeEditor').catch(() => { /* 预热失败无所谓，点开时会重试 */ }) }, 1200)
   await loadProfiles()
   await Promise.all([loadConversations(), loadSpaces()])
+  listsLoadedOnce = true
   // 后台任务徽标：进页面先对一次（可能有上一次会话留下的任务还在跑），
   // 之后按「有没有任务在跑」自适应轮询（见 scheduleJobBadge）。
   // 面板打开时它自己按 2.5s 轮询明细，两者互不依赖。
@@ -2682,11 +2871,56 @@ onMounted(async () => {
       if (idx >= 0) {
         if (data.starred !== undefined) conversations.value[idx].starred = !!data.starred
         if (data.summary !== undefined) conversations.value[idx].summary = String(data.summary)
+        // 别的窗口把这条会话看过了，本窗口跟着消点（AIMarkConversationRead 发）。
+        if (data.unread !== undefined) conversations.value[idx].unread = !!data.unread
       }
     }
   })
   // 设置在 SettingsModal 中保存配置后刷新下拉列表
   Events.On('ai:profiles-updated', loadProfiles)
+  // 定时任务在 Go 侧无头跑完：它不走 SSE，ai:conv 事件收不到（执行用的是 nullSink），
+  // 所以新的空间/会话必须靠这条事件主动拉一次，否则侧栏一直停在进页面时的快照。
+  offScheduleRunUpdated = Events.On('schedule:run-updated', (ev: any) => {
+    void loadConversations()
+    void loadSpaces()
+    // 定时任务是「一个任务一条会话、每次执行往后追加一轮」：用户正看着这条时，
+    // 事件来了必须把这轮新消息拉进来，否则界面一动不动，看上去像没执行成功。
+    const p = (ev?.data ?? ev) as { convId?: string; taskId?: string }
+    // 空间行上的运行按钮由这条事件宣告结束（后端四种收尾都会发）。
+    const tid = String(p?.taskId || '').trim()
+    if (tid) {
+      clearSpaceRunning(tid)
+      // 跑完了：顶部横条的「正在读取文件…」要收回去，并把「上次运行」换成新的时间
+      if (tid === activeSchedTaskId.value) {
+        schedStep.value = ''
+        schedStepArgs.value = ''
+        schedTaskLoadedFor.value = ''
+        void loadSchedTask()
+      }
+    }
+    const convId = String(p?.convId || '').trim()
+    if (!convId || convId !== activeId.value) return
+    const conv = conversations.value.find((c) => c.id === convId)
+    if (conv?.unread) {
+      conv.unread = false
+      void AIMarkConversationRead(convId).catch((e) => logErr('ai:markRead', e))
+    }
+    // 正在流式时不重拉：本地这份比库里新，覆盖会闪一下再回来。
+    // 拉完跟着走到底（followBottom 内部会尊重「用户已上滑」的状态，不抢滚动）。
+    if (!aiGenerating.value) void loadMessages(convId).then(() => followBottom())
+  })
+  // 定时任务执行期的工具步骤：定时执行没有 SSE 连接，光有收尾事件的话，
+  // 用户点完「运行」到出结果之间十来分钟什么都看不见——不知道它在读文件、
+  // 在跑命令，还是已经卡住了。这条只更新顶部横条上的那行字。
+  offScheduleRunProgress = Events.On('schedule:run-progress', (ev: any) => {
+    const p = (ev?.data ?? ev) as { taskId?: string; tool?: string; args?: string }
+    const tid = String(p?.taskId || '').trim()
+    if (!tid || tid !== activeSchedTaskId.value) return
+    schedStep.value = String(p?.tool || '')
+    schedStepArgs.value = String(p?.args || '')
+    // 「有步骤在推」本身就是真在跑的证据：空间行按钮先切过去，不必等 RPC 回包
+    markSpaceRunning(tid)
+  })
   // 点击消息区之外时隐藏划词复制浮层
   document.addEventListener('mousedown', onDocMouseDown, true)
   // 图片查看器的 Esc 关闭（capture 不必要，普通冒泡即可；避免干扰输入框内 Esc 行为的判断）
@@ -2697,6 +2931,8 @@ onMounted(async () => {
 onUnmounted(() => {
   Events.Off('ai:conv')
   Events.Off('ai:profiles-updated')
+  offScheduleRunUpdated?.(); offScheduleRunUpdated = null
+  offScheduleRunProgress?.(); offScheduleRunProgress = null
   document.removeEventListener('mousedown', onDocMouseDown, true)
   document.removeEventListener('keydown', onGlobalKeydown)
   // 这里的 abort 现在只会在「应用退出」时跑到：切到别的导航页是 deactivate，
@@ -2738,6 +2974,9 @@ onUnmounted(() => {
       :shown-spaces="shownSpaces"
       :visible-spaces="visibleSpaces"
       :expanded-space-tasks="expandedSpaceTasks"
+      :flash-space-id="flashSpaceId"
+      :space-run-busy="spaceRunBusy"
+      :run-space-task="runTaskFromSpace"
       :total-matched="totalMatched"
       :renaming-id="renamingId"
       :renaming-space-id="renamingSpaceId"
@@ -2892,6 +3131,20 @@ onUnmounted(() => {
       />
 
       <template v-else>
+      <!-- 定时任务空间：顶上一条运行条。任务名、上次运行、当前步骤、再跑一次，
+           都收在一条细带里——消息流本身分不出「跑过几次」和「现在在不在跑」。 -->
+      <AiSchedRunBar
+        v-if="activeIsScheduled && activeSchedTaskId"
+        :task-name="schedTask?.name || activeConv?.title || ''"
+        :busy="spaceRunBusy.includes(activeSchedTaskId)"
+        :step="schedStep"
+        :step-args="schedStepArgs"
+        :last-run="schedTask?.lastRun || ''"
+        :last-status="schedTask?.lastStatus || ''"
+        :task-gone="!schedTask && schedTaskLoadedFor === activeSchedTaskId"
+        @run-now="runActiveSchedTask"
+        @open-history="schedHistoryOpen = true"
+      />
       <!-- 消息区 -->
       <!-- 本轮实时用时状态条：计时自己走（见 AiRoundBar），父组件不再持有
            每 200ms 变一次的值——否则一次跳动就要重渲染整页。 -->
@@ -2920,6 +3173,7 @@ onUnmounted(() => {
         :cp-for-call="cpForCall"
         :job-rows="jobRows"
         :job-seq="jobSeq"
+        :sched-times="activeIsScheduled"
         @open-settings="emit('open-settings', 'ai:model')"
         @open-artifact="openArtifactInPanel"
         @open-img="openImgViewer"
@@ -3168,6 +3422,14 @@ onUnmounted(() => {
       :open="sideOpen"
       :artifacts="convArtifacts"
       @update:open="sideOpen = $event"
+    />
+    <!-- 运行记录：与定时任务页共用同一个弹窗（状态、耗时、失败筛选、导出、
+         跳转会话都在里面）。会话所属任务已删除时 task 为 null，弹窗自己会空着，
+         这种空间本来也不该再出现运行入口（见 AISpace.task_gone）。 -->
+    <ScheduleRunHistoryDialog
+      :visible="schedHistoryOpen"
+      :task="schedTask"
+      @cancel="schedHistoryOpen = false"
     />
     <input ref="fileInputEl" type="file" accept="image/*" multiple hidden @change="onPickFiles" />
     <Teleport to="body">

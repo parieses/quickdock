@@ -19,7 +19,16 @@ type AISpace struct {
 	Name string `json:"name"` // 展示名，默认取目录名
 	// Cwd 空间绑定的目录（绝对路径）。空串只在用户手工创建「不带目录的空间」时出现，
 	// 目前创建入口都要求选目录，所以实践中恒非空。
-	Cwd       string `json:"cwd"`
+	Cwd string `json:"cwd"`
+	// Kind：'' 普通空间 / 'schedule' 定时任务专属空间。前端据此换闹钟图标。
+	Kind string `json:"kind"`
+	// TaskID：定时任务空间的归属任务。普通空间为空。
+	// 与 AIConversation.ScheduleID 的区别：那个记「哪次跑出来的会话」，
+	// 这个记「这一整组会话属于哪个任务」。
+	TaskID string `json:"task_id"`
+	// TaskGone：定时任务空间对应的任务已被删除（仅 ListAISpaces 计算）。
+	// 空间与历史会留着让人回看，但不能再「立即运行」——那条任务已经不存在了。
+	TaskGone  bool   `json:"task_gone"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }
@@ -74,9 +83,15 @@ type AIConversation struct {
 	WorktreeBranch string `json:"worktree_branch"`
 	// Starred 星标：侧栏置顶收藏。单独一列而不是复用 space_id（自建「收藏」空间）：
 	// 星标是横切属性 —— 一个任务可以既属于某空间又被星标，塞进空间就二选一了。
-	Starred   bool   `json:"starred"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	// Unread 定时任务跑出来的会话默认未读，用户点开才清。
+	// 只标记「有没有看过」，不改 updated_at（否则点开会把它顶到侧栏最前）。
+	Unread bool `json:"unread"`
+	// ScheduleID 产出这条会话的定时任务 id；手工会话为空。
+	// 运行历史靠它反查「这次跑出了哪个会话」，也是将来「继续对话」的挂点。
+	ScheduleID string `json:"schedule_id"`
+	Starred    bool   `json:"starred"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
 }
 
 // AIMessage AI 对话消息
@@ -118,6 +133,8 @@ func mapToAISpace(m map[string]interface{}) AISpace {
 		ID:        str(m["id"]),
 		Name:      str(m["name"]),
 		Cwd:       str(m["cwd"]),
+		Kind:      str(m["kind"]),
+		TaskID:    str(m["task_id"]),
 		CreatedAt: str(m["created_at"]),
 		UpdatedAt: str(m["updated_at"]),
 	}
@@ -141,6 +158,8 @@ func mapToAIConversation(m map[string]interface{}) AIConversation {
 		WorktreePath:     str(m["worktree_path"]),
 		WorktreeBranch:   str(m["worktree_branch"]),
 		Starred:          integer(m["starred"]) == 1,
+		Unread:           integer(m["unread"]) == 1,
+		ScheduleID:       str(m["schedule_id"]),
 		CreatedAt:        str(m["created_at"]),
 		UpdatedAt:        str(m["updated_at"]),
 	}
@@ -197,15 +216,292 @@ func (d *Database) SetAIConversationStar(id string, starred bool) error {
 	)
 }
 
+// MarkAIScheduledConversation 把一次定时执行产出的会话标成未读并记下来源任务。
+//
+// 为什么是独立方法而不是让建会话时带上：runAgent 是 SSE 与子 agent 共用的执行核心，
+// 让它为定时任务多带两个字段会把调度概念倒灌进 AI 引擎。跑完后按 convID 补一笔，
+// 改动面只剩 db 层这一个方法。
+// 与 SetAIConversationStar 同理，不更新 updated_at：定时会话按创建时间排即可，
+// 标未读不该把它顶到列表最前。
+func (d *Database) MarkAIScheduledConversation(convID, scheduleID string) error {
+	return d.ExecuteParams(
+		`UPDATE ai_conversations SET unread = 1, schedule_id = ? WHERE id = ?`,
+		[]interface{}{strings.TrimSpace(scheduleID), strings.TrimSpace(convID)},
+	)
+}
+
+// SetAIConversationRead 用户点开会话时清未读。幂等，重复调无副作用。
+func (d *Database) SetAIConversationRead(id string) error {
+	return d.ExecuteParams(
+		`UPDATE ai_conversations SET unread = 0 WHERE id = ? AND unread = 1`,
+		[]interface{}{strings.TrimSpace(id)},
+	)
+}
+
+// SetAIConversationSpace 把会话挂到指定空间下（幂等：已经挂对时不写库）。
+//
+// 定时任务续聊要用：用户可能把任务的空间删了，下一次执行会按原创建时间重建一个
+// 新空间，而旧会话的 space_id 还指向那个已删空间 —— 它在侧栏里就再也找不到了
+// （空间列表按 space_id 归组，悬挂的会话不会出现在任何组里，也不在「任务」组，
+// 因为那一组只收 space_id 为空的）。执行时顺手归位，代价是一条 UPDATE。
+func (d *Database) SetAIConversationSpace(convID, spaceID string) error {
+	convID = strings.TrimSpace(convID)
+	spaceID = strings.TrimSpace(spaceID)
+	if convID == "" || spaceID == "" {
+		return nil
+	}
+	return d.ExecuteParams(
+		`UPDATE ai_conversations SET space_id = ? WHERE id = ? AND COALESCE(space_id, '') <> ?`,
+		[]interface{}{spaceID, convID, spaceID},
+	)
+}
+
+// ---- 定时任务专属空间 ----
+//
+// 一个 AI 定时任务 = 一个空间 + 一条会话：空间名是「任务名 · 创建时间」，
+// 每次执行都把这一轮问答追加进同一条会话（上下文会自然延续，也方便回看）。
+// 早期版本是「一个空间装所有任务」+「每次运行新开一条会话」，两边都容易看错：
+// 前者让多个任务挤在一起，后者让同一个任务攒出一串同名会话。
+
+// FindScheduledSpace 按任务 id 找它专属的空间；没有返回 (nil, nil)。
+//
+// QueryOne 在没有命中时返回 sql.ErrNoRows 而不是 nil，这里必须把它当「没有」：
+// 当成错误往上抛会让 EnsureScheduledSpace 在「第一次建空间」这条唯一的主路径上
+// 直接失败（日志里那条「建立定时任务空间失败：no rows in result set」就是它）。
+func (d *Database) FindScheduledSpace(taskID string) (*AISpace, error) {
+	if strings.TrimSpace(taskID) == "" {
+		return nil, nil
+	}
+	row, err := d.QueryOne(
+		`SELECT * FROM ai_spaces WHERE kind = 'schedule' AND task_id = ? ORDER BY created_at ASC LIMIT 1`,
+		strings.TrimSpace(taskID),
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if row == nil {
+		return nil, nil
+	}
+	s := mapToAISpace(row)
+	return &s, nil
+}
+
+// EnsureScheduledSpace 幂等地拿到任务专属空间，不存在就按给定名字创建。
+// 用 task_id 查而不是按名字查：用户可能给空间改过名，按名字查会再建一个重复的。
+func (d *Database) EnsureScheduledSpace(taskID, name string) (*AISpace, error) {
+	if sp, err := d.FindScheduledSpace(taskID); err != nil || sp != nil {
+		return sp, err
+	}
+	// 升级兼容：早期版本所有 AI 任务共用一个叫「定时任务」的普通空间。
+	// 直接按新规则另建一个，会让老记录留在旧空间、新记录进新空间，用户看到的
+	// 就是「同一个任务有两处历史，还都只有一半」。若旧空间里只有这一个任务的
+	// 会话，就原地认领成它的专属空间（改名 + 打标记），历史自然归位。
+	if sp, err := d.adoptLegacyScheduledSpace(taskID, name); err != nil || sp != nil {
+		return sp, err
+	}
+	s := &AISpace{
+		ID:        newID(),
+		Name:      strings.TrimSpace(name),
+		Kind:      "schedule",
+		TaskID:    strings.TrimSpace(taskID),
+		CreatedAt: now(),
+		UpdatedAt: now(),
+	}
+	if err := d.BulkInsert("ai_spaces", []map[string]interface{}{structToMap(s)}); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// adoptLegacyScheduledSpace 认领早期版本的共享「定时任务」空间。
+// 只在「该空间下所有定时会话都来自同一个任务，且正是当前任务」时才动，
+// 否则宁可新建——把别人的历史并到这个任务下比多一个空间更糟。
+func (d *Database) adoptLegacyScheduledSpace(taskID, name string) (*AISpace, error) {
+	row, err := d.QueryOne(
+		`SELECT id FROM ai_spaces
+		 WHERE name = '定时任务' AND kind = '' AND task_id = '' LIMIT 1`,
+	)
+	// 没有旧共享空间是最常见的正常情况（全新安装），不该被当成失败。
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if row == nil {
+		return nil, nil
+	}
+	id := str(row["id"])
+	owner, err := d.QueryOne(
+		`SELECT COUNT(DISTINCT schedule_id) AS n, MIN(schedule_id) AS owner
+		 FROM ai_conversations WHERE space_id = ? AND schedule_id <> ''`,
+		id,
+	)
+	if err != nil || owner == nil || integer(owner["n"]) != 1 || str(owner["owner"]) != taskID {
+		return nil, err
+	}
+	if err := d.ExecuteParams(
+		`UPDATE ai_spaces SET kind = 'schedule', task_id = ?, name = ?, updated_at = ? WHERE id = ?`,
+		[]interface{}{strings.TrimSpace(taskID), strings.TrimSpace(name), now(), id},
+	); err != nil {
+		return nil, err
+	}
+	// 认领只负责空间归属；空间里那几条「每次运行一条」的老会话由调用方
+	// 再调 MergeScheduledConversations 并成一条（见 services.ensureAllAISpaces）。
+	return d.GetAISpace(id)
+}
+
+// FindScheduledConversation 取定时任务的主会话（最早那条）；没有返回 (nil, nil)。
+//
+// 「一个定时任务一条会话」是当前口径：每次执行追加到同一条会话里，
+// 不再按次新建。首次执行时找不到 → 调用方新建，之后永远命中这一条。
+func (d *Database) FindScheduledConversation(taskID string) (*AIConversation, error) {
+	if strings.TrimSpace(taskID) == "" {
+		return nil, nil
+	}
+	row, err := d.QueryOne(
+		`SELECT * FROM ai_conversations
+		 WHERE schedule_id = ? ORDER BY created_at ASC, rowid ASC LIMIT 1`,
+		strings.TrimSpace(taskID),
+	)
+	if err != nil {
+		// 首次执行时还没有会话：ErrNoRows 就是「没有」，交给调用方新建。
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if row == nil {
+		return nil, nil
+	}
+	c := mapToAIConversation(row)
+	return &c, nil
+}
+
+// MergeScheduledConversations 把同一任务历次执行留下的多条会话并成一条，返回保留的会话 id。
+//
+// 为什么要并：早期口径是「每次运行新开一条会话」，一个跑了几天的任务会在侧栏里
+// 攒出一串同名兄弟，看上去像互不相干的多个子任务。改成「一个任务一条会话」之后，
+// 存量数据必须收拢，否则同一条任务的老记录还在旧空间里散着。
+//
+// 保留最早那条（= 这个任务第一次运行，标题与上下文都是最初的），其余会话的消息
+// 按原插入顺序搬过去再删空壳。ai_messages 有 ON DELETE CASCADE，所以必须先搬后删。
+//
+// 幂等：0 条或 1 条时直接返回，不产生任何写入。
+func (d *Database) MergeScheduledConversations(taskID string) (string, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return "", nil
+	}
+	rows, err := d.ListTableWhere("ai_conversations",
+		"schedule_id = ? ORDER BY created_at ASC, rowid ASC", taskID)
+	if err != nil {
+		return "", err
+	}
+	if len(rows) == 0 {
+		return "", nil
+	}
+	keep := str(rows[0]["id"])
+	if keep == "" {
+		return "", nil
+	}
+	if len(rows) == 1 {
+		return keep, nil
+	}
+	promptTokens, completionTokens, requests := 0, 0, 0
+	// 未读取「任一条未读」：合并后只要有一条没看过，这条会话就该继续亮着点。
+	unread := integer(rows[0]["unread"]) == 1
+	lastAt := ""
+	for _, r := range rows[1:] {
+		id := str(r["id"])
+		if id == "" || id == keep {
+			continue
+		}
+		if err := d.ExecuteParams(
+			`UPDATE ai_messages SET conv_id = ? WHERE conv_id = ?`,
+			[]interface{}{keep, id},
+		); err != nil {
+			return keep, err
+		}
+		promptTokens += integer(r["prompt_tokens"])
+		completionTokens += integer(r["completion_tokens"])
+		requests += integer(r["request_count"])
+		unread = unread || integer(r["unread"]) == 1
+		if at := str(r["updated_at"]); at > lastAt {
+			lastAt = at
+		}
+		if err := d.ExecuteParams(
+			`DELETE FROM ai_conversations WHERE id = ?`,
+			[]interface{}{id},
+		); err != nil {
+			return keep, err
+		}
+		// 运行历史里记的是「会话 <id> · 摘要」。会话被并掉之后那个 id 就不存在了，
+		// 点「查看会话」会跳到空处。把历史里的旧 id 一并换成保留的那条，
+		// 历史记录本身（时间、状态、摘要）一个字都不动。
+		oldRef := "会话 " + id + " · "
+		if err := d.ExecuteParams(
+			`UPDATE schedule_runs SET result = REPLACE(result, ?, ?) WHERE result LIKE ?`,
+			[]interface{}{oldRef, "会话 " + keep + " · ", "%" + oldRef + "%"},
+		); err != nil {
+			return keep, err
+		}
+	}
+	// 用量与请求数按「并进来的部分」累加：列表里那条 token 数不能因为合并凭空变小。
+	// updated_at 取并进来的最大值，让这条会话仍停在它实际最后活跃的位置。
+	if lastAt == "" {
+		lastAt = now()
+	}
+	if err := d.ExecuteParams(
+		`UPDATE ai_conversations
+		 SET prompt_tokens = prompt_tokens + ?, completion_tokens = completion_tokens + ?,
+		     request_count = request_count + ?, unread = ?, updated_at = ?
+		 WHERE id = ?`,
+		[]interface{}{promptTokens, completionTokens, requests, b2i(unread), lastAt, keep},
+	); err != nil {
+		return keep, err
+	}
+	return keep, nil
+}
+
+// SyncScheduledSpaceName 任务改名时同步空间名前缀，但只在空间名仍是旧自动名时改。
+// 用户手动改过空间名的话不能被悄悄覆盖——这是「改名等于被撤销」的那类坑。
+func (d *Database) SyncScheduledSpaceName(taskID, oldName, newName string) error {
+	return d.ExecuteParams(
+		`UPDATE ai_spaces SET name = ?, updated_at = ?
+		 WHERE kind = 'schedule' AND task_id = ? AND name = ?`,
+		[]interface{}{strings.TrimSpace(newName), now(), strings.TrimSpace(taskID), strings.TrimSpace(oldName)},
+	)
+}
+
 // ---- 空间 ----
 
-// ListAISpaces 全部空间（按更新时间倒序）
+// ListAISpaces 全部空间（按更新时间倒序）。
+//
+// 多带一个 task_alive 子查询：定时任务的专属空间在任务被删后仍留着历史，
+// 前端要据此把「立即运行」按钮藏掉，否则点下去只会得到「任务不存在」。
+// 用 EXISTS 而不是 JOIN：普通空间 task_id 为空，JOIN 条件写不好会掉行。
 func (d *Database) ListAISpaces() ([]AISpace, error) {
-	rows, err := d.ListTableWhere("ai_spaces", "1=1 ORDER BY updated_at DESC, created_at DESC")
+	rows, err := d.Query(
+		`SELECT s.*, (SELECT COUNT(1) FROM scheduled_tasks t WHERE t.id = s.task_id) AS task_alive
+		 FROM ai_spaces s
+		 ORDER BY s.updated_at DESC, s.created_at DESC`,
+	)
 	if err != nil {
 		return nil, err
 	}
-	return mapSlice(rows, mapToAISpace), nil
+	out := make([]AISpace, 0, len(rows))
+	for _, r := range rows {
+		sp := mapToAISpace(r)
+		if sp.Kind == "schedule" && sp.TaskID != "" && integer(r["task_alive"]) == 0 {
+			sp.TaskGone = true
+		}
+		out = append(out, sp)
+	}
+	return out, nil
 }
 
 // GetAISpace 读取单个空间

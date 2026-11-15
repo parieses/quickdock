@@ -98,6 +98,10 @@ var validColumns = map[string]bool{
 	"sort": true, "is_default": true, "is_pinned": true,
 	"open_strategy": true, "tool": true,
 	"recent": true, "recent_at": true,
+	// 定时任务增强（2026-11-13）：AI 动作档位 / 作用域 / 有效期 / 通知策略，
+	// 以及定时跑出来的 AI 会话的未读标记与来源任务 id。
+	"ai_mode": true, "ai_scope": true, "valid_from": true, "valid_until": true,
+	"notify_policy": true, "unread": true, "schedule_id": true,
 	"plugin_id": true, "plugin_data": true,
 	"collection":        true,
 	"working_directory": true, "args": true,

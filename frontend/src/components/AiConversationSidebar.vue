@@ -8,7 +8,7 @@
 import type { Component } from 'vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronDown, ChevronRight, Copy, Folder, FolderOpen, Pencil, Plus, Search, Star, Trash2, X } from '@lucide/vue'
+import { AlarmClock, ChevronDown, ChevronRight, Copy, Folder, FolderOpen, Loader2, Pencil, Play, Plus, Search, Star, Trash2, X } from '@lucide/vue'
 import type { AIConvHit, AIConversation, AISpace } from '../types/ai'
 import AiConvRunDot from './AiConvRunDot.vue'
 
@@ -36,6 +36,12 @@ interface Props {
   spacesOpen: boolean
   spacesExpanded: boolean
   expandedSpaceTasks: string[]
+  // 刚被「跳转定位」到的空间：亮一下再淡回常态（见 AIPage.revealSpace）。
+  flashSpaceId: string
+  // 正在后台跑的定时任务 id：空间行上的运行按钮据此转圈并禁用。
+  spaceRunBusy: string[]
+  // 空间行右侧「立即运行一次」（仅定时任务空间）。
+  runSpaceTask: (s: AISpace) => void
   totalMatched: number
 
   renamingId: string
@@ -105,6 +111,18 @@ function spaceRunState(g: SpaceGroup): 'running' | 'done' | 'error' | undefined 
     else if (!out) out = 'done'
   }
   return out
+}
+
+// 空间行上的未读汇总：空间收起时，会话行上那个未读点根本看不见，
+// 定时任务在后台跑完就完全没有提示——这个点就是给它留的。
+function spaceUnread(g: SpaceGroup): boolean {
+  return g.tasks.some((c) => !!c.unread)
+}
+
+// 定时任务专属空间用闹钟图标。kind 是升级时补的列，迁移没跑完的老库它是空串，
+// 但 task_id 已经填了——拿它兜一下，否则同一类空间升级前后会换图标（目录 ↔ 闹钟）。
+function isSchedSpace(s: AISpace): boolean {
+  return s.kind === 'schedule' || !!s.task_id
 }
 
 // 三个 v-model 走 input 事件而不是 defineModel：项目 Vue 是 ^3.2，
@@ -266,6 +284,7 @@ onBeforeUnmount(() => {
             <component :is="modeIcon(c.mode)" :size="12" class="ai-conv-mode" />
             <AiConvRunDot :state="c.id === activeId ? undefined : runState[c.id]" />
             <span class="ai-conv-title">{{ c.title || t('aiNewChat') }}</span>
+            <span v-if="c.unread" class="ai-conv-unread" :title="t('aiUnreadHint')" />
           </div>
         </template>
       </template>
@@ -288,6 +307,7 @@ onBeforeUnmount(() => {
           >
             <Search :size="11" class="ai-conv-mode" />
             <AiConvRunDot :state="h.conv_id === activeId ? undefined : runState[h.conv_id]" />
+            <span v-if="convById(h.conv_id)?.unread" class="ai-conv-unread" :title="t('aiUnreadHint')" />
             <div class="ai-msg-hit-body">
               <div class="ai-msg-hit-head">
                 <span class="ai-conv-title">{{ h.conv_title || t('aiNewChat') }}</span>
@@ -339,6 +359,7 @@ onBeforeUnmount(() => {
           <span v-if="renamingId !== c.id && (c.prompt_tokens > 0 || c.completion_tokens > 0)" class="ai-conv-tokens" :title="t('aiConvTokenTip', { in: c.prompt_tokens, out: c.completion_tokens })">
             {{ fmtTokens(c.prompt_tokens + c.completion_tokens) }}
           </span>
+          <span v-if="c.unread" class="ai-conv-unread" :title="t('aiUnreadHint')" />
         </div>
       </template>
       <!-- 超过阈值才出现：展开后同一个按钮变「收起」，来回都走这一处 -->
@@ -357,7 +378,8 @@ onBeforeUnmount(() => {
       <template v-if="spacesOpen">
       <div v-for="g in visibleSpaces" :key="g.space.id" class="ai-space">
         <div
-          class="ai-space-row"
+          :id="'ai-space-' + g.space.id"
+          :class="['ai-space-row', { 'is-flash': flashSpaceId === g.space.id }]"
           @click="toggleSpace(g.space.id)"
           @contextmenu.stop="openCtxMenu($event, { kind: 'space', space: g.space })"
         >
@@ -366,7 +388,10 @@ onBeforeUnmount(() => {
             :size="12"
             class="ai-space-caret"
           />
-          <Folder :size="12" class="ai-space-icon" />
+          <!-- 定时任务专属空间用闹钟，和普通目录一眼分开；名字往往带
+               「任务名 · 创建时间」后缀，侧栏窄，完整名放 tooltip 里。 -->
+          <AlarmClock v-if="isSchedSpace(g.space)" :size="12" class="ai-space-icon is-sched" />
+          <Folder v-else :size="12" class="ai-space-icon" />
           <!-- 与任务标题同一套行内改名：为一个短名字弹系统对话框（window.prompt）
                不跟主题、字体也不一致，而且输入法组合中容易丢字。 -->
           <input
@@ -381,9 +406,23 @@ onBeforeUnmount(() => {
             @keydown.esc.prevent="cancelRenameSpace()"
             @blur="commitRenameSpace(g.space)"
           />
-          <span v-else class="ai-space-name" :title="g.space.cwd" @dblclick.stop="startRenameSpace(g.space)">{{ g.space.name }}</span>
+          <span v-else class="ai-space-name" :title="g.space.task_gone ? `${g.space.cwd || g.space.name} · ${t('aiSpaceTaskGone')}` : (g.space.cwd || g.space.name)" @dblclick.stop="startRenameSpace(g.space)">{{ g.space.name }}</span>
           <AiConvRunDot :state="spaceRunState(g)" />
+          <span v-if="spaceUnread(g)" class="ai-conv-unread" :title="t('aiUnreadHint')" />
           <span class="ai-space-count">{{ g.tasks.length }}</span>
+          <!-- 立即运行一次：定时任务在侧栏就能重跑，不用切到定时任务页。
+               任务被删后（task_gone）不再出现——点下去只会得到「任务不存在」。 -->
+          <button
+            v-if="isSchedSpace(g.space) && g.space.task_id && !g.space.task_gone"
+            class="ai-space-run"
+            :class="{ 'is-busy': spaceRunBusy.includes(g.space.task_id || '') }"
+            :disabled="spaceRunBusy.includes(g.space.task_id || '')"
+            :title="spaceRunBusy.includes(g.space.task_id || '') ? t('aiSpaceRunBusy') : t('aiSpaceRunNow')"
+            @click.stop="runSpaceTask(g.space)"
+          >
+            <Loader2 v-if="spaceRunBusy.includes(g.space.task_id || '')" :size="12" class="spin" />
+            <Play v-else :size="12" />
+          </button>
           <!-- 在这个空间里新建任务：否则每次都要去落地页的「归属空间」下拉里翻一遍 -->
           <button
             v-if="renamingSpaceId !== g.space.id"
@@ -405,6 +444,7 @@ onBeforeUnmount(() => {
             <component :is="modeIcon(c.mode)" :size="12" class="ai-conv-mode" />
             <AiConvRunDot :state="c.id === activeId ? undefined : runState[c.id]" />
             <span class="ai-conv-title" @dblclick.stop="startRename(c)">{{ c.title || t('aiNewChat') }}</span>
+            <span v-if="c.unread" class="ai-conv-unread" :title="t('aiUnreadHint')" />
           </div>
           <button
             v-if="g.tasks.length > foldSpaceTasks"
@@ -535,12 +575,44 @@ onBeforeUnmount(() => {
   transition: background var(--transition-fast);
 }
 .ai-space-row:hover { background: var(--color-bg-hover); }
-/* 只剩「新建任务」这一个行内按钮：删除/改名/星标都进了右键菜单，
+/* 跳转定位到某个空间时亮一下再淡回去。用动画而不是常驻高亮：常驻会和
+   「当前任务」的选择态混在一起，用户分不清哪个是「我在这」哪个是「刚跳到这」。 */
+.ai-space-row.is-flash { animation: ai-space-flash 1.8s ease-out; }
+@keyframes ai-space-flash {
+  0% { background: color-mix(in srgb, var(--color-accent) 28%, transparent); }
+  60% { background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+  100% { background: transparent; }
+}
+/* 立即运行一次：常驻显示而不是 hover 才出——它是个「动作入口」，
+   藏起来就得先猜哪儿有按钮（「新建任务」那种辅助操作才适合 hover 显隐）。 */
+.ai-space-run {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-disabled);
+  cursor: pointer;
+}
+.ai-space-run:hover { color: var(--color-accent); background: var(--color-bg-tertiary); }
+.ai-space-run.is-busy { display: flex; color: var(--color-accent); cursor: default; }
+.ai-space-run.is-busy:hover { background: none; }
+.ai-space-run .spin { animation: ai-space-run-spin 0.9s linear infinite; }
+@keyframes ai-space-run-spin { to { transform: rotate(360deg); } }
+/* 行内按钮只剩「运行」和「新建任务」两个：删除/改名/星标都进了右键菜单，
    别再把 .ai-conv-del 抄回来——那个类已经没有对应节点了。 */
 .ai-space-row .ai-conv-add { flex-shrink: 0; }
 .ai-space-row:hover .ai-conv-add { display: flex; }
 .ai-space-caret { flex-shrink: 0; opacity: 0.6; }
 .ai-space-icon { flex-shrink: 0; color: var(--color-accent); opacity: 0.85; }
+/* 定时任务空间是全自动产出物，和「我建的项目目录」不是一类东西：
+   闹钟不透明，在侧栏里更容易一眼扫到。 */
+.ai-space-icon.is-sched { opacity: 1; }
 .ai-space-name {
   flex: 1;
   overflow: hidden;
@@ -578,6 +650,14 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 定时任务跑完的会话标未读，点开才消。与 AiConvRunDot 是两个独立信号：
+   「已经跑完了但还没看过」和「正在生成」可以同时成立。 */
+.ai-conv-unread {
+  flex: 0 0 6px;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
 }
 
 /* 消息命中的行比普通任务行高：标题下面还要放一行片段。

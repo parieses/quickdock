@@ -270,6 +270,29 @@ func (a *AIService) AISetConversationPermission(convID, permission string) *serv
 	return services.Ok(p)
 }
 
+// AIMarkConversationRead 用户点开一条会话时清掉未读。
+//
+// 定时任务在后台跑完会把产出的会话标成未读（MarkAIScheduledConversation），
+// 这是「跑了但你还没看」的唯一提示。清未读必须发生在「真的切进去看」这一步，
+// 不能在列表刷新时做——那样用户只是路过 AI 页，红点就没了。
+//
+// 失败不返回错误给前端：未读只是提示，为了一个点弹 toast 比留着这个点更烦。
+func (a *AIService) AIMarkConversationRead(convID string) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	convID = strings.TrimSpace(convID)
+	if convID == "" {
+		return services.Ok(nil)
+	}
+	if err := a.App.DB.SetAIConversationRead(convID); err != nil {
+		return services.Fail(err)
+	}
+	// 让别的窗口/面板同步消点；本窗口已在 selectConv 里就地改了本地数组。
+	a.emitAI("ai:conv", map[string]interface{}{"id": convID, "unread": false})
+	return services.Ok(nil)
+}
+
 // AISetConversationProfile 记下这条任务选中的模型档案，并同步全局「最后选择」。
 //
 // 一次调用写两处是有意的：会话列决定「切走再回来还用它」，全局 ai_active_profile

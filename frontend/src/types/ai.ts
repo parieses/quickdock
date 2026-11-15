@@ -148,10 +148,22 @@ export interface AIConversation {
   // worktree_branch 是它**基于**的分支（不是工作区自己的 quickdock/xxxx 分支）。
   worktree_path?: string
   worktree_branch?: string
+  // 定时任务跑出来的会话：后端标未读，用户点开才清（AIMarkConversationRead）。
+  // schedule_id 是产出它的定时任务 id，手工会话没有。
+  unread?: boolean
+  schedule_id?: string
 }
 
 // 空间 = 一个目录 + 挂在这个目录下的若干任务。
-export interface AISpace { id: string; name: string; cwd: string; created_at: string; updated_at: string }
+// kind='schedule' 表示这是一个定时任务专属空间（侧栏闹钟图标、会话是逐次运行结果）；
+// task_id 是归属的定时任务 id，普通空间这两项为空。
+export interface AISpace {
+  id: string; name: string; cwd: string
+  kind?: string; task_id?: string
+  // 定时任务空间的归属任务已被删除：历史留着能看，但不能「立即运行」。
+  task_gone?: boolean
+  created_at: string; updated_at: string
+}
 
 // 技能 = skills/<名字>/SKILL.md 一份操作说明（后端 services/ai/skills.go）。
 // 与插件、外部 MCP 的区别：它不新增任何执行能力，只是让模型知道「这类活有现成套路」。

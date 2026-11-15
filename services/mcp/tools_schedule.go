@@ -66,7 +66,7 @@ func registerScheduleTools(s *MCPService, r *toolRegistrar) {
 		}
 		return map[string]any{"count": len(out), "tasks": out}, nil
 	}, mcpsrv.LevelRead, "schedule_list",
-		"列出全部定时任务：动作（app/dir/url/command/http/todo）、目标、是否启用、调度方式、下次与上次执行时间、上次结果。查「我的备份/巡检任务在跑吗」先看这里，再看 schedule_runs 有没有失败记录。注意 action=todo 是待办的重复规则自动生成的任务，不是用户手动建的",
+		"列出全部定时任务：动作（app/dir/url/command/http/ai/todo）、目标、是否启用、调度方式、下次与上次执行时间、上次结果。查「我的备份/巡检任务在跑吗」先看这里，再看 schedule_runs 有没有失败记录。action=ai 会到点跑一段提示词并产出一条 AI 会话，结果串里的「会话 <id>」可回看；action=todo 是待办的重复规则自动生成的任务，不是用户手动建的。schedule_runs 的 skipped 表示关机错过或不在有效期内，不是执行失败",
 		nil, nil)
 
 	r.add(func(args map[string]any) (any, error) {
@@ -123,7 +123,7 @@ func registerScheduleTools(s *MCPService, r *toolRegistrar) {
 		}
 		return unwrap(res)
 	}, mcpsrv.LevelWrite, "schedule_run_now",
-		"立即执行一次已有的定时任务（等价于在定时任务页点「立即运行」）。不影响下次排期、不改启用状态。只能触发用户已创建的任务，不能新建——执行内容是人写的，AI 只负责在需要时跑一次。命令类任务会等到结束或超时才返回，可能较慢",
+		"立即执行一次已有的定时任务（等价于在定时任务页点「立即运行」）。不影响下次排期、不改启用状态。只能触发用户已创建的任务，不能新建——执行内容是人写的，AI 只负责在需要时跑一次。命令类任务会等到结束或超时才返回，可能较慢。action=ai 的任务不等待：返回的是「已在后台开始」，不是执行结果——过一会儿用 schedule_runs 看这一轮的 status/result 和对应会话，别把它当成已经跑完了",
 		[]string{"taskId"},
 		map[string]any{"taskId": str("任务 ID，来自 schedule_list 的 id")})
 }

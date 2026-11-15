@@ -286,6 +286,15 @@ var baseTables = []string{
 		-- retry_count：定时触发失败后的重试次数（0=不重试）。新增列，老库由
 		-- columnMigrations 补上；默认 0 保证升级后行为与之前一致。
 		retry_count INTEGER NOT NULL DEFAULT 0,
+		-- AI 定时任务（2026-11-13）：ai_mode 只被 action='ai' 读取；ai_scope 预留
+		-- 「回到同一会话」（当前只支持 new）；有效期与通知策略对所有动作通用。
+		-- 默认值必须对齐升级前行为：老任务 notify_policy='always' 照旧每次都通知，
+		-- 有效期为空 = 不限，ai_mode 为空 = 不是 AI 动作。
+		ai_mode TEXT NOT NULL DEFAULT '',
+		ai_scope TEXT NOT NULL DEFAULT 'new',
+		valid_from TEXT NOT NULL DEFAULT '',
+		valid_until TEXT NOT NULL DEFAULT '',
+		notify_policy TEXT NOT NULL DEFAULT 'always',
 		next_run TEXT DEFAULT '',
 		last_run TEXT DEFAULT '',
 		last_status TEXT DEFAULT '',
@@ -373,6 +382,11 @@ var baseTables = []string{
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL DEFAULT '',
 		cwd TEXT NOT NULL DEFAULT '',
+		-- kind：'' 普通空间 / 'schedule' 定时任务专属空间（侧栏用闹钟图标）。
+		-- task_id：该空间归属的定时任务 id，普通空间为空。靠它精确做「改名同步」
+		-- 「删任务连带空间」「执行时把会话放回去」，不用拿空间名反查任务。
+		kind TEXT NOT NULL DEFAULT '',
+		task_id TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`,
@@ -397,6 +411,11 @@ var baseTables = []string{
 		worktree_path TEXT NOT NULL DEFAULT '',
 		worktree_branch TEXT NOT NULL DEFAULT '',
 		starred INTEGER NOT NULL DEFAULT 0,
+		-- unread / schedule_id：定时任务跑出来的会话标成未读，用户点开才清。
+		-- schedule_id 让运行历史能反查「这次跑出了哪个会话」，也供「继续对话」用。
+		-- 两者都是 0 / '' 起步，存量会话升级后行为完全不变。
+		unread INTEGER NOT NULL DEFAULT 0,
+		schedule_id TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`,
@@ -1157,6 +1176,20 @@ func (d *Database) migrate() error {
 		// 存量行拿到 '' / 0，分别代表「不是 cron」与「沿用旧的创建日口径」。
 		{"scheduled_tasks", "cron_expr", "TEXT NOT NULL DEFAULT ''"},
 		{"scheduled_tasks", "day_of_month", "INTEGER NOT NULL DEFAULT 0"},
+		// AI 定时任务与通用调度增强（2026-11-13）。默认值与建表语句逐字一致，
+		// 尤其 notify_policy='always'：老任务升级后不能突然收不到通知。
+		{"scheduled_tasks", "ai_mode", "TEXT NOT NULL DEFAULT ''"},
+		{"scheduled_tasks", "ai_scope", "TEXT NOT NULL DEFAULT 'new'"},
+		{"scheduled_tasks", "valid_from", "TEXT NOT NULL DEFAULT ''"},
+		{"scheduled_tasks", "valid_until", "TEXT NOT NULL DEFAULT ''"},
+		{"scheduled_tasks", "notify_policy", "TEXT NOT NULL DEFAULT 'always'"},
+		// 定时跑出来的 AI 会话：未读标记 + 来源任务 id。
+		{"ai_conversations", "unread", "INTEGER NOT NULL DEFAULT 0"},
+		{"ai_conversations", "schedule_id", "TEXT NOT NULL DEFAULT ''"},
+		// 定时任务专属空间：kind/task_id 两列。老库补成空串，已有空间一律是普通空间，
+		// 升级后不会凭空冒出闹钟图标；第一个 AI 任务保存时才建带标记的新空间。
+		{"ai_spaces", "kind", "TEXT NOT NULL DEFAULT ''"},
+		{"ai_spaces", "task_id", "TEXT NOT NULL DEFAULT ''"},
 		// ai_usage: 多 agent 编排的成本归集维度（老数据为空 = 不属于任何 run）。
 		{"ai_usage", "run_id", "TEXT NOT NULL DEFAULT ''"},
 		{"ai_usage", "node_id", "TEXT NOT NULL DEFAULT ''"},
