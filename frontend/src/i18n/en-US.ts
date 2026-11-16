@@ -2345,6 +2345,13 @@ export default {
   aiBaseURL: 'API Base URL',
   aiAPIKey: 'API Key',
   aiAPIKeyOptional: 'Can be left empty (local Ollama needs no auth)',
+  // Reveal / copy of the API key: the list API only returns a mask, the plaintext is fetched on demand once.
+  aiKeyShow: 'Show key',
+  aiKeyHide: 'Hide',
+  aiKeyCopy: 'Copy key',
+  aiKeyCopied: 'API key copied',
+  aiKeyEmpty: 'This profile has no key to copy',
+  aiKeyRevealFailed: 'Could not read the key',
   aiModel: 'Model',
   aiModelPlaceholderOllama: 'Pick a downloaded model below, or type e.g. qwen2.5:7b',
   aiOllamaLocalModels: 'Downloaded locally:',
@@ -2641,6 +2648,11 @@ export default {
   aiCheckpointDone: 'Restored {n} file(s)',
   aiDiffExpand: 'Show all {n} lines',
   aiRulesActive: 'Using {n} rule file(s)',
+  // Context compaction (see .ai-compact in AiMessageList). Two phases: compacting → compacted.
+  aiCompacting: 'Compacting context',
+  aiCompacted: 'Context compacted',
+  aiCompactTruncated: ' (summary failed, oldest part truncated)',
+  aiCompactTitle: 'Model window {window} · history budget {limit} · floor {floor}',
   // Artifacts written/edited by this reply (see ai_preview.go)
   aiArtifactsCount: 'Artifacts ({n})',
   aiArtifactWritten: 'written',
@@ -2864,7 +2876,7 @@ export default {
   aiImageInputBase64: 'Local image only',
   aiImageInputHint: 'Models differ in how they accept images: most compatible endpoints (OpenAI / DeepSeek / Kimi / Qwen) accept both URL and local images; some (e.g. Agnes) only accept public URLs, where local files must be supplied via an accessible URL. Choose according to the model you actually use.',
   aiContextWindow: 'Context window (tokens)',
-  aiContextWindowHint: 'Leave 0 to detect automatically: looked up from a built-in table by model name (mainstream models are 128K–1M), falling back to 128K. If the estimate is too high and the model rejects it, the real window is read from the error and cached, so you rarely need to fill this in. For self-hosted gateways or small local models (8K/32K) it is better to set it, to avoid that first rejected request. History is summarized at ~70% of the window, not at a fixed message count.',
+  aiContextWindowHint: 'Leave 0 to detect automatically: looked up from a built-in table by model name (mainstream models are 128K–1M), falling back to 128K. If the estimate is too high and the model rejects it, the real window is read from the error and cached, so you rarely need to fill this in. For self-hosted gateways or small local models (8K/32K) it is better to set it, to avoid that first rejected request. Before every request the real payload (history + system prompt + tool schemas + referenced file content) is measured, and when it exceeds the usable input space the history is summarized automatically — the before/after size is shown in the conversation.',
   aiAttachImage: 'Add Image',
   aiAddImageUrl: 'Image URL',
   aiAddImageUrlPh: 'Paste a public image URL (https://…)',
@@ -3359,7 +3371,10 @@ export default {
   sshQuickConnectInvalid: 'Invalid address. Examples: user{\'@\'}host:2222, host, [::1]:2222',
   // OSC 7 directory following: remote paths are untrusted, so this is off by default.
   sshFollowCwd: 'Follow terminal directory',
-  sshFollowCwdHint: 'SFTP follows the directory reported by the terminal. That path comes from the remote host, so this is off by default',
+  sshFollowCwdHint: 'SFTP follows the directory reported by the terminal. That path comes from the remote host, so this is off by default. It needs the remote shell to report it — bash does not by default, which is what shell integration covers',
+  // Shell integration: injects one directory-reporting hook into the session; nothing is written to disk and it vanishes on reconnect.
+  sshShellInteg: 'Shell integration',
+  sshShellIntegHint: 'Injects one directory-reporting hook (bash / zsh / fish) right after login so "Follow terminal directory" has data to work with. No remote file is touched; the cost is that the command is echoed at the top of the session. Existing tabs are not affected — only new connections',
   sshHostDetail: 'Host details',
   sshHostDetailAuth: 'Authentication',
   sshHostDetailEmpty: 'No host to show',

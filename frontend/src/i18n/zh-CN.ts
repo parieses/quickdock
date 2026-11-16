@@ -2349,6 +2349,13 @@ export default {
   aiBaseURL: 'API 地址 (Base URL)',
   aiAPIKey: 'API Key',
   aiAPIKeyOptional: '可留空（本地 Ollama 无需鉴权）',
+  // API Key 的查看 / 复制：列表接口只给掩码，明文由 AIRevealProfileKey 按需给一次。
+  aiKeyShow: '显示明文',
+  aiKeyHide: '隐藏',
+  aiKeyCopy: '复制 Key',
+  aiKeyCopied: 'API Key 已复制',
+  aiKeyEmpty: '这个档案还没有可复制的 Key',
+  aiKeyRevealFailed: '取不到 Key 明文',
   aiModel: '模型',
   aiModelPlaceholderOllama: '从下方已下载模型选择，或输入如 qwen2.5:7b',
   aiOllamaLocalModels: '本机已下载：',
@@ -2655,6 +2662,13 @@ export default {
   aiDiffExpand: '展开全部 {n} 行',
   // 项目规则文件（AGENTS.md / .quickdock/rules*）生效提示
   aiRulesActive: '本次生效 {n} 个规则文件',
+  // 上下文压缩（见 AiMessageList 的 .ai-compact）。两条一组：先「正在压缩」，压完改「已压缩」。
+  // 这三个数必须都露出来：只说「已压缩」，用户不知道「压掉多少 / 离上限还有多远」，
+  // 而这正是他接下来要判断「要不要开新会话」的依据。
+  aiCompacting: '正在压缩上下文',
+  aiCompacted: '上下文已压缩',
+  aiCompactTruncated: '（摘要失败，已直接截断最旧部分）',
+  aiCompactTitle: '模型窗口 {window} · 本次历史预算 {limit} · 压缩下限 {floor}',
   // 回答产物（这条回复写过/改过的文件，点击预览；见后端 ai_preview.go）
   aiArtifactsCount: '产物 ({n})',
   aiArtifactWritten: '写入',
@@ -2881,7 +2895,7 @@ export default {
   aiImageInputBase64: '仅本地图片',
   aiImageInputHint: '不同模型支持的图片传入方式不同：多数兼容接口（OpenAI / DeepSeek / Kimi / Qwen 等）链接与本地图都收；部分模型（如 Agnes）只收公网链接，本地图须以可访问 URL 传入。按实际用的模型选择。',
   aiContextWindow: '上下文窗口（token）',
-  aiContextWindowHint: '留 0 自动识别：按模型名查内置表（主流模型 128K–1M），认不出按 128K 估。万一估大了被模型拒绝，会从报错里读出真实窗口自动校正，不用手动填。自建网关或本地小模型（8K/32K）建议直接填，避免先撞一次。历史攒到窗口的约 70% 才会摘要压缩，不是固定条数。',
+  aiContextWindowHint: '留 0 自动识别：按模型名查内置表（主流模型 128K–1M），认不出按 128K 估。万一估大了被模型拒绝，会从报错里读出真实窗口自动校正，不用手动填。自建网关或本地小模型（8K/32K）建议直接填，避免先撞一次。每次请求发出前都会按真实载荷（历史 + 系统提示 + 工具定义 + 引用的文件内容）实测一遍，超过可用输入空间就自动摘要压缩，并把压缩前后的量标在对话里。',
   aiAttachImage: '添加图片',
   aiAddImageUrl: '图片链接',
   aiAddImageUrlPh: '粘贴图片的公网链接（https://…）',
@@ -3374,7 +3388,10 @@ export default {
   sshQuickConnectInvalid: '地址格式不正确，示例：user{\'@\'}host:2222、host、[::1]:2222',
   // OSC 7 目录跟随：远端路径不可信，默认关闭。
   sshFollowCwd: '跟随终端目录',
-  sshFollowCwdHint: '开启后 SFTP 面板跟随终端上报的当前目录；该路径来自远端，默认关闭',
+  sshFollowCwdHint: '开启后 SFTP 面板跟随终端上报的当前目录；该路径来自远端，默认关闭。前提是远端 shell 会上报（bash 默认不上报，靠右边的「shell 集成」注入）',
+  // shell 集成：连接时往远端会话注入一行目录上报钩子，不落盘、重连即消失。
+  sshShellInteg: 'shell 集成',
+  sshShellIntegHint: '登录后往远端会话注入一行目录上报钩子（bash / zsh / fish），让「跟随终端目录」拿得到数据。不改远端任何文件，代价是这行命令会回显在会话顶部；对已打开的标签不生效，新建标签才注入',
   sshHostDetail: '主机详情',
   sshHostDetailAuth: '认证方式',
   sshHostDetailEmpty: '没有可显示的主机',
