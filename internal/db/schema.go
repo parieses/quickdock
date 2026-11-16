@@ -835,15 +835,25 @@ var baseTables = []string{
 		created_at TEXT NOT NULL
 	)`,
 
-	// 下载任务元数据。进度/速度/状态刻意不落库：aria2 是唯一真相源，
-	// 双写必然出现「界面 62% 但文件已经下完」这类不一致。
+	// 下载任务元数据 + 终态快照。
+	//
+	// 进度/速度仍然只在内存里用 aria2 的实时值渲染（双写会打架），这里落的是
+	// 「aria2 重启后自己也记不住」的那部分：状态、总大小、错误原文、结束时间。
+	// aria2 的 tellStopped 是纯内存态，进程一退，已完成/失败的任务就彻底没了；
+	// 落一份到库里，下载页才能在重启后继续显示历史记录（见 ListDlTasks 的用法）。
 	`CREATE TABLE IF NOT EXISTS dl_tasks (
 		gid TEXT PRIMARY KEY,
 		url TEXT NOT NULL DEFAULT '',
 		name TEXT NOT NULL DEFAULT '',
 		save_dir TEXT NOT NULL DEFAULT '',
 		source TEXT NOT NULL DEFAULT '',
-		created_at INTEGER NOT NULL DEFAULT 0
+		created_at INTEGER NOT NULL DEFAULT 0,
+		status TEXT NOT NULL DEFAULT '',
+		total INTEGER NOT NULL DEFAULT 0,
+		completed INTEGER NOT NULL DEFAULT 0,
+		error TEXT NOT NULL DEFAULT '',
+		updated_at INTEGER NOT NULL DEFAULT 0,
+		finished_at INTEGER NOT NULL DEFAULT 0
 	)`,
 }
 
@@ -1108,6 +1118,11 @@ func (d *Database) migrate() error {
 		// ai_messages: 工具调用记录与轮次（内置 agent 的审计面）
 		{"ai_messages", "tool_calls", "TEXT NOT NULL DEFAULT ''"},
 		{"ai_messages", "tool_rounds", "INTEGER NOT NULL DEFAULT 0"},
+		// ai_messages: 这条用户消息发出时真正挂上的技能名（JSON 数组）。
+		// 只为了在聊天里标出来：技能本身是提示词里的「名字 + 路径」，模型读了
+		// SKILL.md 也只留一条普通工具行，用户看不出自己选的技能生效了没有。
+		// 只写在 user 消息上；老消息为空串 = 不显示（不回填，那时的选择已不可考）。
+		{"ai_messages", "skills", "TEXT NOT NULL DEFAULT ''"},
 		// ai_conversations: 这个对话绑定的工作目录（用户选的文件夹，绝对路径；空=没绑定）。
 		// 存库而不是只放前端内存：换个页面回来、或者重启应用，AI 还得知道自己该在哪个
 		// 目录里读文件、改代码。绑在会话上而不是全局设置，是因为同时开两个项目对话是常态。
@@ -1208,6 +1223,14 @@ func (d *Database) migrate() error {
 		// 笔记修改时间：老库补成空串，由 migrate 末尾统一回填成 created_at，
 		// 升级后「最近编辑」不会把所有历史笔记都挤到 1970。
 		{"notes", "updated_at", "TEXT NOT NULL DEFAULT ''"},
+		// dl_tasks: 下载历史。status 为空的存量行（升级前只登记过元数据）在
+		// 读取时按「状态未知」处理，不假装成已完成。
+		{"dl_tasks", "status", "TEXT NOT NULL DEFAULT ''"},
+		{"dl_tasks", "total", "INTEGER NOT NULL DEFAULT 0"},
+		{"dl_tasks", "completed", "INTEGER NOT NULL DEFAULT 0"},
+		{"dl_tasks", "error", "TEXT NOT NULL DEFAULT ''"},
+		{"dl_tasks", "updated_at", "INTEGER NOT NULL DEFAULT 0"},
+		{"dl_tasks", "finished_at", "INTEGER NOT NULL DEFAULT 0"},
 	}
 	var addedCols []string
 	for _, m := range columnMigrations {

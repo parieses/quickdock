@@ -130,8 +130,12 @@ type AIMessage struct {
 	ToolCalls string `json:"tool_calls"`
 	// ToolRounds 用了几轮工具调用（0 = 纯文本回答）。
 	// 与「调用了几个工具」不同：一轮可以并发调多个，界面上「调了几轮」要看这个。
-	ToolRounds int    `json:"tool_rounds"`
-	CreatedAt  string `json:"created_at"`
+	ToolRounds int `json:"tool_rounds"`
+	// Skills 这条用户消息发出时真正挂上的技能名（JSON 数组字符串），空 = 没挂。
+	// 只为了在聊天里标出「这条用到了哪个技能」——在此之前技能只存在于提示词里，
+	// 模型读了 SKILL.md 也只留一条普通工具行，用户看不出自己选的技能生效没有。
+	Skills    string `json:"skills"`
+	CreatedAt string `json:"created_at"`
 }
 
 func mapToAISpace(m map[string]interface{}) AISpace {
@@ -193,6 +197,7 @@ func mapToAIMessage(m map[string]interface{}) AIMessage {
 		Stopped:          integer(m["stopped"]) != 0,
 		ToolCalls:        str(m["tool_calls"]),
 		ToolRounds:       integer(m["tool_rounds"]),
+		Skills:           str(m["skills"]),
 		CreatedAt:        str(m["created_at"]),
 	}
 }
@@ -1291,6 +1296,26 @@ func (d *Database) AddAIMessageImages(convID, role, content, images string) (*AI
 		Role:      role,
 		Content:   content,
 		Images:    images,
+		CreatedAt: now(),
+	}
+	if err := d.BulkInsert("ai_messages", []map[string]interface{}{structToMap(m)}); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// AddAIMessageUser 追加一条用户消息，连同图片引用与本次挂上的技能名。
+//
+// 单独一个入口而不是继续加参数：AddAIMessageImages 还有别的调用点，
+// 而「图片 + 技能」只出现在用户消息这一条路径上。
+func (d *Database) AddAIMessageUser(convID, content, images, skills string) (*AIMessage, error) {
+	m := &AIMessage{
+		ID:        newID(),
+		ConvID:    convID,
+		Role:      "user",
+		Content:   content,
+		Images:    images,
+		Skills:    skills,
 		CreatedAt: now(),
 	}
 	if err := d.BulkInsert("ai_messages", []map[string]interface{}{structToMap(m)}); err != nil {

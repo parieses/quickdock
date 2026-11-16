@@ -91,6 +91,10 @@ var validTables = map[string]bool{
 var validColumns = map[string]bool{
 	"id": true, "name": true, "type": true, "value": true,
 	"workspace_id": true, "scene_id": true, "collection_id": true,
+	// ai_conversations.scene：早期的「能力档」列。三档权限合并后新数据不再写它，
+	// 但老行还在、回收站恢复/快照导入是整行转插入，漏了这列就会在恢复那一步
+	// 报「非法列名: scene」（此时原记录已经删掉了，看起来像数据丢了）。
+	"scene":   true,
 	"tool_id": true, "default_tool_id": true,
 	"storage": true, "remark": true, "description": true,
 	"icon": true, "color": true, "status": true,
@@ -177,6 +181,9 @@ var validColumns = map[string]bool{
 	// dl_tasks：全局列名白名单不按表分，新增表列必须在这里同步登记，
 	// 漏了会在快照/回收站整行恢复时才报「非法列名」。
 	"gid": true, "save_dir": true,
+	// dl_tasks 的终态快照列（total/completed/error/finished_at）。同样是整行
+	// 转插入列的路径要用，漏一个就在恢复那一步报非法列名。
+	"total": true, "completed": true, "finished_at": true,
 	"parent_id": true, "folder_id": true,
 	"db_type": true, "host": true, "port": true, "username": true,
 	"password": true, "database": true, "file_path": true,
