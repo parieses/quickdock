@@ -203,16 +203,26 @@ func matchPathRewrite(rel, rewriteFrom, rewriteTo string) *pathRewriteFile {
 // 原始大小（不是压缩后的字节数）。压缩后大小会小于原始大小，若用压缩后字节做
 // 分子、分母用原始大小，百分比永远到不了 100%——进度条会停在 90% 上下不动。
 func ArchiveDataDir(src, dstZip string, progress archiveProgress) (int, int64, error) {
-	return archiveDataDir(src, dstZip, "", "", progress)
+	return archiveDataDir(src, dstZip, "", "", nil, progress)
 }
 
 // ArchiveDataDirWithRewrite 与 ArchiveDataDir 相同，但会把写死旧目录路径的文本配置
 // 里的路径改写为 rewriteTo。
 func ArchiveDataDirWithRewrite(src, dstZip, rewriteFrom, rewriteTo string, progress archiveProgress) (int, int64, error) {
-	return archiveDataDir(src, dstZip, rewriteFrom, rewriteTo, progress)
+	return archiveDataDir(src, dstZip, rewriteFrom, rewriteTo, nil, progress)
 }
 
-func archiveDataDir(src, dstZip, rewriteFrom, rewriteTo string, progress archiveProgress) (int, int64, error) {
+// archiveExtra 打包时要额外写入 zip 的条目（不在 src 目录里）。
+//
+// 用于整机迁移包：DB 快照（VACUUM INTO 的产物，src 里的 DB 三件套被扫描排除）
+// 与 manifest。name 用斜杠分隔的相对路径。data/srcFile 二选一。
+type archiveExtra struct {
+	name    string
+	data    []byte
+	srcFile string
+}
+
+func archiveDataDir(src, dstZip, rewriteFrom, rewriteTo string, extra []archiveExtra, progress archiveProgress) (int, int64, error) {
 	src = filepath.Clean(src)
 	if src == "" {
 		return 0, 0, fmt.Errorf("数据目录不能为空")
@@ -235,7 +245,14 @@ func archiveDataDir(src, dstZip, rewriteFrom, rewriteTo string, progress archive
 		}
 		// 跳过压缩包自身：旧目录里可能残留着上次迁移的 zip，
 		// 打进包里会在解压时覆盖正在读取的目标文件（Windows 上直接报文件被占用）。
-		if filepath.ToSlash(f.rel) == ArchiveName {
+		slash := filepath.ToSlash(f.rel)
+		if slash == ArchiveName {
+			continue
+		}
+		// 跳过迁移包的 manifest：它由 extra 统一注入。若上次导入在数据目录里留下过
+		// 同名文件，这里再扫进来会和 extra 的那个形成两条同名 zip 条目——
+		// 解压/读取时取到哪条不确定，可能读到过期 manifest。
+		if slash == TransferManifestName {
 			continue
 		}
 		entries = append(entries, entry{rel: f.rel, size: f.size})
@@ -314,6 +331,43 @@ func archiveDataDir(src, dstZip, rewriteFrom, rewriteTo string, progress archive
 			progress(i+1, len(entries), doneBytes, totalBytes, e.rel)
 		}
 	}
+	// 额外条目（整机迁移包的 DB 快照与 manifest）：放在扫描条目之后，
+	// 名字不与数据目录内文件冲突。DB 快照的名字就是 quickdock.db——扫描时
+	// 三件套被排除，故包里原本没有同名条目，这里写入的才是唯一的那份。
+	for _, ex := range extra {
+		ww, err := zw.Create(ex.name)
+		if err != nil {
+			zw.Close()
+			f.Close()
+			_ = os.Remove(tmp)
+			return 0, 0, fmt.Errorf("写入压缩包条目 %s 失败: %w", ex.name, err)
+		}
+		if ex.data != nil {
+			if _, err := ww.Write(ex.data); err != nil {
+				zw.Close()
+				f.Close()
+				_ = os.Remove(tmp)
+				return 0, 0, fmt.Errorf("写入压缩包条目 %s 失败: %w", ex.name, err)
+			}
+		} else if ex.srcFile != "" {
+			in, err := os.Open(ex.srcFile)
+			if err != nil {
+				zw.Close()
+				f.Close()
+				_ = os.Remove(tmp)
+				return 0, 0, fmt.Errorf("读取 %s 失败: %w", ex.srcFile, err)
+			}
+			_, cerr := io.Copy(ww, in)
+			in.Close()
+			if cerr != nil {
+				zw.Close()
+				f.Close()
+				_ = os.Remove(tmp)
+				return 0, 0, fmt.Errorf("写入压缩包条目 %s 失败: %w", ex.name, cerr)
+			}
+		}
+	}
+
 	if err := zw.Close(); err != nil {
 		f.Close()
 		_ = os.Remove(tmp)

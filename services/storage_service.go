@@ -2,11 +2,16 @@ package services
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
+	"quickdock/internal/credentials"
+	"quickdock/internal/db"
+	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 )
 
@@ -325,6 +330,355 @@ func detectEnvRuntimes(dir string) []envRuntimeTarget {
 		out = append(out, envRuntimeTarget{runtime: name, version: ""})
 	}
 	return out
+}
+
+// ============================================================================
+// 整机数据迁移包：A 机导出 zip → B 机在设置里导入，完整恢复数据。
+// 与同机换目录（StorageMigrate）共用打包/解压引擎，但包自包含 DB 快照与 manifest，
+// 走「解压到新目录 → 切过去 → 重启生效」；旧目录保留不删，可随时切回。
+// ============================================================================
+
+// DataExport 把当前数据目录打成整机迁移包，写到 zipPath。
+//
+// 异步执行，进度经 quickdock:storage:migrate 事件推送（phase 以 export_ 开头）。
+// DB 用 VACUUM INTO 生成一致性快照后作为包内 quickdock.db，其余文件按整机打包。
+//
+// vaultPassword 非空且密码库有条目时，额外塞一份**口令加密**的密码库便携包：
+// 密码库的密文是用本机 DPAPI 的 DEK 加密的，原样带走在新机器上解不开，
+// 所以导出时解密、用用户口令重新封一份。
+func (s *StorageService) DataExport(zipPath, vaultPassword string) *ApiResult {
+	if strings.TrimSpace(zipPath) == "" {
+		return FailMsg("保存路径不能为空")
+	}
+	s.migrateMu.Lock()
+	if s.migrateRunning {
+		s.migrateMu.Unlock()
+		return FailMsg("已有数据迁移任务在进行中")
+	}
+	s.migrateRunning = true
+	s.migrateMu.Unlock()
+
+	go func() {
+		defer func() {
+			s.migrateMu.Lock()
+			s.migrateRunning = false
+			s.migrateMu.Unlock()
+			if r := recover(); r != nil {
+				s.emit(storageMigrateProgress{Phase: "error", Err: fmt.Sprintf("导出异常: %v", r)})
+			}
+		}()
+
+		src := platform.DefaultDataDir()
+		if src == "" {
+			s.emit(storageMigrateProgress{Phase: "error", Err: "无法确定当前数据目录"})
+			return
+		}
+		dbPath := filepath.Join(src, platform.DataDirFileName)
+		// VACUUM INTO 到临时文件（放系统临时目录，不污染数据目录扫描）。
+		tmpDir, err := os.MkdirTemp("", "qd-export-")
+		if err != nil {
+			s.emit(storageMigrateProgress{Phase: "error", Err: "创建临时目录失败：" + err.Error()})
+			return
+		}
+		defer os.RemoveAll(tmpDir)
+		snapPath := filepath.Join(tmpDir, platform.TransferDBName)
+
+		s.emit(storageMigrateProgress{Phase: "export_db", Message: "正在生成数据库一致性快照…"})
+		if err := db.ExportDatabaseFile(dbPath, snapPath); err != nil {
+			s.emit(storageMigrateProgress{Phase: "error", Err: "导出数据库快照失败：" + err.Error()})
+			return
+		}
+		var dbBytes int64
+		if st, err := os.Stat(snapPath); err == nil {
+			dbBytes = st.Size()
+		}
+
+		// 密码库：有条目且用户给了口令才带。没给口令 = 用户选择不迁移密码，
+		// 不静默降级成明文——那等于把口令库写在桌面的 zip 里。
+		vaultFile := ""
+		hasVault := false
+		if strings.TrimSpace(vaultPassword) != "" {
+			if n, _ := credentials.Count(); n > 0 {
+				s.emit(storageMigrateProgress{Phase: "export_vault", Message: "正在封装密码库…"})
+				data, verr := credentials.ExportPortable(vaultPassword)
+				if verr != nil {
+					s.emit(storageMigrateProgress{Phase: "error", Err: "封装密码库失败：" + verr.Error()})
+					return
+				}
+				vaultFile = filepath.Join(tmpDir, platform.TransferVaultName)
+				if werr := os.WriteFile(vaultFile, data, 0600); werr != nil {
+					s.emit(storageMigrateProgress{Phase: "error", Err: "写入密码库包失败：" + werr.Error()})
+					return
+				}
+				hasVault = true
+			}
+		}
+
+		m := platform.TransferManifest{
+			Format:    1,
+			SourceDir: src,
+			CreatedAt: time.Now().UTC().Format(time.RFC3339),
+			DBBytes:   dbBytes,
+			HasVault:  hasVault,
+		}
+		s.emit(storageMigrateProgress{Phase: "export_packing", Message: "正在打包数据…"})
+		totalFiles, totalBytes, err := platform.WriteTransferArchive(src, zipPath, snapPath, vaultFile, m,
+			func(doneFiles, tf int, doneBytes, tb int64, cur string) {
+				s.emit(storageMigrateProgress{
+					Phase: "export_packing", TotalFiles: tf, DoneFiles: doneFiles,
+					TotalBytes: tb, DoneBytes: doneBytes, Current: cur,
+				})
+			})
+		if err != nil {
+			_ = os.Remove(zipPath)
+			s.emit(storageMigrateProgress{Phase: "error", Err: "打包失败：" + err.Error()})
+			return
+		}
+		msg := fmt.Sprintf("导出完成：%d 个文件（%.1f MB）", totalFiles, float64(totalBytes)/(1024*1024))
+		if hasVault {
+			msg += "，含密码库（需同一口令导入）"
+		}
+		s.emit(storageMigrateProgress{
+			Phase: "export_done", TotalFiles: totalFiles, DoneFiles: totalFiles,
+			TotalBytes: totalBytes, DoneBytes: totalBytes, Message: msg,
+		})
+	}()
+	return Ok(nil)
+}
+
+// DataImportInfo 导入包校验结果（前端展示用）。
+type DataImportInfo struct {
+	SourceDir string `json:"sourceDir"`
+	CreatedAt string `json:"createdAt"`
+	DBBytes   int64  `json:"dbBytes"`
+	// HasVault 包里有密码库便携包：前端据此显示「口令」输入框。
+	HasVault bool `json:"hasVault"`
+}
+
+// DataImportInspect 只读地检查一个 zip 是否为合法的整机迁移包，返回其信息。
+// 前端选完文件后先调它校验，避免让用户白选一个插件包/损坏包。
+func (s *StorageService) DataImportInspect(zipPath string) *ApiResult {
+	if strings.TrimSpace(zipPath) == "" {
+		return FailMsg("文件路径不能为空")
+	}
+	m, err := platform.ReadTransferManifest(zipPath)
+	if err != nil {
+		return FailMsg(err.Error())
+	}
+	return Ok(DataImportInfo{SourceDir: m.SourceDir, CreatedAt: m.CreatedAt, DBBytes: m.DBBytes, HasVault: m.HasVault})
+}
+
+// DataImport 把整机迁移包**合并**进当前数据目录（不替换、不换目录、不用重启）。
+//
+// 为什么是合并：
+//   - 用户导入的是「另一台机器上的数据」，本机已有的条目没有任何理由消失；
+//   - 替换还要改数据目录并重启，而合并只动行与缺失的文件，当前会话立即可见。
+//
+// 流程：解压到临时目录（路径改写成当前数据目录）→ 行级合并 DB（同名主键保留本地）
+// → 逐文件补进当前目录（同名跳过）→ 还原密码库（包内带了口令加密的那份）。
+//
+// 异步执行，进度经 quickdock:storage:migrate 事件推送（phase 以 import_ 开头）。
+func (s *StorageService) DataImport(zipPath, vaultPassword string) *ApiResult {
+	zipPath = strings.TrimSpace(zipPath)
+	if zipPath == "" {
+		return FailMsg("文件路径不能为空")
+	}
+	s.migrateMu.Lock()
+	if s.migrateRunning {
+		s.migrateMu.Unlock()
+		return FailMsg("已有数据迁移任务在进行中")
+	}
+	s.migrateRunning = true
+	s.migrateMu.Unlock()
+
+	go func() {
+		defer func() {
+			s.migrateMu.Lock()
+			s.migrateRunning = false
+			s.migrateMu.Unlock()
+			if r := recover(); r != nil {
+				s.emit(storageMigrateProgress{Phase: "error", Err: fmt.Sprintf("导入异常: %v", r)})
+			}
+		}()
+
+		// 导入前再校验一次 manifest（DataImportInspect 之后文件可能被换掉）。
+		m, err := platform.ReadTransferManifest(zipPath)
+		if err != nil {
+			s.emit(storageMigrateProgress{Phase: "error", Err: err.Error()})
+			return
+		}
+		cur := platform.DefaultDataDir()
+		if cur == "" {
+			s.emit(storageMigrateProgress{Phase: "error", Err: "无法确定当前数据目录"})
+			return
+		}
+		if m.HasVault && strings.TrimSpace(vaultPassword) == "" {
+			s.emit(storageMigrateProgress{Phase: "error", Err: "这个迁移包里的密码库需要口令，请填写后重试（不想导入密码库可留空并改用在密码库页单独导入）"})
+			return
+		}
+
+		tmpDir, err := os.MkdirTemp("", "qd-import-")
+		if err != nil {
+			s.emit(storageMigrateProgress{Phase: "error", Err: "创建临时目录失败：" + err.Error()})
+			return
+		}
+		defer os.RemoveAll(tmpDir)
+
+		s.emit(storageMigrateProgress{Phase: "import_extracting", Message: "正在解压迁移包…"})
+		// 路径改写的目标是当前数据目录：包里的运行时配置写的是导出端的路径，
+		// 不改会让便携运行时继续把缓存写回那台机器上并不存在的目录。
+		if err := platform.ExtractTransferArchive(zipPath, tmpDir, m.SourceDir,
+			func(doneFiles, tf int, doneBytes, tb int64, c string) {
+				s.emit(storageMigrateProgress{
+					Phase: "import_extracting", TotalFiles: tf, DoneFiles: doneFiles,
+					TotalBytes: tb, DoneBytes: doneBytes, Current: c,
+				})
+			}); err != nil {
+			s.emit(storageMigrateProgress{Phase: "error", Err: "解压失败：" + err.Error()})
+			return
+		}
+
+		// —— 行级合并 DB ——
+		// 注意顺序：先合并 DB 再补文件。反过来的话，文件已经落地而记录没进来，
+		// 中途失败会留下一批「有文件没条目」的孤儿文件。
+		s.emit(storageMigrateProgress{Phase: "import_db", Message: "正在合并数据库…"})
+		stat, merr := db.MergeDatabaseFile(
+			filepath.Join(cur, platform.DataDirFileName),
+			filepath.Join(tmpDir, platform.TransferDBName),
+		)
+		if merr != nil {
+			s.emit(storageMigrateProgress{Phase: "error", Err: "合并数据库失败：" + merr.Error()})
+			return
+		}
+
+		// —— 补文件（同名跳过，本地优先）——
+		s.emit(storageMigrateProgress{Phase: "import_files", Message: "正在补齐文件…"})
+		copied, skipped, cerr := mergeCopyTree(tmpDir, cur, func(done, total int, rel string) {
+			s.emit(storageMigrateProgress{Phase: "import_files", DoneFiles: done, TotalFiles: total, Current: rel})
+		})
+		if cerr != nil {
+			// 文件补到一半失败不回滚：DB 已经并进来了，回滚反而会造成
+			// 「记录说文件在、磁盘上没有」。如实报数量让用户知道补到哪了。
+			s.emit(storageMigrateProgress{
+				Phase: "error",
+				Err:   fmt.Sprintf("补齐文件失败（已补 %d 个）：%s", copied, cerr.Error()),
+			})
+			return
+		}
+
+		// —— 密码库 ——
+		if m.HasVault {
+			s.emit(storageMigrateProgress{Phase: "import_vault", Message: "正在还原密码库…"})
+			data, rerr := os.ReadFile(filepath.Join(tmpDir, platform.TransferVaultName))
+			if rerr != nil {
+				s.emit(storageMigrateProgress{Phase: "error", Err: "读取密码库包失败：" + rerr.Error()})
+				return
+			}
+			rep, ierr := credentials.ImportAuto(data, vaultPassword)
+			if ierr != nil {
+				s.emit(storageMigrateProgress{Phase: "error", Err: "还原密码库失败（口令是否正确？）：" + ierr.Error()})
+				return
+			}
+			logger.I("[storage] 导入密码库：新增 %d 条，更新 %d 条，跳过 %d 条", rep.Created, rep.Updated, rep.Skipped)
+		}
+
+		msg := fmt.Sprintf("合并完成：新增 %d 条记录；文件新增 %d 个、已存在跳过 %d 个", stat.Rows, copied, skipped)
+		if len(stat.Skipped) > 0 {
+			msg += fmt.Sprintf("；跳过 %d 项不兼容内容", len(stat.Skipped))
+			logger.W("[storage] 导入时跳过：%v", stat.Skipped)
+		}
+		if m.HasVault {
+			msg += "；密码库已还原"
+		}
+		s.emit(storageMigrateProgress{Phase: "import_done", Message: msg, TotalFiles: copied + skipped, DoneFiles: copied})
+	}()
+	return Ok(nil)
+}
+
+// mergeCopyTree 把 srcDir 下的文件补进 dstDir，已存在的同名文件跳过（本地优先）。
+//
+// 三个包内专用文件不参与：DB 快照已合并、manifest 是描述文件、密码库包单独还原。
+// 返回 (新复制数, 跳过数, err)。
+func mergeCopyTree(srcDir, dstDir string, progress func(done, total int, rel string)) (int, int, error) {
+	skip := map[string]bool{
+		platform.TransferDBName:       true,
+		platform.TransferManifestName: true,
+		platform.TransferVaultName:    true,
+	}
+	type entry struct{ rel string }
+	var files []entry
+	err := filepath.WalkDir(srcDir, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, rerr := filepath.Rel(srcDir, path)
+		if rerr != nil {
+			return rerr
+		}
+		if skip[filepath.ToSlash(rel)] {
+			return nil
+		}
+		files = append(files, entry{rel: rel})
+		return nil
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+
+	copied, skipped := 0, 0
+	for i, f := range files {
+		src := filepath.Join(srcDir, f.rel)
+		dst := filepath.Join(dstDir, f.rel)
+		if _, serr := os.Stat(dst); serr == nil {
+			skipped++
+			if progress != nil {
+				progress(i+1, len(files), f.rel)
+			}
+			continue
+		}
+		if merr := os.MkdirAll(filepath.Dir(dst), 0700); merr != nil {
+			return copied, skipped, merr
+		}
+		if cerr := copyFile(src, dst); cerr != nil {
+			return copied, skipped, fmt.Errorf("%s: %w", f.rel, cerr)
+		}
+		copied++
+		if progress != nil {
+			progress(i+1, len(files), f.rel)
+		}
+	}
+	return copied, skipped, nil
+}
+
+// copyFile 单文件复制（同目录下先写 .tmp 再改名，避免半截文件出现在真实路径上）。
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	tmp := dst + ".qdmerge.tmp"
+	out, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := out.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // emit 推送迁移进度事件。
