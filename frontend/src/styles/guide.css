@@ -31,7 +31,7 @@
   text-align: center;
   width: 100%;
   max-width: 640px;
-  padding: 28px 24px;
+  padding: 28px var(--space-8);
 }
 
 .qd-guide-icon {
@@ -47,16 +47,16 @@
 }
 
 .qd-guide-title {
-  margin: 0 0 6px;
-  font-size: 18px;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xl);
   font-weight: 600;
   color: var(--color-text-primary);
-  letter-spacing: -0.2px;
+  
 }
 
 .qd-guide-desc {
   margin: 0 0 18px;
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.65;
   color: var(--color-text-muted);
 }
@@ -65,12 +65,12 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 8px 20px;
+  padding: var(--space-4) var(--space-7);
   border: 1px solid var(--color-accent);
   border-radius: var(--radius-sm);
   background: var(--color-accent);
   color: var(--color-accent-text);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
@@ -89,7 +89,7 @@
 .qd-guide-steps {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: var(--space-4);
   width: 100%;
   margin-bottom: 18px;
 }
@@ -101,7 +101,7 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
-  padding: 10px 12px;
+  padding: 10px var(--space-5);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
@@ -126,8 +126,8 @@
   border-radius: 50%;
   background: var(--color-accent-bg);
   color: var(--color-accent);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: var(--text-xs);
+  font-weight: 600;
   line-height: 1;
 }
 
@@ -136,14 +136,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--color-text-primary);
 }
 
 .qd-guide-step-desc {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.55;
   color: var(--color-text-muted);
 }
@@ -154,19 +154,19 @@
   display: flex;
   justify-content: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .qd-guide-link {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   padding: 5px 11px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
@@ -181,8 +181,8 @@
    同时把地址明写出来（用户可以在另一台机器上照着敲）。等宽字体避免字母挤在一起。 */
 .qd-guide-link-url {
   color: var(--color-text-disabled);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: var(--font-mono);
-  letter-spacing: -0.1px;
+  
 }
 .qd-guide-link:hover .qd-guide-link-url { color: var(--color-text-muted); }

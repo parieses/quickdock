@@ -11,7 +11,7 @@
  * 高度、内边距、圆角也各不相同，整体看起来像几个工具拼在一起。
  *
  * 这里只提供**两级**头部：
- *   .qd-page-header   一级页面（环境服务 / 监控 / 笔记 / 插件 ...），44px
+ *   .qd-page-header   一级页面（环境服务 / 监控 / 笔记 / 插件 ...），46px
  *   .qd-panel-header  三栏面板（见 panels.css），38px
  * 任何页面都不许再自造 `xxx-header`。
  *
@@ -34,7 +34,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 18px 20px 24px;
+  padding: 18px var(--space-7) var(--space-8);
 }
 
 /* ---- 一级页头 ---- */
@@ -48,7 +48,7 @@
   gap: 10px;
   flex-shrink: 0;
   min-height: 46px;
-  padding: 0 16px;
+  padding: 0 var(--space-6);
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
 }
@@ -64,13 +64,13 @@
 @media (max-width: 900px) {
   .qd-page-header {
     flex-wrap: wrap;
-    row-gap: 6px;
-    padding: 6px 16px;
-  }
+    row-gap: var(--space-3);
+    padding: var(--space-3) var(--space-6);
+ }
 }
 
 /* 标题块：主标题 + 可选副标题。也允许只有标题（多数页面）。
-   不写 letter-spacing: -0.01em —— 负字距是给西文大字"收紧字间空气"用的，
+   不写 —— 负字距是给西文大字"收紧字间空气"用的，
    中文字面本身占满字身框，再收紧只会让笔画挨在一起（"环 境 服 务"变成一坨）。
    中文标题的紧凑感靠字重和字号档位表达，不靠字距。 */
 .qd-page-titles {
@@ -105,13 +105,13 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .qd-page-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   flex-shrink: 0;
   margin-left: auto;
 }
@@ -127,14 +127,14 @@
 .qd-action-group {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-1);
   flex-shrink: 0;
 }
 .qd-action-sep {
   width: 1px;
   height: 16px;
   flex-shrink: 0;
-  margin: 0 2px;
+  margin: 0 var(--space-1);
   background: var(--color-border);
 }
 
@@ -229,23 +229,29 @@
 }
 
 /* 开关型按钮的"已选中"态（如插件页的「市场 / 本地」切换、分组筛选 chip） */
-.qd-btn.is-on {
+.qd-btn.is-on, .btn.is-on {
   color: var(--color-accent);
   border-color: var(--color-accent-border-strong);
   background: var(--color-accent-bg);
 }
-.qd-btn.is-on:hover {
+.qd-btn.is-on:hover, .btn.is-on:hover {
   color: var(--color-accent);
   border-color: var(--color-accent);
   background: var(--color-accent-bg);
 }
 
-/* 小一号：表格行尾、卡片内部 */
-.qd-btn-sm {
+/* 按钮四档：lg 32 / md 28（默认）/ sm 24 / chip 22。
+   .btn-sm 与 .qd-btn-sm 走同一条规则，避免两套命名出现尺寸偏移。 */
+.qd-btn-lg, .btn-lg { height: 32px; padding: 0 var(--space-6); font-size: var(--text-md); }
+.qd-btn-sm, .btn-sm {
   height: 24px;
-  padding: 0 8px;
-  font-size: 11px;
+  padding: 0 var(--space-4);
+  font-size: var(--text-xs);
 }
+.qd-btn-chip, .btn-chip { height: 22px; padding: 0 var(--space-4); font-size: var(--text-2xs); }
+/* secondary 就是基础盒模型，不另加装饰；列出来是为了让 qd-/无前缀两套命名
+   在语义上完全对称，组件里写哪个都不会「看起来像另一种按钮」。 */
+.qd-btn-secondary, .btn-secondary { /* 继承 .qd-btn 基础态 */ }
 
 /* 图标按钮：页头与三栏共用一套。定义必须留在本文件（而不是 panels.css），
    否则只在页头用它的页面会拿到浏览器默认按钮样式 —— 白底方块。 */
@@ -325,9 +331,9 @@
 .qd-toolbar {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   flex-shrink: 0;
-  padding: 8px 16px;
+  padding: var(--space-4) var(--space-6);
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
 }
@@ -346,19 +352,19 @@
 /* ---- 标题：四级，靠字号 + 装饰拉开层次 ----
    原来 h1~h4 全是 14px/600，扫一眼分不出主次，整篇读起来是一个平面。 */
 .ai-md h1, .ai-md h2, .ai-md h3, .ai-md h4, .ai-md h5, .ai-md h6 {
-  margin: 18px 0 8px; font-weight: 650; line-height: 1.4;
+  margin: 18px 0 var(--space-4); font-weight: 650; line-height: 1.4;
 }
-.ai-md h1 { font-size: 18px; padding-bottom: 7px; border-bottom: 1px solid var(--color-border); }
+.ai-md h1 { font-size: var(--text-xl); padding-bottom: 7px; border-bottom: 1px solid var(--color-border); }
 /* h2 是回答里最常用的层级，加一根竖条当锚点，长文里好扫 */
-.ai-md h2 { font-size: 15px; }
+.ai-md h2 { font-size: var(--text-lg); }
 .ai-md h2::before {
   content: ''; display: inline-block; width: 3px; height: 0.9em;
-  margin-right: 8px; vertical-align: -0.06em;
-  border-radius: 2px; background: var(--color-accent);
+  margin-right: var(--space-4); vertical-align: -0.06em;
+  border-radius: var(--radius-2xs); background: var(--color-accent);
 }
-.ai-md h3 { font-size: 15px; }
+.ai-md h3 { font-size: var(--text-lg); }
 .ai-md h4 { font-size: var(--text-base); color: var(--color-text-secondary); }
-.ai-md h5, .ai-md h6 { font-size: 13px; color: var(--color-text-secondary); }
+.ai-md h5, .ai-md h6 { font-size: var(--text-md); color: var(--color-text-secondary); }
 
 /* 首块不要顶部留白：回答第一行该贴着消息开头，否则像空了一段 */
 .ai-md-block:first-child > :first-child { margin-top: 0; }
@@ -370,7 +376,7 @@
 /* ---- 列表 ----
    自绘符号：部分字体下浏览器会把 disc 渲染成方块（WebView2 偶发），序号也对不齐。
    三级三种形状（实心点 / 空心环 / 短横），嵌套时一眼看出深浅。 */
-.ai-md ul, .ai-md ol { margin: 8px 0; padding-left: 21px; }
+.ai-md ul, .ai-md ol { margin: var(--space-4) 0; padding-left: 21px; }
 .ai-md ul { list-style: none; }
 .ai-md ol { list-style: none; counter-reset: ai-md-ol; }
 .ai-md li { position: relative; margin: 3px 0; line-height: 1.7; }
@@ -386,7 +392,7 @@
   box-sizing: border-box;
 }
 .ai-md ul ul ul > li:not(.ai-task-item)::before {
-  width: 6px; height: 2px; border: none; border-radius: 1px;
+  width: 6px; height: 2px; border: none; border-radius: var(--radius-xs);
   top: 0.9em; background: var(--color-text-muted);
 }
 .ai-md ol > li { counter-increment: ai-md-ol; }
@@ -400,11 +406,11 @@
    DOMPurify 默认白名单剥掉）。AI 做一项就把 [ ] 改成 [x]，界面实时打勾 + 划线。
    只有「确实要拆步骤」的任务才该出现这份清单，简单问答不该有。 */
 .ai-md li.ai-task-item {
-  list-style: none; display: flex; align-items: flex-start; gap: 8px;
+  list-style: none; display: flex; align-items: flex-start; gap: var(--space-4);
   margin: 5px 0;
 }
 .ai-md .ai-task-box {
-  flex: none; width: 15px; height: 15px; margin-top: 4px;
+  flex: none; width: 15px; height: 15px; margin-top: var(--space-2);
   border: 1.5px solid var(--color-border); border-radius: var(--radius-xs);
   background: var(--color-bg-primary); box-sizing: border-box; position: relative;
   transition: background-color var(--transition-fast), border-color var(--transition-fast);
@@ -433,10 +439,10 @@
    改成「表头底色 + 行下边线 + 无外框」：行列关系靠留白和底色读，不靠堆框线。 */
 .ai-md table {
   width: 100%; border-collapse: separate; border-spacing: 0;
-  font-size: 13px; margin: 4px 0;
+  font-size: var(--text-md); margin: var(--space-2) 0;
 }
 .ai-md thead th {
-  padding: 8px 12px; text-align: left; white-space: nowrap;
+  padding: var(--space-4) var(--space-5); text-align: left; white-space: nowrap;
   font-weight: 600; color: var(--color-text-secondary);
   background: var(--color-bg-tertiary);
   border-bottom: 1px solid var(--color-border);
@@ -444,7 +450,7 @@
 .ai-md thead th:first-child { border-top-left-radius: var(--radius-sm); }
 .ai-md thead th:last-child { border-top-right-radius: var(--radius-sm); }
 .ai-md tbody td {
-  padding: 8px 12px; vertical-align: top;
+  padding: var(--space-4) var(--space-5); vertical-align: top;
   border-bottom: 1px solid var(--color-border);
 }
 .ai-md tbody tr:last-child td { border-bottom: none; }
@@ -452,7 +458,7 @@
 
 /* ---- 引用 / 分隔线 / 图片 / 强调 ---- */
 .ai-md blockquote {
-  margin: 10px 0; padding: 8px 14px;
+  margin: 10px 0; padding: var(--space-4) 14px;
   border-left: 3px solid var(--color-accent-border);
   background: var(--color-bg-secondary);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
@@ -462,3 +468,193 @@
 .ai-md hr { height: 0; margin: 18px 0; border: 0; border-top: 1px solid var(--color-border); }
 .ai-md img { max-width: 100%; height: auto; border-radius: var(--radius-sm); }
 .ai-md strong { font-weight: 650; }
+/* ===== 从 AIPage.vue 平移：原为组件内非 scoped 全局样式 ===== */
+/* 跨子组件的共享类：必须非 scoped。
+   这些 class 同时出现在消息区（回答下方产物条）与 AiSidePanel（面板首页产物列表），
+   而 scoped 样式只作用于本组件自己的元素——放在 scoped 块里会有一半命不中。 */
+/* 回答产物：横向排的 chip，一行放不下自动换行。
+   宽度给满而不是 fit-content——fit-content 会先按 max-content 撑开，
+   只有一个短文件名时整块缩成一小截，多文件换行时的收缩点也不好判断 */
+.ai-artifacts { margin-top: var(--space-4); width: 100%; max-width: 100%; }
+.ai-artifacts-sum {
+  display: flex; align-items: center; gap: var(--space-2); width: fit-content;
+  padding: 3px 0; font-size: var(--text-sm); color: var(--color-text-muted);
+  cursor: pointer; user-select: none; list-style: none;
+}
+.ai-artifacts-sum::-webkit-details-marker { display: none; }
+.ai-artifacts-chev { transition: transform 0.15s; }
+.ai-artifacts[open] > .ai-artifacts-sum .ai-artifacts-chev { transform: rotate(180deg); }
+.ai-artifacts-list { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding: var(--space-2) 0; }
+/* 产物 chip 同样无框：透明描边只是为了让 hover 底色和文字保持原有内缩，
+   在深色底上透明边框与去掉边框视觉一致，但不必再调一次 padding。 */
+.ai-artifact {
+  display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 260px;
+  padding: 3px var(--space-4); border: 1px solid transparent; border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-primary); font-size: var(--text-xs); cursor: pointer;
+  text-align: left; font-family: inherit;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+.ai-artifact:hover { background: var(--color-bg-hover); color: var(--color-accent); }
+.ai-artifact-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-artifact-op { color: var(--color-text-secondary); flex-shrink: 0; }
+/* 右侧面板首页的产物合集：面板窄，仍是竖列、op 贴行右，chip 去掉描边融进列表 */
+.ai-side-home .ai-artifacts-list { flex-direction: column; align-items: stretch; gap: var(--space-1); }
+.ai-side-home .ai-artifact {
+  width: 100%; max-width: none; gap: var(--space-4); padding: 5px var(--space-4);
+  font-size: var(--text-sm); border-color: transparent; background: transparent;
+}
+.ai-side-home .ai-artifact:hover { background: var(--color-bg-tertiary); }
+.ai-side-home .ai-artifact-op { margin-left: auto; padding-left: var(--space-5); }
+
+/* 输入相关控件：落地页 hero（AiHero）与输入区（AiComposer）共用同一套
+   缩略图 / 链接输入 / 图标按钮；.ai-go-settings 还被消息区的「没配 key」空态用。
+   放非 scoped 块是因为两个子组件各有一份 scoped 作用域，写在哪一边另一半都命不中。 */
+/* 技能胶囊：**行内**嵌在文字里（由 AiRichInput 用 DOM API 创建），所以样式必须写在
+   非 scoped 块——动态创建的节点没有 data-v 属性，写进组件的 scoped 里一条都不命中。
+   胶囊是 contenteditable=false 的原子节点：像个字符一样参与换行，退格整颗删掉。 */
+.ai-rich-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  max-width: 240px; margin: 0 1px;
+  padding: 1px 3px 1px var(--space-3);
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-bg-active); color: var(--color-text-secondary);
+  font-size: var(--text-sm); line-height: 1.6;
+  vertical-align: baseline;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.ai-rich-chip-icon { flex-shrink: 0; color: var(--color-accent); font-size: var(--text-2xs); }
+
+.ai-rich-chip-name { overflow: hidden; text-overflow: ellipsis; }
+
+.ai-rich-chip-x {
+  flex-shrink: 0; padding: 0 var(--space-1); border: none; background: transparent;
+  color: var(--color-text-muted); font-size: var(--text-sm); line-height: 1;
+  cursor: pointer; opacity: 0.55; transition: opacity var(--transition-fast), color var(--transition-fast);
+}
+
+.ai-rich-chip:hover .ai-rich-chip-x { opacity: 1; }
+
+.ai-rich-chip-x:hover { color: var(--color-danger); }
+
+.ai-go-settings {
+  padding: 7px var(--space-6); border: none; border-radius: var(--radius-md);
+  background: var(--color-accent); color: var(--color-accent-text);
+  font-size: var(--text-md); font-weight: 600; cursor: pointer; font-family: inherit;
+  box-shadow: inset 0 1px 0 var(--color-hairline);
+  transition: background-color var(--transition-fast), transform var(--transition-fast);
+}
+.ai-go-settings:hover { background: var(--color-accent-hover); }
+.ai-go-settings:active { transform: translateY(0.5px); }
+
+.ai-tool-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 40px; height: 32px; border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary); color: var(--color-text-muted);
+  border-radius: var(--radius-md); cursor: pointer; font-family: inherit;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.ai-tool-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
+
+/* 运行中不让加图：图片要过一次闸门 + 落盘，插不进已经开始跑的那一轮。
+   灰掉而不是藏起来——藏起来会让人以为功能坏了。 */
+.ai-tool-btn:disabled { opacity: 0.4; cursor: default; }
+.ai-tool-btn:disabled:hover { color: var(--color-text-muted); border-color: var(--color-border); }
+
+.ai-attach-preview { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+
+.ai-attach-thumb {
+  position: relative; width: 56px; height: 56px; border-radius: var(--radius-sm);
+  overflow: hidden; border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
+}
+
+.ai-attach-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.ai-attach-del {
+  position: absolute; top: 1px; right: 1px; width: 16px; height: 16px;
+  display: flex; align-items: center; justify-content: center; line-height: 1;
+  border: none; border-radius: 50%; background: var(--color-bg-overlay); color: var(--color-text-primary);
+  font-size: var(--text-sm); cursor: pointer; padding: 0;
+}
+
+.ai-attach-del:hover { background: var(--color-danger); }
+
+.ai-url-row { display: flex; gap: var(--space-3); }
+
+.ai-url-input {
+  flex: 1; height: 32px; padding: 0 10px; border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); background: var(--color-bg-tertiary);
+  color: var(--color-text-primary); font-size: var(--text-sm); font-family: inherit; outline: none;
+}
+
+.ai-url-input:focus { border-color: var(--color-border-focus-soft); }
+
+.ai-url-ok {
+  padding: 0 14px; height: 32px; border: none; border-radius: var(--radius-md);
+  background: var(--color-accent); color: var(--color-accent-text);
+  font-size: var(--text-sm); cursor: pointer; font-family: inherit;
+}
+
+/* ===== 从 SceneTags.vue 平移：原为组件内非 scoped 全局样式 ===== */
+.context-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: transparent;
+}
+
+.context-menu {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(12px);
+}
+
+.context-menu .menu-item {
+  display: flex;
+  align-items: center;
+  padding: 7px var(--space-5);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s;
+}
+
+.context-menu .menu-item:hover {
+  background: var(--color-bg-active);
+  color: var(--color-text-primary);
+}
+
+.context-menu .menu-item:disabled {
+  color: var(--color-text-disabled);
+  cursor: default;
+}
+
+.context-menu .menu-item:disabled:hover {
+  background: transparent;
+  color: var(--color-text-disabled);
+}
+
+/* ===== 共享视觉基线（新组件的唯一入口） =====
+   QdModal.vue / QdSwitch.vue / QdTabs.vue 是全应用唯一的模态 / 开关 / 分段控件。
+   存量页面还有 5+ 套私有遮罩、11 套私有开关、5 套视图切换；它们的视觉差异
+   由各组件 scoped 样式里的几何与颜色 token 逐项对齐（全局选择器压不过带
+   data-v 的 scoped 规则，所以不能靠这里覆盖）。新代码不要再造第二套。
+   弹窗面层固定 --color-popover-bg + --popover-border-color + --shadow-pop，
+   开关固定 34×18 / --radius-full，分段选中态固定 --color-accent-bg。 */
+
+/* v-html 注入的运行时图标占位符没有 scoped 的 data-v 属性，只能放全局。 */
+.qd-runtime-fallback { font-size: var(--text-md); }

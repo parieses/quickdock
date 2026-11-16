@@ -40,8 +40,8 @@
 
 .qd-cmfind {
   position: absolute; top: 6px; right: 10px; z-index: 40;
-  display: flex; flex-direction: column; gap: 6px;
-  min-width: 300px; padding: 7px 8px;
+  display: flex; flex-direction: column; gap: var(--space-3);
+  min-width: 300px; padding: 7px var(--space-4);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -49,21 +49,21 @@
 }
 /* hidden 属性会被上面的 display:flex 盖掉，必须显式还原 */
 .qd-cmfind[hidden] { display: none; }
-.qd-cmfind-row { display: flex; align-items: center; gap: 6px; }
+.qd-cmfind-row { display: flex; align-items: center; gap: var(--space-3); }
 .qd-cmfind-row[hidden] { display: none; }
 
 .qd-cmfind-input {
   flex: 1 1 auto; min-width: 0;
-  height: 26px; padding: 0 8px;
+  height: 26px; padding: 0 var(--space-4);
   background: var(--color-bg-primary); color: var(--color-text-primary);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  font-family: inherit; font-size: 12px; outline: none;
+  font-family: inherit; font-size: var(--text-sm); outline: none;
 }
 .qd-cmfind-input:focus { border-color: var(--color-border-focus-soft); }
 
 .qd-cmfind-count {
   flex: none; min-width: 46px; text-align: right;
-  font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted);
+  font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted);
 }
 
 .qd-cmfind-btn {
@@ -71,7 +71,7 @@
   display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: transparent; color: var(--color-text-secondary);
-  font-family: inherit; font-size: 12px; line-height: 1; cursor: pointer;
+  font-family: inherit; font-size: var(--text-sm); line-height: 1; cursor: pointer;
 }
 .qd-cmfind-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .qd-cmfind-btn.on {

@@ -13,15 +13,16 @@
  * **不注入任何 CSS 变量**。所以在插件里套用宿主令牌（color-bg-primary 这一族）
  * 会拿到空值、整条声明静默失效，而且没有任何报错 —— tools/check_plugins.py
  * 的「CSS 变量未定义且无兜底值」就是在拦这一类。插件必须自带令牌，
- * 本文件即插件侧的"影子令牌"（与宿主 style.css 逐项同值，
- * 对照表见 quickdock 仓库 docs/conventions/ui.md 的插件章节）。
+ * 本文件即插件侧的"影子令牌"：宿主 frontend/src/style.css 令牌的**影子副本**，不是独立事实源。
+ * 关键值（如 --bg-primary / --radius-md）必须与宿主逐项一致，改动时两侧同步（见下方同步约定）。
+ * 宿主令牌对照表见 docs/conventions/ui.md。
  *
  * 同步约定：宿主改色阶/圆角/控件尺寸时，先改本文件再同步；
  * 反过来也一样 —— 两边不一致时以 docs/conventions/ui.md 的数值表为准。 */
 
 :root {
   /* ===== 表面（暗色，与 --color-bg-* 同值） ===== */
-  --bg-primary: #0f1116;
+  --bg-primary: #0c0e13;
   --bg-secondary: #151920;
   --bg-tertiary: #1c2029;
   --bg-hover: #1f242e;
@@ -55,8 +56,8 @@
   /* ===== 圆角刻度（与 --radius-xs/sm/md/lg 一一对应） ===== */
   --radius-xs: 4px;
   --radius-sm: 6px;
-  --radius: 6px;        /* 历史别名，值等于 --radius-sm（宿主没有 8px 档） */
-  --radius-md: 10px;    /* 中间档：卡片内的小块容器 */
+  --radius: 6px;        /* 历史别名，值等于 --radius-sm */
+  --radius-md: 8px;     /* 中间档：卡片内的小块容器 */
   --radius-lg: 10px;
   --radius-xl: 14px;
   --radius-pill: 999px;

@@ -1,5 +1,9 @@
 # Design System: QuickDock v3
 
+> **归档说明（历史设计稿）**：本文件为历史设计稿，token 的唯一事实源是
+> `frontend/src/style.css` + `docs/conventions/ui.md`；数值冲突以那两处为准。
+> 下文的色值、圆角、阴影等数值仅记录设计意图，未随实现逐项同步，不要据此改代码。
+
 ## 1. Visual Theme & Atmosphere
 
 QuickDock is a developer efficiency tool for Windows — a hybrid launcher/workspace manager like Raycast meets VS Code. The design language is **precision dark minimalism**: every pixel serves a purpose, spacing is intentional, and visual noise is aggressively reduced.
@@ -8,9 +12,9 @@ The dark theme is not flat black but a rich layered gray-scale with subtle blue 
 
 **Key Characteristics:**
 - Dark chrome aesthetic with layered surface hierarchy (inspired by Raycast, Cursor)
-- Blue accent (#4a9eff) for interactive elements — restrained, never decorative
+- Blue accent (#5b8cff) for interactive elements — restrained, never decorative
 - System font stack with monospace for technical labels
-- Hybrid borders: primary borders use real `1px solid var(--color-border)`; `--shadow-border` token reserved for subtle dividers where layout-shift-free rendering matters
+- Dividers use real `1px solid var(--color-border)`; `--shadow-border` is deprecated — do not add new usages
 - 8px base spacing with 4px increments for consistency
 - Reduced motion preferred — 150ms transitions, no unnecessary animation
 - Focus visible ring on all interactive elements for accessibility
@@ -25,7 +29,7 @@ The dark theme is not flat black but a rich layered gray-scale with subtle blue 
 | `--color-bg-secondary` | `#1d1f24` | Sidebar, secondary surfaces |
 | `--color-bg-tertiary` | `#25282e` | Card backgrounds, hover states |
 | `--color-bg-hover` | `#2e3138` | Interactive hover |
-| `--color-bg-active` | `#3a3e46` | Active/selected state |
+| `--color-bg-active` | `#313948` | Active/selected state |
 | `--color-surface` | `#25282e` | Elevated surface (dropdowns, menus) |
 | `--color-surface-elevated` | `#2e3138` | Modal/dialog surface |
 | `--color-text-primary` | `#e8eaed` | Primary body text |
@@ -33,16 +37,16 @@ The dark theme is not flat black but a rich layered gray-scale with subtle blue 
 | `--color-text-muted` | `#7b818b` | Placeholder, disabled text |
 | `--color-text-disabled` | `#565c66` | Disabled controls |
 | `--color-border` | `#2a2d34` | Subtle borders, dividers |
-| `--color-border-light` | `#3a3e46` | Hover borders |
-| `--color-border-focus` | `#4a9eff` | Focus ring |
-| `--color-accent` | `#4a9eff` | Primary accent, links, active |
-| `--color-accent-hover` | `#3a8eef` | Accent hover |
+| `--color-border-light` | `#313948` | Hover borders |
+| `--color-border-focus` | `#5b8cff` | Focus ring |
+| `--color-accent` | `#5b8cff` | Primary accent, links, active |
+| `--color-accent-hover` | `#4a7af0` | Accent hover |
 | `--color-accent-text` | `#ffffff` | Text on accent |
 | `--color-danger` | `#ef4444` | Destructive actions (modern red) |
 | `--color-success` | `#22c55e` | Success states (modern emerald) |
 | `--color-warning` | `#f59e0b` | Warning states (modern amber) |
-| `--color-accent-bg` | `rgba(74, 158, 255, 0.1)` | Subtle accent background |
-| `--color-accent-border` | `rgba(74, 158, 255, 0.2)` | Accent border |
+| `--color-accent-bg` | `rgba(91, 140, 255, 0.075)` | Subtle accent background |
+| `--color-accent-border` | `rgba(91, 140, 255, 0.2)` | Accent border |
 
 ### Light Theme
 
@@ -61,7 +65,7 @@ The dark theme is not flat black but a rich layered gray-scale with subtle blue 
 | `--color-text-disabled` | `#9aa0a8` | Disabled |
 | `--color-border` | `#d8dbe1` | Subtle borders |
 | `--color-border-light` | `#c6cad2` | Hover borders |
-| `--color-border-focus` | `#4a9eff` | Focus ring |
+| `--color-border-focus` | `#5b8cff` | Focus ring |
 | `--color-danger` | `#ef4444` | Destructive (shared with dark) |
 | `--color-success` | `#22c55e` | Success (shared with dark) |
 | `--color-warning` | `#f59e0b` | Warning (shared with dark) |
@@ -94,7 +98,7 @@ The dark theme is not flat black but a rich layered gray-scale with subtle blue 
 
 ### Sidebar (210px)
 - Background: `--color-bg-secondary`
-- Right border: shadow-border `rgba(0,0,0,0.06) 1px 0 0 0`
+- Right border: `1px solid var(--color-border)`
 - Workspace selector: 44px height, bottom border
 - Scene items: 36px height, left active border (2px accent)
 - Settings button: bottom-aligned, border-top separator
@@ -106,9 +110,9 @@ The dark theme is not flat black but a rich layered gray-scale with subtle blue 
 - Active: accent background, white text
 - Inactive: tertiary background, muted text, hover → secondary text
 
-### Collection List (300px)
+### Collection List (240px)
 - Background: `--color-bg-primary`
-- Right border: shadow-border
+- Right border: `1px solid var(--color-border)`
 - Each collection item: 44px height, icon + name + item count
 - Drag handle on hover for reorder
 - Create button: floating or embedded
@@ -126,7 +130,7 @@ The dark theme is not flat black but a rich layered gray-scale with subtle blue 
 
 ### Inputs
 - Height 32px, padding 8px 12px, radius 6px
-- Border: shadow-border technique
+- Border: `1px solid var(--color-border)`
 - Focus: ring 2px `--color-border-focus` with 15% opacity bg
 
 ### Badges
@@ -153,7 +157,7 @@ The dark theme is not flat black but a rich layered gray-scale with subtle blue 
 │ Sidebar ├──────────────────────────────────┤
 │ (210px) │  ┌────────┬──────────────────┐   │
 │         │  │Collections│     Items      │   │
-│         │  │ (300px)   │   (flex-1)    │   │
+│         │  │ (240px)   │   (flex-1)    │   │
 │         │  └────────┴──────────────────┘   │
 └─────────┴──────────────────────────────────┘
 ```
@@ -162,7 +166,7 @@ The dark theme is not flat black but a rich layered gray-scale with subtle blue 
 | Level | Shadow | Use |
 |-------|--------|-----|
 | 0 | None | Background surfaces |
-| 1 | `0 1px 0 rgba(0,0,0,0.08)` (dark) / `0.1` (light) — subtle shadow border (`--shadow-border`) | Sidebar, panels |
+| 1 | `0 1px 0 rgba(0,0,0,0.08)` (dark) / `0.1` (light) — deprecated `--shadow-border`, no new usages (dividers use `1px solid var(--color-border)`) | Sidebar, panels |
 | 2 | `0 1px 2px rgba(0,0,0,0.08)` | Hover items, tags |
 | 3 | `0 4px 12px rgba(0,0,0,0.15)` | Dropdowns, popovers |
 | 4 | `0 8px 24px rgba(0,0,0,0.2)` | Modals, dialogs |
@@ -179,7 +183,7 @@ The dark theme is not flat black but a rich layered gray-scale with subtle blue 
 
 ### Border Technique
 - Primary borders use real `border: 1px solid var(--color-border)` — visible and consistent on both themes
-- `--shadow-border` / `--shadow-border-right` tokens (subtle 1px drop-shadow) are reserved for dividers where avoiding layout shift matters; light-theme alpha bumped to ~0.1 so they stay visible
+- `--shadow-border` / `--shadow-border-right` are deprecated — do not add new usages; dividers use `1px solid var(--color-border)`
 - Avoid `inset 0 0 0 1px` faux-borders — replaced with real borders during the 2026-09 style refactor
 
 ### Focus Ring
@@ -190,7 +194,7 @@ The dark theme is not flat black but a rich layered gray-scale with subtle blue 
 ## 7. Do's and Don'ts
 
 ### Do
-- Use the shadow-border technique for dividers and borders
+- Use `1px solid var(--color-border)` for dividers and borders
 - Use the spacing scale consistently (8px base)
 - Use `:focus-visible` for focus rings (not `:focus`)
 - Use 150ms ease transitions for interactive state changes
@@ -203,8 +207,8 @@ The dark theme is not flat black but a rich layered gray-scale with subtle blue 
 - Don't use heavy borders — 1px `var(--color-border)` is the standard weight
 - Don't animate for animation's sake — only state transitions
 - Don't use more than 3 surface levels in a single view
-- Don't use border-top/bottom for section separation when shadow-border works
-- Don't mix border-radius styles — use the 4-tier scale: `--radius-xs:4 / sm:6 / md:10 / lg:14`
+- Use border-top/bottom `1px solid var(--color-border)` for section separation; `--shadow-border` is deprecated
+- Don't mix border-radius styles — use the 4-tier scale: `--radius-xs:4 / sm:6 / md:8 / lg:12`
 
 ## 8. Interaction & Motion
 
@@ -235,7 +239,7 @@ The dark theme is not flat black but a rich layered gray-scale with subtle blue 
 ### Adaptive Layout
 - When window < 900px: collapse collections sidebar into overlay
 - When window < 700px: scene tags wrap to two rows
-- Sidebar minimum: 48px icon-only mode at extreme widths
+- Sidebar minimum: 54px icon-only mode at extreme widths
 - Scene tags horizontal scroll on overflow
 
 ### Touch

@@ -42,6 +42,10 @@ function cleanCss(css: string): string {
     .replace(/url\s*\([^)]*\)/gi, 'none')
 }
 
+// 【例外说明】下面是拼进 iframe srcdoc 的独立文档样式，不在宿主 DOM 里，
+// 拿不到 style.css 的任何设计 token，色值/字号必须写具体值。
+// 邮件 CSS 普遍按白底设计，跟随深色主题反色会把正文糊成一团。
+// 全仓 CSS 收敛脚本要跳过本文件。
 const BASE_CSS = `
 html, body { margin: 0; padding: 0; }
 body {

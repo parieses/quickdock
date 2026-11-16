@@ -97,7 +97,7 @@ try {
 
 - `i18n/index.ts`：`legacy:false`，默认 `zh-CN`，fallback `zh-CN`。
 - 键名 camelCase；已有 `sched_*`、`mon_*`、`toolType_*` 等下划线前缀属历史遗留，新增键**不用下划线**。
-- `zh-CN.ts` 与 `en-US.ts` 键集合必须完全一致（当前 1504/1504，双向无缺失）。新增文案两处都要加。
+- `zh-CN.ts` 与 `en-US.ts` 键集合必须完全一致（双向无缺失，以 `npm run check:i18n` 输出为准）。新增文案两处都要加。
 - 硬编码中文现状（待清理，不得新增）：`SettingsModal.vue` 语言按钮、`SettingsAI.vue` 测试提示、`TypeIcon.vue` 类型名映射。
 
 ## 6. 工具链现状

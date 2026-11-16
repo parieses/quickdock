@@ -414,5 +414,30 @@ try {
 }
 ok(decThrew instanceof Error && /base64 解码失败/.test(decThrew.message), 'b64dec 对非法输入抛错', decThrew && decThrew.message)
 
+// ---- 插件影子 token 与宿主对照 ----
+// plugins/shared/common.css 是宿主 style.css 的影子副本（插件 iframe 拿不到宿主
+// CSS 变量，必须自带一份）。以前只校验各插件副本之间一致，宿主改了值而副本
+// 没跟上是查不出来的：切主题时插件会静默用旧色值。这里把两个关键锚点纳入
+// 同一道 CI 门禁（check:bridge 是打包前第 7 步），不改 package.json 也能生效。
+{
+  const hostCss = fs.readFileSync(path.resolve(import.meta.dirname, '../style.css'), 'utf8')
+  const pluginCss = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../../../plugins/shared/common.css'), 'utf8')
+  const pick = (css, name) => {
+    const hit = css.match(new RegExp('(?:^|\\s)' + name + '\\s*:\\s*([^;]+);', 'm'))
+    return hit ? hit[1].trim() : null
+  }
+  for (const [hostName, pluginName] of [
+    ['--color-bg-primary', '--bg-primary'],
+    ['--radius-md', '--radius-md'],
+  ]) {
+    const h = pick(hostCss, hostName)
+    const p = pick(pluginCss, pluginName)
+    ok(h !== null && p !== null && h === p,
+      '插件影子 token ' + pluginName + ' 与宿主 ' + hostName + ' 同值',
+      { host: h, plugin: p })
+  }
+}
+
 console.log('\nbad = ' + bad)
 process.exit(bad === 0 ? 0 : 1)

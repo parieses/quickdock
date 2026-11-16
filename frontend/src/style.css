@@ -26,10 +26,22 @@
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-full: 9999px;
+  /* 装饰档：进度格、文字高亮、滚动条这类 1~3px 微圆角。它们不是控件/卡片/浮层，
+     归到 4px 会明显变圆，但留成散落的裸 px 又绕开单一来源，故单列一档。 */
+  --radius-2xs: 2px;
 
   --sidebar-width: 210px;
-  --collection-width: 300px;
+  /* 集合栏实际宽度是 240px（见 CollectionList.vue）：以前这里写 300、实现写 240、
+     DESIGN.md 又写 300，三处各说各话。以实现为准统一到这一个来源。 */
+  --collection-width: 240px;
   --search-height: 46px;
+
+  /* 阅读宽度三档：长文 1080 / 宽表格与仪表盘 1680 / 设置表单 720。
+     过去三个数字散在 DashboardPage / AIPage / settings.css 及其子页的 scoped 样式里，
+     改一处漏两处；这里只统一「来源」，数值仍按各页信息密度保留。新增长文页用 --reading-max。 */
+  --reading-max: 1080px;
+  --content-max: 1680px;
+  --settings-max: 720px;
 
   /* 滚动条宽度：::-webkit-scrollbar 读它。抽成变量是为了「消息区与输入框对齐」
      这类几何计算有个单一来源可查——别再各写各的 6px。 */
@@ -88,6 +100,46 @@
   --text-lg: 15px;
   --text-xl: 18px;
   --text-2xl: 24px;
+  /* 展示档：空状态图标 / 大数字读数。它们不参与正文阶梯，但同样是「一档一个用途」，
+     不能留成散落在组件里的 28 / 34 / 48 字面量。 */
+  --text-3xl: 28px;
+  --text-4xl: 34px;
+  --text-5xl: 48px;
+
+  /* 运行时官方品牌标识色（Node 绿 / PHP 紫 …）：与明暗主题无关，故只定义一次。
+     以前这些 hex 直接写在 utils/palette.ts 里经 :style 注入，绕开了设计 token；
+     现在色值只在这里有一份，脚本里拿到的全是 var(--brand-*)。 */
+  --brand-php: #777bb3;
+  --brand-node: #539e43;
+  --brand-go: #00add8;
+  --brand-redis: #d82c20;
+  --brand-nginx: #009639;
+  --brand-git: #f05032;
+  --brand-python: #3776ab;
+  --brand-caddy: #1f9e8f;
+  --brand-apache: #d52b1e;
+  --brand-composer: #885630;
+  --brand-ffmpeg: #1f8ac9;
+  --brand-memcached: #1170aa;
+  --brand-mariadb: #1f5fbf;
+  --brand-mysql: #00758f;
+  --brand-postgresql: #336791;
+  --brand-mongodb: #13aa52;
+  --brand-mailpit: #6366f1;
+  --brand-minio: #c51d1d;
+  --brand-frpc: #3b82f6;
+  --brand-ftp: #64748b;
+  --brand-bun: #f472b6;
+  --brand-erlang: #A90533;
+  --brand-traefik: #2393f3;
+  --brand-rabbitmq: #ff6600;
+  --brand-gh: #24292f;
+  --brand-mkcert: #6b7280;
+  --brand-jdk: #007396;
+  /* 环境页「内置工具组」特纳入口 */
+  --brand-special-http: #4a9eff;
+  --brand-special-sites: #e8a33d;
+  --brand-special-ports: #3ecf8e;
 }
 
 /* ==================== CSS 变量 — 深色主题 ==================== */
@@ -144,6 +196,12 @@
      深浅主题无法分别调整，故与 -bg 一样收进 token。 */
   --color-danger-border: rgba(239, 68, 68, 0.4);
   --color-success-border: rgba(34, 197, 94, 0.4);
+  /* 危险按钮 hover 档：原来在组件里用 color-mix(danger 85%, #000) 现算，
+     WebView2 旧版不支持 color-mix 时整条 background 静默失效（见 panels.css:408），
+     故与主题一起成对定义。 */
+  --color-danger-hover: #cf3b3b;
+  /* AI 空间跳转定位的「闪一下」动画 0% 档；60% 复用 --color-accent-bg。 */
+  --color-accent-flash: rgba(91, 140, 255, 0.28);
   --color-accent-border-strong: rgba(91, 140, 255, 0.45);
   /* 日志级别色：I/W/E 三档此前在 LogViewer 里散写，W 档可直接复用 warning */
   --color-log-info: #3b9eff;
@@ -270,6 +328,8 @@
   --color-cat-http: #e0556b;
   --shadow-toast: 0 4px 24px rgba(0, 0, 0, 0.45);
   --shadow-toast-hover: 0 6px 28px rgba(0, 0, 0, 0.55);
+  /* 「运行中」绿点的呼吸光晕；原来在 SettingsDSH 里写死 rgba(76,175,80,.8)。 */
+  --shadow-success: 0 0 6px rgba(76, 175, 80, 0.8);
 }
 
 /* ==================== CSS 变量 — 浅色主题 ==================== */
@@ -285,6 +345,9 @@
   --color-bg-overlay-deep: rgba(15, 18, 24, 0.64); /* 与暗色主题同名 token，一一对应 */
   --color-surface: #ffffff;
   --color-surface-elevated: #f4f6f9;
+  /* 与深色档一一对应：浮层窗口（qd-backdrop）用 bg-primary 实色底，
+     浅色下少了这个别名会静默变透明，透出被盖住的主窗口。 */
+  --color-settings-bg: var(--color-bg-primary);
   --color-text-primary: #1a1f27;
   --color-text-secondary: #525b68;
   --color-text-muted: #6e7683;
@@ -309,6 +372,9 @@
   --color-warning-border: rgba(217, 119, 6, 0.45);
   --color-danger-border: rgba(239, 68, 68, 0.45);
   --color-success-border: rgba(34, 197, 94, 0.45);
+  /* 与深色档一一对应：浅底上 danger hover 要压深一档才够对比度 */
+  --color-danger-hover: #d92d20;
+  --color-accent-flash: rgba(91, 140, 255, 0.22);
   --color-accent-border-strong: rgba(91, 140, 255, 0.5);
   /* 浅色底上要压深一档才够对比度 */
   --color-log-info: #1d6fd8;
@@ -401,6 +467,8 @@
   --color-cat-http: #e0556b;
   --shadow-toast: 0 4px 24px rgba(0, 0, 0, 0.15);
   --shadow-toast-hover: 0 6px 28px rgba(0, 0, 0, 0.2);
+  /* 与深色档一一对应：浅底上光晕要收淡，否则绿点会糊成一团 */
+  --shadow-success: 0 0 6px rgba(16, 185, 129, 0.35);
 }
 
 /* ==================== 全局重置 ==================== */
@@ -638,6 +706,15 @@ html.qd-backdrop .settings-panel {
   outline-offset: 2px;
   border-radius: var(--radius-xs);
 }
+/* 组件 scoped 里的 `outline: none` 带 data-v 属性选择器，优先级高于上面那条
+   全局 :focus-visible，会把可点击 div/span 的键盘焦点环一起抹掉。这里只对
+   非表单可交互元素补回焦点环；表单仍走下方的「换边框色」表达，不外扩蓝环。 */
+[tabindex]:focus-visible,
+[role='button']:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--color-border-focus) !important;
+  outline-offset: 2px;
+}
 /* 所有表单控件统一的聚焦表达：中性边框 + 光标，无发光环。
    组件里另有 :focus / :focus-within 规则的，也统一到同一个 token。 */
 input:focus-visible,
@@ -764,13 +841,13 @@ svg[stroke='currentColor'] { stroke-width: 1.75; }
   align-items: center;
   justify-content: center;
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-accent-text);
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   line-height: 1;
-  transition: opacity 0.15s;
+  transition: opacity var(--transition-fast);
   flex-shrink: 0;
   z-index: 1;
 }
@@ -782,30 +859,30 @@ svg[stroke='currentColor'] { stroke-width: 1.75; }
   left: 0;
   right: 0;
   z-index: 1000;
-  margin-top: 4px;
+  margin-top: var(--space-2);
   max-height: 280px;
   overflow-y: auto;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  box-shadow: var(--shadow-md);
 }
 .version-list-loading,
 .version-list-error,
 .version-list-empty {
-  padding: 10px 12px;
+  padding: 10px var(--space-5);
   text-align: center;
-  font-size: 13px;
+  font-size: var(--text-md);
   cursor: default;
 }
 .version-list-loading { color: var(--color-text-muted); }
 .version-list-error { color: var(--color-danger); }
 .version-list-empty { color: var(--color-accent); cursor: pointer; }
 .version-list-empty:hover { opacity: 0.8; }
-.retry-link { color: var(--color-accent); margin-left: 6px; }
+.retry-link { color: var(--color-accent); margin-left: var(--space-3); }
 .version-item {
-  padding: 7px 12px;
-  font-size: 13px;
+  padding: 7px var(--space-5);
+  font-size: var(--text-md);
   color: var(--color-text-primary);
   cursor: pointer;
   white-space: nowrap;
@@ -816,8 +893,8 @@ svg[stroke='currentColor'] { stroke-width: 1.75; }
 .version-item:hover { background: var(--color-bg-hover); }
 .version-item.active { background: var(--color-accent); color: var(--color-accent-text); }
 .version-list-note {
-  padding: 6px 12px;
-  font-size: 11px;
+  padding: var(--space-3) var(--space-5);
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   text-align: center;
   border-top: 1px solid var(--color-border);

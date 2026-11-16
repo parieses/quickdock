@@ -30,10 +30,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-4);
   flex-shrink: 0;
   height: 38px;
-  padding: 0 8px 0 12px;
+  padding: 0 var(--space-4) 0 var(--space-5);
   /* 一档更亮的底色：三栏并排时，栏头连成一条横向的"带子"，
      视线沿它扫一遍就知道自己在哪一栏，而不是三块同样发灰的区域。
      与一级页头同一套：纯色块 + 一条下缘线，不再叠 inset 内高光。 */
@@ -69,7 +69,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin-left: 8px;
+  margin-left: var(--space-4);
   margin-right: auto;
   padding: 1px 7px;
   border-radius: var(--radius-xs);
@@ -82,7 +82,7 @@
 .qd-panel-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-1);
   flex-shrink: 0;
 }
 
@@ -93,13 +93,13 @@
 .qd-panel-search {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   flex-shrink: 0;
   /* 项目栏是 flex:1 的宽面板，不限宽的话搜索框会拉满上千像素，
      和左边两栏的窄框完全不像同一套控件 */
   max-width: 380px;
-  margin: 8px 8px 6px;
-  padding: 0 8px;
+  margin: var(--space-4) var(--space-4) var(--space-3);
+  padding: 0 var(--space-4);
   height: 28px;
   background: var(--color-bg-tertiary);
   border: 1px solid transparent;
@@ -118,7 +118,7 @@
   border: none;
   outline: none;
   color: var(--color-text-primary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
 }
 .qd-search-input::placeholder { color: var(--color-text-disabled); }
@@ -142,8 +142,8 @@
 /* 搜索结果计数条 */
 .qd-search-hint {
   flex-shrink: 0;
-  padding: 4px 14px;
-  font-size: 11px;
+  padding: var(--space-2) 14px;
+  font-size: var(--text-xs);
   color: var(--color-accent);
   background: var(--color-accent-bg);
 }
@@ -153,7 +153,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 4px 6px 8px;
+  padding: var(--space-2) var(--space-3) var(--space-4);
 }
 .qd-panel-body ul { list-style: none; padding: 0; margin: 0; }
 
@@ -161,13 +161,13 @@
 .qd-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   min-height: 34px;
-  margin-bottom: 2px;
-  padding: 5px 6px 5px 8px;
+  margin-bottom: var(--space-1);
+  padding: 5px var(--space-3) 5px var(--space-4);
   border-radius: var(--radius-sm);
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: var(--text-md);
   cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
 }
@@ -215,22 +215,22 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.3;
 }
 .qd-row-sub {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.25;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
-.qd-row.active .qd-row-sub { color: var(--color-text-muted); }
+.qd-row.active .qd-row-sub { color: var(--color-text-secondary); }
 
 .qd-row-actions {
   display: flex;
-  gap: 2px;
+  gap: var(--space-1);
   flex-shrink: 0;
   opacity: 1;
 }
@@ -264,7 +264,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 36px 16px;
+  padding: 36px var(--space-6);
   text-align: center;
 }
 /* 空状态的三段式：图标（容器）→ 标题（说明这是什么）→ 提示（下一步怎么做）。
@@ -301,12 +301,12 @@
   justify-content: center;
   gap: 5px;
   margin-top: 14px;
-  padding: 6px 13px;
+  padding: var(--space-3) 13px;
   border: 1px solid var(--color-accent-border);
   border-radius: var(--radius-sm);
   background: var(--color-accent-bg);
   color: var(--color-accent);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
@@ -322,11 +322,11 @@
    归类在 panels.css 而不是页面组件的 <style scoped>：样式只有一处实现，
    页面组件里再写一套，改主题时会漏掉其中一半。
    颜色一律取 style.css 的 token——深色/浅色两套主题都要对。 */
-.qd-run { margin: 2px 0; max-width: 80%; }
+.qd-run { margin: var(--space-1) 0; max-width: 80%; }
 .qd-run > summary {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: var(--space-3);
   padding: 5px 9px; cursor: pointer; user-select: none;
-  font-size: 12px; color: var(--color-text-secondary);
+  font-size: var(--text-sm); color: var(--color-text-secondary);
   background: var(--color-card-bg);
   border: 1px solid var(--card-border-color);
   border-radius: var(--radius-sm);
@@ -338,7 +338,7 @@
 /* 折叠箭头：靠 details[open] 旋转，省一个状态字段。 */
 .qd-run-caret { transition: transform var(--transition-fast); transform: rotate(-90deg); flex-shrink: 0; }
 .qd-run[open] > .qd-run-sum .qd-run-caret { transform: rotate(0deg); }
-.qd-run-state { margin-left: auto; font-size: 11px; color: var(--color-text-muted); }
+.qd-run-state { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-muted); }
 .qd-run-state.is-done { color: var(--color-success); }
 .qd-run-state.is-failed { color: var(--color-danger); }
 .qd-run-state.is-canceled { color: var(--color-warning); }
@@ -347,14 +347,14 @@
   border: 1px solid var(--color-border); border-top: none;
   border-radius: 0 0 var(--radius-sm) var(--radius-sm);
   background: var(--color-bg-primary);
-  padding: 6px 9px;
+  padding: var(--space-3) 9px;
 }
-.qd-run-hint { font-size: 12px; color: var(--color-text-muted); padding: 2px 0; }
+.qd-run-hint { font-size: var(--text-sm); color: var(--color-text-muted); padding: var(--space-1) 0; }
 .qd-run-hint.is-err { color: var(--color-danger); }
 
-.qd-run-node { margin: 3px 0; padding-left: 8px; border-left: 2px solid var(--color-border-light); }
+.qd-run-node { margin: 3px 0; padding-left: var(--space-4); border-left: 2px solid var(--color-border-light); }
 /* 状态点：一眼扫出哪个子任务失败了，不用逐条读文字。 */
-.qd-run-node-head { display: flex; align-items: baseline; gap: 6px; font-size: 12px; }
+.qd-run-node-head { display: flex; align-items: baseline; gap: var(--space-3); font-size: var(--text-sm); }
 .qd-run-dot {
   width: 6px; height: 6px; border-radius: 50%;
   background: var(--color-text-disabled); flex-shrink: 0; align-self: center;
@@ -364,22 +364,22 @@
 .qd-run-dot.is-failed { background: var(--color-danger); }
 .qd-run-dot.is-canceled { background: var(--color-warning); }
 .qd-run-role {
-  font-family: var(--font-mono); font-size: 11px;
+  font-family: var(--font-mono); font-size: var(--text-xs);
   color: var(--color-text-secondary); flex-shrink: 0;
 }
 .qd-run-task {
   color: var(--color-text-primary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.qd-run-tokens { margin-left: auto; font-size: 11px; color: var(--color-text-muted); flex-shrink: 0; }
-.qd-run-result { margin: 3px 0 3px 12px; }
+.qd-run-tokens { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-muted); flex-shrink: 0; }
+.qd-run-result { margin: 3px 0 3px var(--space-5); }
 .qd-run-result > summary {
-  font-size: 11px; color: var(--color-text-muted); cursor: pointer; user-select: none;
+  font-size: var(--text-xs); color: var(--color-text-muted); cursor: pointer; user-select: none;
 }
 .qd-run-result > summary:hover { color: var(--color-text-primary); }
 .qd-run-result pre {
-  margin: 4px 0 0; padding: 6px 8px; max-height: 260px; overflow: auto;
-  font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
+  margin: var(--space-2) 0 0; padding: var(--space-3) var(--space-4); max-height: 260px; overflow: auto;
+  font-family: var(--font-mono); font-size: var(--text-xs); line-height: 1.5;
   color: var(--color-text-secondary); background: var(--color-bg-secondary);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   white-space: pre-wrap; word-break: break-word;
@@ -388,14 +388,14 @@
 /* 子组件（AiDiffView.vue）不写 scoped 样式，与 run 树同一套做法：
    页面级样式统一在 styles/ 下，前端类名一律 qd- 前缀。 */
 .qd-diff {
-  margin: 4px 0 2px;
+  margin: var(--space-2) 0 var(--space-1);
   max-height: 320px;
   overflow: auto;
   background: var(--color-bg-primary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-xs);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.5;
 }
 .qd-diff-line { display: flex; white-space: pre; }
@@ -414,8 +414,8 @@
 .qd-diff-line.is-hunk { color: var(--color-text-muted); background: var(--color-bg-active); }
 .qd-diff-line.is-ctx { color: var(--color-text-secondary); }
 .qd-diff-more {
-  display: block; width: 100%; padding: 4px 0; border: none; cursor: pointer;
+  display: block; width: 100%; padding: var(--space-2) 0; border: none; cursor: pointer;
   background: var(--color-bg-active); color: var(--color-text-secondary);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 .qd-diff-more:hover { color: var(--color-accent); }
