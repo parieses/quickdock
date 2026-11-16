@@ -5,6 +5,7 @@ import { Pen, Trash2, Plus, RefreshCw, ChevronDown } from '@lucide/vue'
 import SettingsPrompts from './SettingsPrompts.vue'
 import SettingsSkills from './SettingsSkills.vue'
 import QdBarChart from './charts/QdBarChart.vue'
+import QdTabs from './QdTabs.vue'
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -71,13 +72,13 @@ const AI_TABS: AiSettingsTab[] = ['model', 'usage', 'permission', 'mcp', 'skills
  */
 const initial = props.initialTab as AiSettingsTab | undefined
 const activeTab = ref<AiSettingsTab>(initial && AI_TABS.includes(initial) ? initial : 'model')
-const aiTabs = computed<{ value: AiSettingsTab; label: string }[]>(() => [
-  { value: 'model', label: t('aiTabModel') },
-  { value: 'usage', label: t('aiTabUsage') },
-  { value: 'permission', label: t('aiTabPermission') },
-  { value: 'mcp', label: t('aiTabMcp') },
-  { value: 'skills', label: t('aiTabSkills') },
-  { value: 'prompts', label: t('aiTabPrompts') },
+const aiTabs = computed<{ id: AiSettingsTab; label: string }[]>(() => [
+  { id: 'model', label: t('aiTabModel') },
+  { id: 'usage', label: t('aiTabUsage') },
+  { id: 'permission', label: t('aiTabPermission') },
+  { id: 'mcp', label: t('aiTabMcp') },
+  { id: 'skills', label: t('aiTabSkills') },
+  { id: 'prompts', label: t('aiTabPrompts') },
 ])
 
 // 外部 MCP 的两段 placeholder 是「JSON 片段 / 命令行参数」的语法示例，不走 i18n：
@@ -1217,23 +1218,17 @@ function saveAIModal() {
     <h3 class="section-title">{{ t('navAi') }}</h3>
     <p class="section-desc">{{ t('aiSettingsDesc') }}</p>
 
-    <div class="ai-tabs" role="tablist">
-      <button
-        v-for="o in aiTabs"
-        :key="o.value"
-        type="button"
-        role="tab"
-        :aria-selected="activeTab === o.value"
-        :class="['qd-btn', 'qd-btn-sm', { 'is-on': activeTab === o.value }]"
-        @click="activeTab = o.value"
-      >
-        <span>{{ o.label }}</span>
-        <span
-          v-if="o.value === 'mcp' && extErrorCount"
-          class="ai-tab-badge"
-          :title="t('aiExtStatusErr')"
-        >{{ extErrorCount }}</span>
-      </button>
+    <div class="ai-tabs">
+      <QdTabs v-model="activeTab" :tabs="aiTabs">
+        <template #tab="{ tab }">
+          <span>{{ tab.label }}</span>
+          <span
+            v-if="tab.id === 'mcp' && extErrorCount"
+            class="ai-tab-badge"
+            :title="t('aiExtStatusErr')"
+          >{{ extErrorCount }}</span>
+        </template>
+      </QdTabs>
     </div>
 
     <div v-show="activeTab === 'model'" class="ai-tab-panel" role="tabpanel">

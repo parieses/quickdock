@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import PageHeader from './PageHeader.vue'
+import QdTabs from './QdTabs.vue'
 /**
  * 下载器页面：QuickDock 只做「遥控器 + 仪表盘」。
  * 添加任务 → Go 门面转 JSON-RPC → aria2c 下载并直接写盘；
@@ -449,6 +450,20 @@ const counts = computed<Record<FilterKey, number>>(() => {
   }
   return c
 })
+
+// 四组切换的标签与计数在这里算好，模板不再各写一套 v-for + is-on 判断。
+const filterTabs = computed(() =>
+  filters.map((k) => ({ id: k, label: filterLabel(k), badge: counts.value[k] })),
+)
+const addModeTabs = computed(() => addModes.map((m) => ({ id: m, label: modeLabel(m) })))
+const DETAIL_TABS: DetailTab[] = ['overview', 'files', 'uris', 'peers', 'servers', 'options', 'torrent']
+const detailTabs = computed(() =>
+  DETAIL_TABS.map((k) => ({ id: k, label: t('dlDetailTab' + k.charAt(0).toUpperCase() + k.slice(1)) })),
+)
+const SETTINGS_TABS: SettingsTab[] = ['general', 'bt', 'auto', 'connection', 'engine']
+const settingsTabs = computed(() =>
+  SETTINGS_TABS.map((k) => ({ id: k, label: t('dlSettings' + k.charAt(0).toUpperCase() + k.slice(1)) })),
+)
 
 function filterLabel(k: FilterKey): string {
   const map: Record<FilterKey, string> = {
@@ -1099,11 +1114,7 @@ onUnmounted(() => {
 
         <div class="dl-workspace">
           <div class="dl-main">
-            <div class="dl-tabs">
-              <button v-for="k in filters" :key="k" class="dl-tab" :class="{ 'is-on': filter === k }" @click="filter = k">
-                {{ filterLabel(k) }}<span class="dl-tab-count">{{ counts[k] }}</span>
-              </button>
-            </div>
+            <QdTabs v-model="filter" :tabs="filterTabs" variant="chip" />
 
             <div class="dl-toolbar">
               <label class="dl-check-all">
@@ -1342,10 +1353,7 @@ onUnmounted(() => {
             </header>
 
             <div class="dl-modal-tabs">
-              <button
-                v-for="m in addModes" :key="m" class="dl-tab" :class="{ 'is-on': addMode === m }"
-                @click="addMode = m"
-              >{{ modeLabel(m) }}</button>
+              <QdTabs v-model="addMode" :tabs="addModeTabs" variant="chip" />
               <span class="dl-grow"></span>
               <button
                 class="qd-btn qd-btn-sm" :class="{ 'is-on': advanced }" :disabled="addMode === 'batch'"
@@ -1504,10 +1512,7 @@ onUnmounted(() => {
             </header>
 
             <div class="dl-modal-tabs">
-              <button
-                v-for="k in (['overview', 'files', 'uris', 'peers', 'servers', 'options', 'torrent'] as DetailTab[])" :key="k"
-                class="dl-tab" :class="{ 'is-on': detailTab === k }" @click="detailTab = k"
-              >{{ t('dlDetailTab' + k.charAt(0).toUpperCase() + k.slice(1)) }}</button>
+              <QdTabs v-model="detailTab" :tabs="detailTabs" variant="chip" />
             </div>
 
             <div class="dl-modal-body">
@@ -1708,10 +1713,7 @@ onUnmounted(() => {
             </header>
 
             <div class="dl-modal-tabs">
-              <button
-                v-for="k in (['general', 'bt', 'auto', 'connection', 'engine'] as SettingsTab[])" :key="k"
-                class="dl-tab" :class="{ 'is-on': settingsTab === k }" @click="settingsTab = k"
-              >{{ t('dlSettings' + k.charAt(0).toUpperCase() + k.slice(1)) }}</button>
+              <QdTabs v-model="settingsTab" :tabs="settingsTabs" variant="chip" />
             </div>
 
             <div class="dl-modal-body">
@@ -1923,17 +1925,6 @@ onUnmounted(() => {
 
 .dl-workspace { display: flex; align-items: flex-start; gap: var(--space-4); }
 .dl-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-3); }
-.dl-tabs { display: flex; gap: var(--space-2); flex-wrap: wrap; }
-.dl-tab {
-  display: inline-flex; align-items: center; gap: var(--space-2); height: 22px; padding: 0 var(--space-3);
-  border: 1px solid transparent; border-radius: var(--radius-full);
-  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
-  font-family: inherit; font-size: var(--text-xs); cursor: pointer;
-  transition: background-color var(--transition-fast), color var(--transition-fast);
-}
-.dl-tab:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.dl-tab.is-on { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border-strong); }
-.dl-tab-count { font-size: var(--text-2xs); color: var(--color-text-muted); }
 
 .dl-toolbar {
   display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;

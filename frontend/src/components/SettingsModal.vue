@@ -16,6 +16,7 @@ const store = useWorkspaceStore()
 import HotkeySettings from './HotkeySettings.vue'
 import SettingsClipboardRules from './SettingsClipboardRules.vue'
 import SettingsHistory from './SettingsHistory.vue'
+import QdTabs from './QdTabs.vue'
 import SettingsAI from './SettingsAI.vue'
 import SettingsSnapshot from './SettingsSnapshot.vue'
 import SettingsSync from './SettingsSync.vue'
@@ -71,10 +72,10 @@ const activeTab = ref('')
 // 深链值不合法（含空）一律落回第一段——深链是「尽量帮忙」，不该因为写错就停在空白页。
 type BackupTab = 'storage' | 'sync' | 'snapshot'
 const backupTab = ref<BackupTab>('storage')
-const backupTabs = computed<{ value: BackupTab; label: string }[]>(() => [
-  { value: 'storage', label: t('storageLocation') },
-  { value: 'sync', label: t('sync') },
-  { value: 'snapshot', label: t('snapshot') },
+const backupTabs = computed<{ id: BackupTab; label: string }[]>(() => [
+  { id: 'storage', label: t('storageLocation') },
+  { id: 'sync', label: t('sync') },
+  { id: 'snapshot', label: t('snapshot') },
 ])
 watch(activeTab, (v) => {
   backupTab.value = v === 'sync' || v === 'snapshot' ? v : 'storage'
@@ -1247,16 +1248,8 @@ async function toggleAutoStart() {
                以前是「三段竖着堆」，同步那块要滚过整张存储表单才看得见；
                三件事互相独立（放哪 / 怎么备份到远端 / 定时留底），分段比滚动短。 -->
           <div v-else-if="activePage === 'backup'" class="content-page content-left">
-            <div class="settings-tabs" role="tablist">
-              <button
-                v-for="o in backupTabs"
-                :key="o.value"
-                type="button"
-                role="tab"
-                :aria-selected="backupTab === o.value"
-                :class="['qd-btn', 'qd-btn-sm', { 'is-on': backupTab === o.value }]"
-                @click="backupTab = o.value"
-              >{{ o.label }}</button>
+            <div class="settings-tabs">
+              <QdTabs v-model="backupTab" :tabs="backupTabs" />
             </div>
             <!-- 存储段的首行说明保留、标题去掉：tab 已经写了「存储位置」，再说一遍是重复。 -->
             <div v-show="backupTab === 'storage'" class="section">
