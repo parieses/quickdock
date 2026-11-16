@@ -2,10 +2,15 @@
 /**
  * 全应用唯一的开关控件。
  *
- * 存量有 11 套私有实现（.svc-switch / .cred-switch / .ai-plus-switch /
- * .jt-toggle / .hidden-toggle …），尺寸与配色各不相同。新写的开关一律用本组件；
- * 存量开关在 styles/app.css 的「开关视觉基线」里统一到同一组几何与颜色 token，
- * 不必一次性迁移模板（迁移涉及各页自己的 label / disabled 语义，适合单独排期）。
+ * 11-16 已把 10 处标准 toggle 全部收编：环境页的 .svc-switch（label + input[type=checkbox]）
+ * 与仪表盘 / 监控 / 调度 / 待办 / 设置里共 9 处 .toggle-btn / .toggle-btn-sm（40×22、
+ * 36×20 两种尺寸）统一成本组件的 34×18。尺寸收窄是有意的：原来两种尺寸并存，
+ * 同一屏里开关大小不一致，比各自小 2~6px 更扎眼。
+ *
+ * 刻意不迁的三处，不是遗漏：
+ * - .cred-switch 是「图标 + 文案 + 圆点」的一体化按钮，.ai-plus-switch 是整行按钮里的
+ *   纯视觉指示 —— 都不是 toggle，硬套会产出 button 套 button，或丢掉图标与文案。
+ * - .jt-toggle（JsonTree）与 .hidden-toggle（Sidebar）是展开/折叠箭头，不是开关。
  */
 const props = withDefaults(defineProps<{
   modelValue: boolean

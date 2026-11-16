@@ -2,6 +2,7 @@
 import EnvCoreDialogs from './EnvCoreDialogs.vue'
 import EnvConfigDialogs from './EnvConfigDialogs.vue'
 import PageHeader from './PageHeader.vue'
+import QdSwitch from './QdSwitch.vue'
 // EnvSidebar 由下方 import 引入（侧栏是纯展示壳，分组计算仍在本页）
 import { ref, reactive, computed, onMounted, onUnmounted, watch, inject, nextTick } from 'vue'
 import { matchesTextOrPinyin } from '../utils/pinyin'
@@ -2013,16 +2014,15 @@ const dialogCtx = reactive({
             <div class="detail-badges">
               <span v-if="selected.hasService && selected.id !== 'everything'" class="badge svc">{{ t('svcManage') }}</span>
               <span v-for="p in selected.platforms" :key="p" class="badge plat">{{ p }}</span>
-              <label v-if="selected.hasService && selected.id !== 'everything'" class="svc-switch" :class="{ on: selected.enabled, busy: settingEnabled[selected.id] }">
-                <input
-                  type="checkbox"
-                  :checked="selected.enabled"
+              <span v-if="selected.hasService && selected.id !== 'everything'" class="svc-switch" :class="{ on: selected.enabled, busy: settingEnabled[selected.id] }">
+                <QdSwitch
+                  :model-value="selected.enabled"
                   :disabled="settingEnabled[selected.id]"
-                  @change="toggleEnabled(selected, ($event.target as HTMLInputElement).checked)"
+                  :label="selected.enabled ? t('svcWatchOn') : t('svcWatchOff')"
+                  @update:model-value="(v: boolean) => toggleEnabled(selected!, v)"
                 />
-                <span class="svc-switch-track"><span class="svc-switch-thumb"></span></span>
                 <span class="svc-switch-label">{{ selected.enabled ? t('svcWatchOn') : t('svcWatchOff') }}</span>
-              </label>
+              </span>
             </div>
           </div>
         </header>
@@ -3078,17 +3078,10 @@ const dialogCtx = reactive({
 .badge.svc { background: var(--color-accent-bg); color: var(--color-accent); }
 /* 常驻开关（服务类运行时）：开=随应用自启/崩溃自愈，关=停止 */
 .svc-switch { display: inline-flex; align-items: center; gap: var(--space-3); margin-left: var(--space-2); cursor: pointer; user-select: none; -webkit-user-select: none; }
-.svc-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
-/* 开关几何与 QdSwitch.vue 的基线一致：34×18 胶囊、全圆角、统一过渡曲线。 */
-.svc-switch-track { position: relative; width: 34px; height: 18px; border-radius: var(--radius-full); background: var(--color-bg-tertiary); border: 1px solid var(--color-border); transition: background var(--transition-base); flex: none; }
-.svc-switch-thumb { position: absolute; top: 1px; left: 1px; width: 14px; height: 14px; border-radius: 50%; background: var(--color-accent-text); box-shadow: var(--shadow-sm); transition: transform var(--transition-base); }
-.svc-switch.on .svc-switch-track { background: var(--color-accent, var(--color-success)); }
-.svc-switch.on .svc-switch-thumb { transform: translateX(16px); }
+/* 开关本体已换成 QdSwitch（34×18 几何完全一致），这里只留行内布局与文案。 */
 .svc-switch-label { font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap; }
 .svc-switch.on .svc-switch-label { color: var(--color-accent, var(--color-success)); }
 .svc-switch.busy { opacity: .6; pointer-events: none; }
-.svc-switch.busy .svc-switch-thumb { animation: svc-thumb-pulse .8s ease-in-out infinite; }
-@keyframes svc-thumb-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
 
 /* 详情卡片：圆角收到与全站卡片一致（14 在这套 13px 界面里偏"圆润"），
    加一道内高光把卡片从页面底上"提"起来。

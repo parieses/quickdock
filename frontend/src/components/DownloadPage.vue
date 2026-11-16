@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import PageHeader from './PageHeader.vue'
 import QdTabs from './QdTabs.vue'
+import QdModal from './QdModal.vue'
 /**
  * 下载器页面：QuickDock 只做「遥控器 + 仪表盘」。
  * 添加任务 → Go 门面转 JSON-RPC → aria2c 下载并直接写盘；
@@ -1224,624 +1225,611 @@ onUnmounted(() => {
     </div>
 
     <!-- 换电脑续传：旧会话给 URL，本机目录给 .aria2 / 数据文件 -->
-    <Teleport to="body">
-      <Transition name="dl-modal">
-        <div v-if="showImport" class="dl-modal-overlay" @mousedown.self="closeImport">
-          <div class="dl-modal dl-modal-import" role="dialog" :aria-label="t('dlImportTitle')">
-            <header class="dl-modal-head">
-              <FolderInput :size="15" class="dl-modal-head-icon" />
-              <span class="dl-modal-title">{{ t('dlImportTitle') }}</span>
-              <span class="dl-modal-sub">{{ importRootDir }}</span>
-              <button class="qd-icon-btn" :title="t('dlClose')" @click="closeImport"><X :size="14" /></button>
-            </header>
+    <QdModal
+      v-if="showImport"
+      :model-value="true"
+      width="980px"
+      @update:model-value="closeImport"
+    >
+  <template #header>
+    <FolderInput :size="15" class="dl-modal-head-icon" />
+    <span class="dl-modal-title">{{ t('dlImportTitle') }}</span>
+    <span class="dl-modal-sub">{{ importRootDir }}</span>
+  </template>
+  <div class="dl-modal-body">
 
-            <div class="dl-modal-body">
-              <section class="dl-modal-section">
-                <h4>{{ t('dlImportSectionPrepare') }}</h4>
-                <p class="dl-hint">{{ t('dlImportIntro') }}</p>
-                <p class="dl-hint">{{ t('dlImportSessionHint', { path: importLocalSession }) }}</p>
-                <p v-if="importIsRemote" class="dl-hint is-warn">{{ t('dlImportRemoteHint') }}</p>
-              </section>
+            <section class="dl-modal-section">
+              <h4>{{ t('dlImportSectionPrepare') }}</h4>
+              <p class="dl-hint">{{ t('dlImportIntro') }}</p>
+              <p class="dl-hint">{{ t('dlImportSessionHint', { path: importLocalSession }) }}</p>
+              <p v-if="importIsRemote" class="dl-hint is-warn">{{ t('dlImportRemoteHint') }}</p>
+            </section>
 
-              <section class="dl-modal-section">
-                <h4>{{ t('dlImportSectionSource') }}</h4>
-                <label class="dl-field">
-                  <span>{{ t('dlImportDir') }}</span>
-                  <div class="dl-add-input-row">
-                    <input v-model="importDir" class="qd-input" :placeholder="t('dlImportDirPlaceholder')" @keydown.enter="runImportScan" />
-                    <button class="qd-btn qd-btn-sm dl-row-btn" :title="status.remote ? t('dlPickDirRemoteHint') : t('dlBrowseDir')" @click="chooseImportDir">
-                      <Folder :size="14" />{{ t('dlBrowseDir') }}
-                    </button>
-                  </div>
-                </label>
-                <label class="dl-field">
-                  <span>{{ t('dlImportSession') }}</span>
-                  <div class="dl-add-input-row">
-                    <input v-model="importSession" class="qd-input" :placeholder="t('dlImportSessionPlaceholder')" @keydown.enter="runImportScan" />
-                    <button class="qd-btn qd-btn-sm dl-row-btn" @click="chooseImportSession">
-                      <FileArchive :size="14" />{{ t('dlImportPickSession') }}
-                    </button>
-                  </div>
-                </label>
-                <div class="dl-table-tools">
-                  <button class="qd-btn qd-btn-primary qd-btn-sm" :disabled="importScanning || !importDir.trim()" @click="runImportScan">
-                    <RefreshCw :size="14" />{{ importScanning ? t('dlImportScanning') : t('dlImportScan') }}
+            <section class="dl-modal-section">
+              <h4>{{ t('dlImportSectionSource') }}</h4>
+              <label class="dl-field">
+                <span>{{ t('dlImportDir') }}</span>
+                <div class="dl-add-input-row">
+                  <input v-model="importDir" class="qd-input" :placeholder="t('dlImportDirPlaceholder')" @keydown.enter="runImportScan" />
+                  <button class="qd-btn qd-btn-sm dl-row-btn" :title="status.remote ? t('dlPickDirRemoteHint') : t('dlBrowseDir')" @click="chooseImportDir">
+                    <Folder :size="14" />{{ t('dlBrowseDir') }}
                   </button>
-                  <button class="qd-btn qd-btn-sm" :disabled="importScanning" @click="useLocalSession">{{ t('dlImportUseLocalSession') }}</button>
-                  <button class="qd-btn qd-btn-sm" :disabled="importScanning || !importSession" @click="clearImportSession">{{ t('dlImportClearSession') }}</button>
-                  <span class="dl-grow"></span>
-                  <span v-if="importSummary" class="dl-hint">{{ importSummary }}</span>
                 </div>
-                <p v-if="importError" class="dl-hint is-warn">{{ importError }}</p>
-              </section>
+              </label>
+              <label class="dl-field">
+                <span>{{ t('dlImportSession') }}</span>
+                <div class="dl-add-input-row">
+                  <input v-model="importSession" class="qd-input" :placeholder="t('dlImportSessionPlaceholder')" @keydown.enter="runImportScan" />
+                  <button class="qd-btn qd-btn-sm dl-row-btn" @click="chooseImportSession">
+                    <FileArchive :size="14" />{{ t('dlImportPickSession') }}
+                  </button>
+                </div>
+              </label>
+              <div class="dl-table-tools">
+                <button class="qd-btn qd-btn-primary qd-btn-sm" :disabled="importScanning || !importDir.trim()" @click="runImportScan">
+                  <RefreshCw :size="14" />{{ importScanning ? t('dlImportScanning') : t('dlImportScan') }}
+                </button>
+                <button class="qd-btn qd-btn-sm" :disabled="importScanning" @click="useLocalSession">{{ t('dlImportUseLocalSession') }}</button>
+                <button class="qd-btn qd-btn-sm" :disabled="importScanning || !importSession" @click="clearImportSession">{{ t('dlImportClearSession') }}</button>
+                <span class="dl-grow"></span>
+                <span v-if="importSummary" class="dl-hint">{{ importSummary }}</span>
+              </div>
+              <p v-if="importError" class="dl-hint is-warn">{{ importError }}</p>
+            </section>
 
-              <section class="dl-modal-section">
-                <h4>{{ t('dlImportSectionTasks') }}</h4>
-                <div v-if="!importItems.length" class="dl-table-empty">{{ t('dlImportEmpty') }}</div>
-                <div v-else class="dl-import-scroll">
-                  <table class="dl-table dl-import-table">
-                    <thead>
-                      <tr>
-                        <th class="is-check">
-                          <input type="checkbox" class="dl-check" :checked="importAllChecked" :disabled="!importItems.length" :aria-label="t('dlSelectAll')" @change="toggleImportAll" />
-                        </th>
-                        <th>{{ t('dlImportColName') }}</th>
-                        <th>{{ t('dlImportColUrl') }}</th>
-                        <th>{{ t('dlImportColDir') }}</th>
-                        <th>{{ t('dlImportColSize') }}</th>
-                        <th>{{ t('dlImportColState') }}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="(it, i) in importItems" :key="it.rowId" :class="{ 'is-off': !it.checked }">
-                        <td><input v-model="it.checked" type="checkbox" class="dl-check" :aria-label="it.name" /></td>
-                        <td>
-                          <input v-model="it.name" class="qd-input dl-import-input" :aria-label="t('dlImportColName')" />
-                          <div v-if="importReasonText(it.reason)" class="dl-import-note">{{ importReasonText(it.reason) }}</div>
-                        </td>
-                        <td>
-                          <input
-                            class="qd-input dl-import-input" :value="it.uris[0] || ''"
-                            :placeholder="t('dlImportUrlPlaceholder')" :aria-label="t('dlImportColUrl')"
-                            @input="onImportUriInput(i, $event)"
-                          />
-                          <div v-if="it.uris.length > 1" class="dl-import-note">{{ t('dlImportMirrors', { count: it.uris.length - 1 }) }}</div>
-                        </td>
-                        <td><input v-model="it.dir" class="qd-input dl-import-input" :title="it.dir" :aria-label="t('dlImportColDir')" /></td>
-                        <td class="is-nowrap">{{ it.size > 0 ? formatBytes(it.size) : '-' }}</td>
-                        <td><span class="dl-import-state" :class="'is-' + it.state">{{ importStateLabel(it.state) }}</span></td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                <div class="dl-import-options">
-                  <label class="dl-check-field"><input v-model="importCheckIntegrity" type="checkbox" class="dl-check" /><span>{{ t('dlImportCheckIntegrity') }}</span></label>
-                  <label class="dl-check-field"><input v-model="importPaused" type="checkbox" class="dl-check" /><span>{{ t('dlImportPaused') }}</span></label>
-                </div>
-                <p class="dl-hint">{{ t('dlImportOptionsHint') }}</p>
-                <div v-if="importResult" class="dl-import-result">
-                  <p class="dl-hint">{{ t('dlImportResult', { added: importResult.added, skipped: importResult.skipped }) }}</p>
-                  <p v-for="(a, j) in importFailedActions" :key="j" class="dl-hint is-warn">{{ a.name }}：{{ a.error }}</p>
-                </div>
-              </section>
-            </div>
-
-            <footer class="dl-modal-foot">
-              <span class="dl-grow"></span>
-              <button class="qd-btn qd-btn-sm" @click="closeImport">{{ t('cancel') }}</button>
-              <button
-                class="qd-btn qd-btn-primary qd-btn-sm"
-                :disabled="!status.running || importSubmitting || !importCheckedCount"
-                @click="submitImport"
-              ><FolderInput :size="14" />{{ t('dlImportSubmit', { count: importCheckedCount }) }}</button>
-            </footer>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+            <section class="dl-modal-section">
+              <h4>{{ t('dlImportSectionTasks') }}</h4>
+              <div v-if="!importItems.length" class="dl-table-empty">{{ t('dlImportEmpty') }}</div>
+              <div v-else class="dl-import-scroll">
+                <table class="dl-table dl-import-table">
+                  <thead>
+                    <tr>
+                      <th class="is-check">
+                        <input type="checkbox" class="dl-check" :checked="importAllChecked" :disabled="!importItems.length" :aria-label="t('dlSelectAll')" @change="toggleImportAll" />
+                      </th>
+                      <th>{{ t('dlImportColName') }}</th>
+                      <th>{{ t('dlImportColUrl') }}</th>
+                      <th>{{ t('dlImportColDir') }}</th>
+                      <th>{{ t('dlImportColSize') }}</th>
+                      <th>{{ t('dlImportColState') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(it, i) in importItems" :key="it.rowId" :class="{ 'is-off': !it.checked }">
+                      <td><input v-model="it.checked" type="checkbox" class="dl-check" :aria-label="it.name" /></td>
+                      <td>
+                        <input v-model="it.name" class="qd-input dl-import-input" :aria-label="t('dlImportColName')" />
+                        <div v-if="importReasonText(it.reason)" class="dl-import-note">{{ importReasonText(it.reason) }}</div>
+                      </td>
+                      <td>
+                        <input
+                          class="qd-input dl-import-input" :value="it.uris[0] || ''"
+                          :placeholder="t('dlImportUrlPlaceholder')" :aria-label="t('dlImportColUrl')"
+                          @input="onImportUriInput(i, $event)"
+                        />
+                        <div v-if="it.uris.length > 1" class="dl-import-note">{{ t('dlImportMirrors', { count: it.uris.length - 1 }) }}</div>
+                      </td>
+                      <td><input v-model="it.dir" class="qd-input dl-import-input" :title="it.dir" :aria-label="t('dlImportColDir')" /></td>
+                      <td class="is-nowrap">{{ it.size > 0 ? formatBytes(it.size) : '-' }}</td>
+                      <td><span class="dl-import-state" :class="'is-' + it.state">{{ importStateLabel(it.state) }}</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="dl-import-options">
+                <label class="dl-check-field"><input v-model="importCheckIntegrity" type="checkbox" class="dl-check" /><span>{{ t('dlImportCheckIntegrity') }}</span></label>
+                <label class="dl-check-field"><input v-model="importPaused" type="checkbox" class="dl-check" /><span>{{ t('dlImportPaused') }}</span></label>
+              </div>
+              <p class="dl-hint">{{ t('dlImportOptionsHint') }}</p>
+              <div v-if="importResult" class="dl-import-result">
+                <p class="dl-hint">{{ t('dlImportResult', { added: importResult.added, skipped: importResult.skipped }) }}</p>
+                <p v-for="(a, j) in importFailedActions" :key="j" class="dl-hint is-warn">{{ a.name }}：{{ a.error }}</p>
+              </div>
+            </section>
+  </div>
+  <template #footer>
+    <span class="dl-grow"></span>
+    <button class="qd-btn qd-btn-sm" @click="closeImport">{{ t('cancel') }}</button>
+    <button
+    class="qd-btn qd-btn-primary qd-btn-sm"
+    :disabled="!status.running || importSubmitting || !importCheckedCount"
+    @click="submitImport"
+    ><FolderInput :size="14" />{{ t('dlImportSubmit', { count: importCheckedCount }) }}</button>
+  </template>
+</QdModal>
 
     <!-- 新建下载弹框：与详情 / 设置共用同一套遮罩与面层 -->
-    <Teleport to="body">
-      <Transition name="dl-modal">
-        <div v-if="showAdd" class="dl-modal-overlay" @mousedown.self="closeAdd">
-          <div class="dl-modal dl-modal-wide" role="dialog" :aria-label="t('dlAddTitle')">
-            <header class="dl-modal-head">
-              <Plus :size="15" class="dl-modal-head-icon" />
-              <span class="dl-modal-title">{{ t('dlAddTitle') }}</span>
-              <span class="dl-modal-sub">{{ status.version }}</span>
-              <button class="qd-icon-btn" :title="t('dlClose')" @click="closeAdd"><X :size="14" /></button>
-            </header>
+    <QdModal
+      v-if="showAdd"
+      :model-value="true"
+      width="720px"
+      @update:model-value="closeAdd"
+    >
+  <template #header>
+    <Plus :size="15" class="dl-modal-head-icon" />
+    <span class="dl-modal-title">{{ t('dlAddTitle') }}</span>
+    <span class="dl-modal-sub">{{ status.version }}</span>
+  </template>
 
-            <div class="dl-modal-tabs">
-              <QdTabs v-model="addMode" :tabs="addModeTabs" variant="chip" />
-              <span class="dl-grow"></span>
-              <button
-                class="qd-btn qd-btn-sm" :class="{ 'is-on': advanced }" :disabled="addMode === 'batch'"
-                @click="advanced = !advanced"
-              ><Settings2 :size="14" />{{ t('dlAdvanced') }}</button>
-            </div>
+          <div class="dl-modal-tabs">
+            <QdTabs v-model="addMode" :tabs="addModeTabs" variant="chip" />
+            <span class="dl-grow"></span>
+            <button
+              class="qd-btn qd-btn-sm" :class="{ 'is-on': advanced }" :disabled="addMode === 'batch'"
+              @click="advanced = !advanced"
+            ><Settings2 :size="14" />{{ t('dlAdvanced') }}</button>
+          </div>
 
-            <div class="dl-modal-body">
-              <div class="dl-modal-section">
-                <h4>{{ t('dlAddSectionSource') }}</h4>
-                <div v-if="addMode === 'url'" class="dl-add-input-row">
-                  <input
-                    ref="urlInput" v-model="url" class="qd-input" :placeholder="t('dlUrlPlaceholder')"
-                    @keydown.enter="submit"
-                  />
-                  <button class="qd-icon-btn" :title="t('dlPaste')" @click="pasteLinks"><ClipboardPaste :size="14" /></button>
-                  <button class="qd-btn qd-btn-sm dl-row-btn" :disabled="probing" @click="doProbe">
+            <div class="dl-modal-section">
+              <h4>{{ t('dlAddSectionSource') }}</h4>
+              <div v-if="addMode === 'url'" class="dl-add-input-row">
+                <input
+                  ref="urlInput" v-model="url" class="qd-input" :placeholder="t('dlUrlPlaceholder')"
+                  @keydown.enter="submit"
+                />
+                <button class="qd-icon-btn" :title="t('dlPaste')" @click="pasteLinks"><ClipboardPaste :size="14" /></button>
+                <button class="qd-btn qd-btn-sm dl-row-btn" :disabled="probing" @click="doProbe">
+                  <Search :size="14" />{{ probing ? t('dlProbing') : t('dlProbe') }}
+                </button>
+              </div>
+              <template v-else-if="addMode === 'batch'">
+                <textarea
+                  ref="batchInput" v-model="batchText" class="qd-input dl-add-textarea"
+                  :placeholder="t('dlBatchPlaceholder')" @keydown.ctrl.enter="submit"
+                ></textarea>
+                <p class="dl-hint">{{ t('dlBatchDirHint') }}</p>
+                <div class="dl-add-tools">
+                  <button class="qd-btn qd-btn-sm" :disabled="probing" @click="doProbe">
                     <Search :size="14" />{{ probing ? t('dlProbing') : t('dlProbe') }}
                   </button>
-                </div>
-                <template v-else-if="addMode === 'batch'">
-                  <textarea
-                    ref="batchInput" v-model="batchText" class="qd-input dl-add-textarea"
-                    :placeholder="t('dlBatchPlaceholder')" @keydown.ctrl.enter="submit"
-                  ></textarea>
-                  <p class="dl-hint">{{ t('dlBatchDirHint') }}</p>
-                  <div class="dl-add-tools">
-                    <button class="qd-btn qd-btn-sm" :disabled="probing" @click="doProbe">
-                      <Search :size="14" />{{ probing ? t('dlProbing') : t('dlProbe') }}
-                    </button>
-                    <button class="qd-btn qd-btn-sm" @click="pasteLinks">
-                      <ClipboardPaste :size="14" />{{ t('dlPaste') }}
-                    </button>
-                  </div>
-                </template>
-                <div v-else class="dl-add-file-row">
-                  <button class="qd-btn" @click="chooseFile">
-                    <FileArchive :size="14" />{{ t(addMode === 'torrent' ? 'dlPickTorrent' : 'dlPickMetalink') }}
+                  <button class="qd-btn qd-btn-sm" @click="pasteLinks">
+                    <ClipboardPaste :size="14" />{{ t('dlPaste') }}
                   </button>
-                  <span class="dl-picked" :title="filePath">{{ pickedName || t('dlNoFilePicked') }}</span>
                 </div>
-              </div>
-
-              <div class="dl-modal-section">
-                <h4>{{ t('dlAddSectionTarget') }}</h4>
-                <label class="dl-field">
-                  <span>{{ t('dlAddDir') }}</span>
-                  <div class="dl-add-input-row">
-                    <input v-model="dir" class="qd-input" :placeholder="t('dlDirPlaceholder')" />
-                    <button
-                      class="qd-btn qd-btn-sm dl-row-btn"
-                      :title="status.remote ? t('dlPickDirRemoteHint') : t('dlBrowseDir')"
-                      @click="chooseDir"
-                    >
-                      <Folder :size="14" />{{ t('dlBrowseDir') }}
-                    </button>
-                  </div>
-                </label>
-                <p class="dl-hint">{{ t('dlAddDirHint') }}</p>
-                <p v-if="options.perTaskFolder" class="dl-hint">{{ t('dlPerTaskFolderOn') }}</p>
-                <p v-else class="dl-hint">{{ t('dlPerTaskFolderOff') }}</p>
-                <p v-if="diskSpace" class="dl-hint">
-                  {{ t('dlDiskSpace', { free: formatBytes(diskSpace.free), total: formatBytes(diskSpace.total) }) }}
-                </p>
-                <p v-else-if="status.remote" class="dl-hint">{{ t('dlDiskRemoteHint') }}</p>
-                <template v-if="probe">
-                  <p class="dl-hint">
-                    {{ t('dlProbeResult', {
-                      size: probe.total > 0 ? formatBytes(probe.total) : t('dlProbeUnknownSize'),
-                      count: probe.items.length,
-                    }) }}
-                  </p>
-                  <p v-if="status.remote" class="dl-hint">{{ t('dlProbeRemote') }}</p>
-                  <p v-else-if="probe.total > 0 && diskSpace" class="dl-hint" :class="{ 'is-warn': !enoughSpace }">
-                    {{ t(enoughSpace ? 'dlProbeEnough' : 'dlProbeNotEnough', {
-                      size: formatBytes(probe.total), free: formatBytes(diskSpace.free),
-                    }) }}
-                  </p>
-                  <p v-if="probe.unknown" class="dl-hint">
-                    {{ t('dlProbeUnknown', { count: probe.unknown }) }}
-                  </p>
-                </template>
-                <p v-if="probeError" class="dl-hint is-warn">{{ probeError }}</p>
-              </div>
-
-              <div v-if="advanced && addMode !== 'batch'" class="dl-modal-section">
-                <h4>{{ t('dlAdvanced') }}</h4>
-                <div class="dl-settings-grid">
-                  <label class="dl-field"><span>{{ t('dlAdvancedSplit') }}</span><input v-model.number="advForm.split" type="number" min="0" max="64" class="qd-input" /></label>
-                  <label class="dl-field"><span>{{ t('dlAdvancedConn') }}</span><input v-model.number="advForm.conn" type="number" min="0" max="64" class="qd-input" /></label>
-                  <label class="dl-check-field"><input v-model="advForm.cont" type="checkbox" class="dl-check" /><span>{{ t('dlAdvancedContinue') }}</span></label>
-                </div>
-
-                <h4 class="dl-sub-title">{{ t('dlAdvSectionOut') }}</h4>
-                <div class="dl-settings-grid">
-                  <label class="dl-field"><span>{{ t('dlAdvOut') }}</span><input v-model="advForm.out" class="qd-input" /></label>
-                  <label class="dl-field"><span>{{ t('dlAdvSelectFile') }}</span><input v-model="advForm.selectFile" class="qd-input" placeholder="1,3-5" /></label>
-                </div>
-
-                <h4 class="dl-sub-title">{{ t('dlAdvSectionHttp') }}</h4>
-                <div class="dl-settings-grid">
-                  <label class="dl-field dl-field-wide"><span>{{ t('dlAdvHeaders') }}</span><textarea v-model="advForm.headers" rows="3" class="qd-input dl-adv-headers"></textarea></label>
-                  <label class="dl-field"><span>{{ t('dlAdvReferer') }}</span><input v-model="advForm.referer" class="qd-input" /></label>
-                  <label class="dl-field"><span>{{ t('dlAdvUser') }}</span><input v-model="advForm.httpUser" class="qd-input" /></label>
-                  <label class="dl-field"><span>{{ t('dlAdvPass') }}</span><input v-model="advForm.httpPass" type="password" class="qd-input" /></label>
-                  <label class="dl-field"><span>{{ t('dlAdvUserAgent') }}</span><input v-model="advForm.userAgent" class="qd-input" /></label>
-                  <label class="dl-field"><span>{{ t('dlAdvProxy') }}</span><input v-model="advForm.proxy" class="qd-input" /></label>
-                  <label class="dl-field dl-field-wide"><span>{{ t('dlAdvChecksum') }}</span><input v-model="advForm.checksum" class="qd-input" placeholder="sha-256=..." /></label>
-                </div>
-
-                <h4 class="dl-sub-title">{{ t('dlAdvSectionLimit') }}</h4>
-                <div class="dl-settings-grid">
-                  <label class="dl-field"><span>{{ t('dlAdvDownLimit') }}</span><input v-model="advForm.downLimit" class="qd-input" placeholder="0" /></label>
-                  <label class="dl-field"><span>{{ t('dlAdvUpLimit') }}</span><input v-model="advForm.upLimit" class="qd-input" placeholder="0" /></label>
-                  <label class="dl-field"><span>{{ t('dlAdvSeedRatio') }}</span><input v-model="advForm.seedRatio" class="qd-input" placeholder="0.0" /></label>
-                  <label class="dl-field"><span>{{ t('dlAdvSeedTime') }}</span><input v-model="advForm.seedTime" class="qd-input" placeholder="0" /></label>
-                  <label class="dl-field"><span>{{ t('dlAdvPosition') }}</span><input v-model.number="advForm.position" type="number" min="0" class="qd-input" /></label>
-                </div>
-                <p class="dl-hint">{{ t('dlAdvHint') }}</p>
-              </div>
-              <p v-else-if="addMode === 'batch'" class="dl-hint">{{ t('dlAdvancedBatchHint') }}</p>
-
-              <div>
-                <p v-if="addMode === 'url'" class="dl-hint">{{ t('dlMagnetHint') }}</p>
-                <p v-else-if="addMode === 'torrent'" class="dl-hint">{{ t('dlTorrentHint') }}</p>
-                <p v-else-if="addMode === 'metalink'" class="dl-hint">{{ t('dlMetalinkHint') }}</p>
-                <p v-else class="dl-hint">{{ t('dlAddBatchHint') }}</p>
-                <p class="dl-license">{{ t('dlLicense') }}</p>
+              </template>
+              <div v-else class="dl-add-file-row">
+                <button class="qd-btn" @click="chooseFile">
+                  <FileArchive :size="14" />{{ t(addMode === 'torrent' ? 'dlPickTorrent' : 'dlPickMetalink') }}
+                </button>
+                <span class="dl-picked" :title="filePath">{{ pickedName || t('dlNoFilePicked') }}</span>
               </div>
             </div>
 
-            <footer class="dl-modal-foot">
-              <span class="dl-grow"></span>
-              <button class="qd-btn qd-btn-sm" @click="closeAdd">{{ t('cancel') }}</button>
-              <button
-                class="qd-btn qd-btn-primary qd-btn-sm" :disabled="!status.running || submitting"
-                :title="status.running ? t('dlAdd') : t('dlEngineNotReady')" @click="submit"
-              ><Plus :size="14" />{{ t('dlAdd') }}</button>
-            </footer>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+            <div class="dl-modal-section">
+              <h4>{{ t('dlAddSectionTarget') }}</h4>
+              <label class="dl-field">
+                <span>{{ t('dlAddDir') }}</span>
+                <div class="dl-add-input-row">
+                  <input v-model="dir" class="qd-input" :placeholder="t('dlDirPlaceholder')" />
+                  <button
+                    class="qd-btn qd-btn-sm dl-row-btn"
+                    :title="status.remote ? t('dlPickDirRemoteHint') : t('dlBrowseDir')"
+                    @click="chooseDir"
+                  >
+                    <Folder :size="14" />{{ t('dlBrowseDir') }}
+                  </button>
+                </div>
+              </label>
+              <p class="dl-hint">{{ t('dlAddDirHint') }}</p>
+              <p v-if="options.perTaskFolder" class="dl-hint">{{ t('dlPerTaskFolderOn') }}</p>
+              <p v-else class="dl-hint">{{ t('dlPerTaskFolderOff') }}</p>
+              <p v-if="diskSpace" class="dl-hint">
+                {{ t('dlDiskSpace', { free: formatBytes(diskSpace.free), total: formatBytes(diskSpace.total) }) }}
+              </p>
+              <p v-else-if="status.remote" class="dl-hint">{{ t('dlDiskRemoteHint') }}</p>
+              <template v-if="probe">
+                <p class="dl-hint">
+                  {{ t('dlProbeResult', {
+                    size: probe.total > 0 ? formatBytes(probe.total) : t('dlProbeUnknownSize'),
+                    count: probe.items.length,
+                  }) }}
+                </p>
+                <p v-if="status.remote" class="dl-hint">{{ t('dlProbeRemote') }}</p>
+                <p v-else-if="probe.total > 0 && diskSpace" class="dl-hint" :class="{ 'is-warn': !enoughSpace }">
+                  {{ t(enoughSpace ? 'dlProbeEnough' : 'dlProbeNotEnough', {
+                    size: formatBytes(probe.total), free: formatBytes(diskSpace.free),
+                  }) }}
+                </p>
+                <p v-if="probe.unknown" class="dl-hint">
+                  {{ t('dlProbeUnknown', { count: probe.unknown }) }}
+                </p>
+              </template>
+  <div class="dl-modal-body">
+              <p v-if="probeError" class="dl-hint is-warn">{{ probeError }}</p>
+            </div>
+
+            <div v-if="advanced && addMode !== 'batch'" class="dl-modal-section">
+              <h4>{{ t('dlAdvanced') }}</h4>
+              <div class="dl-settings-grid">
+                <label class="dl-field"><span>{{ t('dlAdvancedSplit') }}</span><input v-model.number="advForm.split" type="number" min="0" max="64" class="qd-input" /></label>
+                <label class="dl-field"><span>{{ t('dlAdvancedConn') }}</span><input v-model.number="advForm.conn" type="number" min="0" max="64" class="qd-input" /></label>
+                <label class="dl-check-field"><input v-model="advForm.cont" type="checkbox" class="dl-check" /><span>{{ t('dlAdvancedContinue') }}</span></label>
+              </div>
+
+              <h4 class="dl-sub-title">{{ t('dlAdvSectionOut') }}</h4>
+              <div class="dl-settings-grid">
+                <label class="dl-field"><span>{{ t('dlAdvOut') }}</span><input v-model="advForm.out" class="qd-input" /></label>
+                <label class="dl-field"><span>{{ t('dlAdvSelectFile') }}</span><input v-model="advForm.selectFile" class="qd-input" placeholder="1,3-5" /></label>
+              </div>
+
+              <h4 class="dl-sub-title">{{ t('dlAdvSectionHttp') }}</h4>
+              <div class="dl-settings-grid">
+                <label class="dl-field dl-field-wide"><span>{{ t('dlAdvHeaders') }}</span><textarea v-model="advForm.headers" rows="3" class="qd-input dl-adv-headers"></textarea></label>
+                <label class="dl-field"><span>{{ t('dlAdvReferer') }}</span><input v-model="advForm.referer" class="qd-input" /></label>
+                <label class="dl-field"><span>{{ t('dlAdvUser') }}</span><input v-model="advForm.httpUser" class="qd-input" /></label>
+                <label class="dl-field"><span>{{ t('dlAdvPass') }}</span><input v-model="advForm.httpPass" type="password" class="qd-input" /></label>
+                <label class="dl-field"><span>{{ t('dlAdvUserAgent') }}</span><input v-model="advForm.userAgent" class="qd-input" /></label>
+                <label class="dl-field"><span>{{ t('dlAdvProxy') }}</span><input v-model="advForm.proxy" class="qd-input" /></label>
+                <label class="dl-field dl-field-wide"><span>{{ t('dlAdvChecksum') }}</span><input v-model="advForm.checksum" class="qd-input" placeholder="sha-256=..." /></label>
+              </div>
+
+              <h4 class="dl-sub-title">{{ t('dlAdvSectionLimit') }}</h4>
+              <div class="dl-settings-grid">
+                <label class="dl-field"><span>{{ t('dlAdvDownLimit') }}</span><input v-model="advForm.downLimit" class="qd-input" placeholder="0" /></label>
+                <label class="dl-field"><span>{{ t('dlAdvUpLimit') }}</span><input v-model="advForm.upLimit" class="qd-input" placeholder="0" /></label>
+                <label class="dl-field"><span>{{ t('dlAdvSeedRatio') }}</span><input v-model="advForm.seedRatio" class="qd-input" placeholder="0.0" /></label>
+                <label class="dl-field"><span>{{ t('dlAdvSeedTime') }}</span><input v-model="advForm.seedTime" class="qd-input" placeholder="0" /></label>
+                <label class="dl-field"><span>{{ t('dlAdvPosition') }}</span><input v-model.number="advForm.position" type="number" min="0" class="qd-input" /></label>
+              </div>
+              <p class="dl-hint">{{ t('dlAdvHint') }}</p>
+            </div>
+            <p v-else-if="addMode === 'batch'" class="dl-hint">{{ t('dlAdvancedBatchHint') }}</p>
+
+            <div>
+              <p v-if="addMode === 'url'" class="dl-hint">{{ t('dlMagnetHint') }}</p>
+              <p v-else-if="addMode === 'torrent'" class="dl-hint">{{ t('dlTorrentHint') }}</p>
+              <p v-else-if="addMode === 'metalink'" class="dl-hint">{{ t('dlMetalinkHint') }}</p>
+              <p v-else class="dl-hint">{{ t('dlAddBatchHint') }}</p>
+              <p class="dl-license">{{ t('dlLicense') }}</p>
+            </div>
+  </div>
+  <template #footer>
+    <span class="dl-grow"></span>
+    <button class="qd-btn qd-btn-sm" @click="closeAdd">{{ t('cancel') }}</button>
+    <button
+    class="qd-btn qd-btn-primary qd-btn-sm" :disabled="!status.running || submitting"
+    :title="status.running ? t('dlAdd') : t('dlEngineNotReady')" @click="submit"
+    ><Plus :size="14" />{{ t('dlAdd') }}</button>
+  </template>
+</QdModal>
 
     <!-- 任务详情弹框：Teleport 到 body，数据随 1s 快照实时刷新 -->
-    <Teleport to="body">
-      <Transition name="dl-modal">
-        <div v-if="detailTask" class="dl-modal-overlay" @mousedown.self="closeDetail">
-          <div class="dl-modal dl-modal-wide" role="dialog" :aria-label="t('dlDetailTitle')">
-            <header class="dl-modal-head">
-              <Info :size="15" class="dl-modal-head-icon" />
-              <span class="dl-modal-title">{{ t('dlDetailTitle') }}</span>
-              <span class="dl-modal-sub">{{ detailTask.gid }}</span>
-              <button class="qd-icon-btn" :title="t('dlDetailRefresh')" @click="loadDetail"><RefreshCw :size="14" /></button>
-              <button class="qd-icon-btn" :title="t('dlDetailClose')" @click="closeDetail"><X :size="14" /></button>
-            </header>
+    <QdModal
+      v-if="detailTask"
+      :model-value="true"
+      width="720px"
+      @update:model-value="closeDetail"
+    >
+  <template #header>
+    <Info :size="15" class="dl-modal-head-icon" />
+    <span class="dl-modal-title">{{ t('dlDetailTitle') }}</span>
+    <span class="dl-modal-sub">{{ detailTask.gid }}</span>
+  </template>
 
-            <div class="dl-modal-tabs">
-              <QdTabs v-model="detailTab" :tabs="detailTabs" variant="chip" />
-            </div>
+          <div class="dl-modal-tabs">
+            <QdTabs v-model="detailTab" :tabs="detailTabs" variant="chip" />
+          </div>
 
-            <div class="dl-modal-body">
-              <div v-if="detailLoading" class="dl-table-empty">{{ t('dlLoadingDetail') }}</div>
-              <div v-else-if="!detail" class="dl-table-empty">{{ t('dlNoDetail') }}</div>
+            <div v-if="detailLoading" class="dl-table-empty">{{ t('dlLoadingDetail') }}</div>
+            <div v-else-if="!detail" class="dl-table-empty">{{ t('dlNoDetail') }}</div>
 
-              <template v-else-if="detailTab === 'overview'">
-                <div class="dl-modal-hero">
-                  <div class="dl-modal-name" :title="detailTask.url">{{ detailTask.name }}</div>
-                  <span class="dl-tag" :class="'is-' + detailTask.status">{{ statusKey(detailTask.status) }}</span>
+            <template v-else-if="detailTab === 'overview'">
+              <div class="dl-modal-hero">
+                <div class="dl-modal-name" :title="detailTask.url">{{ detailTask.name }}</div>
+                <span class="dl-tag" :class="'is-' + detailTask.status">{{ statusKey(detailTask.status) }}</span>
+              </div>
+              <div class="dl-modal-progress">
+                <div class="dl-bar">
+                  <!-- 进度条宽度是运行时计算值，按 R7 例外就近说明 -->
+                  <div class="dl-bar-fill" :style="{ width: Math.min(100, Math.max(0, detailTask.progress)) + '%' }"></div>
                 </div>
-                <div class="dl-modal-progress">
-                  <div class="dl-bar">
-                    <!-- 进度条宽度是运行时计算值，按 R7 例外就近说明 -->
-                    <div class="dl-bar-fill" :style="{ width: Math.min(100, Math.max(0, detailTask.progress)) + '%' }"></div>
-                  </div>
-                  <span>{{ detailTask.progress.toFixed(1) }}%</span>
-                </div>
+                <span>{{ detailTask.progress.toFixed(1) }}%</span>
+              </div>
 
-                <section class="dl-modal-section">
-                  <h4>{{ t('dlDetailSectionInfo') }}</h4>
-                  <div class="dl-kv">
-                    <div class="dl-kv-row"><span>{{ t('dlFieldStatus') }}</span><b>{{ statusKey(detailTask.status) }}</b></div>
-                    <div class="dl-kv-row"><span>{{ t('dlFieldSize') }}</span><b>{{ formatBytes(detailTask.completed) }} / {{ formatBytes(detailTask.total) }}</b></div>
-                    <div class="dl-kv-row"><span>{{ t('dlFieldSpeed') }}</span><b>{{ formatSpeed(detailTask.speed) }}</b></div>
-                    <div class="dl-kv-row"><span>{{ t('dlFieldEta') }}</span><b>{{ etaFor(detailTask) }}</b></div>
-                    <div class="dl-kv-row"><span>{{ t('dlFieldCreated') }}</span><b>{{ formatTime(detailTask.createdAt) }}</b></div>
-                    <div class="dl-kv-row"><span>{{ t('dlFieldSource') }}</span><b>{{ sourceLabel(detailTask.source) }}</b></div>
-                  </div>
-                </section>
-
-                <section v-if="detailTask.isTorrent" class="dl-modal-section">
-                  <h4>{{ t('dlDetailSectionBT') }}</h4>
-                  <div class="dl-kv">
-                    <div class="dl-kv-row"><span>{{ t('dlFieldUploadSpeed') }}</span><b>{{ formatSpeed(detailTask.uploadSpeed) }}</b></div>
-                    <div class="dl-kv-row"><span>{{ t('dlFieldUploaded') }}</span><b>{{ formatBytes(detailTask.uploaded) }}</b></div>
-                    <div class="dl-kv-row"><span>{{ t('dlFieldShareRatio') }}</span><b>{{ formatRatio(detailTask.shareRatio) }}</b></div>
-                    <div class="dl-kv-row"><span>{{ t('dlFieldSeeders') }}</span><b>{{ detailTask.seeders }}</b></div>
-                    <div class="dl-kv-row"><span>{{ t('dlFieldConnections') }}</span><b>{{ detailTask.connections }}</b></div>
-                    <div class="dl-kv-row"><span>{{ t('dlFieldPieces') }}</span><b>{{ detailTask.numPieces }} · {{ formatBytes(detailTask.pieceLength) }}</b></div>
-                    <div class="dl-kv-row"><span>{{ t('dlFieldFileCount') }}</span><b>{{ detailTask.fileCount }}</b></div>
-                    <div class="dl-kv-row"><span>{{ t('dlFieldInfoHash') }}</span><b>{{ detailTask.infoHash || '-' }}</b></div>
-                  </div>
-                </section>
-
-                <section class="dl-modal-section">
-                  <h4>{{ t('dlDetailSectionFile') }}</h4>
-                  <div class="dl-kv">
-                    <div class="dl-kv-row"><span>{{ t('dlFieldGid') }}</span><b>{{ detailTask.gid }}</b></div>
-                    <div class="dl-kv-row"><span>{{ t('dlFieldDir') }}</span><b>{{ detailTask.dir || '-' }}</b></div>
-                    <div class="dl-kv-row"><span>{{ t('dlFieldPath') }}</span><b>{{ detailTask.path || '-' }}</b></div>
-                    <div v-if="detailTask.error" class="dl-kv-row"><span>{{ t('dlFieldError') }}</span><b class="dl-err-text">{{ detailTask.error }}</b></div>
-                  </div>
-                </section>
-
-                <section class="dl-modal-section">
-                  <h4>{{ t('dlFieldLink') }}</h4>
-                  <div class="dl-link-row">
-                    <input class="qd-input" :value="detailTask.url" readonly />
-                    <button class="qd-icon-btn" :title="t('dlCopyLink')" @click="copyField(detailTask.url)"><Copy :size="14" /></button>
-                  </div>
-                </section>
-              </template>
-
-              <template v-else-if="detailTab === 'files'">
-                <div class="dl-table-tools">
-                  <button class="qd-btn qd-btn-sm" @click="toggleAllFiles(true)"><Check :size="14" />{{ t('dlSelectAllFiles') }}</button>
-                  <button class="qd-btn qd-btn-sm" @click="toggleAllFiles(false)"><X :size="14" />{{ t('dlDeselectAllFiles') }}</button>
-                  <span class="dl-grow"></span>
-                  <button class="qd-btn qd-btn-primary qd-btn-sm" @click="saveSelection">{{ t('dlSaveSelection') }}</button>
-                </div>
-                <div v-if="!detail.files.length" class="dl-table-empty">{{ t('dlNoFiles') }}</div>
-                <table v-else class="dl-table">
-                  <thead><tr>
-                    <th>#</th><th>{{ t('dlFileName') }}</th><th>{{ t('dlFileSize') }}</th>
-                    <th>{{ t('dlFileDone') }}</th><th>{{ t('dlFileSelected') }}</th>
-                  </tr></thead>
-                  <tbody>
-                    <tr v-for="f in detail.files" :key="f.index">
-                      <td>{{ f.index }}</td>
-                      <td class="is-wrap" :title="f.path">{{ f.path }}</td>
-                      <td>{{ formatBytes(f.length) }}</td>
-                      <td>{{ formatBytes(f.completed) }}</td>
-                      <td><input type="checkbox" class="dl-check" :checked="selectedFiles.has(f.index)" @change="toggleFile(f.index)" /></td>
-                    </tr>
-                  </tbody>
-                </table>
-              </template>
-
-              <template v-else-if="detailTab === 'uris'">
-                <div class="dl-link-row">
-                  <input v-model="newUri" class="qd-input" :placeholder="t('dlUriPlaceholder')" @keydown.enter="addTaskUri" />
-                  <button class="qd-btn qd-btn-sm" @click="addTaskUri"><Plus :size="14" />{{ t('dlAddUri') }}</button>
-                </div>
-                <div v-if="!detail.uris.length" class="dl-table-empty">{{ t('dlNoUris') }}</div>
-                <table v-else class="dl-table">
-                  <thead><tr><th>{{ t('dlFieldLink') }}</th><th>{{ t('dlUriStatus') }}</th><th></th></tr></thead>
-                  <tbody>
-                    <tr v-for="(u, i) in detail.uris" :key="i">
-                      <td class="is-wrap">{{ u.uri }}</td><td>{{ u.status }}</td>
-                      <td><button class="qd-icon-btn" :title="t('dlDelUri')" @click="delTaskUri(u.uri)"><X :size="14" /></button></td>
-                    </tr>
-                  </tbody>
-                </table>
-              </template>
-
-              <template v-else-if="detailTab === 'peers'">
-                <div v-if="!detail.peers.length" class="dl-table-empty">{{ t('dlNoPeers') }}</div>
-                <table v-else class="dl-table">
-                  <thead><tr>
-                    <th>{{ t('dlPeerIp') }}</th><th>{{ t('dlPeerPort') }}</th><th>{{ t('dlPeerClient') }}</th>
-                    <th>{{ t('dlPeerDown') }}</th><th>{{ t('dlPeerUp') }}</th><th>{{ t('dlPeerSeeder') }}</th>
-                  </tr></thead>
-                  <tbody>
-                    <tr v-for="(p, i) in detail.peers" :key="i">
-                      <td>{{ p.ip }}</td><td>{{ p.port }}</td><td class="is-wrap">{{ p.peerId }}</td>
-                      <td>{{ formatSpeed(p.downloadSpeed) }}</td><td>{{ formatSpeed(p.uploadSpeed) }}</td>
-                      <td>{{ p.seeder ? t('dlYes') : t('dlNo') }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </template>
-
-              <template v-else-if="detailTab === 'servers'">
-                <div v-if="!detail.servers.length" class="dl-table-empty">{{ t('dlNoServers') }}</div>
-                <table v-else class="dl-table">
-                  <thead><tr>
-                    <th>#</th><th>{{ t('dlServerUri') }}</th><th>{{ t('dlServerStatus') }}</th>
-                    <th>{{ t('dlServerSpeed') }}</th>
-                  </tr></thead>
-                  <tbody>
-                    <tr v-for="(s, i) in detail.servers" :key="i">
-                      <td>{{ s.index }}</td><td class="is-wrap">{{ s.currentUri || s.uri }}</td>
-                      <td>{{ s.status }}<span v-if="s.error" class="dl-err-text"> · {{ s.error }}</span></td>
-                      <td>{{ formatSpeed(s.speed) }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </template>
-
-              <template v-else-if="detailTab === 'options'">
-                <div class="dl-settings-grid">
-                  <label class="dl-field"><span>{{ t('dlTaskOptionDown') }}</span><input v-model="taskOpts.down" class="qd-input" placeholder="0" /></label>
-                  <label class="dl-field"><span>{{ t('dlTaskOptionUp') }}</span><input v-model="taskOpts.up" class="qd-input" placeholder="0" /></label>
-                  <label class="dl-field"><span>{{ t('dlTaskOptionSeedRatio') }}</span><input v-model="taskOpts.seedRatio" class="qd-input" /></label>
-                  <label class="dl-field"><span>{{ t('dlTaskOptionPeers') }}</span><input v-model="taskOpts.peers" class="qd-input" /></label>
-                </div>
-                <p class="dl-hint">{{ t('dlTaskOptionHint') }}</p>
-                <div class="dl-card-actions"><button class="qd-btn qd-btn-primary" @click="saveTaskOptions">{{ t('dlSaveTaskOptions') }}</button></div>
-                <div class="dl-kv dl-kv-raw">
-                  <div v-for="(v, k) in detail.options" :key="k" class="dl-kv-row"><span>{{ k }}</span><b>{{ v || '-' }}</b></div>
-                </div>
-              </template>
-
-              <template v-else-if="detailTab === 'torrent'">
+              <section class="dl-modal-section">
+                <h4>{{ t('dlDetailSectionInfo') }}</h4>
                 <div class="dl-kv">
-                  <div class="dl-kv-row"><span>{{ t('dlFieldTorrentName') }}</span><b>{{ detailTask.torrentName || '-' }}</b></div>
-                  <div class="dl-kv-row"><span>{{ t('dlFieldTorrentMode') }}</span><b>{{ detail.torrentMode || '-' }}</b></div>
-                  <div class="dl-kv-row"><span>{{ t('dlFieldTorrentCreated') }}</span><b>{{ detail.torrentCreationDate ? formatTime(detail.torrentCreationDate * 1000) : '-' }}</b></div>
-                  <div class="dl-kv-row"><span>{{ t('dlFieldTorrentComment') }}</span><b>{{ detail.torrentComment || '-' }}</b></div>
+                  <div class="dl-kv-row"><span>{{ t('dlFieldStatus') }}</span><b>{{ statusKey(detailTask.status) }}</b></div>
+                  <div class="dl-kv-row"><span>{{ t('dlFieldSize') }}</span><b>{{ formatBytes(detailTask.completed) }} / {{ formatBytes(detailTask.total) }}</b></div>
+                  <div class="dl-kv-row"><span>{{ t('dlFieldSpeed') }}</span><b>{{ formatSpeed(detailTask.speed) }}</b></div>
+                  <div class="dl-kv-row"><span>{{ t('dlFieldEta') }}</span><b>{{ etaFor(detailTask) }}</b></div>
+                  <div class="dl-kv-row"><span>{{ t('dlFieldCreated') }}</span><b>{{ formatTime(detailTask.createdAt) }}</b></div>
+                  <div class="dl-kv-row"><span>{{ t('dlFieldSource') }}</span><b>{{ sourceLabel(detailTask.source) }}</b></div>
+                </div>
+              </section>
+
+              <section v-if="detailTask.isTorrent" class="dl-modal-section">
+                <h4>{{ t('dlDetailSectionBT') }}</h4>
+                <div class="dl-kv">
+                  <div class="dl-kv-row"><span>{{ t('dlFieldUploadSpeed') }}</span><b>{{ formatSpeed(detailTask.uploadSpeed) }}</b></div>
+                  <div class="dl-kv-row"><span>{{ t('dlFieldUploaded') }}</span><b>{{ formatBytes(detailTask.uploaded) }}</b></div>
+                  <div class="dl-kv-row"><span>{{ t('dlFieldShareRatio') }}</span><b>{{ formatRatio(detailTask.shareRatio) }}</b></div>
+                  <div class="dl-kv-row"><span>{{ t('dlFieldSeeders') }}</span><b>{{ detailTask.seeders }}</b></div>
+                  <div class="dl-kv-row"><span>{{ t('dlFieldConnections') }}</span><b>{{ detailTask.connections }}</b></div>
+                  <div class="dl-kv-row"><span>{{ t('dlFieldPieces') }}</span><b>{{ detailTask.numPieces }} · {{ formatBytes(detailTask.pieceLength) }}</b></div>
+                  <div class="dl-kv-row"><span>{{ t('dlFieldFileCount') }}</span><b>{{ detailTask.fileCount }}</b></div>
                   <div class="dl-kv-row"><span>{{ t('dlFieldInfoHash') }}</span><b>{{ detailTask.infoHash || '-' }}</b></div>
                 </div>
-                <h4 class="dl-sub-title">{{ t('dlFieldTrackers') }}</h4>
-                <div v-if="!detail.announceList.length" class="dl-table-empty">{{ t('dlNoTrackers') }}</div>
-                <div v-for="(tier, i) in detail.announceList" :key="i" class="dl-tracker-tier">
-                  <div v-for="(tr, j) in tier" :key="j" class="dl-tracker">{{ tr }}</div>
-                </div>
-              </template>
-            </div>
+              </section>
 
-            <footer class="dl-modal-foot">
-              <button v-if="detailTask.status === 'active' || detailTask.status === 'waiting'" class="qd-btn qd-btn-sm" @click="pause(detailTask.gid)">{{ t('dlPause') }}</button>
-              <button v-if="detailTask.status === 'active'" class="qd-btn qd-btn-sm" @click="forcePause(detailTask.gid)">{{ t('dlForcePause') }}</button>
-              <button v-if="detailTask.status === 'paused'" class="qd-btn qd-btn-sm" @click="resume(detailTask.gid)">{{ t('dlResume') }}</button>
-              <button v-if="detailTask.status === 'error'" class="qd-btn qd-btn-sm" @click="retryTask(detailTask)"><RotateCcw :size="14" />{{ t('dlRetry') }}</button>
-              <button class="qd-btn qd-btn-sm qd-btn-danger" @click="remove(detailTask.gid, forceFor(detailTask))">{{ t('dlRemove') }}</button>
-              <span class="dl-grow"></span>
-              <button class="qd-btn qd-btn-sm" @click="openFolder(detailTask)"><Folder :size="14" />{{ t('dlOpenFolder') }}</button>
-              <button class="qd-btn qd-btn-sm" @click="copyField(detailTask.path || detailTask.dir)">{{ t('dlCopyPath') }}</button>
-              <button class="qd-btn qd-btn-sm" @click="copyField(detailTask.gid)">{{ t('dlCopyGid') }}</button>
-              <button class="qd-btn qd-btn-sm" @click="closeDetail">{{ t('close') }}</button>
-            </footer>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+              <section class="dl-modal-section">
+                <h4>{{ t('dlDetailSectionFile') }}</h4>
+                <div class="dl-kv">
+                  <div class="dl-kv-row"><span>{{ t('dlFieldGid') }}</span><b>{{ detailTask.gid }}</b></div>
+                  <div class="dl-kv-row"><span>{{ t('dlFieldDir') }}</span><b>{{ detailTask.dir || '-' }}</b></div>
+                  <div class="dl-kv-row"><span>{{ t('dlFieldPath') }}</span><b>{{ detailTask.path || '-' }}</b></div>
+                  <div v-if="detailTask.error" class="dl-kv-row"><span>{{ t('dlFieldError') }}</span><b class="dl-err-text">{{ detailTask.error }}</b></div>
+                </div>
+              </section>
+
+              <section class="dl-modal-section">
+                <h4>{{ t('dlFieldLink') }}</h4>
+                <div class="dl-link-row">
+                  <input class="qd-input" :value="detailTask.url" readonly />
+                  <button class="qd-icon-btn" :title="t('dlCopyLink')" @click="copyField(detailTask.url)"><Copy :size="14" /></button>
+                </div>
+              </section>
+            </template>
+
+            <template v-else-if="detailTab === 'files'">
+              <div class="dl-table-tools">
+                <button class="qd-btn qd-btn-sm" @click="toggleAllFiles(true)"><Check :size="14" />{{ t('dlSelectAllFiles') }}</button>
+                <button class="qd-btn qd-btn-sm" @click="toggleAllFiles(false)"><X :size="14" />{{ t('dlDeselectAllFiles') }}</button>
+                <span class="dl-grow"></span>
+                <button class="qd-btn qd-btn-primary qd-btn-sm" @click="saveSelection">{{ t('dlSaveSelection') }}</button>
+              </div>
+              <div v-if="!detail.files.length" class="dl-table-empty">{{ t('dlNoFiles') }}</div>
+              <table v-else class="dl-table">
+                <thead><tr>
+                  <th>#</th><th>{{ t('dlFileName') }}</th><th>{{ t('dlFileSize') }}</th>
+                  <th>{{ t('dlFileDone') }}</th><th>{{ t('dlFileSelected') }}</th>
+                </tr></thead>
+                <tbody>
+                  <tr v-for="f in detail.files" :key="f.index">
+                    <td>{{ f.index }}</td>
+                    <td class="is-wrap" :title="f.path">{{ f.path }}</td>
+                    <td>{{ formatBytes(f.length) }}</td>
+                    <td>{{ formatBytes(f.completed) }}</td>
+                    <td><input type="checkbox" class="dl-check" :checked="selectedFiles.has(f.index)" @change="toggleFile(f.index)" /></td>
+                  </tr>
+                </tbody>
+              </table>
+            </template>
+
+            <template v-else-if="detailTab === 'uris'">
+              <div class="dl-link-row">
+                <input v-model="newUri" class="qd-input" :placeholder="t('dlUriPlaceholder')" @keydown.enter="addTaskUri" />
+                <button class="qd-btn qd-btn-sm" @click="addTaskUri"><Plus :size="14" />{{ t('dlAddUri') }}</button>
+              </div>
+              <div v-if="!detail.uris.length" class="dl-table-empty">{{ t('dlNoUris') }}</div>
+              <table v-else class="dl-table">
+                <thead><tr><th>{{ t('dlFieldLink') }}</th><th>{{ t('dlUriStatus') }}</th><th></th></tr></thead>
+                <tbody>
+                  <tr v-for="(u, i) in detail.uris" :key="i">
+                    <td class="is-wrap">{{ u.uri }}</td><td>{{ u.status }}</td>
+                    <td><button class="qd-icon-btn" :title="t('dlDelUri')" @click="delTaskUri(u.uri)"><X :size="14" /></button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </template>
+
+            <template v-else-if="detailTab === 'peers'">
+              <div v-if="!detail.peers.length" class="dl-table-empty">{{ t('dlNoPeers') }}</div>
+              <table v-else class="dl-table">
+                <thead><tr>
+                  <th>{{ t('dlPeerIp') }}</th><th>{{ t('dlPeerPort') }}</th><th>{{ t('dlPeerClient') }}</th>
+                  <th>{{ t('dlPeerDown') }}</th><th>{{ t('dlPeerUp') }}</th><th>{{ t('dlPeerSeeder') }}</th>
+                </tr></thead>
+                <tbody>
+                  <tr v-for="(p, i) in detail.peers" :key="i">
+                    <td>{{ p.ip }}</td><td>{{ p.port }}</td><td class="is-wrap">{{ p.peerId }}</td>
+                    <td>{{ formatSpeed(p.downloadSpeed) }}</td><td>{{ formatSpeed(p.uploadSpeed) }}</td>
+                    <td>{{ p.seeder ? t('dlYes') : t('dlNo') }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </template>
+
+            <template v-else-if="detailTab === 'servers'">
+              <div v-if="!detail.servers.length" class="dl-table-empty">{{ t('dlNoServers') }}</div>
+              <table v-else class="dl-table">
+                <thead><tr>
+                  <th>#</th><th>{{ t('dlServerUri') }}</th><th>{{ t('dlServerStatus') }}</th>
+                  <th>{{ t('dlServerSpeed') }}</th>
+                </tr></thead>
+                <tbody>
+                  <tr v-for="(s, i) in detail.servers" :key="i">
+                    <td>{{ s.index }}</td><td class="is-wrap">{{ s.currentUri || s.uri }}</td>
+                    <td>{{ s.status }}<span v-if="s.error" class="dl-err-text"> · {{ s.error }}</span></td>
+                    <td>{{ formatSpeed(s.speed) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </template>
+
+            <template v-else-if="detailTab === 'options'">
+              <div class="dl-settings-grid">
+                <label class="dl-field"><span>{{ t('dlTaskOptionDown') }}</span><input v-model="taskOpts.down" class="qd-input" placeholder="0" /></label>
+                <label class="dl-field"><span>{{ t('dlTaskOptionUp') }}</span><input v-model="taskOpts.up" class="qd-input" placeholder="0" /></label>
+                <label class="dl-field"><span>{{ t('dlTaskOptionSeedRatio') }}</span><input v-model="taskOpts.seedRatio" class="qd-input" /></label>
+                <label class="dl-field"><span>{{ t('dlTaskOptionPeers') }}</span><input v-model="taskOpts.peers" class="qd-input" /></label>
+              </div>
+              <p class="dl-hint">{{ t('dlTaskOptionHint') }}</p>
+              <div class="dl-card-actions"><button class="qd-btn qd-btn-primary" @click="saveTaskOptions">{{ t('dlSaveTaskOptions') }}</button></div>
+              <div class="dl-kv dl-kv-raw">
+                <div v-for="(v, k) in detail.options" :key="k" class="dl-kv-row"><span>{{ k }}</span><b>{{ v || '-' }}</b></div>
+              </div>
+            </template>
+
+            <template v-else-if="detailTab === 'torrent'">
+              <div class="dl-kv">
+                <div class="dl-kv-row"><span>{{ t('dlFieldTorrentName') }}</span><b>{{ detailTask.torrentName || '-' }}</b></div>
+                <div class="dl-kv-row"><span>{{ t('dlFieldTorrentMode') }}</span><b>{{ detail.torrentMode || '-' }}</b></div>
+                <div class="dl-kv-row"><span>{{ t('dlFieldTorrentCreated') }}</span><b>{{ detail.torrentCreationDate ? formatTime(detail.torrentCreationDate * 1000) : '-' }}</b></div>
+                <div class="dl-kv-row"><span>{{ t('dlFieldTorrentComment') }}</span><b>{{ detail.torrentComment || '-' }}</b></div>
+                <div class="dl-kv-row"><span>{{ t('dlFieldInfoHash') }}</span><b>{{ detailTask.infoHash || '-' }}</b></div>
+              </div>
+              <h4 class="dl-sub-title">{{ t('dlFieldTrackers') }}</h4>
+              <div v-if="!detail.announceList.length" class="dl-table-empty">{{ t('dlNoTrackers') }}</div>
+              <div v-for="(tier, i) in detail.announceList" :key="i" class="dl-tracker-tier">
+                <div v-for="(tr, j) in tier" :key="j" class="dl-tracker">{{ tr }}</div>
+              </div>
+            </template>
+  <div class="dl-modal-body">
+  </div>
+  <template #footer>
+    <button v-if="detailTask.status === 'active' || detailTask.status === 'waiting'" class="qd-btn qd-btn-sm" @click="pause(detailTask.gid)">{{ t('dlPause') }}</button>
+    <button v-if="detailTask.status === 'active'" class="qd-btn qd-btn-sm" @click="forcePause(detailTask.gid)">{{ t('dlForcePause') }}</button>
+    <button v-if="detailTask.status === 'paused'" class="qd-btn qd-btn-sm" @click="resume(detailTask.gid)">{{ t('dlResume') }}</button>
+    <button v-if="detailTask.status === 'error'" class="qd-btn qd-btn-sm" @click="retryTask(detailTask)"><RotateCcw :size="14" />{{ t('dlRetry') }}</button>
+    <button class="qd-btn qd-btn-sm qd-btn-danger" @click="remove(detailTask.gid, forceFor(detailTask))">{{ t('dlRemove') }}</button>
+    <span class="dl-grow"></span>
+    <button class="qd-btn qd-btn-sm" @click="openFolder(detailTask)"><Folder :size="14" />{{ t('dlOpenFolder') }}</button>
+    <button class="qd-btn qd-btn-sm" @click="copyField(detailTask.path || detailTask.dir)">{{ t('dlCopyPath') }}</button>
+    <button class="qd-btn qd-btn-sm" @click="copyField(detailTask.gid)">{{ t('dlCopyGid') }}</button>
+    <button class="qd-btn qd-btn-sm" @click="closeDetail">{{ t('close') }}</button>
+  </template>
+</QdModal>
 
     <!-- 设置弹框：常规 / BT / 自动化 / 引擎四组 -->
-    <Teleport to="body">
-      <Transition name="dl-modal">
-        <div v-if="showSettings" class="dl-modal-overlay" @mousedown.self="showSettings = false">
-          <div class="dl-modal dl-modal-wide" role="dialog" :aria-label="t('dlSettingsTitle')">
-            <header class="dl-modal-head">
-              <Settings2 :size="15" class="dl-modal-head-icon" />
-              <span class="dl-modal-title">{{ t('dlSettingsTitle') }}</span>
-              <span class="dl-modal-sub">{{ status.version }}</span>
-              <button class="qd-icon-btn" :title="t('dlClose')" @click="showSettings = false"><X :size="14" /></button>
-            </header>
+    <QdModal
+      v-if="showSettings"
+      :model-value="true"
+      width="720px"
+      @update:model-value="showSettings = false"
+    >
+  <template #header>
+    <Settings2 :size="15" class="dl-modal-head-icon" />
+    <span class="dl-modal-title">{{ t('dlSettingsTitle') }}</span>
+    <span class="dl-modal-sub">{{ status.version }}</span>
+  </template>
 
-            <div class="dl-modal-tabs">
-              <QdTabs v-model="settingsTab" :tabs="settingsTabs" variant="chip" />
-            </div>
-
-            <div class="dl-modal-body">
-              <template v-if="settingsTab === 'general'">
-                <div class="dl-settings-grid">
-                  <label class="dl-field"><span>{{ t('dlDir') }}</span><input v-model="settingsForm.downloadDir" class="qd-input" /></label>
-                  <label class="dl-field"><span>{{ t('dlSplit') }}</span><input v-model.number="settingsForm.split" type="number" min="1" max="64" class="qd-input" /></label>
-                  <label class="dl-field"><span>{{ t('dlConcurrency') }}</span><input v-model.number="settingsForm.maxConcurrent" type="number" min="1" max="64" class="qd-input" /></label>
-                  <label class="dl-field"><span>{{ t('dlLimit') }}</span><input v-model="settingsForm.downloadLimit" class="qd-input" placeholder="0" /></label>
-                  <label class="dl-field"><span>{{ t('dlSetUploadLimit') }}</span><input v-model="settingsForm.uploadLimit" class="qd-input" placeholder="0" /></label>
-                  <label class="dl-field"><span>{{ t('dlSetMinSplit') }}</span><input v-model="settingsForm.minSplitSize" class="qd-input" placeholder="20M" /></label>
-                  <label class="dl-field"><span>{{ t('dlSetUserAgent') }}</span><input v-model="settingsForm.userAgent" class="qd-input" /></label>
-                  <label class="dl-field"><span>{{ t('dlSetProxy') }}</span><input v-model="settingsForm.proxy" class="qd-input" /></label>
-                  <label class="dl-field"><span>{{ t('dlSetFileAlloc') }}</span>
-                    <select v-model="settingsForm.fileAllocation" class="qd-input">
-                      <option value="none">{{ t('dlAllocNone') }}</option>
-                      <option value="falloc">{{ t('dlAllocFalloc') }}</option>
-                      <option value="trunc">{{ t('dlAllocTrunc') }}</option>
-                      <option value="prealloc">{{ t('dlAllocPrealloc') }}</option>
-                    </select>
-                  </label>
-                </div>
-                <p class="dl-hint">{{ t('dlOptionsHint') }}</p>
-                <p class="dl-hint">{{ t('dlSetFileAllocHint') }}</p>
-              </template>
-
-              <template v-else-if="settingsTab === 'bt'">
-                <div class="dl-settings-grid">
-                  <label class="dl-field"><span>{{ t('dlSetListenPort') }}</span><input v-model.number="settingsForm.listenPort" type="number" min="1" max="65500" class="qd-input" /></label>
-                  <label class="dl-field"><span>{{ t('dlSetDhtPort') }}</span><input v-model.number="settingsForm.dhtListenPort" type="number" min="1" max="65500" class="qd-input" /></label>
-                  <label class="dl-field"><span>{{ t('dlSetMaxPeers') }}</span><input v-model.number="settingsForm.btMaxPeers" type="number" min="1" max="1024" class="qd-input" /></label>
-                  <label class="dl-field"><span>{{ t('dlSetSeedRatio') }}</span><input v-model="settingsForm.seedRatio" class="qd-input" placeholder="0.0" /></label>
-                  <label class="dl-field"><span>{{ t('dlSetSeedTime') }}</span><input v-model="settingsForm.seedTime" class="qd-input" placeholder="0" /></label>
-                  <label class="dl-field dl-field-wide"><span>{{ t('dlSetTracker') }}</span><input v-model="settingsForm.btTracker" class="qd-input" /></label>
-                </div>
-                <p class="dl-hint">{{ t('dlSetTrackerHint') }}</p>
-                <div class="dl-switch-grid">
-                  <label class="dl-check-field"><input v-model="settingsForm.disableDht" type="checkbox" class="dl-check" /><span>{{ t('dlSetDht') }}</span></label>
-                  <label class="dl-check-field"><input v-model="settingsForm.disableDht6" type="checkbox" class="dl-check" /><span>{{ t('dlSetDht6') }}</span></label>
-                  <label class="dl-check-field"><input v-model="settingsForm.disablePeerExchange" type="checkbox" class="dl-check" /><span>{{ t('dlSetPex') }}</span></label>
-                  <label class="dl-check-field"><input v-model="settingsForm.disableSaveMetadata" type="checkbox" class="dl-check" /><span>{{ t('dlSetSaveMetadata') }}</span></label>
-                  <label class="dl-check-field"><input v-model="settingsForm.disableFollowTorrent" type="checkbox" class="dl-check" /><span>{{ t('dlSetFollowTorrent') }}</span></label>
-                  <label class="dl-check-field"><input v-model="settingsForm.btForceEncryption" type="checkbox" class="dl-check" /><span>{{ t('dlSetForceEncryption') }}</span></label>
-                  <label class="dl-check-field"><input v-model="settingsForm.btRequireCrypto" type="checkbox" class="dl-check" /><span>{{ t('dlSetRequireCrypto') }}</span></label>
-                  <label class="dl-check-field"><input v-model="settingsForm.btRemoveUnselected" type="checkbox" class="dl-check" /><span>{{ t('dlSetRemoveUnselected') }}</span></label>
-                  <label class="dl-check-field"><input v-model="settingsForm.checkIntegrity" type="checkbox" class="dl-check" /><span>{{ t('dlSetCheckIntegrity') }}</span></label>
-                </div>
-                <p class="dl-hint">{{ t('dlSettingsRestartHint') }}</p>
-              </template>
-
-              <template v-else-if="settingsTab === 'auto'">
-                <div class="dl-switch-grid">
-                  <label class="dl-check-field"><input v-model="settingsForm.autoOpenFolder" type="checkbox" class="dl-check" /><span>{{ t('dlSetAutoOpen') }}</span></label>
-                  <label class="dl-check-field"><input v-model="settingsForm.autoCategory" type="checkbox" class="dl-check" /><span>{{ t('dlSetAutoCategory') }}</span></label>
-                  <label class="dl-check-field"><input v-model="settingsForm.perTaskFolder" type="checkbox" class="dl-check" /><span>{{ t('dlSetPerTaskFolder') }}</span></label>
-                </div>
-                <label class="dl-field dl-field-block"><span>{{ t('dlSetCategoryRules') }}</span><textarea v-model="categoryText" class="qd-input" rows="5"></textarea></label>
-                <p class="dl-hint">{{ t('dlSetCategoryHint') }}</p>
-                <p class="dl-hint">{{ t('dlSetPerTaskFolderHint') }}</p>
-                <h4 class="dl-sub-title"><Zap :size="14" />{{ t('dlSetSchedule') }}</h4>
-                <div class="dl-switch-grid">
-                  <label class="dl-check-field"><input v-model="settingsForm.schedule.enabled" type="checkbox" class="dl-check" /><span>{{ t('dlSetSchedule') }}</span></label>
-                  <label class="dl-field"><span>{{ t('dlSetScheduleStart') }}</span><input v-model="settingsForm.schedule.start" class="qd-input" placeholder="23:00" /></label>
-                  <label class="dl-field"><span>{{ t('dlSetScheduleEnd') }}</span><input v-model="settingsForm.schedule.end" class="qd-input" placeholder="07:00" /></label>
-                  <label class="dl-field"><span>{{ t('dlSetScheduleDown') }}</span><input v-model="settingsForm.schedule.downloadLimit" class="qd-input" placeholder="0" /></label>
-                  <label class="dl-field"><span>{{ t('dlSetScheduleUp') }}</span><input v-model="settingsForm.schedule.uploadLimit" class="qd-input" placeholder="0" /></label>
-                </div>
-                <p class="dl-hint">{{ t('dlSetScheduleHint') }}</p>
-              </template>
-
-              <template v-else-if="settingsTab === 'connection'">
-                <div class="dl-switch-grid">
-                  <label class="dl-check-field"><input v-model="settingsForm.remoteEnabled" type="checkbox" class="dl-check" /><span>{{ t('dlConnRemote') }}</span></label>
-                  <label class="dl-check-field"><input v-model="notifyEnabled" type="checkbox" class="dl-check" /><span>{{ t('dlConnNotify') }}</span></label>
-                </div>
-                <p class="dl-hint">{{ t('dlConnNotifyHint') }}</p>
-                <template v-if="settingsForm.remoteEnabled">
-                  <div class="dl-settings-grid">
-                    <label class="dl-field"><span>{{ t('dlConnHost') }}</span><input v-model="settingsForm.remoteHost" class="qd-input" placeholder="192.168.1.10" /></label>
-                    <label class="dl-field"><span>{{ t('dlConnPort') }}</span><input v-model.number="settingsForm.remotePort" type="number" min="1" max="65535" class="qd-input" /></label>
-                    <label class="dl-field"><span>{{ t('dlConnSecret') }}</span><input v-model="settingsForm.remoteSecret" type="password" class="qd-input" :placeholder="settingsForm.remoteSecretSet ? t('dlConnSecretSet') : ''" /></label>
-                    <label class="dl-field"><span>{{ t('dlConnPath') }}</span><input v-model="settingsForm.remotePath" class="qd-input" placeholder="/jsonrpc" /></label>
-                  </div>
-                  <div class="dl-switch-grid">
-                    <label class="dl-check-field"><input v-model="settingsForm.remoteSecure" type="checkbox" class="dl-check" /><span>{{ t('dlConnSecure') }}</span></label>
-                  </div>
-                  <p class="dl-hint">{{ t('dlConnHint') }}</p>
-                </template>
-                <p v-else class="dl-hint">{{ t('dlConnLocal') }}</p>
-                <p class="dl-hint">{{ status.wsConnected ? t('dlConnWsOn') : t('dlConnWsOff') }}</p>
-              </template>
-
-              <template v-else-if="settingsTab === 'engine'">
-                <div class="dl-kv">
-                  <div class="dl-kv-row"><span>{{ t('dlEngineVersion') }}</span><b>{{ engine?.version || '-' }}</b></div>
-                  <div class="dl-kv-row"><span>{{ t('dlEngineFeatures') }}</span><b>{{ (engine?.features || []).join(', ') || '-' }}</b></div>
-                  <div class="dl-kv-row"><span>{{ t('dlEngineSession') }}</span><b>{{ engine?.sessionId || '-' }}</b></div>
-                  <div class="dl-kv-row"><span>{{ t('dlEngineMethods') }}</span><b>{{ (engine?.methods || []).length || 0 }}</b></div>
-                </div>
-                <h4 class="dl-sub-title"><Cpu :size="14" />{{ t('dlEngineOptions') }}</h4>
-                <div class="dl-link-row">
-                  <input v-model="globalKey" class="qd-input dl-global-key" />
-                  <input v-model="globalVal" class="qd-input" :placeholder="t('dlGlobalOptionValue')" />
-                  <button class="qd-btn qd-btn-sm" @click="applyGlobalOption">{{ t('dlApplyGlobalOption') }}</button>
-                </div>
-                <div class="dl-kv dl-kv-raw">
-                  <div v-for="(v, k) in globalOpts" :key="k" class="dl-kv-row"><span>{{ k }}</span><b>{{ v || '-' }}</b></div>
-                </div>
-                <h4 class="dl-sub-title"><Radio :size="14" />{{ t('dlEngineShutdown') }}</h4>
-                <p class="dl-hint">{{ t('dlEngineShutdownHint') }}</p>
-                <div class="dl-card-actions">
-                  <button class="qd-btn qd-btn-sm" @click="doShutdown(false)">{{ t('dlEngineShutdown') }}</button>
-                  <button class="qd-btn qd-btn-sm qd-btn-danger" @click="doShutdown(true)">{{ t('dlEngineForceShutdown') }}</button>
-                </div>
-              </template>
-            </div>
-
-            <footer class="dl-modal-foot">
-              <button class="qd-btn qd-btn-sm" @click="resetOptions"><RotateCcw :size="14" />{{ t('dlResetDefaults') }}</button>
-              <button v-if="settingsTab === 'engine'" class="qd-btn qd-btn-sm" @click="loadEngine"><RefreshCw :size="14" />{{ t('dlRefresh') }}</button>
-              <span class="dl-grow"></span>
-              <button class="qd-btn qd-btn-sm" @click="showSettings = false">{{ t('cancel') }}</button>
-              <button class="qd-btn qd-btn-primary qd-btn-sm" @click="submitSettings">{{ t('dlSave') }}</button>
-            </footer>
+          <div class="dl-modal-tabs">
+            <QdTabs v-model="settingsTab" :tabs="settingsTabs" variant="chip" />
           </div>
-        </div>
-      </Transition>
-    </Teleport>
+
+            <template v-if="settingsTab === 'general'">
+              <div class="dl-settings-grid">
+                <label class="dl-field"><span>{{ t('dlDir') }}</span><input v-model="settingsForm.downloadDir" class="qd-input" /></label>
+                <label class="dl-field"><span>{{ t('dlSplit') }}</span><input v-model.number="settingsForm.split" type="number" min="1" max="64" class="qd-input" /></label>
+                <label class="dl-field"><span>{{ t('dlConcurrency') }}</span><input v-model.number="settingsForm.maxConcurrent" type="number" min="1" max="64" class="qd-input" /></label>
+                <label class="dl-field"><span>{{ t('dlLimit') }}</span><input v-model="settingsForm.downloadLimit" class="qd-input" placeholder="0" /></label>
+                <label class="dl-field"><span>{{ t('dlSetUploadLimit') }}</span><input v-model="settingsForm.uploadLimit" class="qd-input" placeholder="0" /></label>
+                <label class="dl-field"><span>{{ t('dlSetMinSplit') }}</span><input v-model="settingsForm.minSplitSize" class="qd-input" placeholder="20M" /></label>
+                <label class="dl-field"><span>{{ t('dlSetUserAgent') }}</span><input v-model="settingsForm.userAgent" class="qd-input" /></label>
+                <label class="dl-field"><span>{{ t('dlSetProxy') }}</span><input v-model="settingsForm.proxy" class="qd-input" /></label>
+                <label class="dl-field"><span>{{ t('dlSetFileAlloc') }}</span>
+                  <select v-model="settingsForm.fileAllocation" class="qd-input">
+                    <option value="none">{{ t('dlAllocNone') }}</option>
+                    <option value="falloc">{{ t('dlAllocFalloc') }}</option>
+                    <option value="trunc">{{ t('dlAllocTrunc') }}</option>
+                    <option value="prealloc">{{ t('dlAllocPrealloc') }}</option>
+                  </select>
+                </label>
+              </div>
+              <p class="dl-hint">{{ t('dlOptionsHint') }}</p>
+              <p class="dl-hint">{{ t('dlSetFileAllocHint') }}</p>
+            </template>
+
+            <template v-else-if="settingsTab === 'bt'">
+              <div class="dl-settings-grid">
+                <label class="dl-field"><span>{{ t('dlSetListenPort') }}</span><input v-model.number="settingsForm.listenPort" type="number" min="1" max="65500" class="qd-input" /></label>
+                <label class="dl-field"><span>{{ t('dlSetDhtPort') }}</span><input v-model.number="settingsForm.dhtListenPort" type="number" min="1" max="65500" class="qd-input" /></label>
+                <label class="dl-field"><span>{{ t('dlSetMaxPeers') }}</span><input v-model.number="settingsForm.btMaxPeers" type="number" min="1" max="1024" class="qd-input" /></label>
+                <label class="dl-field"><span>{{ t('dlSetSeedRatio') }}</span><input v-model="settingsForm.seedRatio" class="qd-input" placeholder="0.0" /></label>
+                <label class="dl-field"><span>{{ t('dlSetSeedTime') }}</span><input v-model="settingsForm.seedTime" class="qd-input" placeholder="0" /></label>
+                <label class="dl-field dl-field-wide"><span>{{ t('dlSetTracker') }}</span><input v-model="settingsForm.btTracker" class="qd-input" /></label>
+              </div>
+              <p class="dl-hint">{{ t('dlSetTrackerHint') }}</p>
+              <div class="dl-switch-grid">
+                <label class="dl-check-field"><input v-model="settingsForm.disableDht" type="checkbox" class="dl-check" /><span>{{ t('dlSetDht') }}</span></label>
+                <label class="dl-check-field"><input v-model="settingsForm.disableDht6" type="checkbox" class="dl-check" /><span>{{ t('dlSetDht6') }}</span></label>
+                <label class="dl-check-field"><input v-model="settingsForm.disablePeerExchange" type="checkbox" class="dl-check" /><span>{{ t('dlSetPex') }}</span></label>
+                <label class="dl-check-field"><input v-model="settingsForm.disableSaveMetadata" type="checkbox" class="dl-check" /><span>{{ t('dlSetSaveMetadata') }}</span></label>
+                <label class="dl-check-field"><input v-model="settingsForm.disableFollowTorrent" type="checkbox" class="dl-check" /><span>{{ t('dlSetFollowTorrent') }}</span></label>
+                <label class="dl-check-field"><input v-model="settingsForm.btForceEncryption" type="checkbox" class="dl-check" /><span>{{ t('dlSetForceEncryption') }}</span></label>
+                <label class="dl-check-field"><input v-model="settingsForm.btRequireCrypto" type="checkbox" class="dl-check" /><span>{{ t('dlSetRequireCrypto') }}</span></label>
+                <label class="dl-check-field"><input v-model="settingsForm.btRemoveUnselected" type="checkbox" class="dl-check" /><span>{{ t('dlSetRemoveUnselected') }}</span></label>
+                <label class="dl-check-field"><input v-model="settingsForm.checkIntegrity" type="checkbox" class="dl-check" /><span>{{ t('dlSetCheckIntegrity') }}</span></label>
+              </div>
+              <p class="dl-hint">{{ t('dlSettingsRestartHint') }}</p>
+            </template>
+
+            <template v-else-if="settingsTab === 'auto'">
+              <div class="dl-switch-grid">
+                <label class="dl-check-field"><input v-model="settingsForm.autoOpenFolder" type="checkbox" class="dl-check" /><span>{{ t('dlSetAutoOpen') }}</span></label>
+                <label class="dl-check-field"><input v-model="settingsForm.autoCategory" type="checkbox" class="dl-check" /><span>{{ t('dlSetAutoCategory') }}</span></label>
+                <label class="dl-check-field"><input v-model="settingsForm.perTaskFolder" type="checkbox" class="dl-check" /><span>{{ t('dlSetPerTaskFolder') }}</span></label>
+              </div>
+              <label class="dl-field dl-field-block"><span>{{ t('dlSetCategoryRules') }}</span><textarea v-model="categoryText" class="qd-input" rows="5"></textarea></label>
+              <p class="dl-hint">{{ t('dlSetCategoryHint') }}</p>
+              <p class="dl-hint">{{ t('dlSetPerTaskFolderHint') }}</p>
+              <h4 class="dl-sub-title"><Zap :size="14" />{{ t('dlSetSchedule') }}</h4>
+              <div class="dl-switch-grid">
+                <label class="dl-check-field"><input v-model="settingsForm.schedule.enabled" type="checkbox" class="dl-check" /><span>{{ t('dlSetSchedule') }}</span></label>
+                <label class="dl-field"><span>{{ t('dlSetScheduleStart') }}</span><input v-model="settingsForm.schedule.start" class="qd-input" placeholder="23:00" /></label>
+                <label class="dl-field"><span>{{ t('dlSetScheduleEnd') }}</span><input v-model="settingsForm.schedule.end" class="qd-input" placeholder="07:00" /></label>
+                <label class="dl-field"><span>{{ t('dlSetScheduleDown') }}</span><input v-model="settingsForm.schedule.downloadLimit" class="qd-input" placeholder="0" /></label>
+                <label class="dl-field"><span>{{ t('dlSetScheduleUp') }}</span><input v-model="settingsForm.schedule.uploadLimit" class="qd-input" placeholder="0" /></label>
+              </div>
+              <p class="dl-hint">{{ t('dlSetScheduleHint') }}</p>
+            </template>
+
+            <template v-else-if="settingsTab === 'connection'">
+              <div class="dl-switch-grid">
+                <label class="dl-check-field"><input v-model="settingsForm.remoteEnabled" type="checkbox" class="dl-check" /><span>{{ t('dlConnRemote') }}</span></label>
+                <label class="dl-check-field"><input v-model="notifyEnabled" type="checkbox" class="dl-check" /><span>{{ t('dlConnNotify') }}</span></label>
+              </div>
+              <p class="dl-hint">{{ t('dlConnNotifyHint') }}</p>
+              <template v-if="settingsForm.remoteEnabled">
+                <div class="dl-settings-grid">
+                  <label class="dl-field"><span>{{ t('dlConnHost') }}</span><input v-model="settingsForm.remoteHost" class="qd-input" placeholder="192.168.1.10" /></label>
+                  <label class="dl-field"><span>{{ t('dlConnPort') }}</span><input v-model.number="settingsForm.remotePort" type="number" min="1" max="65535" class="qd-input" /></label>
+                  <label class="dl-field"><span>{{ t('dlConnSecret') }}</span><input v-model="settingsForm.remoteSecret" type="password" class="qd-input" :placeholder="settingsForm.remoteSecretSet ? t('dlConnSecretSet') : ''" /></label>
+                  <label class="dl-field"><span>{{ t('dlConnPath') }}</span><input v-model="settingsForm.remotePath" class="qd-input" placeholder="/jsonrpc" /></label>
+                </div>
+                <div class="dl-switch-grid">
+                  <label class="dl-check-field"><input v-model="settingsForm.remoteSecure" type="checkbox" class="dl-check" /><span>{{ t('dlConnSecure') }}</span></label>
+                </div>
+                <p class="dl-hint">{{ t('dlConnHint') }}</p>
+              </template>
+              <p v-else class="dl-hint">{{ t('dlConnLocal') }}</p>
+              <p class="dl-hint">{{ status.wsConnected ? t('dlConnWsOn') : t('dlConnWsOff') }}</p>
+            </template>
+
+            <template v-else-if="settingsTab === 'engine'">
+              <div class="dl-kv">
+                <div class="dl-kv-row"><span>{{ t('dlEngineVersion') }}</span><b>{{ engine?.version || '-' }}</b></div>
+                <div class="dl-kv-row"><span>{{ t('dlEngineFeatures') }}</span><b>{{ (engine?.features || []).join(', ') || '-' }}</b></div>
+                <div class="dl-kv-row"><span>{{ t('dlEngineSession') }}</span><b>{{ engine?.sessionId || '-' }}</b></div>
+                <div class="dl-kv-row"><span>{{ t('dlEngineMethods') }}</span><b>{{ (engine?.methods || []).length || 0 }}</b></div>
+              </div>
+              <h4 class="dl-sub-title"><Cpu :size="14" />{{ t('dlEngineOptions') }}</h4>
+              <div class="dl-link-row">
+                <input v-model="globalKey" class="qd-input dl-global-key" />
+                <input v-model="globalVal" class="qd-input" :placeholder="t('dlGlobalOptionValue')" />
+                <button class="qd-btn qd-btn-sm" @click="applyGlobalOption">{{ t('dlApplyGlobalOption') }}</button>
+              </div>
+              <div class="dl-kv dl-kv-raw">
+                <div v-for="(v, k) in globalOpts" :key="k" class="dl-kv-row"><span>{{ k }}</span><b>{{ v || '-' }}</b></div>
+              </div>
+              <h4 class="dl-sub-title"><Radio :size="14" />{{ t('dlEngineShutdown') }}</h4>
+              <p class="dl-hint">{{ t('dlEngineShutdownHint') }}</p>
+              <div class="dl-card-actions">
+                <button class="qd-btn qd-btn-sm" @click="doShutdown(false)">{{ t('dlEngineShutdown') }}</button>
+                <button class="qd-btn qd-btn-sm qd-btn-danger" @click="doShutdown(true)">{{ t('dlEngineForceShutdown') }}</button>
+              </div>
+            </template>
+  <div class="dl-modal-body">
+  </div>
+  <template #footer>
+    <button class="qd-btn qd-btn-sm" @click="resetOptions"><RotateCcw :size="14" />{{ t('dlResetDefaults') }}</button>
+    <button v-if="settingsTab === 'engine'" class="qd-btn qd-btn-sm" @click="loadEngine"><RefreshCw :size="14" />{{ t('dlRefresh') }}</button>
+    <span class="dl-grow"></span>
+    <button class="qd-btn qd-btn-sm" @click="showSettings = false">{{ t('cancel') }}</button>
+    <button class="qd-btn qd-btn-primary qd-btn-sm" @click="submitSettings">{{ t('dlSave') }}</button>
+  </template>
+</QdModal>
   </div>
 </template>
 
@@ -1976,17 +1964,7 @@ onUnmounted(() => {
 .dl-err-text { color: var(--color-danger); }
 
 /* 弹框：面层用 popover-bg（比卡片亮一级），遮罩压住整页 */
-.dl-modal-overlay { position: fixed; inset: 0; z-index: 3000; display: flex; align-items: center; justify-content: center; background: var(--color-bg-overlay); }
-.dl-modal {
-  width: 560px; max-width: calc(100vw - 40px); max-height: calc(100vh - 80px);
-  display: flex; flex-direction: column;
-  border: 1px solid var(--popover-border-color); border-radius: var(--radius-md);
-  background: var(--color-popover-bg); box-shadow: var(--shadow-pop);
-}
-/* 变体与 .dl-modal 叠加使用，但显式写一遍 max-width：800px 最小窗口下
-   980 定宽若单独使用会横向溢出被裁，别指望「一定同时带基础类」。 */
-.dl-modal-wide { width: 720px; max-width: calc(100vw - 40px); }
-.dl-modal-import { width: 980px; max-width: calc(100vw - 40px); max-height: calc(100vh - 60px); }
+/* 弹窗外壳统一走 QdModal：遮罩 / 卡片 / 头部 / 底栏 / 宽度都不再本地重写。 */
 /* 导入表：列宽固定，长 URL / 长路径靠输入框内部横向滚动，不把弹框撑爆 */
 .dl-import-scroll { max-height: 320px; overflow: auto; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
 .dl-import-table { table-layout: fixed; min-width: 880px; }
@@ -2013,12 +1991,11 @@ onUnmounted(() => {
 .dl-import-result { padding: var(--space-3); border-radius: var(--radius-sm); background: var(--color-bg-secondary); }
 .dl-import-result .dl-hint { margin-top: 0; }
 .dl-import-result .dl-hint + .dl-hint { margin-top: var(--space-1); }
-.dl-modal-head { display: flex; align-items: center; gap: var(--space-2); flex: none; padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--color-border); }
 .dl-modal-head-icon { flex: none; color: var(--color-accent); }
 .dl-modal-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
 .dl-modal-sub { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--color-text-muted); }
-.dl-modal-tabs { display: flex; gap: var(--space-2); flex-wrap: wrap; flex: none; padding: var(--space-3) var(--space-5) 0; }
-.dl-modal-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-5); padding: var(--space-5); }
+.dl-modal-tabs { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.dl-modal-body { display: flex; flex-direction: column; gap: var(--space-5); }
 .dl-modal-hero { display: flex; align-items: center; gap: var(--space-3); }
 .dl-modal-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
 .dl-modal-progress { display: flex; align-items: center; gap: var(--space-3); }
@@ -2034,12 +2011,6 @@ onUnmounted(() => {
 .dl-link-row { display: flex; align-items: center; gap: var(--space-2); }
 .dl-link-row .qd-input { flex: 1; min-width: 0; font-size: var(--text-xs); }
 .dl-global-key { flex: 0 1 250px !important; }
-.dl-modal-foot {
-  display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); flex: none;
-  padding: var(--space-3) var(--space-5); border-top: 1px solid var(--color-border);
-}
-.dl-modal-enter-active, .dl-modal-leave-active { transition: opacity var(--transition-fast); }
-.dl-modal-enter-from, .dl-modal-leave-to { opacity: 0; }
 
 .dl-table-tools { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .dl-table { width: 100%; border-collapse: collapse; font-size: var(--text-xs); }

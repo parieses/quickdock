@@ -6,6 +6,8 @@ import SettingsPrompts from './SettingsPrompts.vue'
 import SettingsSkills from './SettingsSkills.vue'
 import QdBarChart from './charts/QdBarChart.vue'
 import QdTabs from './QdTabs.vue'
+import QdSwitch from './QdSwitch.vue'
+import QdModal from './QdModal.vue'
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -1676,15 +1678,13 @@ function saveAIModal() {
                       <span v-if="tool.disabled" class="ai-ext-tool-off">{{ t('aiExtToolDisabled') }}</span>
                       <span class="ai-ext-tool-desc">{{ tool.desc }}</span>
                     </div>
-                    <button
-                      class="toggle-btn-sm"
-                      :class="{ active: !tool.disabled }"
+                    <QdSwitch
+                      :model-value="!tool.disabled"
                       :disabled="extToolsBusy === tool.name"
+                      :label="tool.disabled ? t('aiExtToolEnable') : t('aiExtToolDisable')"
                       :title="tool.disabled ? t('aiExtToolEnable') : t('aiExtToolDisable')"
-                      @click="toggleExtTool(tool)"
-                    >
-                      <span class="toggle-knob"></span>
-                    </button>
+                      @update:model-value="() => toggleExtTool(tool)"
+                    />
                   </div>
                 </div>
               </div>
@@ -1699,15 +1699,13 @@ function saveAIModal() {
               >
                 <ChevronDown :size="12" />
               </button>
-              <button
-                class="toggle-btn-sm"
-                :class="{ active: s.status !== 'disabled' }"
+              <QdSwitch
+                :model-value="s.status !== 'disabled'"
                 :disabled="extSaving"
+                :label="s.status === 'disabled' ? t('aiExtEnable') : t('aiExtDisable')"
                 :title="s.status === 'disabled' ? t('aiExtEnable') : t('aiExtDisable')"
-                @click="toggleExt(s)"
-              >
-                <span class="toggle-knob"></span>
-              </button>
+                @update:model-value="() => toggleExt(s)"
+              />
               <button class="ai-hook-no" :disabled="extSaving" @click="openEditExt(s)">{{ t('aiExtEdit') }}</button>
               <button class="ai-hook-no is-danger" :disabled="extSaving" @click="removeExt(s)">{{ t('delete') }}</button>
             </div>
@@ -1723,169 +1721,167 @@ function saveAIModal() {
     </div>
     </div>
 
-    <!-- AI 配置编辑模态框 -->
-    <Teleport to="body">
-      <div v-if="aiEditDraft" class="ai-modal-overlay" @mousedown.self="closeAIEditor">
-        <div class="ai-modal">
-          <div class="ai-modal-header">
-            <h3>{{ t('aiEditProfile') }}</h3>
-            <button class="ai-modal-close" @click="closeAIEditor">&times;</button>
-          </div>
-          <div class="ai-modal-body">
-            <label class="field">
-              <span class="field-label">{{ t('aiProfileName') }}</span>
-              <input v-model="aiEditDraft.name" type="text" class="field-input" :placeholder="t('aiProfileNamePh')" />
-            </label>
-            <label class="field">
-              <span class="field-label">{{ t('aiProvider') }}</span>
-              <select v-model="aiEditDraft.provider" class="field-input" @change="onAIProviderChangeDraft">
-                <option v-for="p in aiProviders" :key="p.value" :value="p.value">{{ p.label }}</option>
-              </select>
-            </label>
-            <label class="field">
-              <span class="field-label">{{ t('aiBaseURL') }}</span>
-              <input v-model="aiEditDraft.baseURL" type="text" class="field-input" placeholder="https://api.openai.com/v1" />
-            </label>
-            <label class="field">
-              <span class="field-label">{{ t('aiAPIKey') }}</span>
-              <input
-                v-model="aiEditDraft.apiKey"
-                type="password"
-                class="field-input"
-                :placeholder="aiEditDraft.provider === 'ollama' ? t('aiAPIKeyOptional') : 'sk-...'"
-              />
-            </label>
-            <label class="field">
-              <span class="field-label">{{ t('aiModel') }}</span>
-              <!-- 输入框 + 显式下拉。原生 datalist 必须聚焦后输入才过滤，
-                   WebView2 上体验不可靠，故自己做一个「点箭头即出全部」的列表。 -->
-              <div class="model-input-wrap">
-                <input
-                  v-model="aiEditDraft.model"
-                  type="text"
-                  class="field-input"
-                  :placeholder="aiEditDraft.provider === 'ollama' ? t('aiModelPlaceholderOllama') : 'gpt-4o-mini / deepseek-chat'"
-                  @focus="onModelFocus"
-                />
-                <button
-                  v-if="modelOptions.length"
-                  type="button"
-                  class="model-caret"
-                  :title="t('aiFetchModels')"
-                  @click.prevent="modelOptionsOpen = !modelOptionsOpen"
-                >▾</button>
-                <div v-if="modelOptionsOpen && modelOptions.length" class="model-dropdown">
-                  <div
-                    v-for="m in filteredModelOptions"
-                    :key="m"
-                    class="model-option"
-                    :class="{ on: aiEditDraft.model === m }"
-                    @mousedown.prevent="pickModel(m)"
-                  >{{ m }}</div>
-                  <div v-if="!filteredModelOptions.length" class="model-option-empty">
-                    {{ t('aiNoModelsFound') }}
-                  </div>
-                </div>
+    <!-- AI 配置编辑模态框。v-if 驱动而非 model-value：内容里全是 aiEditDraft.xxx，
+         TS 只有在 v-if 分支内才认得它非空。 -->
+    <QdModal
+      v-if="aiEditDraft"
+      :model-value="true"
+      :title="t('aiEditProfile')"
+      width="520px"
+      @update:model-value="closeAIEditor"
+    >
+      <div class="ai-modal-body">
+        <label class="field">
+          <span class="field-label">{{ t('aiProfileName') }}</span>
+          <input v-model="aiEditDraft.name" type="text" class="field-input" :placeholder="t('aiProfileNamePh')" />
+        </label>
+        <label class="field">
+          <span class="field-label">{{ t('aiProvider') }}</span>
+          <select v-model="aiEditDraft.provider" class="field-input" @change="onAIProviderChangeDraft">
+            <option v-for="p in aiProviders" :key="p.value" :value="p.value">{{ p.label }}</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-label">{{ t('aiBaseURL') }}</span>
+          <input v-model="aiEditDraft.baseURL" type="text" class="field-input" placeholder="https://api.openai.com/v1" />
+        </label>
+        <label class="field">
+          <span class="field-label">{{ t('aiAPIKey') }}</span>
+          <input
+            v-model="aiEditDraft.apiKey"
+            type="password"
+            class="field-input"
+            :placeholder="aiEditDraft.provider === 'ollama' ? t('aiAPIKeyOptional') : 'sk-...'"
+          />
+        </label>
+        <label class="field">
+          <span class="field-label">{{ t('aiModel') }}</span>
+          <!-- 输入框 + 显式下拉。原生 datalist 必须聚焦后输入才过滤，
+               WebView2 上体验不可靠，故自己做一个「点箭头即出全部」的列表。 -->
+          <div class="model-input-wrap">
+            <input
+              v-model="aiEditDraft.model"
+              type="text"
+              class="field-input"
+              :placeholder="aiEditDraft.provider === 'ollama' ? t('aiModelPlaceholderOllama') : 'gpt-4o-mini / deepseek-chat'"
+              @focus="onModelFocus"
+            />
+            <button
+              v-if="modelOptions.length"
+              type="button"
+              class="model-caret"
+              :title="t('aiFetchModels')"
+              @click.prevent="modelOptionsOpen = !modelOptionsOpen"
+            >▾</button>
+            <div v-if="modelOptionsOpen && modelOptions.length" class="model-dropdown">
+              <div
+                v-for="m in filteredModelOptions"
+                :key="m"
+                class="model-option"
+                :class="{ on: aiEditDraft.model === m }"
+                @mousedown.prevent="pickModel(m)"
+              >{{ m }}</div>
+              <div v-if="!filteredModelOptions.length" class="model-option-empty">
+                {{ t('aiNoModelsFound') }}
               </div>
-              <!-- 非 Ollama：从兼容接口拉取模型列表。Ollama 已在编辑时自动拉本机模型，无需此按钮。 -->
-              <div v-if="aiEditDraft.provider !== 'ollama'" class="model-fetch-row">
-                <button
-                  type="button"
-                  class="model-fetch-btn"
-                  :disabled="modelOptionsLoading"
-                  @click.prevent="fetchApiModels"
-                >
-                  <RefreshCw :size="12" :class="{ spinning: modelOptionsLoading }" />
-                  {{ modelOptionsLoading ? t('aiFetchingModels') : t('aiFetchModels') }}
-                </button>
-                <span v-if="modelOptionsError" class="model-fetch-msg error">{{ modelOptionsError }}</span>
-                <span v-else-if="modelOptions.length" class="model-fetch-msg">
-                  {{ t('aiModelsFetched', { n: modelOptions.length }) }}
-                </span>
-              </div>
-            </label>
-            <!-- Ollama：chip 快捷选择（与下拉等价，鼠标不用移来移去） -->
-            <div v-if="aiEditDraft.provider === 'ollama'" class="ollama-model-picks">
-              <template v-if="modelOptions.length">
-                <span class="picks-label">{{ t('aiOllamaLocalModels') }}</span>
-                <button
-                  v-for="m in modelOptions"
-                  :key="m"
-                  type="button"
-                  class="pick-chip"
-                  :class="{ on: aiEditDraft.model === m }"
-                  @click="aiEditDraft.model = m"
-                >{{ m }}</button>
-              </template>
-              <span v-else-if="modelOptionsLoading" class="picks-hint">{{ t('aiOllamaLoading') }}</span>
-              <span v-else class="picks-hint">{{ t('aiOllamaNoModels') }}</span>
-            </div>
-            <div class="field-row">
-              <label class="field field-half">
-                <span class="field-label">{{ t('aiTemperature') }}</span>
-                <input v-model.number="aiEditDraft.temperature" type="number" min="0" max="2" step="0.1" class="num-input" />
-              </label>
-              <label class="field field-half">
-                <span class="field-label">{{ t('aiMaxTokens') }}</span>
-                <input v-model.number="aiEditDraft.maxTokens" type="number" min="0" max="131072" step="1" class="num-input" placeholder="0" />
-              </label>
-            </div>
-            <label class="field field-textarea">
-              <span class="field-label">{{ t('aiSystemPrompt') }}</span>
-              <textarea v-model="aiEditDraft.systemPrompt" class="field-input" rows="3" :placeholder="t('aiSystemPromptPh')"></textarea>
-            </label>
-            <label class="field">
-              <span class="field-label">{{ t('aiImageInput') }}</span>
-              <select v-model="aiEditDraft.imageInput" class="field-input">
-                <option value="both">{{ t('aiImageInputBoth') }}</option>
-                <option value="url">{{ t('aiImageInputURL') }}</option>
-                <option value="base64">{{ t('aiImageInputBase64') }}</option>
-              </select>
-            </label>
-            <p class="ai-field-hint">{{ t('aiImageInputHint') }}</p>
-            <label class="field">
-              <span class="field-label">{{ t('aiContextWindow') }}</span>
-              <input
-                v-model.number="aiEditDraft.contextWindow"
-                type="number"
-                min="0"
-                max="2000000"
-                step="1024"
-                class="num-input"
-                placeholder="0"
-              />
-            </label>
-            <p class="ai-field-hint">{{ t('aiContextWindowHint') }}</p>
-            <div class="field-row">
-              <label class="field field-half">
-                <span class="field-label">top_p</span>
-                <input v-model.number="aiEditDraft.topP" type="number" min="0" max="1" step="0.05" class="num-input" placeholder="0" />
-              </label>
-              <label class="field field-half">
-                <span class="field-label">frequency_penalty</span>
-                <input v-model.number="aiEditDraft.frequencyPenalty" type="number" min="-2" max="2" step="0.1" class="num-input" placeholder="0" />
-              </label>
-            </div>
-            <div class="field-row">
-              <label class="field field-half">
-                <span class="field-label">presence_penalty</span>
-                <input v-model.number="aiEditDraft.presencePenalty" type="number" min="-2" max="2" step="0.1" class="num-input" placeholder="0" />
-              </label>
-              <label class="field field-half toggle-field">
-                <span class="field-label">思考模式 (thinking)</span>
-                <button :class="['toggle-btn-sm', { active: aiEditDraft.thinkingEnabled }]" @click="aiEditDraft.thinkingEnabled = !aiEditDraft.thinkingEnabled">
-                  <span class="toggle-knob" />
-                </button>
-              </label>
             </div>
           </div>
-          <div class="ai-modal-footer">
-            <button class="btn btn-secondary" @click="closeAIEditor">{{ t('cancel') }}</button>
-            <button class="btn btn-primary" @click="saveAIModal">{{ t('save') }}</button>
+          <!-- 非 Ollama：从兼容接口拉取模型列表。Ollama 已在编辑时自动拉本机模型，无需此按钮。 -->
+          <div v-if="aiEditDraft.provider !== 'ollama'" class="model-fetch-row">
+            <button
+              type="button"
+              class="model-fetch-btn"
+              :disabled="modelOptionsLoading"
+              @click.prevent="fetchApiModels"
+            >
+              <RefreshCw :size="12" :class="{ spinning: modelOptionsLoading }" />
+              {{ modelOptionsLoading ? t('aiFetchingModels') : t('aiFetchModels') }}
+            </button>
+            <span v-if="modelOptionsError" class="model-fetch-msg error">{{ modelOptionsError }}</span>
+            <span v-else-if="modelOptions.length" class="model-fetch-msg">
+              {{ t('aiModelsFetched', { n: modelOptions.length }) }}
+            </span>
           </div>
+        </label>
+        <!-- Ollama：chip 快捷选择（与下拉等价，鼠标不用移来移去） -->
+        <div v-if="aiEditDraft.provider === 'ollama'" class="ollama-model-picks">
+          <template v-if="modelOptions.length">
+            <span class="picks-label">{{ t('aiOllamaLocalModels') }}</span>
+            <button
+              v-for="m in modelOptions"
+              :key="m"
+              type="button"
+              class="pick-chip"
+              :class="{ on: aiEditDraft.model === m }"
+              @click="aiEditDraft.model = m"
+            >{{ m }}</button>
+          </template>
+          <span v-else-if="modelOptionsLoading" class="picks-hint">{{ t('aiOllamaLoading') }}</span>
+          <span v-else class="picks-hint">{{ t('aiOllamaNoModels') }}</span>
+        </div>
+        <div class="field-row">
+          <label class="field field-half">
+            <span class="field-label">{{ t('aiTemperature') }}</span>
+            <input v-model.number="aiEditDraft.temperature" type="number" min="0" max="2" step="0.1" class="num-input" />
+          </label>
+          <label class="field field-half">
+            <span class="field-label">{{ t('aiMaxTokens') }}</span>
+            <input v-model.number="aiEditDraft.maxTokens" type="number" min="0" max="131072" step="1" class="num-input" placeholder="0" />
+          </label>
+        </div>
+        <label class="field field-textarea">
+          <span class="field-label">{{ t('aiSystemPrompt') }}</span>
+          <textarea v-model="aiEditDraft.systemPrompt" class="field-input" rows="3" :placeholder="t('aiSystemPromptPh')"></textarea>
+        </label>
+        <label class="field">
+          <span class="field-label">{{ t('aiImageInput') }}</span>
+          <select v-model="aiEditDraft.imageInput" class="field-input">
+            <option value="both">{{ t('aiImageInputBoth') }}</option>
+            <option value="url">{{ t('aiImageInputURL') }}</option>
+            <option value="base64">{{ t('aiImageInputBase64') }}</option>
+          </select>
+        </label>
+        <p class="ai-field-hint">{{ t('aiImageInputHint') }}</p>
+        <label class="field">
+          <span class="field-label">{{ t('aiContextWindow') }}</span>
+          <input
+            v-model.number="aiEditDraft.contextWindow"
+            type="number"
+            min="0"
+            max="2000000"
+            step="1024"
+            class="num-input"
+            placeholder="0"
+          />
+        </label>
+        <p class="ai-field-hint">{{ t('aiContextWindowHint') }}</p>
+        <div class="field-row">
+          <label class="field field-half">
+            <span class="field-label">top_p</span>
+            <input v-model.number="aiEditDraft.topP" type="number" min="0" max="1" step="0.05" class="num-input" placeholder="0" />
+          </label>
+          <label class="field field-half">
+            <span class="field-label">frequency_penalty</span>
+            <input v-model.number="aiEditDraft.frequencyPenalty" type="number" min="-2" max="2" step="0.1" class="num-input" placeholder="0" />
+          </label>
+        </div>
+        <div class="field-row">
+          <label class="field field-half">
+            <span class="field-label">presence_penalty</span>
+            <input v-model.number="aiEditDraft.presencePenalty" type="number" min="-2" max="2" step="0.1" class="num-input" placeholder="0" />
+          </label>
+          <label class="field field-half toggle-field">
+            <span class="field-label">思考模式 (thinking)</span>
+            <QdSwitch :model-value="aiEditDraft.thinkingEnabled" label="思考模式 (thinking)"
+                      @update:model-value="(v: boolean) => aiEditDraft && (aiEditDraft.thinkingEnabled = v)" />
+          </label>
         </div>
       </div>
-    </Teleport>
+      <template #footer>
+        <button class="btn btn-secondary" @click="closeAIEditor">{{ t('cancel') }}</button>
+        <button class="btn btn-primary" @click="saveAIModal">{{ t('save') }}</button>
+      </template>
+    </QdModal>
 
     <!-- 技能：skills/ 目录的 SKILL.md 操作手册，与提示词库（ai_prompts 表）不是一套。
          visible 同 SettingsPrompts，只在切到本分段时触发加载；切走再切回要重拉，

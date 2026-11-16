@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import PageHeader from './PageHeader.vue'
 import QdTabs from './QdTabs.vue'
+import QdSwitch from './QdSwitch.vue'
+import QdModal from './QdModal.vue'
 import { ref, computed, onMounted, onBeforeUnmount, onActivated, onDeactivated, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { KEEP_ALIVE } from '../pages/keepAlive'
@@ -811,10 +813,9 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 
         <div class="item-actions">
           <!-- 启用开关 -->
-          <button class="toggle-btn" :class="{ active: task.enabled }" @click="toggleEnabled(task)"
-                  :title="task.enabled ? t('sched_enabled') : t('sched_disabled')">
-            <span class="toggle-knob" />
-          </button>
+          <QdSwitch :model-value="task.enabled" @update:model-value="() => toggleEnabled(task)"
+                    :label="task.enabled ? t('sched_enabled') : t('sched_disabled')"
+                    :title="task.enabled ? t('sched_enabled') : t('sched_disabled')" />
           <!-- 「立即执行」是同步阻塞调用（后端要等命令跑完，最长 30s），
                所以这里只能给转圈 + 说明，不能画进度条或停止按钮 —— 都没有真实通道。 -->
           <button class="act" :disabled="runningId === task.id" @click="runNow(task)"
@@ -834,10 +835,7 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
     </div>
 
     <!-- 新增/编辑弹窗 -->
-    <div v-if="showModal" class="modal-mask" @click.self="showModal = false">
-      <div class="modal">
-        <h3>{{ modalTitle }}</h3>
-
+    <QdModal v-model="showModal" :title="modalTitle" width="440px">
         <label>{{ t('sched_name') }}</label>
         <input v-model="fName" class="modal-input" :placeholder="t('sched_name_ph')" />
 
@@ -1026,12 +1024,11 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
         <!-- 用 qd-btn 这套（app.css）而不是设置页的 .btn/.btn-primary：
              .btn-primary 只定义颜色，盒子尺寸靠 .btn 基类，漏了基类就是「浏览器默认
              按钮 + 主题色文字」——正是保存按钮看起来不对的原因。 -->
-        <div class="modal-actions">
-          <button class="qd-btn" @click="showModal = false">{{ t('cancel') }}</button>
-          <button class="qd-btn qd-btn-primary" :disabled="saving" @click="save">{{ t('save') }}</button>
-        </div>
-      </div>
-    </div>
+      <template #footer>
+        <button class="qd-btn" @click="showModal = false">{{ t('cancel') }}</button>
+        <button class="qd-btn qd-btn-primary" :disabled="saving" @click="save">{{ t('save') }}</button>
+      </template>
+    </QdModal>
 
     <ConfirmDialog
       :visible="showDelConfirm"
@@ -1222,14 +1219,6 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 @keyframes sched-spin { to { transform: rotate(360deg); } }
 
 /* 弹窗 */
-.modal-mask {
-  position: fixed; inset: 0; background: var(--color-bg-overlay); display: flex;
-  align-items: center; justify-content: center; z-index: 100;
-}
-.modal {
-  width: 440px; max-height: 90vh; overflow-y: auto; background: var(--color-popover-bg);
-  border-radius: var(--radius-lg); padding: var(--space-5); box-shadow: var(--shadow-lg);
-}
 .modal-area { height: auto; padding: var(--space-4) 10px; resize: vertical; line-height: 1.5; }
 .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .modal-grid > * { min-width: 0; }
@@ -1253,5 +1242,4 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 .nf-link { font-size: var(--text-xs); color: var(--color-accent); cursor: pointer; text-decoration: underline dotted; }
 .nf-link:hover { color: var(--color-accent-hover); }
 
-.modal-actions { display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-5); }
 </style>

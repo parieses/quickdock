@@ -4,10 +4,18 @@ import { useI18n } from 'vue-i18n'
 /**
  * 全应用唯一的模态容器。
  *
- * 存量页面还有 5+ 套私有遮罩（.modal-overlay / .modal-mask / .dl-modal /
- * .qd-modal / .php-modal …），圆角、内边距、遮罩色、关闭按钮各不相同。
- * 新写的弹窗一律用本组件，不要再复制一套；存量弹窗的视觉由
- * styles/app.css 的「弹窗基线」逐项对齐，不必一次性迁移模板。
+ * 11-16 已把存量弹窗全部收编到本组件：原来的 .modal-overlay / .modal-mask /
+ * .dl-modal / .qd-modal / .tool-modal / .ai-modal / .cfg-modal 七套外壳（各自的
+ * 圆角、内边距、遮罩色、关闭按钮与尺寸档）连同 CSS 一起删干净了，页面里不再有
+ * 第二套遮罩。写新弹窗请直接用本组件，不要复制外壳。
+ *
+ * 用法约定：
+ * - 打开条件是「某对象非空」时用 `v-if` 而非 `:model-value`：`<QdModal v-if="editing"
+ *   :model-value="true">`。模板里的 `editing.xxx` 只有在 v-if 分支内才被 TS 认作非空，
+ *   用 `:model-value="!!editing"` 会让全内容类型报错。
+ * - 底部按钮进 `#footer`，头部要图标 / 副标题 / 额外按钮时进 `#header`：
+ *   插槽内容由父组件渲染，父组件的 scoped 样式仍然生效。
+ * - 内容自带的 padding 与滚动要去掉：body 的 padding 与 overflow 由本组件提供。
  *
  * 无障碍：v-dialog 指令（utils/a11y.ts）负责 role/aria-modal、打开聚焦首个
  * 输入控件、Tab 循环与关闭恢复焦点；这里只补 Esc 与点遮罩关闭。

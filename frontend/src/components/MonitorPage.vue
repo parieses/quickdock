@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import PageHeader from './PageHeader.vue'
 import QdTabs from './QdTabs.vue'
+import QdSwitch from './QdSwitch.vue'
+import QdModal from './QdModal.vue'
 defineOptions({ name: KEEP_ALIVE.monitor })
 // name 的唯一来源：pages/keepAlive.ts（与 KeepAlive 白名单共用同一常量）
 import { KEEP_ALIVE } from '../pages/keepAlive'
@@ -1160,10 +1162,9 @@ onUnmounted(() => {
             </div>
           </div>
           <div v-key-click class="item-actions" @click.stop>
-            <button class="toggle-btn" :class="{ active: m.enabled }" @click="toggleEnabled(m)"
-                    :title="m.enabled ? t('mon_enabled') : t('mon_disabled')">
-              <span class="toggle-knob" />
-            </button>
+            <QdSwitch :model-value="m.enabled" @update:model-value="() => toggleEnabled(m)"
+                      :label="m.enabled ? t('mon_enabled') : t('mon_disabled')"
+                      :title="m.enabled ? t('mon_enabled') : t('mon_disabled')" />
             <button class="act" :disabled="checkingId === m.id" @click="checkNow(m)" :title="t('mon_check_now')">
               <RefreshCw :size="14" :class="{ spin: checkingId === m.id }" />
             </button>
@@ -1268,10 +1269,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 新增/编辑弹窗 -->
-    <div v-if="showModal" class="modal-mask" @click.self="showModal = false">
-      <div class="modal">
-        <h3>{{ modalTitle }}</h3>
-
+    <QdModal v-model="showModal" :title="modalTitle" width="440px">
         <label>{{ t('mon_name') }}</label>
         <input v-model="fName" class="modal-input" :placeholder="t('mon_name_ph')" />
 
@@ -1414,12 +1412,11 @@ onUnmounted(() => {
         <!-- 校验提示画在弹窗里：页面级 error 被遮罩盖住，等于没提示 -->
         <p v-if="formErr" class="form-err">{{ formErr }}</p>
 
-        <div class="modal-actions">
-          <button class="qd-btn" @click="showModal = false">{{ t('cancel') }}</button>
-          <button class="qd-btn qd-btn-primary" :disabled="saving" @click="save">{{ t('save') }}</button>
-        </div>
-      </div>
-    </div>
+      <template #footer>
+        <button class="qd-btn" @click="showModal = false">{{ t('cancel') }}</button>
+        <button class="qd-btn qd-btn-primary" :disabled="saving" @click="save">{{ t('save') }}</button>
+      </template>
+    </QdModal>
 
     <ConfirmDialog
       :visible="showDelConfirm"
@@ -1752,14 +1749,6 @@ onUnmounted(() => {
 
 
 /* 弹窗 */
-.modal-mask {
-  position: fixed; inset: 0; background: var(--color-bg-overlay); display: flex;
-  align-items: center; justify-content: center; z-index: 100;
-}
-.modal {
-  width: 440px; max-height: 90vh; overflow-y: auto; background: var(--color-popover-bg);
-  border-radius: var(--radius-lg); padding: var(--space-5); box-shadow: var(--shadow-lg);
-}
 .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .modal-grid > * { min-width: 0; }
 
@@ -1789,7 +1778,6 @@ onUnmounted(() => {
 .toggle-label input { cursor: pointer; }
 .toggle-row { display: flex; gap: var(--space-5); margin-top: var(--space-3); flex-wrap: wrap; }
 
-.modal-actions { display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-5); }
 /* 弹窗内校验提示：弹窗自己有内边距，这里不再加外边距 */
 .form-err {
   margin: var(--space-3) 0 0; padding: 7px 10px; font-size: var(--text-sm);

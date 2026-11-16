@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import PageHeader from './PageHeader.vue'
+import QdModal from './QdModal.vue'
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -1321,10 +1322,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 编辑弹窗 -->
-    <div v-if="showEdit" class="modal-mask" @click.self="showEdit = false">
-      <div class="modal">
-        <h3>{{ t('todoEdit') }}</h3>
-
+    <QdModal v-model="showEdit" :title="t('todoEdit')" width="380px">
         <label>{{ t('todoTitle') }}</label>
         <input v-model="editTitle" class="modal-input" placeholder="..." />
 
@@ -1387,18 +1385,14 @@ onUnmounted(() => {
              关联走独立 service，不进 UpdateTodo 的字段。 -->
         <EntityLinkPicker v-if="editing" src-type="todo" :src-id="editing.id" :src-label="editTitle" />
 
-        <div class="modal-actions">
-          <button class="qd-btn" @click="showEdit = false">{{ t('cancel') }}</button>
-          <button class="qd-btn qd-btn-primary" @click="saveEdit">{{ t('save') }}</button>
-        </div>
-      </div>
-    </div>
+      <template #footer>
+        <button class="qd-btn" @click="showEdit = false">{{ t('cancel') }}</button>
+        <button class="qd-btn qd-btn-primary" @click="saveEdit">{{ t('save') }}</button>
+      </template>
+    </QdModal>
 
     <!-- 新增弹窗 -->
-    <div v-if="showCreate" class="modal-mask" @click.self="showCreate = false">
-      <div class="modal">
-        <h3>{{ t('todoAdd') }}</h3>
-
+    <QdModal v-model="showCreate" :title="t('todoAdd')" width="380px">
         <label>{{ t('todoTitle') }}</label>
         <input v-model="cTitle" class="modal-input" :placeholder="t('todoAddPlaceholder')" />
 
@@ -1450,12 +1444,11 @@ onUnmounted(() => {
         <label>{{ t('todoNote') }}</label>
         <input v-model="cNote" class="modal-input" />
 
-        <div class="modal-actions">
-          <button class="qd-btn" @click="showCreate = false">{{ t('cancel') }}</button>
-          <button class="qd-btn qd-btn-primary" @click="createTodo">{{ t('save') }}</button>
-        </div>
-      </div>
-    </div>
+      <template #footer>
+        <button class="qd-btn" @click="showCreate = false">{{ t('cancel') }}</button>
+        <button class="qd-btn qd-btn-primary" @click="createTodo">{{ t('save') }}</button>
+      </template>
+    </QdModal>
 
     <!-- 标签联想：allTags 早就统计好了（标签筛选栏在用），输入时却全靠手打，
          拼错一个字就分裂成两个标签。原生 datalist 零依赖，够用。 -->
@@ -1816,16 +1809,7 @@ onUnmounted(() => {
 .p-high { background: var(--color-danger); }
 
 /* 弹窗 */
-.modal-mask {
-  position: fixed; inset: 0; background: var(--color-bg-overlay); display: flex;
-  align-items: center; justify-content: center; z-index: 100;
-}
-.modal {
-  width: 380px; max-height: 94vh; overflow: visible; background: var(--color-popover-bg);
-  border-radius: var(--radius-lg); padding: var(--space-5); box-shadow: var(--shadow-lg);
-}
 .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .modal-grid > * { min-width: 0; }
 .modal-grid input[type="datetime-local"] { width: 100%; box-sizing: border-box; }
-.modal-actions { display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-4); }
 </style>

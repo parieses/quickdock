@@ -12,85 +12,112 @@
  */
 import { useI18n } from 'vue-i18n'
 import RuntimeLogView from './RuntimeLogView.vue'
+import QdModal from './QdModal.vue'
 defineProps<{ ctx: any }>()
 const { t } = useI18n()
 </script>
 
 <template>
 <!-- 别名 / 备注编辑弹窗 -->
-<div v-if="ctx.editing.open" class="modal-overlay" @click.self="ctx.editing.open = false">
-  <div class="modal">
-    <div class="modal-title">{{ t('editAliasNote') }} · {{ ctx.editing.version }}</div>
-    <label class="modal-label">{{ t('envAlias') }}</label>
-    <input v-model="ctx.editing.alias" class="env-input" :placeholder="t('aliasPlaceholder')" />
-    <label class="modal-label">{{ t('envNote') }}</label>
-    <textarea v-model="ctx.editing.note" class="env-textarea" :placeholder="t('envNotePlaceholder')" rows="3"></textarea>
+<QdModal
+  v-if="ctx.editing.open"
+  :model-value="true"
+  :title="`${t('editAliasNote')} · ${ctx.editing.version}`"
+  width="560px"
+  @update:model-value="ctx.editing.open = false"
+>
+  <label class="modal-label">{{ t('envAlias') }}</label>
+  <input v-model="ctx.editing.alias" class="env-input" :placeholder="t('aliasPlaceholder')" />
+  <label class="modal-label">{{ t('envNote') }}</label>
+  <textarea v-model="ctx.editing.note" class="env-textarea" :placeholder="t('envNotePlaceholder')" rows="3"></textarea>
+  <template #footer>
     <div class="modal-actions">
       <button class="op-btn" @click="ctx.editing.open = false">{{ t('cancel') }}</button>
       <button class="env-install-btn" @click="ctx.saveAlias">{{ t('save') }}</button>
     </div>
-  </div>
-</div>
+  </template>
+</QdModal>
 
 <!-- 删除确认弹窗 -->
-<div v-if="ctx.confirmDelete.open" class="modal-overlay" @click.self="ctx.confirmDelete.open = false">
-  <div class="modal">
-    <div class="modal-title">{{ t('confirmDeleteTitle') }}</div>
-    <p class="modal-text">{{ t('confirmDeleteVersion', { version: ctx.confirmDelete.version }) }}</p>
-    <label v-if="ctx.HAS_DATA_DIR.has(ctx.confirmDelete.runtime)" class="modal-check">
-      <input type="checkbox" v-model="ctx.confirmDelete.removeData" />
-      <span>{{ t('deleteWithData') }}</span>
-    </label>
+<QdModal
+  v-if="ctx.confirmDelete.open"
+  :model-value="true"
+  :title="t('confirmDeleteTitle')"
+  width="560px"
+  @update:model-value="ctx.confirmDelete.open = false"
+>
+  <p class="modal-text">{{ t('confirmDeleteVersion', { version: ctx.confirmDelete.version }) }}</p>
+  <label v-if="ctx.HAS_DATA_DIR.has(ctx.confirmDelete.runtime)" class="modal-check">
+    <input type="checkbox" v-model="ctx.confirmDelete.removeData" />
+    <span>{{ t('deleteWithData') }}</span>
+  </label>
+  <template #footer>
     <div class="modal-actions">
       <button class="op-btn" @click="ctx.confirmDelete.open = false">{{ t('cancel') }}</button>
       <button class="env-install-btn danger" @click="ctx.doDelete">{{ t('deleteVersion') }}</button>
     </div>
-  </div>
-</div>
+  </template>
+</QdModal>
 
 <!-- 模型删除确认弹窗：与版本删除分开，避免误把「删模型」当成「删程序」 -->
-<div v-if="ctx.ollamaDelTarget" class="modal-overlay" @click.self="ctx.ollamaDelTarget = null">
-  <div class="modal">
-    <div class="modal-title">{{ t('ollamaConfirmDeleteTitle') }}</div>
-    <p class="modal-text">{{ t('ollamaConfirmDelete', { name: ctx.ollamaDelTarget.name, size: ctx.ollamaSize(ctx.ollamaDelTarget.size) }) }}</p>
+<QdModal
+  v-if="ctx.ollamaDelTarget"
+  :model-value="true"
+  :title="t('ollamaConfirmDeleteTitle')"
+  width="560px"
+  @update:model-value="ctx.ollamaDelTarget = null"
+>
+  <p class="modal-text">{{ t('ollamaConfirmDelete', { name: ctx.ollamaDelTarget.name, size: ctx.ollamaSize(ctx.ollamaDelTarget.size) }) }}</p>
+  <template #footer>
     <div class="modal-actions">
       <button class="op-btn" @click="ctx.ollamaDelTarget = null">{{ t('cancel') }}</button>
       <button class="env-install-btn danger" @click="ctx.deleteOllamaModel">{{ t('delete') }}</button>
     </div>
-  </div>
-</div>
+  </template>
+</QdModal>
 
 <!-- 通用日志弹窗：任意实现了 LogProvider 的运行时（nginx/redis/caddy/traefik/apache/postgresql/mysql/mariadb/mongodb/memcached/minio/mailpit…）-->
-<div v-if="ctx.logModal.open" class="modal-overlay" @click.self="ctx.closeLogModal()">
-  <div class="modal php-modal">
-    <div class="modal-title">{{ t('viewLog') }} · {{ ctx.logModal.runtime }} · {{ ctx.logModal.version }}</div>
-    <div class="php-tab-body">
-      <!-- 日志查看器自带搜索高亮 / 级别着色 / 跟随末尾；自动刷新仍由本页负责（要调后端） -->
-      <RuntimeLogView
-        :text="ctx.logModal.log"
-        :empty-text="t('logEmpty')"
-        @refresh="ctx.refreshLogModal()"
-      >
-        <template #actions>
-          <button class="log-btn" :class="{ active: ctx.logModal.logAuto }" @click="ctx.toggleLogModalAuto()">
-            {{ ctx.logModal.logAuto ? t('logAutoOn') : t('logAutoOff') }}
-          </button>
-        </template>
-      </RuntimeLogView>
-    </div>
+<QdModal
+  v-if="ctx.logModal.open"
+  :model-value="true"
+  :title="`${t('viewLog')} · ${ctx.logModal.runtime} · ${ctx.logModal.version}`"
+  width="540px"
+  @update:model-value="ctx.closeLogModal()"
+>
+  <div class="php-tab-body">
+    <!-- 日志查看器自带搜索高亮 / 级别着色 / 跟随末尾；自动刷新仍由本页负责（要调后端） -->
+    <RuntimeLogView
+      :text="ctx.logModal.log"
+      :empty-text="t('logEmpty')"
+      @refresh="ctx.refreshLogModal()"
+    >
+      <template #actions>
+        <button class="log-btn" :class="{ active: ctx.logModal.logAuto }" @click="ctx.toggleLogModalAuto()">
+          {{ ctx.logModal.logAuto ? t('logAutoOn') : t('logAutoOff') }}
+        </button>
+      </template>
+    </RuntimeLogView>
+  </div>
+  <template #footer>
     <div class="modal-actions">
       <button class="op-btn" @click="ctx.closeLogModal()">{{ t('cancel') }}</button>
     </div>
-  </div>
-</div>
+  </template>
+</QdModal>
 
 <!-- 特色操作输出弹窗：各语言生态的只读查询 / 可逆写操作 / 清理动作共用一个文本视图 -->
-<div v-if="ctx.taskModal.open" class="modal-overlay" @click.self="ctx.taskModal.open = false">
-  <div class="modal task-modal">
-    <div class="modal-title">
+<QdModal
+  v-if="ctx.taskModal.open"
+  :model-value="true"
+  width="680px"
+  @update:model-value="ctx.taskModal.open = false"
+>
+  <template #header>
+    <div class="task-head">
       {{ t('task_' + ctx.taskKey(ctx.taskModal.taskId)) }}
       <span class="task-ver">{{ ctx.taskModal.runtime }} · {{ ctx.taskModal.version }}</span>
     </div>
+  </template>
     <p class="modal-text">{{ t('task_' + ctx.taskKey(ctx.taskModal.taskId) + '_desc') }}</p>
 
     <div v-if="ctx.taskModal.needsConfirm" class="task-confirm">
@@ -108,6 +135,7 @@ const { t } = useI18n()
     <p v-if="ctx.taskModal.truncated" class="task-hint">{{ t('taskTruncated') }}</p>
     <p v-if="ctx.taskModal.durationMs" class="task-hint">{{ t('taskDuration', { ms: ctx.taskModal.durationMs }) }}</p>
 
+  <template #footer>
     <div class="modal-actions">
       <button class="op-btn" @click="ctx.taskModal.open = false">{{ t('close') }}</button>
       <button v-if="ctx.taskModal.output" class="op-btn" @click="ctx.copyTaskOutput">{{ t('copy') }}</button>
@@ -119,20 +147,25 @@ const { t } = useI18n()
         @click="ctx.runTask"
       >{{ ctx.taskModal.needsConfirm ? t('taskRun') : t('taskRetry') }}</button>
     </div>
-  </div>
-</div>
+  </template>
+</QdModal>
 
 <!-- 端口全景弹窗：所有运行中服务的端口与控制台一览 -->
 <!-- 项目版本要求检查：探测目录里的版本声明，与已装/激活对比 -->
-<div v-if="ctx.projectCheck.open" class="modal-overlay" @click.self="ctx.projectCheck.open = false">
-  <div class="modal path-modal path-modal--760">
+<QdModal
+  v-if="ctx.projectCheck.open"
+  :model-value="true"
+  width="760px"
+  @update:model-value="ctx.projectCheck.open = false"
+>
+  <template #header>
     <div class="modal-actions-top">
       <div>
         <div class="modal-title">{{ t('projectCheck') }}</div>
         <p class="modal-text">{{ t('projectCheckDesc') }}</p>
       </div>
-      <button class="cfg-close" type="button" :title="t('close')" @click="ctx.projectCheck.open = false">×</button>
     </div>
+  </template>
 
     <div class="pc-row">
       <input
@@ -233,18 +266,22 @@ const { t } = useI18n()
         </div>
       </template>
     </template>
-  </div>
-</div>
+</QdModal>
 
-<div v-if="ctx.panorama.open" class="modal-overlay" @click.self="ctx.panorama.open = false">
-  <div class="modal path-modal path-modal--640">
+<QdModal
+  v-if="ctx.panorama.open"
+  :model-value="true"
+  width="640px"
+  @update:model-value="ctx.panorama.open = false"
+>
+  <template #header>
     <div class="modal-actions-top">
       <div>
         <div class="modal-title">{{ t('portPanorama') }}</div>
         <p class="modal-text">{{ t('portPanoramaDesc') }}</p>
       </div>
-      <button class="cfg-close" type="button" :title="t('close')" @click="ctx.panorama.open = false">×</button>
     </div>
+  </template>
     <div v-if="!ctx.panoramaEntries.length" class="empty-state">
       <div class="empty-icon">∅</div>
       <div class="empty-text">{{ t('noRunningService') }}</div>
@@ -270,8 +307,7 @@ const { t } = useI18n()
         </tr>
       </tbody>
     </table>
-  </div>
-</div>
+</QdModal>
 
 
 </template>
@@ -301,9 +337,10 @@ const { t } = useI18n()
 
 .svc-port-link.disabled:hover { color: var(--color-text-disabled); text-decoration: none; }
 
+/* 自定义头部（标题 + 说明 + 可选右上按钮）现在住在 QdModal 的 header 插槽里 */
 .modal-actions-top {
+  flex: 1; min-width: 0;
   display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-6);
-  margin-bottom: 14px;
 }
 
 .modal-actions-top .modal-text { margin: var(--space-2) 0 0; }
@@ -368,10 +405,6 @@ const { t } = useI18n()
 
 .modal-check { display: flex; align-items: center; gap: var(--space-4); margin: 10px 0 var(--space-1); font-size: var(--text-sm); color: var(--color-text-primary); cursor: pointer; user-select: none; }
 
-.path-modal--760 { max-width: 760px; }
-
-.path-modal--640 { max-width: 640px; }
-
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); padding: 26px 0; }
 
 .empty-icon { font-size: var(--text-3xl); color: var(--color-text-disabled); }
@@ -420,53 +453,15 @@ const { t } = useI18n()
 
 .ftp-form .env-input { margin-bottom: var(--space-3); }
 
-.modal-overlay {
-  position: fixed; inset: 0; background: var(--color-bg-overlay);
-  display: flex; align-items: center; justify-content: center; z-index: 50;
-}
+/* 弹窗外壳统一走 QdModal（遮罩 / 卡片 / 标题 / 底栏都不再本地重写） */
 
-.modal {
-  position: relative;
-  width: 560px;
-  max-width: 94vw;
-  max-height: 88vh;
-  background: var(--color-popover-bg);
-  border: 1px solid var(--popover-border-color);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 18px 56px var(--color-bg-overlay);
-  display: flex;
-  flex-direction: column;
-  padding: var(--space-7) 22px;
-  overflow: hidden;
-  color: var(--color-text-primary);
-}
 
-.modal-title {
-  font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary);
-  margin: 0 0 var(--space-2); line-height: 1.4;
-}
-
-.modal-actions {
-  display: flex; align-items: center; justify-content: flex-end; gap: var(--space-4);
-  margin-top: var(--space-6); padding-top: 14px; border-top: 1px solid var(--color-border); flex-shrink: 0;
-}
-
-.cfg-close {
-  width: 30px; height: 30px; flex: none; border-radius: var(--radius-sm);
-  border: 1px solid transparent; background: transparent; color: var(--color-text-muted);
-  font-size: var(--text-xl); line-height: 1; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-
-.cfg-close:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-
-.php-modal { width: 540px; max-width: 94vw; }
+/* 底栏按钮组：QdModal 的 footer 已给好分隔线与内边距，这里只负责撑满与右对齐 */
+.modal-actions { flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: var(--space-4); }
 
 .php-tab-body { min-height: 200px; flex: 1 1 auto; max-height: 60vh; overflow: auto; }
 
-/* 800px 最小窗口扣掉 210 侧栏后主区只有 590，680 定宽会横向溢出被裁。 */
-.task-modal { width: 680px; max-width: 94vw; }
+.task-head { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--space-3); }
 
 .task-ver {
   margin-left: var(--space-4); font-size: var(--text-sm); font-weight: 400; color: var(--color-text-muted);

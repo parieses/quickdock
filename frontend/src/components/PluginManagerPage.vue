@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import PageHeader from './PageHeader.vue'
+import QdModal from './QdModal.vue'
 defineOptions({ name: KEEP_ALIVE.plugins })
 // name 的唯一来源：pages/keepAlive.ts（与 KeepAlive 白名单共用同一常量）
 import { KEEP_ALIVE } from '../pages/keepAlive'
@@ -1058,13 +1059,13 @@ onUnmounted(() => {
     />
 
     <!-- 命令清单：卡片上放不下整张表，点开看完整 trigger / 热键 / 参数 -->
-    <div v-if="cmdDialog.visible" class="qd-modal-overlay" @click.self="cmdDialog.visible = false">
-      <div class="qd-modal cmd-dialog">
-        <div class="qd-modal-head">
-          <span class="qd-modal-title">{{ t('pluginCmdListTitle') }} · {{ cmdDialog.pluginName }}</span>
-          <button class="qd-modal-close" @click="cmdDialog.visible = false" :title="t('close')"><X :size="14" /></button>
-        </div>
-        <div class="cmd-dialog-body">
+    <QdModal
+      :model-value="cmdDialog.visible"
+      :title="`${t('pluginCmdListTitle')} · ${cmdDialog.pluginName}`"
+      width="520px"
+      @update:model-value="(v: boolean) => (cmdDialog.visible = v)"
+    >
+      <div class="cmd-dialog-body">
           <div v-for="r in cmdDialog.rows" :key="r.id" class="cmd-row">
             <div class="cmd-row-top">
               <kbd v-if="r.hotkey" class="cmd-kbd">{{ r.hotkey }}</kbd>
@@ -1078,18 +1079,17 @@ onUnmounted(() => {
               <code>{{ r.paramsText }}</code>
             </div>
           </div>
-        </div>
       </div>
-    </div>
+    </QdModal>
 
     <!-- 市场源：增删 / 启停。保存后由刷新信号让市场页按新配置重拉索引 -->
-    <div v-if="sourcesDialog" class="qd-modal-overlay" @click.self="closeSourcesDialog">
-      <div class="qd-modal sources-dialog">
-        <div class="qd-modal-head">
-          <span class="qd-modal-title">{{ t('pluginMarketSources') }}</span>
-          <button class="qd-modal-close" @click="closeSourcesDialog" :title="t('close')"><X :size="14" /></button>
-        </div>
-        <div class="sources-list">
+    <QdModal
+      :model-value="sourcesDialog"
+      :title="t('pluginMarketSources')"
+      width="460px"
+      @update:model-value="(v: boolean) => v || closeSourcesDialog()"
+    >
+      <div class="sources-list">
           <div v-for="(s, i) in sourcesDraft" :key="s.id" class="source-row">
             <input v-model="s.enabled" type="checkbox" class="source-enabled" :disabled="savingSources" :title="t('pluginEnable')" />
             <div class="source-fields">
@@ -1102,13 +1102,12 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
-        <div class="sources-actions">
-          <button class="qd-btn qd-btn-ghost" @click="addSource" :disabled="savingSources"><span>{{ t('add') }}</span></button>
-          <button class="qd-btn" @click="closeSourcesDialog" :disabled="savingSources"><span>{{ t('cancel') }}</span></button>
-          <button class="qd-btn" @click="saveSources" :disabled="savingSources"><span>{{ t('save') }}</span></button>
-        </div>
-      </div>
-    </div>
+      <template #footer>
+        <button class="qd-btn qd-btn-ghost" @click="addSource" :disabled="savingSources"><span>{{ t('add') }}</span></button>
+        <button class="qd-btn" @click="closeSourcesDialog" :disabled="savingSources"><span>{{ t('cancel') }}</span></button>
+        <button class="qd-btn" @click="saveSources" :disabled="savingSources"><span>{{ t('save') }}</span></button>
+      </template>
+    </QdModal>
 
     <!-- zip 安装遮罩动画：覆盖「选择 zip → 安装完成」全过程 -->
     <div v-if="operating.has('_install_')" class="install-overlay">
@@ -1525,38 +1524,9 @@ onUnmounted(() => {
 }
 
 /* ---- 本组件内的弹窗基类（不写全局 styles，避免影响其它页面） ---- */
-.qd-modal-overlay {
-  position: absolute; inset: 0; z-index: 70;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--color-bg-overlay);
-}
-.qd-modal {
-  background: var(--color-popover-bg);
-  border: 1px solid var(--popover-border-color);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 18px 56px var(--color-bg-overlay);
-  padding: var(--space-6) 18px;
-  color: var(--color-text-primary);
-  display: flex; flex-direction: column;
-  max-height: 76vh;
-}
-.qd-modal-head {
-  display: flex; align-items: center; gap: var(--space-4);
-  padding-bottom: 10px; margin-bottom: 10px;
-  border-bottom: 1px solid var(--color-border);
-}
-.qd-modal-title { font-size: var(--text-md); font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.qd-modal-close {
-  display: flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px; flex-shrink: 0;
-  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  background: var(--color-bg-tertiary); color: var(--color-text-muted); cursor: pointer;
-}
-.qd-modal-close:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
 
 /* ---- 命令清单 ---- */
 .card-cmds { cursor: pointer; } /* 点开完整命令表 */
-.cmd-dialog { width: 520px; max-width: 90%; }
 .cmd-dialog-body { overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-3); }
 .cmd-row {
   padding: var(--space-4) 10px;
@@ -1584,7 +1554,6 @@ onUnmounted(() => {
 }
 
 /* ---- 市场源编辑 ---- */
-.sources-dialog { width: 460px; max-width: 90%; }
 .sources-list { overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-3); }
 .source-row {
   display: flex; align-items: flex-start; gap: var(--space-4);
@@ -1610,6 +1579,5 @@ onUnmounted(() => {
   background: var(--color-bg-tertiary); color: var(--color-text-muted); cursor: pointer;
 }
 .source-remove:hover { color: var(--color-danger); border-color: var(--color-danger); }
-.sources-actions { display: flex; justify-content: flex-end; gap: var(--space-4); margin-top: var(--space-5); padding-top: 10px; border-top: 1px solid var(--color-border); }
 
 </style>

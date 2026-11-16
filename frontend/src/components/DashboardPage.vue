@@ -71,6 +71,7 @@ import {
 import TypeIcon from './TypeIcon.vue'
 import MailDetailDialog from './MailDetailDialog.vue'
 import QdBarChart from './charts/QdBarChart.vue'
+import QdSwitch from './QdSwitch.vue'
 
 // 以下两个结构只在返回值里出现，Wails 绑定生成器不会单独生成类型（与 MonitorPage 的
 // MonitorLog/MonitorStat 同一处理方式），故本地声明，字段与后端 json tag 一致。
@@ -1828,16 +1829,12 @@ onUnmounted(() => {
             </div>
             <label class="field toggle-field">
               <span class="field-label">{{ t('daybarShowYiJi') }}</span>
-              <button type="button" class="toggle-btn" :class="{ active: dayPrefs.showYiJi }" @click="toggleYiJi">
-                <span class="toggle-knob"></span>
-              </button>
+              <QdSwitch :model-value="dayPrefs.showYiJi" :label="t('daybarShowYiJi')" @update:model-value="toggleYiJi" />
             </label>
             <span class="db-pref-hint">{{ t('daybarYiJiHint') }}</span>
             <label class="field toggle-field">
               <span class="field-label">{{ t('daybarShowWeather') }}</span>
-              <button type="button" class="toggle-btn" :class="{ active: weatherCfg.enabled }" @click="toggleWeather">
-                <span class="toggle-knob"></span>
-              </button>
+              <QdSwitch :model-value="weatherCfg.enabled" :label="t('daybarShowWeather')" @update:model-value="toggleWeather" />
             </label>
             <div class="field">
               <span class="field-label">{{ t('daybarWeatherSource') }}</span>
@@ -1970,8 +1967,8 @@ onUnmounted(() => {
             </div>
             <label class="field toggle-field">
               <span class="field-label">{{ t('mailEnable') }}</span>
-              <button type="button" class="toggle-btn" :class="{ active: mailForm.enabled }"
-                      @click="mailForm.enabled = !mailForm.enabled"><span class="toggle-knob"></span></button>
+              <QdSwitch :model-value="mailForm.enabled" :label="t('mailEnable')"
+                        @update:model-value="(v: boolean) => (mailForm.enabled = v)" />
             </label>
             <div class="field">
               <span class="field-label">{{ t('mailEmail') }}</span>

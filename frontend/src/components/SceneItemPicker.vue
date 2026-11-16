@@ -10,7 +10,8 @@ import { ListItems } from '../../bindings/quickdock/services/item/itemservice'
 import { useWorkspaceStore } from '../stores/workspace'
 import type { CollectionItem, Collection, Scene } from '../types'
 import TypeIcon from './TypeIcon.vue'
-import { LoaderCircle, X, Layers, ChevronRight } from '@lucide/vue'
+import QdModal from './QdModal.vue'
+import { LoaderCircle, Layers, ChevronRight } from '@lucide/vue'
 
 const props = defineProps<{ visible: boolean }>()
 const emit = defineEmits<{ select: [item: CollectionItem]; cancel: [] }>()
@@ -85,104 +86,84 @@ function close() { emit('cancel') }
 </script>
 
 <template>
-  <div v-if="visible" class="modal-mask" @click.self="close">
-    <div class="modal">
-      <h3>
-        {{ t('sched_picker_title') }}
-        <button class="modal-x" @click="close" :title="t('cancel')"><X :size="16" /></button>
-      </h3>
+  <QdModal
+    :model-value="visible"
+    :title="t('sched_picker_title')"
+    width="460px"
+    @update:model-value="close"
+  >
+    <!-- 面包屑：点任一层跳回（数据已缓存，不重新拉取） -->
+    <div class="crumb">
+      <button class="crumb-item" :class="{ on: level === 'scene' }" @click="level = 'scene'">{{ t('sched_picker_scene') }}</button>
+      <template v-if="activeScene">
+        <ChevronRight :size="13" class="crumb-sep" />
+        <button class="crumb-item" :class="{ on: level === 'collection' }" @click="level = 'collection'">{{ activeScene.name }}</button>
+      </template>
+      <template v-if="activeCollection">
+        <ChevronRight :size="13" class="crumb-sep" />
+        <button class="crumb-item" :class="{ on: level === 'item' }" @click="level = 'item'">{{ activeCollection.name }}</button>
+      </template>
+    </div>
 
-      <!-- 面包屑：点任一层跳回（数据已缓存，不重新拉取） -->
-      <div class="crumb">
-        <button class="crumb-item" :class="{ on: level === 'scene' }" @click="level = 'scene'">{{ t('sched_picker_scene') }}</button>
-        <template v-if="activeScene">
-          <ChevronRight :size="13" class="crumb-sep" />
-          <button class="crumb-item" :class="{ on: level === 'collection' }" @click="level = 'collection'">{{ activeScene.name }}</button>
-        </template>
-        <template v-if="activeCollection">
-          <ChevronRight :size="13" class="crumb-sep" />
-          <button class="crumb-item" :class="{ on: level === 'item' }" @click="level = 'item'">{{ activeCollection.name }}</button>
-        </template>
+    <div class="picker-body">
+      <div v-if="loading" class="picker-loading">
+        <LoaderCircle :size="18" class="spin" /> {{ t('sched_picker_loading') }}
       </div>
+      <div v-else-if="err" class="picker-err">{{ err }}</div>
 
-      <div class="picker-body">
-        <div v-if="loading" class="picker-loading">
-          <LoaderCircle :size="18" class="spin" /> {{ t('sched_picker_loading') }}
-        </div>
-        <div v-else-if="err" class="picker-err">{{ err }}</div>
+      <!-- 场景层 -->
+      <ul v-else-if="level === 'scene'" class="picker-list">
+        <li v-if="!scenes.length" class="picker-empty">{{ t('sched_picker_no_scene') }}</li>
+        <li v-key-click v-for="s in scenes" :key="s.id" class="qd-row" @click="pickScene(s)">
+          <span class="qd-row-icon"><Layers :size="17" /></span>
+          <span class="qd-row-main">
+            <span class="qd-row-title">{{ s.name }}</span>
+            <span class="qd-row-sub">{{ s.type }}</span>
+          </span>
+          <span class="qd-row-actions"><ChevronRight :size="14" /></span>
+        </li>
+      </ul>
 
-        <!-- 场景层 -->
-        <ul v-else-if="level === 'scene'" class="picker-list">
-          <li v-if="!scenes.length" class="picker-empty">{{ t('sched_picker_no_scene') }}</li>
-          <li v-key-click v-for="s in scenes" :key="s.id" class="qd-row" @click="pickScene(s)">
-            <span class="qd-row-icon"><Layers :size="17" /></span>
-            <span class="qd-row-main">
-              <span class="qd-row-title">{{ s.name }}</span>
-              <span class="qd-row-sub">{{ s.type }}</span>
-            </span>
-            <span class="qd-row-actions"><ChevronRight :size="14" /></span>
-          </li>
-        </ul>
+      <!-- 集合层 -->
+      <ul v-else-if="level === 'collection'" class="picker-list">
+        <li v-if="!collections.length" class="picker-empty">{{ t('sched_picker_no_collection') }}</li>
+        <li v-key-click v-for="c in collections" :key="c.id" class="qd-row" @click="pickCollection(c)">
+          <span class="qd-row-icon"><TypeIcon :type="c.type || '目录集合'" :size="17" /></span>
+          <span class="qd-row-main">
+            <span class="qd-row-title">{{ c.name }}</span>
+            <span class="qd-row-sub">{{ c.type }}</span>
+          </span>
+          <span class="qd-row-actions"><ChevronRight :size="14" /></span>
+        </li>
+      </ul>
 
-        <!-- 集合层 -->
-        <ul v-else-if="level === 'collection'" class="picker-list">
-          <li v-if="!collections.length" class="picker-empty">{{ t('sched_picker_no_collection') }}</li>
-          <li v-key-click v-for="c in collections" :key="c.id" class="qd-row" @click="pickCollection(c)">
-            <span class="qd-row-icon"><TypeIcon :type="c.type || '目录集合'" :size="17" /></span>
-            <span class="qd-row-main">
-              <span class="qd-row-title">{{ c.name }}</span>
-              <span class="qd-row-sub">{{ c.type }}</span>
-            </span>
-            <span class="qd-row-actions"><ChevronRight :size="14" /></span>
-          </li>
-        </ul>
+      <!-- 项目层 -->
+      <ul v-else class="picker-list">
+        <li v-if="!items.length" class="picker-empty">{{ t('sched_picker_no_item') }}</li>
+        <li v-key-click v-for="it in items" :key="it.id" class="qd-row" @click="chooseItem(it)">
+          <span class="qd-row-icon">
+            <img v-if="it.icon" :src="it.icon" class="item-icon-img" alt="" />
+            <TypeIcon v-else :type="it.type" :size="17" />
+          </span>
+          <span class="qd-row-main">
+            <span class="qd-row-title">{{ it.name }}</span>
+            <span class="qd-row-sub">{{ it.value }}</span>
+          </span>
+        </li>
+      </ul>
+    </div>
 
-        <!-- 项目层 -->
-        <ul v-else class="picker-list">
-          <li v-if="!items.length" class="picker-empty">{{ t('sched_picker_no_item') }}</li>
-          <li v-key-click v-for="it in items" :key="it.id" class="qd-row" @click="chooseItem(it)">
-            <span class="qd-row-icon">
-              <img v-if="it.icon" :src="it.icon" class="item-icon-img" alt="" />
-              <TypeIcon v-else :type="it.type" :size="17" />
-            </span>
-            <span class="qd-row-main">
-              <span class="qd-row-title">{{ it.name }}</span>
-              <span class="qd-row-sub">{{ it.value }}</span>
-            </span>
-          </li>
-        </ul>
-      </div>
-
+    <template #footer>
       <div class="modal-actions">
         <button class="qd-btn" @click="back" :disabled="level === 'scene'">{{ t('back') }}</button>
         <button class="qd-btn qd-btn-primary" @click="close">{{ t('done') }}</button>
       </div>
-    </div>
-  </div>
+    </template>
+  </QdModal>
 </template>
 
 <style scoped>
-.modal-mask {
-  position: fixed; inset: 0; background: var(--color-bg-overlay);
-  display: flex; align-items: center; justify-content: center; z-index: 110;
-}
-.modal {
-  width: 460px; max-width: 92vw; max-height: 86vh;
-  display: flex; flex-direction: column;
-  background: var(--color-popover-bg); border-radius: var(--radius-lg);
-  padding: var(--space-5); box-shadow: var(--shadow-lg);
-}
-h3 {
-  margin: 0; display: flex; align-items: center; justify-content: space-between;
-  font-size: var(--text-base); font-weight: 600; color: var(--color-text-primary);
-}
-.modal-x {
-  border: none; background: none; color: var(--color-text-disabled);
-  cursor: pointer; padding: var(--space-1); border-radius: var(--radius-sm); line-height: 0;
-}
-.modal-x:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
-
-.crumb { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-3) 0; flex-wrap: wrap; }
+.crumb { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-5); flex-wrap: wrap; }
 .crumb-item {
   border: none; background: none; padding: 3px var(--space-3); border-radius: var(--radius-sm);
   font-size: var(--text-sm); color: var(--color-text-secondary); cursor: pointer; font-family: inherit;
@@ -210,5 +191,6 @@ h3 {
 }
 @keyframes picker-spin { to { transform: rotate(360deg); } }
 
-.modal-actions { display: flex; justify-content: space-between; gap: var(--space-3); margin-top: var(--space-5); }
+/* 与 QdModal 的 footer 分工：「上一步」靠左、「完成」靠右，所以撑满整行再两端分开 */
+.modal-actions { flex: 1; display: flex; justify-content: space-between; gap: var(--space-3); }
 </style>

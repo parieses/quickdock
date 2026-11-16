@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Plus, Pen, Trash2, Check, X } from '@lucide/vue'
+import { Plus, Pen, Trash2, Check } from '@lucide/vue'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { ListTools, CreateTool, UpdateTool, DeleteTool } from '../../bindings/quickdock/services/appservice'
 import type { OpenTool } from '../types'
 import type { ToastAPI } from '../types'
+import QdModal from './QdModal.vue'
 import { TOOL_TYPES, SENTINEL_TOOL_NAME } from '../constants/itemTypes'
 
 const { t } = useI18n()
@@ -196,77 +197,73 @@ async function setDefault(tool: OpenTool) {
       </div>
     </div>
 
-    <!-- 编辑 / 新增模态框 -->
-    <Teleport to="body">
-      <div v-if="editing" class="tool-modal-overlay" @mousedown.self="closeEditor">
-        <div class="tool-modal">
-          <div class="tool-modal-header">
-            <h3>{{ isNew ? t('newTool') : t('editTool') }}</h3>
-            <button class="tool-modal-close" @click="closeEditor">
-              <X :size="18" />
-            </button>
-          </div>
-
-          <div class="tool-modal-body">
-            <div class="field">
-              <label class="field-label">{{ t('name') }}</label>
-              <input
-                v-model="editing.name"
-                class="field-input"
-                :placeholder="t('toolNamePlaceholder')"
-                @keyup.enter="save"
-              />
-            </div>
-
-            <div class="field">
-              <label class="field-label">{{ t('toolType') }}</label>
-              <select v-model="editing.type" class="field-input">
-                <option v-for="opt in TOOL_TYPE_OPTIONS" :key="opt.value" :value="opt.value">
-                  {{ opt.label }}
-                </option>
-              </select>
-            </div>
-
-            <div class="field">
-              <label class="field-label">{{ t('toolPath') }}</label>
-              <input
-                v-model="editing.path"
-                class="field-input"
-                :placeholder="t('toolPath')"
-              />
-            </div>
-
-            <div class="field">
-              <label class="field-label">{{ t('toolArgs') }}</label>
-              <input
-                v-model="editing.args"
-                class="field-input"
-                :placeholder="t('toolArgs')"
-              />
-              <p class="field-hint">{{ t('toolArgsHint') }}</p>
-            </div>
-
-            <div class="field tool-default-field">
-              <label class="tool-default-toggle">
-                <input type="checkbox" v-model="editing.isDefault" :true-value="1" :false-value="0" />
-                <span>{{ t('toolSetDefault') }}</span>
-              </label>
-            </div>
-
-            <p v-if="savingError" class="tool-error">{{ savingError }}</p>
-          </div>
-
-          <div class="tool-modal-footer">
-            <button class="btn btn-secondary" :disabled="saving" @click="closeEditor">
-              {{ t('cancel') }}
-            </button>
-            <button class="btn btn-primary" :disabled="saving" @click="save">
-              {{ t('save') }}
-            </button>
-          </div>
+    <!-- 编辑 / 新增模态框。v-if 而非 model-value 驱动：内容里有 20 处 editing.xxx，
+         TS 只有在 v-if 分支内才认得 editing 非空；关闭一律走 closeEditor 清空状态。 -->
+    <QdModal
+      v-if="editing"
+      :model-value="true"
+      :title="isNew ? t('newTool') : t('editTool')"
+      width="520px"
+      @update:model-value="closeEditor"
+    >
+      <div class="tool-modal-body">
+        <div class="field">
+          <label class="field-label">{{ t('name') }}</label>
+          <input
+            v-model="editing.name"
+            class="field-input"
+            :placeholder="t('toolNamePlaceholder')"
+            @keyup.enter="save"
+          />
         </div>
+
+        <div class="field">
+          <label class="field-label">{{ t('toolType') }}</label>
+          <select v-model="editing.type" class="field-input">
+            <option v-for="opt in TOOL_TYPE_OPTIONS" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label class="field-label">{{ t('toolPath') }}</label>
+          <input
+            v-model="editing.path"
+            class="field-input"
+            :placeholder="t('toolPath')"
+          />
+        </div>
+
+        <div class="field">
+          <label class="field-label">{{ t('toolArgs') }}</label>
+          <input
+            v-model="editing.args"
+            class="field-input"
+            :placeholder="t('toolArgs')"
+          />
+          <p class="field-hint">{{ t('toolArgsHint') }}</p>
+        </div>
+
+        <div class="field tool-default-field">
+          <label class="tool-default-toggle">
+            <input type="checkbox" v-model="editing.isDefault" :true-value="1" :false-value="0" />
+            <span>{{ t('toolSetDefault') }}</span>
+          </label>
+        </div>
+
+        <p v-if="savingError" class="tool-error">{{ savingError }}</p>
       </div>
-    </Teleport>
+
+      <template #footer>
+        <button class="btn btn-secondary" :disabled="saving" @click="closeEditor">
+          {{ t('cancel') }}
+        </button>
+        <button class="btn btn-primary" :disabled="saving" @click="save">
+          {{ t('save') }}
+        </button>
+      </template>
+    </QdModal>
   </div>
 </template>
 
@@ -449,72 +446,10 @@ async function setDefault(tool: OpenTool) {
 }
 
 /* 编辑模态框 */
-.tool-modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 20000;
-  background: var(--color-bg-overlay);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.tool-modal {
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  width: 520px;
-  max-width: 90vw;
-  max-height: 85vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: var(--shadow-pop);
-}
-.tool-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-.tool-modal-header h3 {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  margin: 0;
-  color: var(--color-text-primary);
-}
-.tool-modal-close {
-  background: none;
-  border: none;
-  color: var(--color-text-muted);
-  font-size: var(--text-xl);
-  cursor: pointer;
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-}
-.tool-modal-close:hover {
-  background: var(--color-bg-active);
-  color: var(--color-text-primary);
-}
 .tool-modal-body {
-  padding: 14px 18px;
-  overflow-y: auto;
-  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-.tool-modal-footer {
-  display: flex;
-  gap: var(--space-4);
-  justify-content: flex-end;
-  padding: var(--space-5) 18px;
-  border-top: 1px solid var(--color-border);
-  flex-shrink: 0;
 }
 .field {
   display: flex;

@@ -4,8 +4,12 @@ import type { App, Directive } from 'vue'
  * 键盘可达性与弹窗无障碍的全局能力。
  *
  * 为什么放在这里而不是每个组件各写一份：项目里有一批 `<div @click>` / `<span @click>`
- * 没有键盘语义，另有 30+ 个内联遮罩弹窗既没有焦点陷阱也没有 aria 标记。
+ * 没有键盘语义，另有一批内联遮罩弹窗既没有焦点陷阱也没有 aria 标记。
  * 逐个改模板既容易漏，又会把同一段 Tab 循环复制到几十个文件里。
+ *
+ * 11-16 之后 `.modal-overlay` / `.modal-mask` / `.dl-modal-overlay` / `.qd-modal-overlay`
+ * / `.ai-modal-overlay` / `.tool-modal-overlay` 这一批已经全部迁到 QdModal（自己带 v-dialog），
+ * 白名单里对应条目随之删除 —— 留着只会让新写的同名遮罩悄悄绕过 v-dialog 又拿到一份陷阱。
  *
  * 与 `useFocusTrap` 的关系：那 14 个组件自己接了焦点陷阱、自己处理 Esc，
  * 本文件的白名单**刻意不含**它们的遮罩类名（.confirm-overlay 等），避免双重陷阱。
@@ -136,11 +140,7 @@ function detachDialog(el: HTMLElement) {
  *  刻意排除菜单背景（*-backdrop / *-menu）、加载态（install-overlay / sess-overlay）、
  *  图片与 HTML 预览（ai-img-viewer / ai-html-preview）——它们不是对话框。 */
 const DIALOG_SELECTOR = [
-  '.modal-overlay',
-  '.modal-mask',
-  '.dl-modal-overlay',
   '.kb-overlay',
-  '.qd-modal-overlay',
   '.cs-overlay',
   '.challenge-mask',
   '.hdd-overlay',
@@ -148,8 +148,6 @@ const DIALOG_SELECTOR = [
   '.sfp-overlay',
   '.sfe-overlay',
   '.gen-overlay',
-  '.tool-modal-overlay',
-  '.ai-modal-overlay',
   '.prompt-dialog-overlay',
   '.note-editor-mask',
 ].join(',')

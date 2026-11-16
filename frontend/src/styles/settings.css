@@ -337,19 +337,8 @@
    .qd-btn:disabled。历史设置页这几个变体原本带 0.5 透明度，保留观感。 */
 .btn-secondary:disabled, .btn-ghost:disabled, .btn-danger:disabled { opacity: 0.5; cursor: default; }
 
-/* 切换开关 */
-.toggle-btn {
-  width: 40px; height: 22px; border-radius: var(--radius-full); border: none;
-  background: var(--color-bg-active); cursor: pointer; position: relative;
-  transition: background 0.2s; padding: 0;
-}
-.toggle-btn.active { background: var(--color-accent); }
-.toggle-knob {
-  position: absolute; top: 2px; left: 2px;
-  width: 18px; height: 18px; border-radius: 50%;
-  background: var(--color-accent-text); transition: transform 0.2s;
-}
-.toggle-btn.active .toggle-knob { transform: translateX(18px); }
+/* 开关本体已全部收编到 QdSwitch（34×18）。这里只留它旁边的
+   「开/关」文字标签，与 .toggle-field 的行内布局骨架。 */
 .toggle-label { font-size: var(--text-sm); color: var(--color-text-muted); }
 
 /* 快照备份 */
@@ -455,32 +444,8 @@
 .storage-migrate-progress .field-hint { margin: var(--space-4) 0 0; word-break: break-all; }
 
 /* 配置编辑模态框 */
-.ai-modal-overlay {
-  position: fixed; inset: 0; z-index: 20000;
-  background: var(--color-bg-overlay); display: flex;
-  align-items: center; justify-content: center;
-}
-.ai-modal {
-  background: var(--color-bg-primary); border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg); width: 520px; max-width: 90vw; max-height: 85vh;
-  display: flex; flex-direction: column; box-shadow: var(--shadow-pop);
-}
-.ai-modal-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 18px; border-bottom: 1px solid var(--color-border); flex-shrink: 0;
-}
-.ai-modal-header h3 { font-size: var(--text-lg); font-weight: 600; margin: 0; color: var(--color-text-primary); }
-.ai-modal-close {
-  background: none; border: none; color: var(--color-text-muted);
-  font-size: var(--text-xl); cursor: pointer; width: 28px; height: 28px;
-  display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm);
-}
-.ai-modal-close:hover { background: var(--color-bg-active); color: var(--color-text-primary); }
-.ai-modal-body { padding: 14px 18px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: var(--space-4); }
-.ai-modal-footer {
-  display: flex; gap: var(--space-4); justify-content: flex-end;
-  padding: var(--space-5) 18px; border-top: 1px solid var(--color-border); flex-shrink: 0;
-}
+/* AI 配置编辑弹窗：外壳已交给 QdModal，这里只留 body 的纵向堆叠节奏 */
+.ai-modal-body { display: flex; flex-direction: column; gap: var(--space-4); }
 .ai-edit-bar { display: flex; gap: var(--space-4); margin: var(--space-2) 0; }
 
 /* ── AI 用量统计 ─────────────────────────────────────────────────────
@@ -714,21 +679,6 @@
 .approval-rules.is-readonly td { padding: var(--space-2) 0; }
 .approval-rules.is-readonly code { color: var(--color-text-secondary); }
 
-/* 小型 toggle 开关（思考模式） */
-.toggle-btn-sm {
-  position: relative; width: 36px; height: 20px; border-radius: var(--radius-full);
-  border: none; background: var(--color-bg-active); cursor: pointer;
-  transition: background 0.15s; padding: 0; flex-shrink: 0;
-}
-.toggle-btn-sm.active { background: var(--color-accent); }
-.toggle-btn-sm .toggle-knob {
-  position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
-  border-radius: 50%; background: var(--color-text-secondary);
-  transition: transform 0.15s, background 0.15s;
-}
-.toggle-btn-sm.active .toggle-knob {
-  transform: translateX(16px); background: var(--color-accent-text);
-}
 .toggle-field { flex-direction: row !important; align-items: center; gap: var(--space-4); }
 
 /* 表单字段（AI 配置与 WebDAV 复用） */

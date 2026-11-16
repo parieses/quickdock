@@ -19,6 +19,7 @@ import { confirmPermissions, permissionsToLines } from '../composables/usePlugin
 import { setMarketOffline, marketRefreshSignal } from '../composables/usePluginMarketSources'
 import { logWarn } from '../utils/logger'
 import type { ToastAPI } from '../types'
+import QdModal from './QdModal.vue'
 
 const { t, locale } = useI18n()
 const toast = inject<ToastAPI>('toast')!
@@ -466,9 +467,13 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
     </div>
 
     <!-- 插件详情弹窗：展示完整描述、依赖说明、平台、权限/能力、版本状态；changelog/截图若市场索引提供则显示 -->
-    <div v-if="detail" class="modal-overlay" @click.self="closeDetail()">
-      <div class="modal plugin-detail">
-        <button class="detail-close" @click="closeDetail()" :title="t('close')">✕</button>
+    <QdModal
+      v-if="detail"
+      :model-value="true"
+      width="560px"
+      @update:model-value="closeDetail()"
+    >
+      <template #header>
         <div class="detail-head">
           <img v-if="detail.icon" :src="detail.icon" class="detail-icon" alt="" />
           <Store v-else :size="40" class="detail-icon-fallback" />
@@ -482,72 +487,74 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
             <div class="detail-id">{{ detail.id }}</div>
           </div>
         </div>
+      </template>
 
-        <div class="detail-body">
+      <div class="detail-body">
+        <section class="detail-section">
+          <h4 class="detail-h">{{ t('pluginDetailDesc') }}</h4>
+          <p class="detail-desc">{{ pluginDesc({ description: detail.description, descriptionI18n: detail.description_i18n }, locale) }}</p>
+        </section>
+
+        <div class="detail-grid">
+          <section class="detail-section" v-if="detail.author">
+            <h4 class="detail-h">{{ t('pluginDetailAuthor') }}</h4>
+            <p class="detail-meta">{{ detail.author }}</p>
+          </section>
+          <section class="detail-section" v-if="detail.category">
+            <h4 class="detail-h">{{ t('pluginDetailCategory') }}</h4>
+            <p class="detail-meta">{{ detail.category }}</p>
+          </section>
           <section class="detail-section">
-            <h4 class="detail-h">{{ t('pluginDetailDesc') }}</h4>
-            <p class="detail-desc">{{ pluginDesc({ description: detail.description, descriptionI18n: detail.description_i18n }, locale) }}</p>
+            <h4 class="detail-h">{{ t('pluginDetailVersion') }}</h4>
+            <p class="detail-meta">
+              {{ t('pluginDetailLatest') }} v{{ detail.version }}
+              <template v-if="detail.installed"> · {{ t('pluginDetailInstalledVer') }} v{{ detail.installed_version }}</template>
+            </p>
           </section>
-
-          <div class="detail-grid">
-            <section class="detail-section" v-if="detail.author">
-              <h4 class="detail-h">{{ t('pluginDetailAuthor') }}</h4>
-              <p class="detail-meta">{{ detail.author }}</p>
-            </section>
-            <section class="detail-section" v-if="detail.category">
-              <h4 class="detail-h">{{ t('pluginDetailCategory') }}</h4>
-              <p class="detail-meta">{{ detail.category }}</p>
-            </section>
-            <section class="detail-section">
-              <h4 class="detail-h">{{ t('pluginDetailVersion') }}</h4>
-              <p class="detail-meta">
-                {{ t('pluginDetailLatest') }} v{{ detail.version }}
-                <template v-if="detail.installed"> · {{ t('pluginDetailInstalledVer') }} v{{ detail.installed_version }}</template>
-              </p>
-            </section>
-            <section class="detail-section" v-if="detail.platforms && detail.platforms.length">
-              <h4 class="detail-h">{{ t('pluginDetailPlatforms') }}</h4>
-              <p class="detail-meta">{{ detail.platforms.join(', ') }}</p>
-            </section>
-          </div>
-
-          <section class="detail-section" v-if="detailDeps(detail).length">
-            <h4 class="detail-h">{{ t('pluginDetailDependencies') }}</h4>
-            <div class="detail-tags">
-              <span v-for="d in detailDeps(detail)" :key="d" class="detail-tag">{{ d }}</span>
-            </div>
-          </section>
-
-          <section class="detail-section" v-if="permDetails(detail).length">
-            <h4 class="detail-h">{{ t('pluginDetailPermissions') }}</h4>
-            <div class="detail-perms">
-              <div v-for="(grp, gi) in permDetails(detail)" :key="gi" class="detail-perm">
-                <span class="detail-perm-label">{{ grp.label }}</span>
-                <div v-if="grp.values.length" class="detail-tags">
-                  <span v-for="(val, vi) in grp.values" :key="vi" class="detail-tag detail-tag-path">{{ val }}</span>
-                </div>
-                <span v-else class="detail-perm-on">{{ t('pluginPermGranted') }}</span>
-              </div>
-            </div>
-          </section>
-
-          <section class="detail-section" v-if="detailChangelog(detail)">
-            <h4 class="detail-h">{{ t('pluginDetailChangelog') }}</h4>
-            <pre class="detail-changelog">{{ detailChangelog(detail) }}</pre>
-          </section>
-          <section class="detail-section" v-else>
-            <h4 class="detail-h">{{ t('pluginDetailChangelog') }}</h4>
-            <p class="detail-meta detail-muted">{{ t('pluginDetailNoChangelog') }}</p>
-          </section>
-
-          <section class="detail-section" v-if="detail.screenshots && detail.screenshots.length">
-            <h4 class="detail-h">{{ t('pluginDetailScreenshots') }}</h4>
-            <div class="detail-shots">
-              <img v-for="(s, i) in detail.screenshots" :key="i" :src="s" class="detail-shot" alt="" />
-            </div>
+          <section class="detail-section" v-if="detail.platforms && detail.platforms.length">
+            <h4 class="detail-h">{{ t('pluginDetailPlatforms') }}</h4>
+            <p class="detail-meta">{{ detail.platforms.join(', ') }}</p>
           </section>
         </div>
 
+        <section class="detail-section" v-if="detailDeps(detail).length">
+          <h4 class="detail-h">{{ t('pluginDetailDependencies') }}</h4>
+          <div class="detail-tags">
+            <span v-for="d in detailDeps(detail)" :key="d" class="detail-tag">{{ d }}</span>
+          </div>
+        </section>
+
+        <section class="detail-section" v-if="permDetails(detail).length">
+          <h4 class="detail-h">{{ t('pluginDetailPermissions') }}</h4>
+          <div class="detail-perms">
+            <div v-for="(grp, gi) in permDetails(detail)" :key="gi" class="detail-perm">
+              <span class="detail-perm-label">{{ grp.label }}</span>
+              <div v-if="grp.values.length" class="detail-tags">
+                <span v-for="(val, vi) in grp.values" :key="vi" class="detail-tag detail-tag-path">{{ val }}</span>
+              </div>
+              <span v-else class="detail-perm-on">{{ t('pluginPermGranted') }}</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="detail-section" v-if="detailChangelog(detail)">
+          <h4 class="detail-h">{{ t('pluginDetailChangelog') }}</h4>
+          <pre class="detail-changelog">{{ detailChangelog(detail) }}</pre>
+        </section>
+        <section class="detail-section" v-else>
+          <h4 class="detail-h">{{ t('pluginDetailChangelog') }}</h4>
+          <p class="detail-meta detail-muted">{{ t('pluginDetailNoChangelog') }}</p>
+        </section>
+
+        <section class="detail-section" v-if="detail.screenshots && detail.screenshots.length">
+          <h4 class="detail-h">{{ t('pluginDetailScreenshots') }}</h4>
+          <div class="detail-shots">
+            <img v-for="(s, i) in detail.screenshots" :key="i" :src="s" class="detail-shot" alt="" />
+          </div>
+        </section>
+      </div>
+
+      <template #footer>
         <div class="modal-actions">
           <button class="op-btn" @click="closeDetail()">{{ t('close') }}</button>
           <a v-if="pickDownload(detail.downloads)" class="action-btn btn-install detail-install"
@@ -559,8 +566,8 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
             <span>{{ installing.has(detail.id) ? dlLabel(detail) : (detail.installed ? (detail.has_update ? t('pluginUpgrade') : t('pluginReinstall')) : t('pluginInstallFromMarket')) }}</span>
           </a>
         </div>
-      </div>
-    </div>
+      </template>
+    </QdModal>
   </div>
 </template>
 
@@ -702,24 +709,9 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .btn-disabled { color: var(--color-text-disabled); }
 
 /* 插件详情弹窗 */
-.modal-overlay {
-  position: fixed; inset: 0; background: var(--color-bg-overlay);
-  display: flex; align-items: center; justify-content: center; z-index: 50;
-}
-/* 弹窗卡片基类：同 EnvironmentPage 标准。此前缺失导致弹框裸奔（无遮罩/无卡片背景/无内边距/无圆角阴影） */
-.modal {
-  background: var(--color-popover-bg);
-  border: 1px solid var(--popover-border-color);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 18px 56px var(--color-bg-overlay);
-  padding: var(--space-7) 22px;
-  color: var(--color-text-primary);
-}
-.plugin-detail { position: relative; max-width: 560px; width: 92%; max-height: 82vh; overflow-y: auto; }
-.modal-actions {
-  display: flex; align-items: center; justify-content: flex-end; gap: var(--space-4);
-  margin-top: var(--space-6); padding-top: 14px; border-top: 1px solid var(--color-border);
-}
+/* 弹窗外壳已交给 QdModal（遮罩 / 卡片 / 圆角 / 阴影 / 内边距都不再本地重写）。
+   这里只剩详情页自己的内容排布。 */
+.modal-actions { flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: var(--space-4); }
 .op-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
   font-size: var(--text-sm); height: 28px; padding: 0 11px; border-radius: var(--radius-sm); cursor: pointer;
   border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
@@ -727,20 +719,14 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 }
 .op-btn:hover { background: var(--color-bg-primary); color: var(--color-text-primary); }
 .op-btn:disabled { opacity: .4; cursor: default; }
-.detail-close {
-  position: absolute; top: 10px; right: 12px; width: 26px; height: 26px; border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
-  color: var(--color-text-muted); cursor: pointer; font-size: var(--text-md); line-height: 1;
-}
-.detail-close:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
-.detail-head { display: flex; align-items: center; gap: var(--space-5); padding-right: 30px; }
+.detail-head { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-5); }
 .detail-icon { width: 44px; height: 44px; border-radius: var(--radius-md); background: var(--color-bg-tertiary); padding: var(--space-3); }
 .detail-icon-fallback { color: var(--color-text-muted); }
 .detail-titles { min-width: 0; }
 .detail-name-row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
 .detail-name { font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
 .detail-id { font-size: var(--text-2xs); color: var(--color-text-disabled); font-family: var(--font-mono); margin-top: var(--space-1); }
-.detail-body { display: flex; flex-direction: column; gap: 14px; margin: 14px 0; }
+.detail-body { display: flex; flex-direction: column; gap: 14px; }
 .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .detail-section { display: flex; flex-direction: column; gap: 5px; }
 .detail-h { font-size: var(--text-xs); font-weight: 600; letter-spacing: .3px; color: var(--color-text-disabled); margin: 0; }

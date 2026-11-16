@@ -17,6 +17,7 @@ import HotkeySettings from './HotkeySettings.vue'
 import SettingsClipboardRules from './SettingsClipboardRules.vue'
 import SettingsHistory from './SettingsHistory.vue'
 import QdTabs from './QdTabs.vue'
+import QdSwitch from './QdSwitch.vue'
 import SettingsAI from './SettingsAI.vue'
 import SettingsSnapshot from './SettingsSnapshot.vue'
 import SettingsSync from './SettingsSync.vue'
@@ -1134,12 +1135,7 @@ async function toggleAutoStart() {
               <div class="setting-row">
                 <label class="setting-label">{{ t('autoStart') }}</label>
                 <div class="setting-control">
-                  <button
-                    :class="['toggle-btn', { active: autoStart }]"
-                    @click="toggleAutoStart"
-                  >
-                    <span class="toggle-knob" />
-                  </button>
+                  <QdSwitch :model-value="autoStart" :label="t('autoStart')" @update:model-value="toggleAutoStart" />
                   <span class="toggle-label">{{ autoStart ? t('autoStartOn') : t('autoStartOff') }}</span>
                 </div>
                 <p v-if="autoStartResult" class="result-hint error">{{ autoStartResult }}</p>
