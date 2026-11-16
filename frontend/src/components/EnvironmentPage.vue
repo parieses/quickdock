@@ -59,7 +59,7 @@ import {
   MCPSetLevel,
 } from '../../bindings/quickdock/services/mcp/mcpservice'
 import SettingsDSH from './SettingsDSH.vue'
-import { DSHStatus } from '../../bindings/quickdock/services/dsh/dshservice'
+import { DSHStatus, DSHSetAutoStart } from '../../bindings/quickdock/services/dsh/dshservice'
 import PortPage from './PortPage.vue'
 import SitesPanel from './SitesPanel.vue'
 import { unwrap } from '../utils/api'
@@ -347,6 +347,8 @@ const STATIC_CATALOG: { id: string; name: string; group: string; hasService: boo
   { id: 'git', name: 'Git', group: 'tool', hasService: false, singleVersion: true },
   { id: 'everything', name: 'Everything', group: 'tool', hasService: true, singleVersion: true },
   { id: 'aria2', name: 'aria2', group: 'tool', hasService: true, singleVersion: true, recommended: ['1.37.0'] },
+  // OpenList：网盘聚合网关，「网盘」页的取数入口（百度/夸克 → WebDAV + 网页后台）
+  { id: 'openlist', name: 'OpenList', group: 'tool', hasService: true, singleVersion: true, recommended: ['4.2.9'] },
   { id: 'composer', name: 'Composer', group: 'tool', hasService: false },
   { id: 'ffmpeg', name: 'FFmpeg', group: 'tool', hasService: false },
   { id: 'mailpit', name: 'Mailpit', group: 'tool', hasService: true },
@@ -389,7 +391,15 @@ const selected = computed<RuntimeInfo | null>(() => {
 //
 // 定位用 fixed + 按钮 rect，与 SSH 右键菜单同一套做法：父容器 .env-detail 是
 // 可滚动区域，absolute 浮层会被 overflow 裁掉。
-const docRuntime = computed(() => (selected.value ? RUNTIME_DOCS[selected.value.id] : undefined))
+// 资料卡主体 id：普通运行时跟随 selected；DSH 不在 runtimes 列表里（selectedId=harness
+// 时 selected 会 fallback 到 node），打开时显式传 HARNESS_KEY 才能查到自己的资料。
+// 空值表示跟随 selected，关闭浮层时清空，避免残留上一个主体。
+const docTargetId = ref('')
+const docSubjectId = computed(() => docTargetId.value || selected.value?.id || '')
+const docRuntime = computed(() => RUNTIME_DOCS[docSubjectId.value])
+// 主体展示名：DSH 不在 runtimes 里，名字取侧栏同一份 navDsh，别在资料卡里写死第二份。
+const docSubjectName = computed(() =>
+  docSubjectId.value === HARNESS_KEY ? t('navDsh') : (selected.value?.name || docSubjectId.value))
 // 资料自带双语，不走 i18n 字典：一个运行时的定性 / 要点 / 提示必须成组维护，
 // 拆成上百个 key 后改一个运行时要翻遍几千行（理由见 utils/runtimeDocs.ts 文件头）。
 const isZhDoc = computed(() => locale.value.startsWith('zh'))
@@ -409,9 +419,20 @@ const docTip = computed(() => {
   return isZhDoc.value ? d.tip.zh : d.tip.en
 })
 // 分组标签复用侧栏的 GROUP_LABEL，别在资料卡里另写一份同义映射。
-const docGroupLabel = computed(() => t(GROUP_LABEL[selected.value?.group || ''] || 'groupTool'))
+// DSH 是 special 分组且不进 runtimes，单独按 subject id 判定。
+const docGroupLabel = computed(() => {
+  const group = docSubjectId.value === HARNESS_KEY ? 'special' : (selected.value?.group || '')
+  return t(GROUP_LABEL[group] || 'groupTool')
+})
 // 实时状态：与静态资料分开取，切换版本 / 启停服务后不用重开浮层也会跟着变。
 const docState = computed(() => {
+  // DSH 的状态来自它自己的服务治理，不走 env 的 installed / hasService / 端口那套。
+  if (docSubjectId.value === HARNESS_KEY) {
+    return [
+      dshRunning.value ? t('dshServiceRunning') : t('dshServiceStopped'),
+      t(dshAutoStart.value ? 'svcWatchOn' : 'svcWatchOff'),
+    ]
+  }
   const r = selected.value
   if (!r) return [] as string[]
   const out = [
@@ -427,11 +448,13 @@ const docPos = ref({ x: 0, y: 0 })
 const docMaxHeight = ref(0)
 const docPopRef = ref<HTMLElement | null>(null)
 
-function toggleDoc(e: MouseEvent) {
+function toggleDoc(e: MouseEvent, targetId = '') {
   if (docOpen.value) {
     closeDoc()
     return
   }
+  // 传了就锁定主体（DSH 传 harness），留空则跟随 selected。
+  docTargetId.value = targetId
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
   // 宽度写死一个上限：资料卡内容多，宽度再浮动会让每次打开都左右跳。
   const w = Math.min(368, window.innerWidth - 16)
@@ -458,6 +481,7 @@ function toggleDoc(e: MouseEvent) {
 
 function closeDoc() {
   docOpen.value = false
+  docTargetId.value = ''
 }
 
 function openDoc(url?: string) {
@@ -1049,12 +1073,35 @@ const httpAnyRunning = computed(() => Object.values(httpRunning).some(Boolean))
 // dsh（harness）运行态：侧栏入口此前没带 running，导致 dsh 服务跑着也不显示小绿点。
 const dshRunning = ref(false)
 const dshPort = ref(0)
+// 常驻开关（随 QuickDock 启动）：与其它运行时共用同一套 svc-switch 外观，
+// 但 dsh 不在 env 运行时体系里，期望态存在 DB 的 dsh autoStart 键，走 DSHSetAutoStart。
+const dshAutoStart = ref(false)
+const settingDshAutoStart = ref(false)
 async function loadDshRunning() {
   try {
-    const st = unwrap<{ running: boolean; port: number }>(await DSHStatus())
-    if (st) { dshRunning.value = st.running; dshPort.value = st.port || 0 }
+    const st = unwrap<{ running: boolean; port: number; autoStart?: boolean }>(await DSHStatus())
+    if (st) {
+      dshRunning.value = st.running
+      dshPort.value = st.port || 0
+      if (typeof st.autoStart === 'boolean') dshAutoStart.value = st.autoStart
+    }
   } catch (e) {
     console.warn('[env] 加载 dsh 运行状态失败', e)
+  }
+}
+
+async function toggleDshAutoStart(on: boolean) {
+  if (settingDshAutoStart.value) return
+  settingDshAutoStart.value = true
+  dshAutoStart.value = on // 乐观更新
+  try {
+    unwrap(await DSHSetAutoStart(on))
+    toast.success(t('navDsh') + ' ' + (on ? t('svcWatchOn') : t('svcWatchOff')))
+  } catch (e: any) {
+    dshAutoStart.value = !on // 失败回滚
+    toast.error(getErrorMessage(e))
+  } finally {
+    settingDshAutoStart.value = false
   }
 }
 
@@ -1431,6 +1478,9 @@ async function toggleEnabled(r: RuntimeInfo, on: boolean) {
     await statusPoller.runNow()
     refreshRuntimeCacheNow(r)
     refreshOllamaPanel(on ? 1200 : 0)
+    // Everything 的四态面板有独立数据源（EnvEverythingStatus），不在 statusPoller 里，
+    // 切常驻开关后必须单独刷新，否则面板里的「运行中/已停止」会停在旧值。
+    if (r.id === 'everything') loadEverything()
   } catch (e: any) {
     // 失败回滚乐观状态
     if (target) target.enabled = !on
@@ -1438,6 +1488,14 @@ async function toggleEnabled(r: RuntimeInfo, on: boolean) {
   } finally {
     settingEnabled[r.id] = false
   }
+}
+
+// Everything 面板的「停止」与其它运行时同范式：常驻开启时先撤销期望态
+// （EnvSetEnabled(false) 内部已 Stop），否则看门狗下个周期会把它拉回来，用户以为「停止无效」。
+async function stopEverythingPanel() {
+  const r = runtimes.value.find((x) => x.id === 'everything')
+  if (r?.enabled) { await toggleEnabled(r, false); return }
+  await evStop()
 }
 
 // stopping[rt+version] 标记某版本正在停止，期间禁用按钮避免重复点击
@@ -1908,11 +1966,31 @@ const dialogCtx = reactive({
             <div class="detail-titles">
               <div class="detail-title-row">
                 <span class="detail-name">{{ t('navDsh') }}</span>
+                <!-- 与其它运行时同款的资料卡问号：DSH 不在 runtimes 里，显式传 harness 作为主体 id。 -->
+                <button
+                  v-if="RUNTIME_DOCS[HARNESS_KEY]"
+                  class="doc-btn"
+                  :class="{ on: docOpen && docSubjectId === HARNESS_KEY }"
+                  :title="t('envDocOpen')"
+                  :aria-label="t('envDocOpen')"
+                  @click.stop="toggleDoc($event, HARNESS_KEY)"
+                >?</button>
                 <span class="detail-id">harness</span>
               </div>
               <div class="detail-badges">
                 <span class="badge svc">{{ t('dshDesc') }}</span>
                 <span v-if="dshRunning" class="badge ok">{{ t('dshServiceRunning') }}</span>
+                <!-- 与其它服务类运行时同构的常驻开关：dsh 期望态是 DB 里的 autoStart（随应用启动），
+                     面板内不再重复放复选框；崩溃自愈由 dsh 自己的 reaper 负责。 -->
+                <span class="svc-switch" :class="{ on: dshAutoStart, busy: settingDshAutoStart }" :title="t('dshAutoStartHint')">
+                  <QdSwitch
+                    :model-value="dshAutoStart"
+                    :disabled="settingDshAutoStart"
+                    :label="dshAutoStart ? t('svcWatchOn') : t('svcWatchOff')"
+                    @update:model-value="(v: boolean) => toggleDshAutoStart(v)"
+                  />
+                  <span class="svc-switch-label">{{ dshAutoStart ? t('svcWatchOn') : t('svcWatchOff') }}</span>
+                </span>
               </div>
             </div>
           </header>
@@ -2007,14 +2085,16 @@ const dialogCtx = reactive({
                 :class="{ on: docOpen }"
                 :title="t('envDocOpen')"
                 :aria-label="t('envDocOpen')"
-                @click.stop="toggleDoc"
+                @click.stop="toggleDoc($event, selected.id)"
               >?</button>
               <span class="detail-id">{{ selected.id }}</span>
             </div>
             <div class="detail-badges">
-              <span v-if="selected.hasService && selected.id !== 'everything'" class="badge svc">{{ t('svcManage') }}</span>
+              <span v-if="selected.hasService" class="badge svc">{{ t('svcManage') }}</span>
               <span v-for="p in selected.platforms" :key="p" class="badge plat">{{ p }}</span>
-              <span v-if="selected.hasService && selected.id !== 'everything'" class="svc-switch" :class="{ on: selected.enabled, busy: settingEnabled[selected.id] }">
+              <!-- Everything 与其它服务类运行时同构：也显示常驻开关（背后是 env states.json + 看门狗）。
+                   它与面板里的「启用文件搜索」是两件事：常驻管进程生命周期，文件搜索管检索能力。 -->
+              <span v-if="selected.hasService" class="svc-switch" :class="{ on: selected.enabled, busy: settingEnabled[selected.id] }">
                 <QdSwitch
                   :model-value="selected.enabled"
                   :disabled="settingEnabled[selected.id]"
@@ -2026,53 +2106,6 @@ const dialogCtx = reactive({
             </div>
           </div>
         </header>
-
-        <!-- 运行时介绍：Teleport 到 body 才能绕过 .env-detail 的滚动裁剪；
-             点遮罩外部 / Esc / 页面滚动 / 换运行时都会关（逻辑见 script 里 toggleDoc 一带）。
-             left/top/maxHeight 是按按钮 rect 与视口空间算出来的运行时值，是内联样式的例外用法。
-             内容从「一句话」扩成资料卡：分组 / 本页能做什么 / 上手提示 / 实时状态 / 三个链接。 -->
-        <Teleport to="body">
-          <div
-            v-if="docOpen && docRuntime"
-            ref="docPopRef"
-            class="doc-pop"
-            :style="{ left: docPos.x + 'px', top: docPos.y + 'px', maxHeight: docMaxHeight ? docMaxHeight + 'px' : undefined }"
-            role="dialog"
-            :aria-label="t('envDocOpen')"
-          >
-            <div class="doc-pop-head">
-              <span class="doc-pop-name">{{ selected?.name }}</span>
-              <span class="doc-pop-id">{{ selected?.id }}</span>
-              <span class="doc-pop-kind">{{ docGroupLabel }}</span>
-            </div>
-            <p class="doc-pop-text">{{ docText }}</p>
-
-            <div class="doc-pop-section">
-              <div class="doc-pop-label">{{ t('envDocWhatCanDo') }}</div>
-              <ul class="doc-pop-points">
-                <li v-for="(p, i) in docPoints" :key="i">{{ p }}</li>
-              </ul>
-            </div>
-
-            <div v-if="docTip" class="doc-pop-tip">
-              <span class="doc-pop-label">{{ t('envDocTip') }}</span>
-              <span>{{ docTip }}</span>
-            </div>
-
-            <div class="doc-pop-section">
-              <div class="doc-pop-label">{{ t('envDocState') }}</div>
-              <div class="doc-pop-chips">
-                <span v-for="(s, i) in docState" :key="i" class="doc-chip">{{ s }}</span>
-              </div>
-            </div>
-
-            <div class="doc-pop-actions">
-              <button class="doc-link" @click="openDoc(docRuntime.home)">{{ t('envDocHome') }} ↗</button>
-              <button v-if="docRuntime.docs" class="doc-link" @click="openDoc(docRuntime.docs)">{{ t('envDocDocs') }} ↗</button>
-              <button v-if="docRuntime.repo" class="doc-link" @click="openDoc(docRuntime.repo)">{{ t('envDocRepo') }} ↗</button>
-            </div>
-          </div>
-        </Teleport>
 
         <!-- Ollama 模型管理：管的是模型库（全局共享、几十 GB），与上方程序版本互不越界 -->
         <section v-if="selected.id === 'ollama'" class="detail-block">
@@ -2528,7 +2561,7 @@ const dialogCtx = reactive({
             </template>
             <template v-else>
               <button v-if="evStatus?.state === 'stopped'" class="op-btn" :disabled="evBusy" @click="evStart">{{ t('envStart') }}</button>
-              <button v-if="evStatus?.state === 'running'" class="op-btn danger" :disabled="evBusy" @click="evStop">{{ t('envStop') }}</button>
+              <button v-if="evStatus?.state === 'running'" class="op-btn danger" :disabled="evBusy" @click="stopEverythingPanel">{{ t('envStop') }}</button>
               <button class="op-btn" :disabled="evBusy" @click="evRedetect">{{ t('evRedetect') }}</button>
             </template>
           </div>
@@ -2937,6 +2970,53 @@ const dialogCtx = reactive({
           <div class="empty-text">{{ t('noInstalledVersion') }}</div>
         </div>
       </main>
+
+      <!-- 运行时介绍资料卡：Teleport 到 body 绕过 .env-detail 滚动裁剪。放在所有页头条件分支
+           之外（不能塞进 v-else-if="selected"，否则 DSH 页不渲染时浮层也跟着消失）。
+           点遮罩外部 / Esc / 页面滚动 / 换运行时都会关（逻辑见 script 里 toggleDoc 一带）。
+           left/top/maxHeight 按按钮 rect 与视口空间算出，是内联样式的例外用法。 -->
+      <Teleport to="body">
+        <div
+          v-if="docOpen && docRuntime"
+          ref="docPopRef"
+          class="doc-pop"
+          :style="{ left: docPos.x + 'px', top: docPos.y + 'px', maxHeight: docMaxHeight ? docMaxHeight + 'px' : undefined }"
+          role="dialog"
+          :aria-label="t('envDocOpen')"
+        >
+          <div class="doc-pop-head">
+            <span class="doc-pop-name">{{ docSubjectName }}</span>
+            <span class="doc-pop-id">{{ docSubjectId }}</span>
+            <span class="doc-pop-kind">{{ docGroupLabel }}</span>
+          </div>
+          <p class="doc-pop-text">{{ docText }}</p>
+
+          <div class="doc-pop-section">
+            <div class="doc-pop-label">{{ t('envDocWhatCanDo') }}</div>
+            <ul class="doc-pop-points">
+              <li v-for="(p, i) in docPoints" :key="i">{{ p }}</li>
+            </ul>
+          </div>
+
+          <div v-if="docTip" class="doc-pop-tip">
+            <span class="doc-pop-label">{{ t('envDocTip') }}</span>
+            <span>{{ docTip }}</span>
+          </div>
+
+          <div class="doc-pop-section">
+            <div class="doc-pop-label">{{ t('envDocState') }}</div>
+            <div class="doc-pop-chips">
+              <span v-for="(s, i) in docState" :key="i" class="doc-chip">{{ s }}</span>
+            </div>
+          </div>
+
+          <div class="doc-pop-actions">
+            <button class="doc-link" @click="openDoc(docRuntime.home)">{{ t('envDocHome') }} ↗</button>
+            <button v-if="docRuntime.docs" class="doc-link" @click="openDoc(docRuntime.docs)">{{ t('envDocDocs') }} ↗</button>
+            <button v-if="docRuntime.repo" class="doc-link" @click="openDoc(docRuntime.repo)">{{ t('envDocRepo') }} ↗</button>
+          </div>
+        </div>
+      </Teleport>
     </div>
 
     <EnvCoreDialogs :ctx="dialogCtx" />

@@ -28,7 +28,6 @@ import {
   DSHStatus,
   DSHStart,
   DSHStop,
-  DSHSetAutoStart,
   DSHUpdateAllPlugins,
   DSHRollbackPlugins,
   DSHCheckPluginUpdates,
@@ -280,16 +279,6 @@ async function toggleService(start: boolean) {
     loadDSHStatus()
   } finally {
     if (!start) svcBusy.value = false
-  }
-}
-
-async function setAutoStart(enabled: boolean) {
-  try {
-    unwrap(await DSHSetAutoStart(enabled))
-    if (dshSvc.value) dshSvc.value.autoStart = enabled
-  } catch (e: any) {
-    showMsg(getErrorMessage(e), true)
-    if (dshSvc.value) dshSvc.value.autoStart = !enabled // 回滚 UI
   }
 }
 
@@ -666,7 +655,7 @@ watch(() => props.visible, async (v) => {
       <template v-else>{{ t('dshWebView2TooOld', { version: webview2!.version, min: webview2!.minVersion }) }}</template>
     </p>
 
-    <!-- dsh web 服务运行状态 / 开关 / 自动启动（dsh 已安装时显示） -->
+    <!-- dsh web 服务运行状态 / 启停按钮（dsh 已安装时显示）；常驻开关在环境管理页头 -->
     <div v-if="status?.dshInstalled" class="dsh-status qd-mt-3" >
       <div class="dsh-status-row">
         <div class="dsh-status-left">
@@ -702,14 +691,7 @@ watch(() => props.visible, async (v) => {
           </button>
         </div>
       </div>
-      <label class="dsh-auto-start" :title="t('dshAutoStartHint')">
-        <input
-          type="checkbox"
-          :checked="!!dshSvc?.autoStart"
-          @change="(e: any) => setAutoStart(!!e.target.checked)"
-        />
-        <span>{{ t('dshAutoStart') }}</span>
-      </label>
+      <!-- 常驻开关已上移到环境管理页头（与其它运行时同构的 QdSwitch），此处不再重复 -->
     </div>
 
     <!-- 版本更新（dsh 已安装时显示） -->
@@ -981,17 +963,6 @@ watch(() => props.visible, async (v) => {
   background: var(--color-success);
   box-shadow: var(--shadow-success);
 }
-.dsh-auto-start {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin-top: var(--space-4);
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  cursor: pointer;
-  user-select: none;
-}
-.dsh-auto-start input { cursor: pointer; }
 .plugin-row {
   display: flex;
   align-items: center;

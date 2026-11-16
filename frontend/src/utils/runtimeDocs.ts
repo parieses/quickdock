@@ -251,6 +251,29 @@ export const RUNTIME_DOCS: Record<string, RuntimeDoc> = {
     },
     tip: { zh: '这里是引擎设置；下载目录和任务请到「下载」页改。', en: 'This is engine config — set the download directory and manage tasks on the Download page.' },
   },
+  openlist: {
+    home: 'https://github.com/OpenListTeam/OpenList',
+    docs: 'https://doc.oplist.org/',
+    repo: 'https://github.com/OpenListTeam/OpenList',
+    zh: '网盘聚合网关（AList 社区分支）：把百度、夸克等网盘统一转成标准 WebDAV 与网页后台，「网盘」页靠它取数。',
+    en: 'Netdisk aggregation gateway (community fork of AList): turns Baidu, Quark and similar drives into standard WebDAV plus a web console, which the Netdisk page reads from.',
+    points: {
+      zh: [
+        '一键安装 / 启停网关，端口与配置在本页改',
+        '首次启动前自动生成管理员密码并存进密码库',
+        '在「打开控制台」的后台里添加百度、夸克账号',
+      ],
+      en: [
+        'Install, start and stop the gateway here; port and config live on this page',
+        'An admin password is generated and stored in the vault before the first start',
+        'Add Baidu / Quark accounts in the console opened from this page',
+      ],
+    },
+    tip: {
+      zh: 'QuickDock 不碰网盘账号：扫码与 Cookie 录入都在网关后台完成，这里只管安装与启停。',
+      en: 'QuickDock never touches your drive credentials — QR/Cookie entry happens in the gateway console; this page only installs and runs it.',
+    },
+  },
   composer: {
     home: 'https://getcomposer.org/',
     docs: 'https://getcomposer.org/doc/',
@@ -398,5 +421,18 @@ export const RUNTIME_DOCS: Record<string, RuntimeDoc> = {
       en: ['Starts with the app, listening on 127.0.0.1:9230 by default', 'Point AI clients at http://127.0.0.1:9230/mcp', 'Tools cover files, commands, environments, downloads and more'],
     },
     tip: { zh: '只监听本机；要让别的机器连，需要先处理认证与防火墙。', en: 'Localhost only: exposing it to other machines needs auth and firewall rules first.' },
+  },
+  // DSH 不在 runtimes 多版本体系里（侧栏 key 是 harness），但资料卡和别的页共用一套。
+  // 常驻开关的含义与其它服务不同：这里只管「随 QuickDock 启动」，崩溃恢复由 dsh 自己的 reaper 负责。
+  harness: {
+    home: 'https://github.com/deepseek-ai/dsh',
+    repo: 'https://github.com/deepseek-ai/dsh',
+    zh: 'DeepSeek 官方开源 Agent 框架，能调用工具、读写文件、执行终端命令，比 AI 助手更适合动手改代码的活。',
+    en: "DeepSeek's open-source Agent framework: calls tools, reads/writes files and runs terminal commands — better suited to hands-on coding than a chat assistant.",
+    points: {
+      zh: ['一键安装 / 更新 dsh 与内置 Node 环境，缺什么这里装什么', '启停 dsh web 服务、看日志、回滚版本', '管理插件，页头常驻开关让它随 QuickDock 一起启动'],
+      en: ['One-click install/update of dsh and its bundled Node runtime', 'Start/stop the dsh web service, read logs and roll back versions', 'Manage plugins; the header switch starts it together with QuickDock'],
+    },
+    tip: { zh: '常驻只负责「随 QuickDock 启动」；它在你自己的终端里也能用，装好后系统终端直接敲 dsh。', en: 'The header switch only controls auto-start with QuickDock; dsh also works in your own terminal once installed.' },
   },
 }
