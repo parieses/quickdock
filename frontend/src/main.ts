@@ -4,6 +4,7 @@ import App from './App.vue'
 import { i18n } from './i18n'
 import { Events } from '@wailsio/runtime'
 import { ReportFrontendError } from '../bindings/quickdock/services/diag/diagservice'
+import { installA11y } from './utils/a11y'
 import './style.css'
 // 应用外壳与通用控件（页头 / 按钮 / 输入框 / 卡片）：全应用唯一实现，
 // 各业务页不许再自造 xxx-header 或第 N 套按钮尺寸
@@ -91,6 +92,9 @@ const app = createApp(App)
 const pinia = createPinia()
 app.use(pinia)
 app.use(i18n)
+// 存量内联遮罩弹窗的焦点陷阱 / aria 语义，以及 v-key-click、v-dialog 两个指令。
+// 必须在 mount 之前注册，否则首屏已有弹窗时指令解析不到。
+installA11y(app)
 
 // Vue 组件渲染 / 生命周期抛错（window.onerror 不一定捕获得到）
 //
