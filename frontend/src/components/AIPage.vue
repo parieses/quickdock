@@ -3233,19 +3233,6 @@ onUnmounted(() => {
         </template>
       </AiMessageList>
 
-      <!-- 会话用量汇总：整个对话调用了哪些模型、各几次、共多少 Token。
-           不放积分——用量只以 Token 计。置在消息区与输入框之间，始终可见。 -->
-      <div v-if="sessionUsage.hasAny" class="ai-session-usage">
-        <span class="ai-su-total">{{ t('aiSessionUsageTotal', { tokens: fmtTokens(sessionUsage.totalTokens) }) }}</span>
-        <span class="ai-su-sep">·</span>
-        <span class="ai-su-models">
-          <template v-for="(e, i) in sessionUsage.models" :key="e.model">
-            <span v-if="i > 0" class="ai-su-sep">·</span>
-            <span class="ai-su-model">{{ e.model }} <em class="ai-su-calls">×{{ e.calls }}</em></span>
-          </template>
-        </span>
-      </div>
-
       <!-- 「回到底部」按钮由 AiMessageList 自己渲染：它跟着消息容器的滚动状态走，
            放在父组件里要靠事件回传，反而多一层状态。 -->
 
@@ -3353,6 +3340,23 @@ onUnmounted(() => {
               @click="rushInject(p)"
             >{{ p.rushed ? t('aiInjectRushing') : t('aiInjectSendNow') }}</button>
           </div>
+        </div>
+
+        <!-- 会话用量汇总：整个对话调用了哪些模型、各几次、共多少 Token。
+             不放积分——用量只以 Token 计。置在输入框正上方，始终可见。
+             放进 .ai-dock 是为了和 composer 共用同一个定位上下文：
+             两者都套 --ai-column-w 居中，左边缘才落在同一条竖线上——
+             留在外层通栏渲染时，窄窗口外它会贴死窗口左边缘，
+             与居中的输入框错开半栏，看起来像掉到版式外面。 -->
+        <div v-if="sessionUsage.hasAny" class="ai-session-usage">
+          <span class="ai-su-total">{{ t('aiSessionUsageTotal', { tokens: fmtTokens(sessionUsage.totalTokens) }) }}</span>
+          <span class="ai-su-sep">·</span>
+          <span class="ai-su-models">
+            <template v-for="(e, i) in sessionUsage.models" :key="e.model">
+              <span v-if="i > 0" class="ai-su-sep">·</span>
+              <span class="ai-su-model">{{ e.model }} <em class="ai-su-calls">×{{ e.calls }}</em></span>
+            </template>
+          </span>
         </div>
 
         <!-- 输入区 -->
@@ -3477,14 +3481,19 @@ onUnmounted(() => {
 }
 
 /* 会话用量汇总：浮在消息区与输入框之间的一行，始终可见。
-   只报 Token 与「哪些模型 × 几次」，不引入积分/点数概念。 */
+   只报 Token 与「哪些模型 × 几次」，不引入积分/点数概念。
+   与 composer 同套 --ai-column-w 居中（同样住在 .ai-dock 里，
+   窄窗口的 100% 兜底参照物也一致），分隔线只压在这条栏上，
+   不再通栏贯穿窗口——否则和下方居中的圆角输入框不是一套版式。 */
 .ai-session-usage {
   flex-shrink: 0;
+  width: var(--ai-column-w);
+  margin: 0 auto;
   display: flex;
   align-items: center;
   gap: var(--space-3);
   flex-wrap: wrap;
-  padding: var(--space-3) var(--space-6);
+  padding: var(--space-2) var(--space-5);
   font-size: var(--text-xs);
   color: var(--color-text-muted);
   border-top: 1px solid var(--color-border);
