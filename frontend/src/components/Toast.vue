@@ -23,7 +23,9 @@ defineEmits<{
         <div
           v-for="msg in messages"
           :key="msg.id"
+          v-key-click
           :class="['toast-item', msg.type]"
+          :aria-label="msg.text"
           @click="$emit('remove', msg.id)"
         >
           <CheckCircle2 v-if="msg.type === 'success'" :size="16" />
@@ -38,12 +40,12 @@ defineEmits<{
 <style scoped>
 .toast-container {
   position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
-  z-index: 10001; display: flex; flex-direction: column; gap: 8px;
+  z-index: 10001; display: flex; flex-direction: column; gap: var(--space-4);
   pointer-events: none;
 }
 .toast-item {
-  display: flex; align-items: center; gap: 8px;
-  padding: 10px 20px; border-radius: var(--radius-md); font-size: 13px;
+  display: flex; align-items: center; gap: var(--space-4);
+  padding: 10px var(--space-7); border-radius: var(--radius-md); font-size: var(--text-md);
   box-shadow: var(--shadow-toast);
   pointer-events: auto; cursor: pointer; white-space: nowrap;
   transition: box-shadow 0.15s;

@@ -173,12 +173,12 @@ watch(() => props.visible, (v) => {
 }
 .skill-count {
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
 }
 .skill-hint {
   margin: var(--space-4) 0 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.6;
   color: var(--color-text-muted);
 }
@@ -200,7 +200,7 @@ watch(() => props.visible, (v) => {
   min-width: 0;
 }
 .skill-name {
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 500;
   color: var(--color-text-primary);
   word-break: break-all;
@@ -210,23 +210,23 @@ watch(() => props.visible, (v) => {
   padding: 1px var(--space-2);
   border-radius: var(--radius-xs);
   background: var(--color-danger-bg);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 500;
   color: var(--color-danger);
 }
 .skill-desc {
-  margin-top: 2px;
+  margin-top: var(--space-1);
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--color-text-secondary);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 .skill-path {
-  margin-top: 2px;
+  margin-top: var(--space-1);
   overflow: hidden;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.4;
   color: var(--color-text-muted);
   white-space: nowrap;
@@ -237,13 +237,13 @@ watch(() => props.visible, (v) => {
   align-items: center;
   gap: var(--space-4);
   flex: none;
-  padding-top: 2px;
+  padding-top: var(--space-1);
 }
 .skill-toggle {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  font-size: 12px;
+  font-size: var(--text-sm);
   white-space: nowrap;
   color: var(--color-text-secondary);
   cursor: pointer;

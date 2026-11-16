@@ -48,8 +48,9 @@ try {
  * 布局注意：外层 .page-shell 是 display:contents（见 App.vue），所以本组件的
  * 根节点会直接成为 .app-content（flex column）的子项，得自己撑满并管好纵向排列。
  */
-import { computed, defineAsyncComponent, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, defineAsyncComponent, watch, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { PanelLeft, PanelLeftClose } from '@lucide/vue'
 import { useWorkspaceStore } from '../stores/workspace'
 // 命令面板「点结果 → 落到具体场景/集合」：目标由 bridge 的 pendingTarget 带过来
 import { pendingTarget } from '../composables/bridge'
@@ -58,6 +59,7 @@ import { ListAllItems } from '../../bindings/quickdock/services/appservice'
 import { ListScenes } from '../../bindings/quickdock/services/scene/sceneservice'
 import { ListCollections } from '../../bindings/quickdock/services/collection/collectionservice'
 import type { CollectionItem } from '../types'
+import PageHeader from './PageHeader.vue'
 import SceneTags from './SceneTags.vue'
 import SceneRail from './SceneRail.vue'
 import CollectionList from './CollectionList.vue'
@@ -91,6 +93,18 @@ const showCollectionsGuide = computed(() =>
   !store.collectionsLoading &&
   !store.hasSearch
 )
+
+// 常驻页头只在「常规三栏」态放操作按钮；三档引导态（首次使用 / 无场景 / 无集合）
+// 只显示标题 —— 那几档不渲染集合栏，折叠按钮放上去没有对象可切。
+const showHeaderActions = computed(() =>
+  store.workspaces.length > 0 && !showWorkspaceGuide.value && !showCollectionsGuide.value
+)
+
+// 集合栏抽屉开关（<900px 生效，见下方模板与 CSS）。默认 false = 抽屉收起，
+// 点常驻页头按钮切到 true = 抽屉展开覆盖内容区；≥900px 集合栏恒显示、按钮隐藏，
+// 本值不参与布局。命名沿用桌面折叠开关，窄屏下由 CSS 媒体查询把「未切换」映射成
+// 默认收起的抽屉（不做 JS resize 监听），toggle 后由 .is-collection-open 展开。
+const collectionDrawerOpen = ref(false)
 
 // ---- 命令面板深链定位（scene / collection / item）----
 // target 形如 "scene:<id>" / "collection:<id>" / "item:<id>"；workspaceId / sceneId
@@ -238,16 +252,39 @@ watch([() => store.loading, () => store.workspaces.length], () => { void tryAppl
 </script>
 
 <template>
-  <div class="ws-root">
-    <!-- 空状态引导页（首次使用，无工作空间） -->
+  <div class="ws-root" :class="{ 'is-collection-open': collectionDrawerOpen }">
+    <!-- 常驻共享页头：四档状态共用同一条横栏，下面只替换 body。
+         引导态只显示标题、不带操作按钮（集合栏折叠按钮在引导态没有对象可切）。 -->
+    <PageHeader>
+      <template #titles>
+        <h2 class="qd-page-title">{{ t('navWorkspace') }}</h2>
+      </template>
+      <div v-if="showHeaderActions" class="qd-page-actions">
+        <button
+          type="button"
+          class="qd-icon-btn ws-collection-toggle"
+          :aria-label="collectionDrawerOpen ? t('collapseCollections') : t('expandCollections')"
+          :aria-expanded="collectionDrawerOpen"
+          aria-controls="ws-collections"
+          :title="collectionDrawerOpen ? t('collapseCollections') : t('expandCollections')"
+          @click="collectionDrawerOpen = !collectionDrawerOpen"
+        >
+          <component :is="collectionDrawerOpen ? PanelLeftClose : PanelLeft" :size="16" />
+        </button>
+      </div>
+    </PageHeader>
+
+    <!-- 空状态引导页（首次使用，无工作空间）：整页占满页头以下的剩余区域 -->
     <OnboardingPage
       v-if="store.workspaces.length === 0"
+      class="ws-guide"
       @open-settings="emit('open-settings', $event)"
     />
 
     <!-- 空状态引导页（已有工作空间，但里面一个场景都没有）：占满整个内容区 -->
     <EmptyGuide
       v-else-if="showWorkspaceGuide"
+      class="ws-guide"
       variant="scene"
       @open-settings="emit('open-settings', $event)"
     />
@@ -269,7 +306,7 @@ watch([() => store.loading, () => store.workspaces.length], () => { void tryAppl
           @open-settings="emit('open-settings', $event)"
         />
         <template v-else>
-          <CollectionList class="ws-collections" />
+          <CollectionList id="ws-collections" class="ws-collections" />
           <ItemList class="ws-items" />
         </template>
       </div>
@@ -278,18 +315,28 @@ watch([() => store.loading, () => store.workspaces.length], () => { void tryAppl
 </template>
 
 <style scoped>
-/* 根节点直接作为 .app-content（flex column）的子项：撑满剩余高度、自己管纵向排列 */
+/* 根节点直接作为 .app-content（flex column）的子项：撑满剩余高度、自己管纵向排列。
+   min-height:0 让常驻页头固定、其下的 body 能收缩；引导态与常规态共用这条横栏，
+   只替换 body，不会出现双页头或切状态时高度跳变。 */
 .ws-root {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
+/* 整页引导态：占满页头以下的剩余区域（OnboardingPage 自带 height:100%，
+   min-height:0 保证它在 flex column 里能收缩到剩余高度而不撑破 .ws-root）。 */
+.ws-guide { flex: 1; min-height: 0; }
+
+/* 集合栏折叠按钮：≥900px 集合栏恒显示，按钮隐藏 */
+.ws-collection-toggle { display: none; }
 
 /* 场景 → 集合 → 项目 同一行，共用一条顶部基线 */
 .ws-body {
   flex: 1;
+  min-height: 0;
   display: flex;
   overflow: hidden;
 }
@@ -297,17 +344,36 @@ watch([() => store.loading, () => store.workspaces.length], () => { void tryAppl
 .ws-collections { flex-shrink: 0; }
 .ws-items { flex: 1; min-width: 0; }
 
+/* <900px：集合栏折叠成抽屉（DESIGN.md §9）。默认收起由 CollectionList.vue 的
+   媒体查询负责（width:0 / 移出），这里只在点按钮后把 .is-collection-open 展开成
+   覆盖层：负 margin 抵消占位，ItemList 不被挤窄、没有宽度跳变；宽度仍走
+   --collection-width token。全靠媒体查询 + 修饰类，不做 JS resize 监听。 */
+@media (max-width: 900px) {
+  .ws-collection-toggle { display: flex; }
+  .ws-root.is-collection-open .ws-body .ws-collections {
+    position: relative;
+    z-index: 20;
+    width: var(--collection-width);
+    min-width: var(--collection-width);
+    margin-right: calc(0px - var(--collection-width));
+    transform: translateX(0);
+    border-right-width: 1px;
+    pointer-events: auto;
+    box-shadow: var(--shadow-lg);
+  }
+}
+
 .ws-error-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 8px 12px 0;
-  padding: 6px 10px;
+  gap: var(--space-4);
+  margin: var(--space-4) var(--space-5) 0;
+  padding: var(--space-3) 10px;
   border-radius: var(--radius-sm);
   background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border);
   color: var(--color-danger);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 .ws-error-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-error-close {
@@ -315,8 +381,8 @@ watch([() => store.loading, () => store.workspaces.length], () => { void tryAppl
   border: none;
   cursor: pointer;
   color: inherit;
-  font-size: 12px;
-  padding: 2px 4px;
+  font-size: var(--text-sm);
+  padding: var(--space-1) var(--space-2);
   opacity: 0.7;
 }
 .ws-error-close:hover { opacity: 1; }

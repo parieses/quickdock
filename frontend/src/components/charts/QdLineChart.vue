@@ -132,7 +132,7 @@ function buildOption() {
     tooltip: {
       trigger: 'axis',
       // 与 QdBarChart 保持一致：留在图表容器（定位最稳），靠 overflow:visible 放行。
-      extraCssText: 'z-index:2147483647;box-shadow:0 6px 20px rgba(0,0,0,.22);border-radius: var(--radius-sm);padding:6px 9px;line-height:1.6;white-space:nowrap;pointer-events:none;',
+      extraCssText: 'z-index:2147483647;box-shadow:var(--shadow-md);border-radius:var(--radius-sm);padding:var(--space-3) var(--space-4);line-height:1.6;white-space:nowrap;pointer-events:none;',
       axisPointer: {
         type: 'cross',
         lineStyle: { color: c.borderLight },
@@ -253,17 +253,17 @@ onBeforeUnmount(() => {
 .qd-chart__state {
   position: absolute; inset: 0; z-index: 1;
   display: flex; align-items: center; justify-content: center;
-  font-size: 11px; color: var(--color-text-muted);
+  font-size: var(--text-xs); color: var(--color-text-muted);
   background: var(--color-bg-secondary);
   border-radius: var(--radius-md);
 }
 .qd-chart__zoom {
   position: absolute; right: var(--space-2); bottom: 2px; z-index: 2;
   display: flex; align-items: center; gap: var(--space-2);
-  font-size: 10px; color: var(--color-text-muted);
+  font-size: var(--text-2xs); color: var(--color-text-muted);
 }
 .qd-chart__zoom button {
-  padding: 1px 6px; font-size: 10px; font-family: inherit; cursor: pointer;
+  padding: 1px var(--space-3); font-size: var(--text-2xs); font-family: inherit; cursor: pointer;
   color: var(--color-text-secondary);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);

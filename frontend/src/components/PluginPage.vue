@@ -170,7 +170,7 @@ function forceClose() {
   user-select: none;
 }
 .pw-title {
-  font-size: 12px; font-weight: 500;
+  font-size: var(--text-sm); font-weight: 500;
   color: var(--color-text-muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   letter-spacing: 0.02em;

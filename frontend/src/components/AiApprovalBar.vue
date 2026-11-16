@@ -218,15 +218,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .ai-approve-title {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--color-text-primary);
   line-height: 1.4;
 }
 
 .ai-approve-count {
-  margin-left: 6px;
-  font-size: 11px;
+  margin-left: var(--space-3);
+  font-size: var(--text-xs);
   font-weight: 400;
   color: var(--color-text-muted);
 }
@@ -238,7 +238,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   background: transparent;
   color: var(--color-text-muted);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -249,13 +249,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   margin-top: 7px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  font-size: 12px;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--color-text-muted);
 }
 
-.ai-approve-meta-row { display: flex; gap: 4px; min-width: 0; }
+.ai-approve-meta-row { display: flex; gap: var(--space-2); min-width: 0; }
 
 .ai-approve-meta-k { flex: none; }
 
@@ -268,7 +268,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
 .ai-approve-risk {
   margin-top: 7px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.55;
   color: var(--color-warning);
   word-break: break-word;
@@ -294,7 +294,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   background: transparent;
   color: var(--color-text-secondary);
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--text-md);
   text-align: left;
   cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast);
@@ -311,7 +311,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .ai-approve-num {
   flex: none;
   width: 12px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
   color: var(--color-text-muted);
 }

@@ -177,7 +177,7 @@ function openBacklink(b: BacklinkRow) {
 
 <template>
   <div class="elp" :class="{ 'elp-compact': compact, 'elp-open': expanded }">
-    <div
+    <div v-key-click
       class="elp-head"
       :class="{ 'is-toggle': canToggle }"
       :role="canToggle ? 'button' : undefined"
@@ -231,7 +231,7 @@ function openBacklink(b: BacklinkRow) {
 
       <div class="elp-sec">{{ t('linkForward') }}<span class="elp-n">{{ manual.length + wiki.length }}</span></div>
       <div v-if="!manual.length && !wiki.length" class="elp-empty">{{ t('linkEmpty') }}</div>
-      <div v-for="l in manual" :key="'m-' + l.id" class="elp-row" @click="openLink(l)">
+      <div v-key-click v-for="l in manual" :key="'m-' + l.id" class="elp-row" @click="openLink(l)">
         <component :is="iconFor(l.dstType)" :size="12" class="elp-row-icon" />
         <span class="elp-type">{{ typeLabel(l.dstType) }}</span>
         <span class="elp-label">{{ l.dstLabel || t('deleted') }}</span>
@@ -240,7 +240,7 @@ function openBacklink(b: BacklinkRow) {
         </button>
       </div>
       <div v-if="wiki.length" class="elp-sub">{{ t('linkFromBody') }}</div>
-      <div v-for="l in wiki" :key="'w-' + l.id" class="elp-row is-wiki" @click="openLink(l)">
+      <div v-key-click v-for="l in wiki" :key="'w-' + l.id" class="elp-row is-wiki" @click="openLink(l)">
         <component :is="iconFor(l.dstType)" :size="12" class="elp-row-icon" />
         <span class="elp-type">{{ typeLabel(l.dstType) }}</span>
         <span class="elp-label">{{ l.dstLabel || t('deleted') }}</span>
@@ -248,7 +248,7 @@ function openBacklink(b: BacklinkRow) {
 
       <div class="elp-sec">{{ t('linkBacklinks') }}<span class="elp-n">{{ backlinks.length }}</span></div>
       <div v-if="!backlinks.length" class="elp-empty">{{ t('linkEmpty') }}</div>
-      <div v-for="b in backlinks" :key="'b-' + b.id" class="elp-row" @click="openBacklink(b)">
+      <div v-key-click v-for="b in backlinks" :key="'b-' + b.id" class="elp-row" @click="openBacklink(b)">
         <ArrowUpRight :size="12" class="elp-row-icon" />
         <component :is="iconFor(b.srcType)" :size="12" class="elp-row-icon" />
         <span class="elp-type">{{ typeLabel(b.srcType) }}</span>
@@ -259,7 +259,7 @@ function openBacklink(b: BacklinkRow) {
 </template>
 
 <style scoped>
-.elp { border-top: 1px solid var(--color-border); background: var(--color-bg-secondary); font-size: 12px; color: var(--color-text-secondary); }
+.elp { border-top: 1px solid var(--color-border); background: var(--color-bg-secondary); font-size: var(--text-sm); color: var(--color-text-secondary); }
 /* 弹窗/表单里的宿主（非 compact）不铺二级底色：宿主已经是 popover-bg，
    再叠一层更暗的横带会像挖了个洞；内容也与表单字段左对齐，不二次缩进。 */
 .elp:not(.elp-compact) { background: transparent; }
@@ -277,13 +277,13 @@ function openBacklink(b: BacklinkRow) {
 /* compact：高度吃紧的宿主（笔记编辑区）专用。默认只剩一行摘要，
    展开的内容浮在正文上、不占文档流高度 —— 否则空面板也能吃掉一百多像素。 */
 .elp-compact { position: relative; }
-.elp-compact > .elp-head { padding: 4px 12px; }
+.elp-compact > .elp-head { padding: var(--space-2) var(--space-5); }
 .elp-hint { color: var(--color-text-disabled); font-size: var(--text-xs); }
 .elp-chev { flex-shrink: 0; color: var(--color-text-muted); transition: transform var(--transition-fast); }
 .elp-chev.on { transform: rotate(180deg); }
 .elp-compact.elp-open .elp-scroll {
   position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
-  max-height: 280px; padding: 8px 12px 10px;
+  max-height: 280px; padding: var(--space-4) var(--space-5) 10px;
   border: 1px solid var(--popover-border-color); border-top: none;
   border-radius: 0 0 var(--radius-md) var(--radius-md);
   background: var(--color-popover-bg); box-shadow: var(--shadow-md);
@@ -295,14 +295,14 @@ function openBacklink(b: BacklinkRow) {
 
 .elp-add-row { display: flex; align-items: center; gap: var(--space-2); position: relative; }
 .elp-search-icon { color: var(--color-text-muted); flex-shrink: 0; }
-.elp-add-input { flex: 1; min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 12px; outline: none; font-family: inherit; }
+.elp-add-input { flex: 1; min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: var(--text-sm); outline: none; font-family: inherit; }
 .elp-add-input:focus { border-color: var(--color-border-focus-soft); }
 .elp-add-btn { flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-secondary); cursor: pointer; }
 .elp-add-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent-border); }
 .elp-add-btn:disabled { opacity: 0.4; cursor: default; }
 
 .elp-cands { max-height: 96px; overflow-y: auto; margin-top: var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-primary); }
-.elp-cand { display: flex; align-items: center; gap: var(--space-2); width: 100%; padding: var(--space-2) var(--space-3); border: none; background: transparent; color: var(--color-text-secondary); text-align: left; cursor: pointer; font-family: inherit; font-size: 12px; }
+.elp-cand { display: flex; align-items: center; gap: var(--space-2); width: 100%; padding: var(--space-2) var(--space-3); border: none; background: transparent; color: var(--color-text-secondary); text-align: left; cursor: pointer; font-family: inherit; font-size: var(--text-sm); }
 .elp-cand:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .elp-cand.is-picked { background: var(--color-accent-bg); color: var(--color-accent); }
 .elp-cand-type { flex-shrink: 0; color: var(--color-text-muted); }

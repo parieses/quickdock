@@ -605,7 +605,7 @@ onMounted(async () => {
 .cred-switch {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   padding: 5px 10px;
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
@@ -635,12 +635,12 @@ onMounted(async () => {
 
 .cred-switch.is-on .cred-switch-dot {
   background: var(--color-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
+  box-shadow: 0 0 0 3px var(--color-accent-border);
 }
 
 .cred-ext {
   flex-shrink: 0;
-  padding: 10px 16px;
+  padding: 10px var(--space-6);
   background: var(--color-accent-bg);
   border-bottom: 1px solid var(--color-border);
 }
@@ -648,7 +648,7 @@ onMounted(async () => {
 .cred-ext-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .cred-ext-label {
@@ -657,7 +657,7 @@ onMounted(async () => {
 }
 
 .cred-ext-code {
-  padding: 2px 8px;
+  padding: var(--space-1) var(--space-4);
   font-family: ui-monospace, Consolas, monospace;
   font-size: var(--text-sm);
   color: var(--color-accent);
@@ -672,7 +672,7 @@ onMounted(async () => {
 }
 
 .cred-ext-hint {
-  margin: 6px 0 0;
+  margin: var(--space-3) 0 0;
   font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--color-text-secondary);
@@ -681,13 +681,13 @@ onMounted(async () => {
 /* 导出/导入面板：与浏览器集成条同构，但用中性底色区分它是一次性操作。 */
 .cred-transfer {
   flex-shrink: 0;
-  padding: 10px 16px;
+  padding: 10px var(--space-6);
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
 }
 
 .cred-transfer-desc {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-4);
   font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--color-text-secondary);
@@ -705,7 +705,7 @@ onMounted(async () => {
 
 .cred-warn {
   flex-shrink: 0;
-  padding: 8px 16px;
+  padding: var(--space-4) var(--space-6);
   font-size: var(--text-xs);
   color: var(--color-warning);
   background: var(--color-bg-secondary);
@@ -727,7 +727,7 @@ onMounted(async () => {
 }
 
 .cred-search {
-  padding: 10px 10px 6px;
+  padding: 10px 10px var(--space-3);
 }
 
 .cred-search .qd-input {
@@ -737,15 +737,15 @@ onMounted(async () => {
 .cred-items {
   flex: 1;
   overflow-y: auto;
-  padding: 0 6px 10px;
+  padding: 0 var(--space-3) 10px;
 }
 
 .cred-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   width: 100%;
-  padding: 7px 8px;
+  padding: 7px var(--space-4);
   background: none;
   border: none;
   border-radius: var(--radius-sm);
@@ -786,7 +786,7 @@ onMounted(async () => {
 }
 
 .cred-empty {
-  margin: 12px 6px;
+  margin: var(--space-5) var(--space-3);
   font-size: var(--text-xs);
   color: var(--color-text-disabled);
   line-height: 1.6;
@@ -796,7 +796,7 @@ onMounted(async () => {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: 14px 18px 20px;
+  padding: 14px 18px var(--space-7);
 }
 
 .cred-grid {
@@ -812,7 +812,7 @@ onMounted(async () => {
 
 .cred-label {
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-2);
   font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
@@ -824,14 +824,14 @@ onMounted(async () => {
 .cred-pw-row {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
 .cred-pw { flex: 1; min-width: 0; }
 
 .cred-textarea {
   height: auto;
-  padding: 6px 9px;
+  padding: var(--space-3) 9px;
   resize: vertical;
   line-height: 1.6;
 }
@@ -839,8 +839,8 @@ onMounted(async () => {
 .cred-check {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  margin: 0 14px 8px 0;
+  gap: var(--space-3);
+  margin: 0 14px var(--space-4) 0;
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
   cursor: pointer;
@@ -849,9 +849,9 @@ onMounted(async () => {
 .cred-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  padding-top: 12px;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  padding-top: var(--space-5);
   border-top: 1px solid var(--color-border);
 }
 

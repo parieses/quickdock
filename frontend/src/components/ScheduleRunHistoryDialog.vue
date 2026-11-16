@@ -194,8 +194,8 @@ function close() {
 .dlg-head {
   display: flex; align-items: center; gap: 10px; position: relative; margin-bottom: var(--space-4);
 }
-.dlg-title { display: flex; align-items: center; gap: 7px; font-size: 15px; font-weight: 600; color: var(--color-text-primary); }
-.dlg-sub { font-size: 12px; color: var(--color-text-muted); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dlg-title { display: flex; align-items: center; gap: 7px; font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
+.dlg-sub { font-size: var(--text-sm); color: var(--color-text-muted); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dlg-close {
   position: absolute; right: -6px; top: -4px; width: 28px; height: 28px;
   border: none; background: transparent; color: var(--color-text-disabled);
@@ -204,28 +204,28 @@ function close() {
 .dlg-close:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
 
 .dlg-error {
-  margin-bottom: var(--space-3); padding: 8px 12px; font-size: 12px;
+  margin-bottom: var(--space-3); padding: var(--space-4) var(--space-5); font-size: var(--text-sm);
   color: var(--color-danger); background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-md);
 }
 
 .dlg-body { flex: 1; overflow-y: auto; min-height: 120px; }
-.dlg-empty { text-align: center; padding: var(--space-8) var(--space-4); color: var(--color-text-disabled); font-size: 13px; }
+.dlg-empty { text-align: center; padding: var(--space-8) var(--space-4); color: var(--color-text-disabled); font-size: var(--text-md); }
 
-.run-list { display: flex; flex-direction: column; gap: 6px; }
+.run-list { display: flex; flex-direction: column; gap: var(--space-3); }
 .run-row {
   display: grid; grid-template-columns: 18px 1fr 72px 2fr; align-items: center; gap: 10px;
-  padding: 8px 10px; background: var(--color-card-bg);
+  padding: var(--space-4) 10px; background: var(--color-card-bg);
   border: 1px solid var(--card-border-color); border-radius: var(--radius-md);
 }
 .run-status { display: flex; align-items: center; }
 .run-row.ok .run-status { color: var(--color-success); }
 .run-row.fail .run-status { color: var(--color-danger); }
 .run-row.skipped .run-status { color: var(--color-text-muted); }
-.run-time { font-size: 12px; color: var(--color-text-secondary); white-space: nowrap; }
-.run-dur { font-size: 12px; color: var(--color-text-muted); text-align: right; font-variant-numeric: tabular-nums; }
+.run-time { font-size: var(--text-sm); color: var(--color-text-secondary); white-space: nowrap; }
+.run-dur { font-size: var(--text-sm); color: var(--color-text-muted); text-align: right; font-variant-numeric: tabular-nums; }
 .run-result {
-  font-size: 12px; color: var(--color-text-secondary);
+  font-size: var(--text-sm); color: var(--color-text-secondary);
   display: flex; align-items: center; gap: var(--space-2); min-width: 0;
 }
 .run-result-text {
@@ -238,8 +238,8 @@ function close() {
   display: flex; align-items: center; justify-content: space-between;
   margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--color-border);
 }
-.dlg-retention { font-size: 11px; color: var(--color-text-disabled); }
+.dlg-retention { font-size: var(--text-xs); color: var(--color-text-disabled); }
 /* 工具条与头部之间留白；导出按钮靠右 */
-.dlg-tools { display: flex; align-items: center; gap: 4px; margin-bottom: var(--space-3); }
+.dlg-tools { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
 .dlg-export { margin-left: auto; }
 </style>

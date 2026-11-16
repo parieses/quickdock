@@ -1467,7 +1467,11 @@ async function doSSHGenerate() {
     if (r?.key) {
       sshGenerated.value = r.key
       // 顺手把公钥放到剪贴板：下一步就是去网页上粘贴，少一次点击
-      try { await navigator.clipboard.writeText(r.key.publicKey) } catch { /* 剪贴板不可用时用户还能手点复制 */ }
+      try { await navigator.clipboard.writeText(r.key.publicKey) } catch (e) {
+        // 自动复制失败要告诉用户，否则下一步直接去网页粘贴会贴出旧内容。
+        logErr('git.copyPublicKey', e)
+        toast.error(getErrorMessage(e))
+      }
     }
     sshStatus.value = unwrap<SSHStatus>(await GitSSHStatus()) || sshStatus.value
     toast.success(t('git_ssh_gen_done'))
@@ -2175,7 +2179,7 @@ function seedPreview() {
       '--- a/frontend/src/components/GitPage.vue',
       '+++ b/frontend/src/components/GitPage.vue',
       '@@ -130,6 +130,14 @@ async function addRepo() {',
-      '   }',
+      ' }',
       '   try {',
       '     const picked = unwrap<string>(await GitPickRepo())',
       '+    if (!picked) return',
@@ -2371,7 +2375,7 @@ const dialogCtx = reactive({
             <button class="grp-act" :title="t('git_add_repo')" @click="addRepo"><Plus :size="12" /></button>
           </div>
           <ul v-show="open.repos" class="grp-list">
-            <li v-for="r in repos" :key="r.path" :class="['item', { active: r.path === activePath }]"
+            <li v-key-click v-for="r in repos" :key="r.path" :class="['item', { active: r.path === activePath }]"
                 :title="r.path" @click="switchRepo(r)">
               <FolderGit2 :size="11" class="item-ic" />
               <span class="item-name">{{ r.name }}</span>
@@ -2393,7 +2397,7 @@ const dialogCtx = reactive({
               </button>
             </div>
             <ul v-show="open.local" class="grp-list">
-              <li v-for="b in branches.local" :key="b.name"
+              <li v-key-click v-for="b in branches.local" :key="b.name"
                   :class="['item', { current: b.current, 'is-spinning': isCheckingOut(b) }]"
                   @click="doCheckout(b)" @contextmenu.prevent="openBranchCtx($event, b)">
                 <Loader2 v-if="isCheckingOut(b)" :size="11" class="item-ic" />
@@ -2415,7 +2419,7 @@ const dialogCtx = reactive({
               </button>
             </div>
             <ul v-show="open.remote" class="grp-list">
-              <li v-for="b in branches.remote" :key="b.name"
+              <li v-key-click v-for="b in branches.remote" :key="b.name"
                   :class="['item', 'dim', { 'is-spinning': isCheckingOut(b) }]"
                   :title="t('git_checkout_remote')" @click="doCheckout(b)"
                   @contextmenu.prevent="openBranchCtx($event, b)">
@@ -2457,7 +2461,7 @@ const dialogCtx = reactive({
               </button>
             </div>
             <ul v-show="open.stash" class="grp-list">
-              <li v-for="s in stashes" :key="s.ref"
+              <li v-key-click v-for="s in stashes" :key="s.ref"
                   :class="['item', 'dim', { active: selectedStash?.ref === s.ref }]"
                   :title="`${s.ref} · ${s.branch} · ${s.message}`"
                   @click="selectStash(s)"
@@ -2543,7 +2547,7 @@ const dialogCtx = reactive({
           <p v-else-if="!shownCommits.length" class="pane-state">{{ t('git_history_empty') }}</p>
 
           <ul v-else class="commit-list">
-            <li v-for="c in shownCommits" :key="c.hash"
+            <li v-key-click v-for="c in shownCommits" :key="c.hash"
                 :class="['commit-item', { active: c.hash === selectedHash }]"
                 @click="selectCommit(c)" @contextmenu.prevent="openCommitCtx($event, c)">
               <!-- graph 用等宽字体原样渲染：SourceTree 的分支线就是这套字符，不解析反而更准 -->
@@ -2587,14 +2591,14 @@ const dialogCtx = reactive({
               </div>
               <ul v-if="stagedFiles.length" class="file-rows wt-rows">
                 <template v-for="row in stagedRows" :key="row.key">
-                  <li v-if="row.dir" class="tree-dir"
+                  <li v-key-click v-if="row.dir" class="tree-dir"
                       :style="{ paddingLeft: 12 + row.depth * 12 + 'px' }" @click="toggleDir(row.key)">
                     <ChevronDown v-if="!closedDirs.has(row.key)" :size="10" />
                     <ChevronRight v-else :size="10" />
                     <Folder :size="11" class="td-ic" />
                     <span class="td-name">{{ row.name }}</span>
                   </li>
-                  <li v-else-if="row.file"
+                  <li v-key-click v-else-if="row.file"
                       :class="['file-row', { active: selectedFile === row.file!.path, picked: picked.has('s:' + row.file!.path) }]"
                       :style="{ paddingLeft: 12 + row.depth * 12 + 'px' }"
                       :title="row.file!.path" @click="onFileClick($event, row.file!, 'staged')"
@@ -2622,14 +2626,14 @@ const dialogCtx = reactive({
               </div>
               <ul v-if="unstagedFiles.length" class="file-rows wt-rows">
                 <template v-for="row in unstagedRows" :key="row.key">
-                  <li v-if="row.dir" class="tree-dir"
+                  <li v-key-click v-if="row.dir" class="tree-dir"
                       :style="{ paddingLeft: 12 + row.depth * 12 + 'px' }" @click="toggleDir(row.key)">
                     <ChevronDown v-if="!closedDirs.has(row.key)" :size="10" />
                     <ChevronRight v-else :size="10" />
                     <Folder :size="11" class="td-ic" />
                     <span class="td-name">{{ row.name }}</span>
                   </li>
-                  <li v-else-if="row.file"
+                  <li v-key-click v-else-if="row.file"
                       :class="['file-row', { active: selectedFile === row.file!.path, picked: picked.has('u:' + row.file!.path) }]"
                       :style="{ paddingLeft: 12 + row.depth * 12 + 'px' }"
                       :title="row.file!.path" @click="onFileClick($event, row.file!, 'unstaged')"
@@ -2678,14 +2682,14 @@ const dialogCtx = reactive({
               <div v-else-if="!detail" class="file-state"><Loader2 :size="13" class="spin" /></div>
               <ul v-else class="file-rows">
                 <template v-for="row in commitRows" :key="row.key">
-                  <li v-if="row.dir" class="tree-dir"
+                  <li v-key-click v-if="row.dir" class="tree-dir"
                       :style="{ paddingLeft: 12 + row.depth * 12 + 'px' }" @click="toggleDir(row.key)">
                     <ChevronDown v-if="!closedDirs.has(row.key)" :size="10" />
                     <ChevronRight v-else :size="10" />
                     <Folder :size="11" class="td-ic" />
                     <span class="td-name">{{ row.name }}</span>
                   </li>
-                  <li v-else-if="row.file"
+                  <li v-key-click v-else-if="row.file"
                       :class="['file-row', { active: selectedFile && selectedFile === blockPath(row.file!) }]"
                       :style="{ paddingLeft: 12 + row.depth * 12 + 'px' }"
                       :title="row.file!.desc" @click="selectFile(row.file!)"
@@ -2842,38 +2846,39 @@ const dialogCtx = reactive({
    和相邻页面切来切去时上沿明显差一截。 */
 .git-bar {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-5);
+  /* 与 .qd-page-header 同高、同内边距、同分隔方式：切页时顶部基线不跳。
+     内高光已去掉 —— ui.md §3.1 规定页头靠 1px border-bottom 收口，不叠第三层装饰。 */
   height: 46px; padding: 0 var(--space-6); flex-shrink: 0;
   border-bottom: 1px solid var(--color-border); background: var(--color-bg-secondary);
-  box-shadow: 0 1px 0 var(--color-hairline) inset;
 }
-.bar-left { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.bar-left { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
 /* 收起左栏：看长 diff 时把 240px 让出来，按钮留在工具栏最左，收了也能立刻展开 */
 .bar-toggle {
   display: grid; place-items: center; width: 22px; height: 22px; flex-shrink: 0;
-  margin-right: 2px; padding: 0; border: 0; border-radius: var(--radius-xs);
+  margin-right: var(--space-1); padding: 0; border: 0; border-radius: var(--radius-xs);
   background: none; color: var(--color-text-muted); cursor: pointer;
 }
 .bar-toggle:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .bar-icon { color: var(--color-accent); flex-shrink: 0; }
-.bar-repo { font-size: 12px; font-weight: 600; color: var(--color-text-primary); flex-shrink: 0; }
+.bar-repo { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); flex-shrink: 0; }
 .bar-path {
-  font-size: 11px; color: var(--color-text-muted); font-family: var(--font-mono);
+  font-size: var(--text-xs); color: var(--color-text-muted); font-family: var(--font-mono);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
 }
-.bar-dirty { font-size: 11px; color: var(--color-warning); flex-shrink: 0; }
+.bar-dirty { font-size: var(--text-xs); color: var(--color-warning); flex-shrink: 0; }
 .bar-actions { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
 .bar-actions .qd-btn { height: 26px; }
 .btn-badge {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 15px; height: 15px; padding: 0 3px; border-radius: var(--radius-full);
   background: var(--color-accent); color: var(--color-accent-text);
-  font-family: var(--font-mono); font-size: 10px;
+  font-family: var(--font-mono); font-size: var(--text-2xs);
 }
 /* 徽章挂在实心的主按钮上时，蓝底压蓝底会糊成一团：反成白底蓝字 */
 .qd-btn-primary .btn-badge { background: var(--color-accent-text); color: var(--color-accent); }
 
 .git-error {
-  margin: 0; padding: 6px var(--space-5); font-size: 12px; flex-shrink: 0;
+  margin: 0; padding: var(--space-3) var(--space-5); font-size: var(--text-sm); flex-shrink: 0;
   color: var(--color-danger); background: var(--color-danger-bg);
   border-bottom: 1px solid var(--color-border);
 }
@@ -2887,8 +2892,8 @@ const dialogCtx = reactive({
 }
 .gw-ic { color: var(--color-warning); flex-shrink: 0; }
 .gw-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
-.gw-text b { font-size: 12px; font-weight: 600; color: var(--color-text-primary); }
-.gw-text span { font-size: 11px; color: var(--color-text-muted); }
+.gw-text b { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); }
+.gw-text span { font-size: var(--text-xs); color: var(--color-text-muted); }
 .git-warn .qd-btn { height: 24px; flex-shrink: 0; }
 
 /* ---- 主体 ---- */
@@ -2901,21 +2906,21 @@ const dialogCtx = reactive({
   border-right: 1px solid var(--color-border); background: var(--color-bg-secondary);
 }
 .git-side.collapsed { display: none; }
-.grp + .grp { margin-top: 6px; }
+.grp + .grp { margin-top: var(--space-3); }
 .grp-head {
-  display: flex; align-items: center; gap: 2px;
+  display: flex; align-items: center; gap: var(--space-1);
   padding-right: var(--space-2);
 }
 .grp-toggle {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: 3px;
   height: 24px; padding: 0 var(--space-2);
   background: none; border: 0; cursor: pointer; font: inherit;
-  font-size: 11px; font-weight: 600; letter-spacing: 0.03em;
+  font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.03em;
   color: var(--color-text-muted); 
 }
 .grp-toggle:hover { color: var(--color-text-secondary); }
 .grp-n {
-  margin-left: auto; font-family: var(--font-mono); font-size: 10px; font-weight: 400;
+  margin-left: auto; font-family: var(--font-mono); font-size: var(--text-2xs); font-weight: 400;
   letter-spacing: 0; text-transform: none; color: var(--color-text-disabled);
 }
 .grp-act {
@@ -2926,11 +2931,11 @@ const dialogCtx = reactive({
 .grp-act:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 
 .grp-list { list-style: none; margin: 0; padding: 0 var(--space-2); }
-.grp-empty { padding: 4px var(--space-2) 6px; font-size: 11px; color: var(--color-text-disabled); }
+.grp-empty { padding: var(--space-2) var(--space-2) var(--space-3); font-size: var(--text-xs); color: var(--color-text-disabled); }
 .item {
   display: flex; align-items: center; gap: 5px;
   height: 24px; padding: 0 var(--space-2); border-radius: var(--radius-xs);
-  font-size: 12px; color: var(--color-text-secondary); cursor: pointer;
+  font-size: var(--text-sm); color: var(--color-text-secondary); cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 .item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
@@ -2951,7 +2956,7 @@ const dialogCtx = reactive({
 .item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item-cur { flex-shrink: 0; color: var(--color-accent); }
 .item-remote {
-  flex-shrink: 0; font-size: 10px; color: var(--color-text-disabled);
+  flex-shrink: 0; font-size: var(--text-2xs); color: var(--color-text-disabled);
 }
 .item-x {
   display: none; place-items: center; width: 16px; height: 16px; flex-shrink: 0;
@@ -2960,7 +2965,7 @@ const dialogCtx = reactive({
 }
 .item:hover .item-x { display: grid; }
 .item-x:hover { color: var(--color-danger); background: var(--color-danger-bg); }
-.ab { font-family: var(--font-mono); font-size: 10px; flex-shrink: 0; }
+.ab { font-family: var(--font-mono); font-size: var(--text-2xs); flex-shrink: 0; }
 .ab.up { color: var(--color-warning); }
 .ab.down { color: var(--color-accent); }
 
@@ -2978,7 +2983,7 @@ const dialogCtx = reactive({
 .hb-input {
   flex: 1; min-width: 0; height: 100%; padding: 0;
   background: none; border: 0; outline: none;
-  font: inherit; font-size: 11px; color: var(--color-text-secondary);
+  font: inherit; font-size: var(--text-xs); color: var(--color-text-secondary);
 }
 .hb-input::placeholder { color: var(--color-text-disabled); }
 .hb-x {
@@ -2988,13 +2993,13 @@ const dialogCtx = reactive({
 }
 .hb-x:hover { color: var(--color-text-primary); }
 .hb-n {
-  flex-shrink: 0; font-family: var(--font-mono); font-size: 10px;
+  flex-shrink: 0; font-family: var(--font-mono); font-size: var(--text-2xs);
   color: var(--color-text-disabled);
 }
 /* 「全历史」徽标：告诉用户当前列表已经不是本地 200 条的筛选结果 */
 .hb-mode {
   flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
-  font-size: 10px; color: var(--color-accent);
+  font-size: var(--text-2xs); color: var(--color-accent);
 }
 
 /* 表头与数据行共用同一套列宽，否则两行的摘要列会错开半格。
@@ -3006,7 +3011,7 @@ const dialogCtx = reactive({
 }
 .commit-head {
   height: 28px; padding: 0 var(--space-5); flex-shrink: 0;
-  font-size: 11px; color: var(--color-text-muted);
+  font-size: var(--text-xs); color: var(--color-text-muted);
   border-bottom: 1px solid var(--color-border); background: var(--color-bg-secondary);
 }
 .col-date { text-align: right; }
@@ -3016,7 +3021,7 @@ const dialogCtx = reactive({
 .commit-list { list-style: none; margin: 0; padding: 0; }
 .commit-item {
   height: 28px; padding: 0 var(--space-5);
-  font-size: 12px; cursor: pointer;
+  font-size: var(--text-sm); cursor: pointer;
 }
 .commit-item:hover { background: var(--color-bg-hover); }
 /* 选中态与 .qd-row.active 同一套：--color-select-bg 实底 + 3px accent 左标记。
@@ -3028,12 +3033,12 @@ const dialogCtx = reactive({
 }
 /* graph 前缀必须等宽 + 保留空格，否则线会歪 */
 .commit-graph {
-  font-size: 12px; line-height: 1; color: var(--color-accent);
+  font-size: var(--text-sm); line-height: 1; color: var(--color-accent);
   white-space: pre; overflow: hidden;
 }
 /* 摘要单元格是 flex：文字先让位（shrink 1），徽章按内容宽度整颗保留（shrink 0） */
 .commit-subject {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: var(--space-3);
   min-width: 0; overflow: hidden;
   color: var(--color-text-primary);
 }
@@ -3043,7 +3048,7 @@ const dialogCtx = reactive({
 }
 .ref {
   flex: 0 0 auto; max-width: 140px;
-  font-size: 10px; line-height: 15px; padding: 0 6px; border-radius: var(--radius-full);
+  font-size: var(--text-2xs); line-height: 15px; padding: 0 var(--space-3); border-radius: var(--radius-full);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-family: var(--font-mono);
 }
@@ -3053,21 +3058,21 @@ const dialogCtx = reactive({
 .ref-more { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 
 /* 作者：首字母头像 + 名字，同一个人永远同色，作者列从「一排灰字」变成可扫的列 */
-.commit-author { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.commit-author { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
 .avatar {
   width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0;
   display: grid; place-items: center;
-  font-size: 10px; font-weight: 600; line-height: 1;
+  font-size: var(--text-2xs); font-weight: 600; line-height: 1;
 }
 .avatar.av0 { background: var(--color-accent-bg); color: var(--color-accent); }
 .avatar.av1 { background: var(--color-success-bg); color: var(--color-success); }
 .avatar.av2 { background: var(--color-warning-bg); color: var(--color-warning); }
 .author-name {
-  min-width: 0; font-size: 11px; color: var(--color-text-muted);
+  min-width: 0; font-size: var(--text-xs); color: var(--color-text-muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .commit-time {
-  font-family: var(--font-mono); font-size: 11px; color: var(--color-text-disabled);
+  font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-disabled);
   text-align: right; white-space: nowrap;
 }
 
@@ -3077,7 +3082,7 @@ const dialogCtx = reactive({
   height: 30px; flex-shrink: 0; padding: 0 var(--space-5);
   background: var(--color-bg-secondary); border: 0;
   border-bottom: 1px solid var(--color-border);
-  font: inherit; font-size: 12px; color: var(--color-text-secondary);
+  font: inherit; font-size: var(--text-sm); color: var(--color-text-secondary);
   text-align: left; cursor: pointer;
   box-shadow: inset 3px 0 0 transparent;
   transition: background-color var(--transition-fast), color var(--transition-fast);
@@ -3091,12 +3096,12 @@ const dialogCtx = reactive({
 .wt-bar.dirty .wt-ic { color: var(--color-warning); }
 .wt-name { font-weight: 500; }
 .wt-n {
-  min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-full);
+  min-width: 16px; height: 16px; padding: 0 var(--space-2); border-radius: var(--radius-full);
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--color-warning-bg); color: var(--color-warning);
-  font-family: var(--font-mono); font-size: 10px;
+  font-family: var(--font-mono); font-size: var(--text-2xs);
 }
-.wt-sub { margin-left: auto; font-size: 11px; color: var(--color-text-muted); }
+.wt-sub { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-muted); }
 .wt-arrow { opacity: .45; flex-shrink: 0; }
 
 /* ---- 详情 + 提交面板 ---- */
@@ -3110,17 +3115,17 @@ const dialogCtx = reactive({
 .wt-files { overflow-y: auto; }
 .wt-files .wt-rows { flex: 0 0 auto; max-height: none; overflow: visible; }
 .wt-files .file-rows { flex: none; overflow: visible; }
-.wt-files .file-state { padding: 3px var(--space-4) 7px; font-size: 11px; color: var(--color-text-disabled); }
+.wt-files .file-state { padding: 3px var(--space-4) 7px; font-size: var(--text-xs); color: var(--color-text-disabled); }
 /* 组头吸顶：滚到未暂存那组时「已暂存」的标题已经滚出去，
    但组名是这两组的坐标系，不该跟着滚没。 */
 .pane-head.sticky { position: sticky; top: 0; z-index: 1; background: var(--color-bg-secondary); }
 .wt-rows + .pane-head { border-top: 1px solid var(--color-border); }
 /* 尺寸与外观由 style.css 的全局 input[type=checkbox] 负责，这里只管不被挤扁。 */
 .stage-box { margin: 0; flex-shrink: 0; cursor: pointer; }
-.pane-n { font-family: var(--font-mono); font-size: 10px; color: var(--color-text-muted); }
+.pane-n { font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--color-text-muted); }
 .pane-act {
-  margin-left: auto; padding: 0 2px; border: 0; background: none;
-  font: inherit; font-size: 10px; color: var(--color-text-muted); cursor: pointer;
+  margin-left: auto; padding: 0 var(--space-1); border: 0; background: none;
+  font: inherit; font-size: var(--text-2xs); color: var(--color-text-muted); cursor: pointer;
 }
 .pane-act:hover:not(:disabled) { color: var(--color-accent); }
 .pane-act:disabled { opacity: .5; cursor: default; }
@@ -3132,12 +3137,12 @@ const dialogCtx = reactive({
   background: var(--color-bg-secondary);
 }
 .cb-head { display: flex; align-items: center; gap: var(--space-3); }
-.cb-label { font-size: 11px; color: var(--color-text-muted); }
+.cb-label { font-size: var(--text-xs); color: var(--color-text-muted); }
 .cb-ai {
-  margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
+  margin-left: auto; display: inline-flex; align-items: center; gap: var(--space-2);
   height: 20px; padding: 0 7px; border-radius: var(--radius-xs);
   border: 1px solid var(--color-border-light); background: var(--color-bg-primary);
-  color: var(--color-accent); font: inherit; font-size: 11px; cursor: pointer;
+  color: var(--color-accent); font: inherit; font-size: var(--text-xs); cursor: pointer;
   transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
 .cb-ai:hover:not(:disabled) { background: var(--color-accent-bg); border-color: var(--color-accent-border); }
@@ -3148,12 +3153,12 @@ const dialogCtx = reactive({
   width: 100%; resize: vertical; min-height: 46px; max-height: 160px;
   padding: 7px 9px; border-radius: var(--radius-sm);
   border: 1px solid var(--color-border); background: var(--color-bg-primary);
-  color: var(--color-text-primary); font: inherit; font-size: 12px; line-height: 1.5;
+  color: var(--color-text-primary); font: inherit; font-size: var(--text-sm); line-height: 1.5;
 }
 .cb-input:focus { outline: none; border-color: var(--color-border-focus-soft); }
 .cb-input::placeholder { color: var(--color-text-disabled); }
 .cb-foot { display: flex; align-items: center; gap: var(--space-3); }
-.cb-hint { font-size: 11px; color: var(--color-text-muted); }
+.cb-hint { font-size: var(--text-xs); color: var(--color-text-muted); }
 .cb-hint.warn { color: var(--color-warning); }
 .cb-foot .qd-btn { margin-left: auto; height: 26px; }
 
@@ -3177,22 +3182,22 @@ const dialogCtx = reactive({
 .detail-diff { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .pane-head {
   display: flex; align-items: center; gap: 5px; height: 26px; flex-shrink: 0;
-  padding: 0 var(--space-4); font-size: 11px; color: var(--color-text-muted);
+  padding: 0 var(--space-4); font-size: var(--text-xs); color: var(--color-text-muted);
   border-bottom: 1px solid var(--color-border);
 }
-.file-state { padding: var(--space-5); color: var(--color-text-muted); font-size: 12px; }
-.file-rows { list-style: none; margin: 0; padding: 2px; overflow-y: auto; flex: 1; min-height: 0; }
+.file-state { padding: var(--space-5); color: var(--color-text-muted); font-size: var(--text-sm); }
+.file-rows { list-style: none; margin: 0; padding: var(--space-1); overflow-y: auto; flex: 1; min-height: 0; }
 .file-row {
   display: flex; align-items: center; gap: var(--space-3);
   min-height: 22px; padding: 0 var(--space-3); border-radius: var(--radius-xs);
-  font-size: 12px; cursor: pointer;
+  font-size: var(--text-sm); cursor: pointer;
 }
 .file-row:hover { background: var(--color-bg-hover); }
 /* 目录行：只承担分组与折叠，不参与选中（点它折叠/展开） */
 .tree-dir {
   display: flex; align-items: center; gap: 3px; min-height: 20px;
   padding: 0 var(--space-3); border-radius: var(--radius-xs);
-  font-size: 11px; color: var(--color-text-muted); cursor: pointer; user-select: none;
+  font-size: var(--text-xs); color: var(--color-text-muted); cursor: pointer; user-select: none;
 }
 .tree-dir:hover { background: var(--color-bg-hover); }
 .td-ic { color: var(--color-text-disabled); }
@@ -3200,7 +3205,7 @@ const dialogCtx = reactive({
 .file-row.active { background: var(--color-select-bg); }
 .file-badge {
   width: 14px; flex-shrink: 0; text-align: center;
-  font-family: var(--font-mono); font-size: 10px; color: var(--color-text-secondary);
+  font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--color-text-secondary);
 }
 .file-badge.add { color: var(--color-success); }
 .file-badge.del { color: var(--color-danger); }
@@ -3209,29 +3214,29 @@ const dialogCtx = reactive({
 .file-badge.new { color: var(--color-success); }
 .file-badge.conflict { color: var(--color-danger); }
 .file-path {
-  flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11px;
+  flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--text-xs);
   color: var(--color-text-secondary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.file-num { display: flex; gap: 3px; flex-shrink: 0; font-family: var(--font-mono); font-size: 10px; }
+.file-num { display: flex; gap: 3px; flex-shrink: 0; font-family: var(--font-mono); font-size: var(--text-2xs); }
 .file-num b { font-weight: 500; }
 .file-num .add { color: var(--color-success); }
 .file-num .del { color: var(--color-danger); }
 
 .diff-title {
-  font-family: var(--font-mono); font-size: 11px; color: var(--color-text-secondary);
+  font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-secondary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .diff-hash { margin-left: auto; font-family: var(--font-mono); color: var(--color-text-disabled); }
 .diff-reset {
   margin-left: auto; background: none; border: 0; padding: 0; cursor: pointer;
-  font: inherit; font-size: 11px; color: var(--color-accent);
+  font: inherit; font-size: var(--text-xs); color: var(--color-accent);
 }
 .diff-reset:hover { color: var(--color-accent-hover); }
 
 .diff {
   margin: 0; padding: var(--space-3) 0; overflow: auto; flex: 1; min-height: 0;
-  font-family: var(--font-mono); font-size: 11px; line-height: 1.6;
+  font-family: var(--font-mono); font-size: var(--text-xs); line-height: 1.6;
   color: var(--color-text-secondary); white-space: pre;
 }
 .diff span { display: block; padding: 0 var(--space-4); }
@@ -3244,25 +3249,25 @@ const dialogCtx = reactive({
 /* ---- 并排 diff ---- */
 .diff-toggle {
   display: inline-flex; align-items: center; gap: 3px;
-  margin-left: auto; padding: 0 4px; border: 0; background: none; cursor: pointer;
-  font: inherit; font-size: 10px; color: var(--color-text-muted);
+  margin-left: auto; padding: 0 var(--space-2); border: 0; background: none; cursor: pointer;
+  font: inherit; font-size: var(--text-2xs); color: var(--color-text-muted);
 }
 .diff-toggle:hover { color: var(--color-accent); }
-.diff-toggle + .diff-reset { margin-left: 8px; }
-.diff-side { flex: 1; min-height: 0; overflow: auto; font-family: var(--font-mono); font-size: 11px; }
+.diff-toggle + .diff-reset { margin-left: var(--space-4); }
+.diff-side { flex: 1; min-height: 0; overflow: auto; font-family: var(--font-mono); font-size: var(--text-xs); }
 .side-block + .side-block { border-top: 1px solid var(--color-border); }
 .side-file {
-  position: sticky; left: 0; padding: 4px var(--space-4); font-size: 11px;
+  position: sticky; left: 0; padding: var(--space-2) var(--space-4); font-size: var(--text-xs);
   color: var(--color-text-secondary); background: var(--color-bg-tertiary);
 }
 .side-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .side-row { line-height: 1.6; }
 .sd-ln {
-  width: 44px; padding: 0 6px; text-align: right; vertical-align: top;
+  width: 44px; padding: 0 var(--space-3); text-align: right; vertical-align: top;
   color: var(--color-text-disabled); background: var(--color-bg-secondary);
   border-right: 1px solid var(--color-border); user-select: none;
 }
-.sd-code { padding: 0 8px; white-space: pre-wrap; word-break: break-all; vertical-align: top; }
+.sd-code { padding: 0 var(--space-4); white-space: pre-wrap; word-break: break-all; vertical-align: top; }
 .side-table td.del { background: var(--color-danger-bg); color: var(--color-danger); }
 .side-table td.add { background: var(--color-success-bg); color: var(--color-success); }
 .side-table td.blank { background: var(--color-bg-secondary); }
@@ -3276,22 +3281,22 @@ const dialogCtx = reactive({
 .file-row.picked { background: var(--color-select-bg); }
 .file-row.picked.active { box-shadow: inset 3px 0 0 var(--color-accent); }
 .pane-ic {
-  margin-left: auto; padding: 0 2px; border: 0; background: none; cursor: pointer;
+  margin-left: auto; padding: 0 var(--space-1); border: 0; background: none; cursor: pointer;
   color: var(--color-text-muted); display: inline-flex; align-items: center;
 }
 .pane-ic:hover { color: var(--color-accent); }
-.pane-ic + .pane-act { margin-left: 6px; }
+.pane-ic + .pane-act { margin-left: var(--space-3); }
 .pick-bar {
-  position: sticky; bottom: 8px; z-index: 3; margin: 4px 8px 0;
-  display: flex; align-items: center; gap: 6px;
-  padding: 5px 8px; border-radius: var(--radius-sm);
-  background: var(--color-surface-elevated); border: 1px solid var(--color-border);
+  position: sticky; bottom: 8px; z-index: 3; margin: var(--space-2) var(--space-4) 0;
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: 5px var(--space-4); border-radius: var(--radius-sm);
+  background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
   box-shadow: var(--shadow-pop);
 }
-.pb-n { font-size: 11px; color: var(--color-text-secondary); }
+.pb-n { font-size: var(--text-xs); color: var(--color-text-secondary); }
 .pb-btn {
   padding: 0 7px; height: 20px; border-radius: var(--radius-xs); cursor: pointer;
-  font: inherit; font-size: 11px;
+  font: inherit; font-size: var(--text-xs);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
   border: 1px solid var(--color-border);
 }
@@ -3308,7 +3313,7 @@ const dialogCtx = reactive({
 
 .pane-state {
   display: flex; align-items: center; justify-content: center; gap: var(--space-3);
-  flex: 1; padding: var(--space-6); font-size: 12px; color: var(--color-text-muted);
+  flex: 1; padding: var(--space-6); font-size: var(--text-sm); color: var(--color-text-muted);
   flex-direction: column;
 }
 .pane-state p { margin: 0; }
@@ -3317,12 +3322,12 @@ const dialogCtx = reactive({
 /* ---- 状态栏 ---- */
 .git-status {
   display: flex; align-items: center; gap: var(--space-5); height: 24px; flex-shrink: 0;
-  padding: 0 var(--space-5); font-size: 11px;
+  padding: 0 var(--space-5); font-size: var(--text-xs);
   border-top: 1px solid var(--color-border); background: var(--color-bg-secondary);
   color: var(--color-text-secondary);
 }
-.st-branch { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-mono); color: var(--color-text-secondary); }
-.st-dim { color: var(--color-text-muted); font-size: 11px; }
+.st-branch { display: inline-flex; align-items: center; gap: var(--space-2); font-family: var(--font-mono); color: var(--color-text-secondary); }
+.st-dim { color: var(--color-text-muted); font-size: var(--text-xs); }
 .st-warn { color: var(--color-warning); }
 .st-path {
   margin-left: auto; font-family: var(--font-mono); color: var(--color-text-disabled);
@@ -3341,7 +3346,7 @@ const dialogCtx = reactive({
 /* 菜单固定在鼠标位置，透明遮罩负责「点外面关闭」，与项目内其它浮层同一套语言 */
 .ctx-backdrop { position: fixed; inset: 0; z-index: 900; }
 .ctx-menu {
-  position: fixed; min-width: 208px; padding: 4px;
+  position: fixed; min-width: 208px; padding: var(--space-2);
   background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
   display: flex; flex-direction: column; gap: 1px;
@@ -3349,14 +3354,14 @@ const dialogCtx = reactive({
 .ctx-item {
   display: flex; align-items: center; height: 27px; padding: 0 10px;
   border: none; border-radius: var(--radius-sm); background: none;
-  color: var(--color-text-secondary); font-size: 12px; font-family: inherit;
+  color: var(--color-text-secondary); font-size: var(--text-sm); font-family: inherit;
   text-align: left; cursor: pointer; white-space: nowrap;
 }
 .ctx-item:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .ctx-item.danger { color: var(--color-danger); }
 .ctx-item.danger:hover:not(:disabled) { background: var(--color-danger-bg); color: var(--color-danger); }
 .ctx-item:disabled { color: var(--color-text-disabled); cursor: default; }
-.ctx-sep { height: 1px; margin: 3px 6px; background: var(--color-border); }
+.ctx-sep { height: 1px; margin: 3px var(--space-3); background: var(--color-border); }
 
 /* ---- 远端管理（弹窗内） ---- */
 .rm-add .qd-btn { flex-shrink: 0; height: 26px; }
@@ -3365,7 +3370,7 @@ const dialogCtx = reactive({
 .fh-bar {
   display: flex; align-items: center; gap: var(--space-3); height: 28px; flex-shrink: 0;
   padding: 0 var(--space-5); background: var(--color-accent-bg);
-  border-bottom: 1px solid var(--color-border); font-size: 11px; color: var(--color-accent);
+  border-bottom: 1px solid var(--color-border); font-size: var(--text-xs); color: var(--color-accent);
 }
 .fh-ic { flex-shrink: 0; }
 .fh-name { font-weight: 500; flex-shrink: 0; }

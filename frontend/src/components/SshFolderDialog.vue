@@ -166,7 +166,7 @@ function onKeydown(e: KeyboardEvent) {
 
 .fd-title {
   flex: 1 1 auto;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -192,7 +192,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 .fd-x-glyph {
-  font-size: 18px;
+  font-size: var(--text-xl);
   line-height: 1;
 }
 
@@ -207,7 +207,7 @@ function onKeydown(e: KeyboardEvent) {
 .fd-label {
   display: block;
   margin-bottom: var(--space-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-secondary);
 }
 
@@ -215,7 +215,7 @@ function onKeydown(e: KeyboardEvent) {
   width: 100%;
   box-sizing: border-box;
   padding: var(--space-3) var(--space-4);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-family: inherit;
   color: var(--color-text-primary);
   background: var(--color-bg-secondary);
@@ -240,7 +240,7 @@ function onKeydown(e: KeyboardEvent) {
 
 .fd-err {
   margin: var(--space-3) 0 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-danger);
 }
 
@@ -254,9 +254,9 @@ function onKeydown(e: KeyboardEvent) {
   background: var(--color-bg-tertiary);
 }
 
-.fd-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+.fd-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
   height: 28px; padding: 0 11px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   color: var(--color-text-secondary);
   background: transparent;

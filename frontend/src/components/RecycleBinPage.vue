@@ -266,13 +266,13 @@ onMounted(load)
 /* 页头已统一为 .qd-page-header（见 styles/app.css） */
 
 .recycle-filters {
-  display: flex; gap: 4px; flex-wrap: wrap; flex-shrink: 0;
-  padding: 8px 16px; border-bottom: 1px solid var(--color-border);
+  display: flex; gap: var(--space-2); flex-wrap: wrap; flex-shrink: 0;
+  padding: var(--space-4) var(--space-6); border-bottom: 1px solid var(--color-border);
 }
 .rc-chip {
-  padding: 2px 9px; border-radius: var(--radius-md);
+  padding: var(--space-1) 9px; border-radius: var(--radius-md);
   border: 1px solid var(--color-border); background: transparent;
-  color: var(--color-text-secondary); font-size: 11px; font-family: inherit;
+  color: var(--color-text-secondary); font-size: var(--text-xs); font-family: inherit;
   cursor: pointer; white-space: nowrap;
   transition: background-color 0.1s, color 0.1s, border-color 0.1s;
 }
@@ -282,15 +282,15 @@ onMounted(load)
 }
 
 .recycle-error {
-  margin: 10px 16px 0; padding: 8px 12px; border-radius: var(--radius-sm); font-size: 12px;
+  margin: 10px var(--space-6) 0; padding: var(--space-4) var(--space-5); border-radius: var(--radius-sm); font-size: var(--text-sm);
   color: var(--color-danger-text); background: var(--color-danger-bg); border: 1px solid var(--color-danger-border);
 }
 
-.recycle-body { flex: 1; overflow-y: auto; padding: 8px 12px 16px; }
-.rc-list { display: flex; flex-direction: column; gap: 4px; }
+.recycle-body { flex: 1; overflow-y: auto; padding: var(--space-4) var(--space-5) var(--space-6); }
+.rc-list { display: flex; flex-direction: column; gap: var(--space-2); }
 .rc-row {
   display: flex; align-items: center; gap: 10px;
-  padding: 8px 10px; border-radius: var(--radius-sm);
+  padding: var(--space-4) 10px; border-radius: var(--radius-sm);
   border: 1px solid var(--card-border-color); background: var(--color-card-bg);
 }
 .rc-row:hover { background: var(--color-bg-hover); }
@@ -306,36 +306,36 @@ onMounted(load)
 .rc-icon[data-type='notes'] { color: var(--color-warning); }
 .rc-icon[data-type='monitors'] { color: var(--color-log-info); }
 .rc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.rc-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rc-line { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
 .rc-name {
-  font-size: 12px; color: var(--color-text-primary);
+  font-size: var(--text-sm); color: var(--color-text-primary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .rc-badge {
-  flex-shrink: 0; font-size: 10px; padding: 0 5px; border-radius: var(--radius-sm);
+  flex-shrink: 0; font-size: var(--text-2xs); padding: 0 5px; border-radius: var(--radius-sm);
   color: var(--color-text-secondary); background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
 }
-.rc-time { font-size: 11px; color: var(--color-text-disabled); }
-.rc-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.rc-time { font-size: var(--text-xs); color: var(--color-text-disabled); }
+.rc-actions { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
 .rc-btn {
-  display: flex; align-items: center; gap: 4px; font-size: 11px;
-  height: 24px; padding: 0 8px; border-radius: var(--radius-sm); cursor: pointer;
+  display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs);
+  height: 24px; padding: 0 var(--space-4); border-radius: var(--radius-sm); cursor: pointer;
   border: 1px solid var(--color-border); background: var(--color-bg-primary);
   color: var(--color-text-primary); font-family: inherit;
 }
 .rc-btn:hover:not(:disabled) { background: var(--color-bg-active); }
 .rc-btn:disabled { opacity: 0.4; cursor: default; }
 .rc-btn.restore:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
-.rc-btn.danger { border-radius: var(--radius-sm); padding: 3px 6px; color: var(--color-text-disabled); }
+.rc-btn.danger { border-radius: var(--radius-sm); padding: 3px var(--space-3); color: var(--color-text-disabled); }
 .rc-btn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger-border); }
 
 .rc-empty {
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
-  padding: 32px 16px; margin: 0; text-align: center;
-  font-size: 12px; color: var(--color-text-disabled);
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-2);
+  padding: var(--space-9) var(--space-6); margin: 0; text-align: center;
+  font-size: var(--text-sm); color: var(--color-text-disabled);
 }
-.rc-empty-icon { color: var(--color-text-disabled); opacity: 0.6; margin-bottom: 4px; }
-.rc-empty-title { margin: 0; font-size: 13px; color: var(--color-text-secondary); }
+.rc-empty-icon { color: var(--color-text-disabled); opacity: 0.6; margin-bottom: var(--space-2); }
+.rc-empty-title { margin: 0; font-size: var(--text-md); color: var(--color-text-secondary); }
 .rc-empty-hint { margin: 0; line-height: 1.6; }
 </style>

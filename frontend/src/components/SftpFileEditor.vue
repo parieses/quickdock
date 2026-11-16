@@ -282,20 +282,20 @@ onMounted(load)
 .sfe-head-main {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
   min-width: 0;
   flex: 1 1 auto;
 }
 
 .sfe-name {
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--color-text-primary);
 }
 
 /* 路径可能很长，单行截断 + title 兜底，不要让它把弹窗顶宽 */
 .sfe-path {
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: var(--font-mono);
   color: var(--color-text-muted);
   white-space: nowrap;
@@ -327,7 +327,7 @@ onMounted(load)
   justify-content: center;
   gap: var(--space-4);
   padding: var(--space-6);
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-secondary);
 }
 
@@ -353,7 +353,7 @@ onMounted(load)
   flex: 0 0 auto;
   margin: 0;
   padding: var(--space-3) var(--space-5);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-warning);
   background: var(--color-warning-bg);
   border-bottom: 1px solid var(--color-border);
@@ -382,7 +382,7 @@ onMounted(load)
 
 .sfe-dirty {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-warning);
 }
 
@@ -400,7 +400,7 @@ onMounted(load)
   align-items: center;
   gap: var(--space-2);
   height: 28px; padding: 0 11px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   color: var(--color-text-secondary);
   background: transparent;

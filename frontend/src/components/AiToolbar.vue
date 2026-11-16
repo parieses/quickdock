@@ -104,13 +104,13 @@ const { t } = useI18n()
      原来是 space-between + 左右两块都常驻，现在左侧那块只在绑了目录时才存在，
      用 space-between 会在没有它时把右侧整组推到最左。 */
   justify-content: flex-end;
-  padding: 10px 16px;
+  padding: 10px var(--space-6);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
   gap: 10px;
 }
 
-.ai-toolbar-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.ai-toolbar-right { display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; }
 
 /* 工作目录：显示当前绑到哪个目录，点一下在资源管理器里打开。
    它只「打开」已绑定的目录，不是「选目录」——绑定入口已收进「新建任务 → 选空间」。
@@ -120,12 +120,12 @@ const { t } = useI18n()
   display: inline-flex; align-items: center; gap: 5px;
   margin-right: auto;
   max-width: 40%; min-width: 0;
-  padding: 4px 6px;
+  padding: var(--space-2) var(--space-3);
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-disabled);
-  font-size: 12px; font-family: inherit;
+  font-size: var(--text-sm); font-family: inherit;
   cursor: pointer;
   transition: color var(--transition-fast), border-color var(--transition-fast);
 }
@@ -162,7 +162,7 @@ const { t } = useI18n()
   border-radius: var(--radius-full);
   background: var(--color-accent);
   color: var(--color-bg-primary);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   line-height: 14px;
   text-align: center;
   font-variant-numeric: tabular-nums;

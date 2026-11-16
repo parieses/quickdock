@@ -100,15 +100,15 @@ function restoreAll() {
 <style scoped>
 .snv { display: flex; flex-direction: column; gap: 14px; }
 .snv-head { display: flex; align-items: flex-start; gap: 10px; color: var(--color-accent); }
-.snv-title { margin: 0; font-size: 13px; font-weight: 500; color: var(--color-text-primary); }
-.snv-sub { margin: 2px 0 0; font-size: 12px; color: var(--color-text-secondary); }
+.snv-title { margin: 0; font-size: var(--text-md); font-weight: 500; color: var(--color-text-primary); }
+.snv-sub { margin: var(--space-1) 0 0; font-size: var(--text-sm); color: var(--color-text-secondary); }
 
-.snv-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.snv-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
 .snv-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 7px 8px;
+  padding: 7px var(--space-4);
   border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
   cursor: grab;
@@ -123,7 +123,7 @@ function restoreAll() {
 
 .snv-grip { color: var(--color-text-disabled); flex-shrink: 0; cursor: grab; }
 .snv-icon { color: var(--color-text-secondary); flex-shrink: 0; }
-.snv-name { flex: 1; font-size: 13px; color: var(--color-text-primary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snv-name { flex: 1; font-size: var(--text-md); color: var(--color-text-primary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .snv-eye {
   flex-shrink: 0;
   display: flex;
@@ -141,17 +141,17 @@ function restoreAll() {
 .snv-eye:hover { color: var(--color-accent); background: var(--color-bg-active); }
 .snv-row.hidden .snv-eye { color: var(--color-text-disabled); }
 
-.snv-hint { margin: 0; font-size: 12px; color: var(--color-text-disabled); }
-.snv-actions { display: flex; gap: 8px; }
+.snv-hint { margin: 0; font-size: var(--text-sm); color: var(--color-text-disabled); }
+.snv-actions { display: flex; gap: var(--space-4); }
 .snv-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   height: 28px; padding: 0 11px;
   border: 1px solid var(--color-border);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   cursor: pointer;
   border-radius: var(--radius-sm);
@@ -159,12 +159,12 @@ function restoreAll() {
 }
 .snv-btn:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .snv-btn:disabled { opacity: 0.45; cursor: default; }
-.snv-foot { margin: 0; font-size: 12px; color: var(--color-text-disabled); }
+.snv-foot { margin: 0; font-size: var(--text-sm); color: var(--color-text-disabled); }
 .snv-link {
   border: none;
   background: transparent;
   color: var(--color-accent);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   cursor: pointer;
   padding: 0;

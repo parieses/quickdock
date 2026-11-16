@@ -478,8 +478,8 @@ function dropSelection() {
  * 生产上底色而不是纯红字：侧栏很窄，纯文字色在快速扫视时容易被忽略。
  */
 .ssh-ai-env {
-  padding: 0 4px;
-  font-size: 10px;
+  padding: 0 var(--space-2);
+  font-size: var(--text-2xs);
   line-height: 15px;
   border-radius: var(--radius-xs);
   border: 1px solid transparent;
@@ -510,8 +510,8 @@ function dropSelection() {
  */
 .ssh-ai-profile {
   max-width: 76px;
-  padding: 0 4px;
-  font-size: 10px;
+  padding: 0 var(--space-2);
+  font-size: var(--text-2xs);
   line-height: 15px;
   border-radius: var(--radius-xs);
   color: var(--color-text-muted);
@@ -535,8 +535,8 @@ function dropSelection() {
 .ssh-ai-quote-head {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 11px;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
   color: var(--color-accent);
 }
 
@@ -558,9 +558,9 @@ function dropSelection() {
 }
 
 .ssh-ai-quote-line {
-  margin-top: 2px;
+  margin-top: var(--space-1);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.45;
   color: var(--color-text-muted);
   white-space: pre;
@@ -573,9 +573,9 @@ function dropSelection() {
 .ssh-ai-screen-note {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 6px;
-  font-size: 11px;
+  gap: var(--space-2);
+  padding: 3px var(--space-3);
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   background: var(--color-card-bg);
   border: 1px solid var(--card-border-color);
@@ -584,8 +584,8 @@ function dropSelection() {
 
 /* 历史压缩提示：一行弱化的说明，不抢输入区的注意力。 */
 .ssh-ai-summary-note {
-  padding: 2px 2px 0;
-  font-size: 11px;
+  padding: var(--space-1) var(--space-1) 0;
+  font-size: var(--text-xs);
   line-height: 1.4;
   color: var(--color-text-disabled);
 }
@@ -602,8 +602,8 @@ function dropSelection() {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  padding: 2px 6px;
-  font-size: 11px;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
   line-height: 1.5;
   color: var(--color-text-muted);
   background: transparent;
@@ -644,7 +644,7 @@ function dropSelection() {
    这里不是报错，只是"这类命令留给你自己确认"，不该看起来像出了问题。 */
 .ssh-ai-cmd-lock {
   padding-left: 3px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-disabled);
 }
 </style>

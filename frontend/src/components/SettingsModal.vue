@@ -1080,7 +1080,7 @@ async function toggleAutoStart() {
               <h3 class="section-title">{{ t('update') }}</h3>
               <p class="section-desc">{{ t('updateCheckingAuto') }}</p>
 
-              <div class="action-row" style="margin-top:12px">
+              <div class="action-row qd-mt-3" >
                 <button class="btn btn-primary" :disabled="updateChecking" @click="checkForUpdates">
                   <RotateCcw :size="14" :class="{ spinning: updateChecking }" />
                   {{ updateChecking ? t('updateChecking') : t('updateCheckNow') }}
@@ -1093,7 +1093,7 @@ async function toggleAutoStart() {
                 <div class="update-dl-fill" :style="{ width: updateProgress + '%' }"></div>
               </div>
 
-              <div v-if="updateStatus?.state === 'available'" class="action-row" style="margin-top:12px">
+              <div v-if="updateStatus?.state === 'available'" class="action-row qd-mt-3" >
                 <button class="btn btn-primary" @click="downloadUpdate" :disabled="updateDlActive">
                   {{ updateDlActive
                     ? t('updateDownloadingPct', { pct: updateProgress })
@@ -1118,7 +1118,7 @@ async function toggleAutoStart() {
                 <pre v-else class="update-notes-body">{{ updateStatus.releaseNotes }}</pre>
               </div>
 
-              <div v-if="updateStatus?.state === 'ready'" class="action-row" style="margin-top:12px">
+              <div v-if="updateStatus?.state === 'ready'" class="action-row qd-mt-3" >
                 <button class="btn btn-primary update-restart-btn" @click="restartApp">
                   {{ t('updateRestart') }}
                 </button>
@@ -1286,7 +1286,7 @@ async function toggleAutoStart() {
                 {{ t('storageMigrateTarget') }}：{{ storageTargetHint }}
               </p>
 
-              <label class="field toggle-field" style="cursor: pointer; margin-bottom: 16px;">
+              <label class="field toggle-field qd-pointer qd-mb-4" >
                 <input type="checkbox" v-model="storageMigrate" class="field-checkbox" :disabled="migrateRunning" />
                 <span>{{ t('storageMigrate') }}</span>
               </label>
@@ -1405,10 +1405,10 @@ async function toggleAutoStart() {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  margin-top: 12px;
+  margin-top: var(--space-5);
 }
 .skip-versions {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-disabled);
   overflow-wrap: anywhere;
 }
@@ -1419,12 +1419,12 @@ async function toggleAutoStart() {
 .menu-row-alert {
   align-self: flex-start;
   max-width: 100%;
-  margin-top: 2px;
-  padding: 1px 6px;
+  margin-top: var(--space-1);
+  padding: 1px var(--space-3);
   border-radius: var(--radius-full);
   background: var(--color-danger-bg);
   color: var(--color-danger);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   line-height: 1.5;
   white-space: nowrap;
   overflow: hidden;
@@ -1439,7 +1439,7 @@ async function toggleAutoStart() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   color: var(--color-danger-text);
   font-variant-numeric: tabular-nums;

@@ -183,10 +183,10 @@ onUnmounted(() => { if (copyTimer) clearTimeout(copyTimer) })
   border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
   box-shadow: 0 12px 48px var(--color-bg-overlay);
-  padding: 14px 16px 12px;
+  padding: 14px var(--space-6) var(--space-5);
 }
-.md-head { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-.md-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
+.md-head { display: flex; align-items: center; gap: var(--space-4); flex: 0 0 auto; }
+.md-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
 .md-icon {
   margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
   width: 24px; height: 24px; padding: 0; border: none; border-radius: var(--radius-sm);
@@ -195,28 +195,28 @@ onUnmounted(() => { if (copyTimer) clearTimeout(copyTimer) })
 .md-icon:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 
 .md-subject {
-  flex: 0 0 auto; margin: 8px 0 10px; font-size: 14px; font-weight: 500;
+  flex: 0 0 auto; margin: var(--space-4) 0 10px; font-size: var(--text-base); font-weight: 500;
   color: var(--color-text-primary); line-height: 1.5;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .md-meta {
   flex: 0 0 auto; display: grid; grid-template-columns: 1fr 1fr;
-  gap: 6px 14px; margin: 0 0 12px; padding: 10px 12px;
+  gap: var(--space-3) 14px; margin: 0 0 var(--space-5); padding: 10px var(--space-5);
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
 }
-.md-meta div { display: flex; min-width: 0; gap: 8px; font-size: 11px; line-height: 1.5; }
+.md-meta div { display: flex; min-width: 0; gap: var(--space-4); font-size: var(--text-xs); line-height: 1.5; }
 .md-meta dt { flex: 0 0 52px; color: var(--color-text-disabled); }
 .md-meta dd {
   min-width: 0; margin: 0; color: var(--color-text-secondary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-.md-tabs { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.md-tabs { flex: 0 0 auto; display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); }
 .md-tabs button {
   height: 24px; padding: 0 10px; border: 1px solid var(--color-border);
   border-radius: var(--radius-sm); background: transparent;
-  color: var(--color-text-muted); font-family: inherit; font-size: 11px; cursor: pointer;
+  color: var(--color-text-muted); font-family: inherit; font-size: var(--text-xs); cursor: pointer;
 }
 .md-tabs button:hover { color: var(--color-text-primary); }
 .md-tabs button.on {
@@ -224,41 +224,42 @@ onUnmounted(() => { if (copyTimer) clearTimeout(copyTimer) })
   color: var(--color-accent);
 }
 .md-remote {
-  display: inline-flex; align-items: center; gap: 4px; margin-left: 6px;
-  font-size: 10px; color: var(--color-text-muted); cursor: pointer; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: var(--space-2); margin-left: var(--space-3);
+  font-size: var(--text-2xs); color: var(--color-text-muted); cursor: pointer; white-space: nowrap;
 }
 /* 勾选框尺寸/勾型由 style.css 的全局自绘规则唯一负责，这里只留布局。 */
 .md-remote input { margin: 0; }
-.md-hint { margin-left: auto; font-size: 10px; color: var(--color-text-disabled); white-space: nowrap; }
-.md-trunc { flex: 0 0 auto; margin: -2px 0 6px; font-size: 10px; color: var(--color-warning); }
+.md-hint { margin-left: auto; font-size: var(--text-2xs); color: var(--color-text-disabled); white-space: nowrap; }
+.md-trunc { flex: 0 0 auto; margin: -2px 0 var(--space-3); font-size: var(--text-2xs); color: var(--color-warning); }
 
 .md-body-wrap {
   flex: 1; min-height: 0; overflow: hidden;
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-primary);
 }
-/* 邮件正文按白纸渲染：邮件 CSS 是按白底设计的，跟着深色主题反色会糊成一团。 */
+/* 邮件正文按白纸渲染：邮件 CSS 是按白底设计的，跟着深色主题反色会糊成一团。
+   iframe srcdoc 是独立文档、没有宿主的 CSS 变量，这里的 #fff 属刻意保留的例外。 */
 .md-frame {
   display: block; width: 100%; height: 100%; border: 0; background: #fff;
 }
 .md-body {
-  height: 100%; margin: 0; padding: 12px 14px; overflow: auto;
-  font-family: ui-monospace, Consolas, monospace; font-size: 12px; line-height: 1.7;
+  height: 100%; margin: 0; padding: var(--space-5) 14px; overflow: auto;
+  font-family: ui-monospace, Consolas, monospace; font-size: var(--text-sm); line-height: 1.7;
   color: var(--color-text-secondary);
   white-space: pre-wrap; word-break: break-word;
 }
 .md-state {
-  margin: 0; padding: 24px 14px; text-align: center;
-  font-size: 12px; color: var(--color-text-disabled);
+  margin: 0; padding: var(--space-8) 14px; text-align: center;
+  font-size: var(--text-sm); color: var(--color-text-disabled);
 }
 .md-state.err { color: var(--color-danger-text); }
 
-.md-footer { flex: 0 0 auto; display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.md-footer { flex: 0 0 auto; display: flex; justify-content: flex-end; gap: var(--space-4); margin-top: 10px; }
 .md-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-  height: 28px; padding: 0 12px; border: 1px solid var(--color-border);
+  height: 28px; padding: 0 var(--space-5); border: 1px solid var(--color-border);
   border-radius: var(--radius-sm); background: transparent;
-  color: var(--color-text-secondary); font-family: inherit; font-size: 12px; cursor: pointer;
+  color: var(--color-text-secondary); font-family: inherit; font-size: var(--text-sm); cursor: pointer;
 }
 .md-btn:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .md-btn:disabled { opacity: .4; cursor: default; }

@@ -121,6 +121,7 @@ async function genPassword() {
       showSecret.value = true
     }
   } catch (e) {
+    errText.value = getErrorMessage(e)
     logErr('CredentialPrompt.generate', e)
   }
 }
@@ -318,7 +319,7 @@ function onKeydown(e: KeyboardEvent) {
 .cred-panel {
   width: 420px;
   max-width: 92vw;
-  padding: 18px 20px 16px;
+  padding: 18px var(--space-7) var(--space-6);
   background: var(--color-popover-bg);
   border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
@@ -363,7 +364,7 @@ function onKeydown(e: KeyboardEvent) {
 .cred-picks {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
   max-height: 168px;
   overflow-y: auto;
   margin-bottom: 10px;
@@ -376,8 +377,8 @@ function onKeydown(e: KeyboardEvent) {
 .cred-pick {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
   background: none;
   border: none;
   border-radius: var(--radius-sm);
@@ -425,7 +426,7 @@ function onKeydown(e: KeyboardEvent) {
 
 .cred-label {
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-2);
   font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
@@ -433,7 +434,7 @@ function onKeydown(e: KeyboardEvent) {
 .cred-pw-row {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
 .cred-pw {
@@ -444,8 +445,8 @@ function onKeydown(e: KeyboardEvent) {
 .cred-save {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 12px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
   cursor: pointer;
@@ -460,7 +461,7 @@ function onKeydown(e: KeyboardEvent) {
 .cred-foot {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .cred-enter-active,

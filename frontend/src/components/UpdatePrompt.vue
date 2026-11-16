@@ -97,11 +97,11 @@ const noteItems = computed(() => parseReleaseNotes(props.releaseNotes))
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 18px;
+  padding: var(--space-6) 18px;
   border-bottom: 1px solid var(--color-border);
 }
 .up-title {
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -122,12 +122,12 @@ const noteItems = computed(() => parseReleaseNotes(props.releaseNotes))
   color: var(--color-text-primary);
 }
 .up-body {
-  padding: 16px 18px;
+  padding: var(--space-6) 18px;
   overflow-y: auto;
 }
 .up-sub {
-  margin: 0 0 12px;
-  font-size: 13px;
+  margin: 0 0 var(--space-5);
+  font-size: var(--text-md);
   color: var(--color-text-secondary);
 }
 .up-notes {
@@ -136,8 +136,8 @@ const noteItems = computed(() => parseReleaseNotes(props.releaseNotes))
   overflow: hidden;
 }
 .up-notes-title {
-  padding: 7px 12px;
-  font-size: 11px;
+  padding: 7px var(--space-5);
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--color-text-secondary);
   background: var(--color-bg-active);
@@ -145,14 +145,14 @@ const noteItems = computed(() => parseReleaseNotes(props.releaseNotes))
 }
 .up-notes-list {
   margin: 0;
-  padding: 8px 12px 8px 14px;
+  padding: var(--space-4) var(--space-5) var(--space-4) 14px;
   max-height: 220px;
   overflow-y: auto;
   list-style: none;
 }
 .up-notes-list li {
   position: relative;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.55;
   color: var(--color-text-primary);
   word-break: break-word;
@@ -172,11 +172,11 @@ const noteItems = computed(() => parseReleaseNotes(props.releaseNotes))
 }
 .up-notes-body {
   margin: 0;
-  padding: 10px 12px;
+  padding: 10px var(--space-5);
   max-height: 220px;
   overflow-y: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.55;
   color: var(--color-text-primary);
   white-space: pre-wrap;
@@ -184,7 +184,7 @@ const noteItems = computed(() => parseReleaseNotes(props.releaseNotes))
 }
 .up-footer {
   display: flex;
-  gap: 8px;
+  gap: var(--space-4);
   padding: 14px 18px;
   border-top: 1px solid var(--color-border);
 }

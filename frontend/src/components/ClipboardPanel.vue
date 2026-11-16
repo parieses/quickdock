@@ -1087,7 +1087,7 @@ onUnmounted(() => {
         <ClipboardList :size="36" class="empty-icon" />
         <p class="empty-text">{{ searchQuery ? t('noMatchClipboard') : t('noClipboardRecords') }}</p>
       </div>
-      <div
+      <div v-key-click
         v-for="(entry, idx) in displayEntries"
         :key="entry.id"
         :class="['clipboard-item', {
@@ -1169,7 +1169,7 @@ onUnmounted(() => {
           >
             <Download :size="13" />
           </button>
-          <div v-if="saveMenuId === entry.id" class="save-menu" @click.stop>
+          <div v-key-click v-if="saveMenuId === entry.id" class="save-menu" @click.stop>
             <button class="save-menu-item" @click="saveAsTodo(entry)">
               <ListTodo :size="13" /><span>{{ t('clipboardSaveTodo') }}</span>
             </button>
@@ -1191,7 +1191,7 @@ onUnmounted(() => {
           >
             <ClipboardPaste :size="13" />
           </button>
-          <div v-if="pasteAsMenuId === entry.id" class="save-menu" @click.stop>
+          <div v-key-click v-if="pasteAsMenuId === entry.id" class="save-menu" @click.stop>
             <button class="save-menu-item" @click="pasteAs(entry, 'plain')">
               <AlignLeft :size="13" /><span>{{ t('cbPastePlain') }}</span>
             </button>
@@ -1320,7 +1320,7 @@ onUnmounted(() => {
 /* 条数徽标：与插件页 .plugin-count 同款（10px、tertiary 底、极小圆角），
    挂在标题后面当提示，不跟标题的字号字重抢戏。 */
 .cb-count {
-  font-size: 10px; font-weight: 400; color: var(--color-text-muted);
+  font-size: var(--text-2xs); font-weight: 400; color: var(--color-text-muted);
   background: var(--color-bg-tertiary); padding: 1px 7px; border-radius: var(--radius-xs);
 }
 
@@ -1342,15 +1342,17 @@ onUnmounted(() => {
 /* 浮窗（compact）只有 480px 宽（clipWinWidth），会命中 app.css 里
    max-width:900px 的页头换行规则 —— 浮窗没有第二行的高度，必须复原成单行：
    搜索框让出剩余宽度（页头里只有它是可压缩的），标题降一档字号给动作区腾位置。 */
-.clipboard-panel.compact .qd-page-header { flex-wrap: nowrap; padding: 0 12px; gap: 8px; }
+.clipboard-panel.compact .qd-page-header { flex-wrap: nowrap; padding: 0 var(--space-5); gap: var(--space-4); }
 .clipboard-panel.compact .qd-page-title { font-size: var(--text-md); }
 .clipboard-panel.compact .cb-search { flex: 1 1 auto; min-width: 110px; }
 
 .icon-btn {
-  width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+  /* 26px 是自造档，收到按钮四档的 sm(24)：命中区仍达 WCAG 最小 24px。 */
+  width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
   background: transparent; border: none; color: var(--color-text-muted); border-radius: var(--radius-sm);
   cursor: pointer; flex-shrink: 0;
-  transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
+  transition: background-color var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast), opacity var(--transition-fast);
 }
 .icon-btn:hover { background: var(--color-bg-hover); color: var(--color-text-secondary); }
 
@@ -1359,8 +1361,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 16px;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6);
   border-bottom: 1px solid var(--color-border);
   overflow-x: auto;
   flex-shrink: 0;
@@ -1368,19 +1370,19 @@ onUnmounted(() => {
 .tags-divider {
   width: 1px;
   height: 16px;
-  margin: 0 4px;
+  margin: 0 var(--space-2);
   background: var(--color-border);
   flex-shrink: 0;
 }
 
 /* 时间筛选：同排的轻量分段，选中用蓝字+淡蓝底 */
-.time-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+.time-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
   height: 22px; padding: 0 9px;
   border: 1px solid transparent;
   border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
   white-space: nowrap;
@@ -1397,13 +1399,13 @@ onUnmounted(() => {
 .tag-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   height: 22px; padding: 0 9px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
   white-space: nowrap;
@@ -1443,13 +1445,13 @@ onUnmounted(() => {
 }
 
 .clipboard-list {
-  flex: 1; overflow-y: auto; padding: 8px;
+  flex: 1; overflow-y: auto; padding: var(--space-4);
 }
 
 .clipboard-item {
   position: relative;
   display: flex; align-items: flex-start; gap: 10px;
-  padding: 10px 12px; border-radius: var(--radius-md);
+  padding: 10px var(--space-5); border-radius: var(--radius-md);
   cursor: pointer; transition: background-color var(--transition-fast);
 }
 /* hover 与选中必须用不同强度：原来两者都是「淡蓝底 + 1px 蓝 outline」，
@@ -1473,7 +1475,7 @@ onUnmounted(() => {
 .pin-btn {
   flex-shrink: 0; margin-top: 3px;
   background: none; border: none; cursor: pointer;
-  padding: 2px; border-radius: var(--radius-sm);
+  padding: var(--space-1); border-radius: var(--radius-sm);
   color: var(--color-text-disabled); opacity: 0;
   transition: opacity 0.15s, color 0.15s;
   display: flex; align-items: center; justify-content: center;
@@ -1489,23 +1491,23 @@ onUnmounted(() => {
 .save-wrap { position: relative; display: inline-flex; }
 .save-menu {
   position: absolute; top: calc(100% + 4px); right: 0; z-index: 40;
-  min-width: 132px; padding: 4px;
-  background: var(--color-surface-elevated);
-  border: 1px solid var(--color-border);
+  min-width: 132px; padding: var(--space-2);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
 }
 .save-menu-item {
-  display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 6px 8px; font-size: 12px; cursor: pointer;
-  background: transparent; border: 0; border-radius: calc(var(--radius-md) - 2px);
+  display: flex; align-items: center; gap: var(--space-4); width: 100%;
+  padding: var(--space-3) var(--space-4); font-size: var(--text-sm); cursor: pointer;
+  background: transparent; border: 0; border-radius: var(--radius-sm);
   color: var(--color-text-secondary); text-align: left;
 }
 .save-menu-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .note-btn {
   flex-shrink: 0; margin-top: 3px;
   background: none; border: none; cursor: pointer;
-  padding: 2px; border-radius: var(--radius-sm);
+  padding: var(--space-1); border-radius: var(--radius-sm);
   color: var(--color-text-disabled); opacity: 0;
   transition: opacity 0.15s, color 0.15s;
   display: flex; align-items: center; justify-content: center;
@@ -1517,7 +1519,7 @@ onUnmounted(() => {
 .delete-btn {
   flex-shrink: 0; margin-top: 3px;
   background: none; border: none; cursor: pointer;
-  padding: 2px; border-radius: var(--radius-sm);
+  padding: var(--space-1); border-radius: var(--radius-sm);
   color: var(--color-text-disabled); opacity: 0;
   transition: opacity 0.15s, color 0.15s;
   display: flex; align-items: center; justify-content: center;
@@ -1531,7 +1533,7 @@ onUnmounted(() => {
 .ai-btn {
   flex-shrink: 0; margin-top: 3px;
   background: none; border: none; cursor: pointer;
-  padding: 2px; border-radius: var(--radius-sm);
+  padding: var(--space-1); border-radius: var(--radius-sm);
   color: var(--color-text-disabled); opacity: 0;
   transition: opacity 0.15s, color 0.15s;
   display: flex; align-items: center; justify-content: center;
@@ -1542,18 +1544,18 @@ onUnmounted(() => {
 
 .item-content { flex: 1; min-width: 0; }
 .item-text {
-  font-size: 13px; color: var(--color-text-primary); line-height: 1.5;
-  word-break: break-all; margin-bottom: 4px;
+  font-size: var(--text-md); color: var(--color-text-primary); line-height: 1.5;
+  word-break: break-all; margin-bottom: var(--space-2);
 }
-.item-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.item-time { font-size: 11px; color: var(--color-text-disabled); }
-.item-source { font-size: 11px; color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px 6px; border-radius: var(--radius-xs); }
-.item-count { font-size: 11px; color: var(--color-accent); }
+.item-meta { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
+.item-time { font-size: var(--text-xs); color: var(--color-text-disabled); }
+.item-source { font-size: var(--text-xs); color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px var(--space-3); border-radius: var(--radius-xs); }
+.item-count { font-size: var(--text-xs); color: var(--color-accent); }
 
-.clipboard-item.is-image { align-items: flex-start; padding: 8px 12px; }
+.clipboard-item.is-image { align-items: flex-start; padding: var(--space-4) var(--space-5); }
 .image-thumb-wrap {
   width: 100%; max-width: 300px; border-radius: var(--radius-sm); overflow: hidden;
-  margin-bottom: 6px; border: 1px solid var(--color-border);
+  margin-bottom: var(--space-3); border: 1px solid var(--color-border);
 }
 .image-thumb {
   display: block; width: 100%; height: auto;
@@ -1562,22 +1564,22 @@ onUnmounted(() => {
 }
 .image-placeholder {
   width: 160px; height: 100px; display: flex; align-items: center; justify-content: center;
-  background: var(--color-card-bg); border-radius: var(--radius-sm); margin-bottom: 6px;
+  background: var(--color-card-bg); border-radius: var(--radius-sm); margin-bottom: var(--space-3);
   border: 1px solid var(--card-border-color); color: var(--color-text-disabled);
 }
 
 .file-entry {
-  display: flex; align-items: flex-start; gap: 8px;
-  margin-bottom: 4px;
+  display: flex; align-items: flex-start; gap: var(--space-4);
+  margin-bottom: var(--space-2);
 }
 .file-entry--top { margin-top: var(--space-3); }
-.file-icon { flex-shrink: 0; margin-top: 2px; color: var(--color-accent); }
+.file-icon { flex-shrink: 0; margin-top: var(--space-1); color: var(--color-accent); }
 .file-paths {
   flex: 1; min-width: 0;
-  font-size: 12px; color: var(--color-text-secondary); line-height: 1.5;
+  font-size: var(--text-sm); color: var(--color-text-secondary); line-height: 1.5;
   word-break: break-all; white-space: pre-wrap;
 }
-.file-paths--sm { font-size: 11px; }
+.file-paths--sm { font-size: var(--text-xs); }
 /* 在资源管理器定位：贴在路径右侧，hover 条目才显出来，不抢视觉 */
 .file-reveal {
   flex-shrink: 0; display: flex; align-items: center; justify-content: center;
@@ -1595,25 +1597,25 @@ onUnmounted(() => {
   justify-content: center; height: 100%; color: var(--color-text-disabled);
 }
 .clipboard-empty .empty-icon {
-  padding: 12px;
+  padding: var(--space-5);
   box-sizing: content-box;
   color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  margin-bottom: 12px;
+  margin-bottom: var(--space-5);
 }
 .clipboard-empty .empty-text { font-size: var(--text-md); color: var(--color-text-secondary); }
 
 .clipboard-loading {
   display: flex; align-items: center; justify-content: center;
-  height: 100%; color: var(--color-text-disabled); font-size: 13px;
+  height: 100%; color: var(--color-text-disabled); font-size: var(--text-md);
 }
 
 /* 剪贴板分页 */
 .clipboard-pagination {
   display: flex; align-items: center; justify-content: center;
-  gap: 4px; padding: 8px; flex-shrink: 0;
+  gap: var(--space-2); padding: var(--space-4); flex-shrink: 0;
   border-top: 1px solid var(--color-border);
 }
 .clipboard-pagination .page-btn {
@@ -1621,20 +1623,20 @@ onUnmounted(() => {
   min-width: 24px; height: 24px;
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
-  font-size: 11px; font-family: inherit; cursor: pointer;
+  font-size: var(--text-xs); font-family: inherit; cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .clipboard-pagination .page-btn:hover:not(:disabled) { background: var(--color-bg-active); color: var(--color-text-primary); }
 .clipboard-pagination .page-btn:disabled { opacity: 0.35; cursor: default; }
 .clipboard-pagination .page-btn.active { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
-.clipboard-pagination .page-ellipsis { color: var(--color-text-disabled); font-size: 11px; width: 18px; text-align: center; }
-.clipboard-pagination .page-total { margin-left: 6px; font-size: 11px; color: var(--color-text-muted); }
+.clipboard-pagination .page-ellipsis { color: var(--color-text-disabled); font-size: var(--text-xs); width: 18px; text-align: center; }
+.clipboard-pagination .page-total { margin-left: var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); }
 
 /* 备注按钮 */
 .note-btn {
   flex-shrink: 0; margin-top: 3px;
   background: none; border: none; cursor: pointer;
-  padding: 2px; border-radius: var(--radius-sm);
+  padding: var(--space-1); border-radius: var(--radius-sm);
   color: var(--color-text-disabled); opacity: 0;
   transition: opacity 0.15s, color 0.15s;
   display: flex; align-items: center; justify-content: center;
@@ -1668,7 +1670,7 @@ onUnmounted(() => {
 .note-editor-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 10px 14px; border-bottom: 1px solid var(--color-border);
-  font-size: 13px; font-weight: 500; color: var(--color-text-primary);
+  font-size: var(--text-md); font-weight: 500; color: var(--color-text-primary);
 }
 .note-editor-head .icon-btn { width: 24px; height: 24px; }
 
@@ -1676,19 +1678,19 @@ onUnmounted(() => {
   flex: 1; min-height: 80px; padding: 10px 14px;
   border: none; outline: none; resize: none;
   background: transparent; color: var(--color-text-primary);
-  font-size: 13px; font-family: inherit; line-height: 1.6;
+  font-size: var(--text-md); font-family: inherit; line-height: 1.6;
 }
 .note-textarea::placeholder { color: var(--color-text-disabled); }
 
 .note-editor-footer {
   display: flex; align-items: center; justify-content: flex-end;
-  gap: 8px; padding: 10px 14px;
+  gap: var(--space-4); padding: 10px 14px;
   border-top: 1px solid var(--color-border);
 }
 .cancel-btn, .save-btn {
   display: inline-flex; align-items: center; justify-content: center;
   height: 28px; padding: 0 11px; border-radius: var(--radius-sm);
-  font-size: 12px; font-family: inherit; font-weight: 500;
+  font-size: var(--text-sm); font-family: inherit; font-weight: 500;
   cursor: pointer; transition: background-color 0.12s, color 0.12s, border-color 0.12s;
   border: 1px solid var(--color-border);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
@@ -1701,9 +1703,9 @@ onUnmounted(() => {
 
 /* 备注行 */
 .item-note {
-  display: flex; align-items: center; gap: 4px;
-  font-size: 11px; color: var(--color-text-muted);
-  margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: flex; align-items: center; gap: var(--space-2);
+  font-size: var(--text-xs); color: var(--color-text-muted);
+  margin-top: var(--space-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .item-note-icon {
   flex-shrink: 0; opacity: 0.6;
@@ -1724,26 +1726,26 @@ onUnmounted(() => {
 
 /* 粘贴队列条：贴在标签栏下方，队列为空时整条不渲染。 */
 .cb-queue-bar {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 16px; flex-shrink: 0;
+  display: flex; align-items: center; gap: var(--space-4);
+  padding: var(--space-3) var(--space-6); flex-shrink: 0;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-accent-bg);
 }
 .cb-queue-icon { flex-shrink: 0; color: var(--color-accent); }
-.cb-queue-title { flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--color-accent); }
-.cb-queue-status { flex-shrink: 0; font-size: 11px; color: var(--color-text-secondary); }
-.cb-queue-chips { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; overflow: hidden; }
+.cb-queue-title { flex-shrink: 0; font-size: var(--text-xs); font-weight: 600; color: var(--color-accent); }
+.cb-queue-status { flex-shrink: 0; font-size: var(--text-xs); color: var(--color-text-secondary); }
+.cb-queue-chips { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-2); overflow: hidden; }
 .cb-queue-chip {
-  max-width: 120px; padding: 1px 6px; font-size: 10px;
+  max-width: 120px; padding: 1px var(--space-3); font-size: var(--text-2xs);
   color: var(--color-text-muted); background: var(--color-bg-tertiary);
   border-radius: var(--radius-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.cb-queue-more { font-size: 10px; color: var(--color-text-disabled); }
-.cb-queue-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.cb-queue-more { font-size: var(--text-2xs); color: var(--color-text-disabled); }
+.cb-queue-actions { display: flex; align-items: center; gap: var(--space-1); flex-shrink: 0; }
 .cb-queue-actions .qd-icon-btn { width: 24px; height: 24px; }
 
 /* 浮窗只有 480px 宽，队列条必须再收一圈，否则第三条预览会把按钮挤出去。 */
-.clipboard-panel.compact .cb-queue-bar { padding: 6px 12px; gap: 6px; }
+.clipboard-panel.compact .cb-queue-bar { padding: var(--space-3) var(--space-5); gap: var(--space-3); }
 .clipboard-panel.compact .cb-queue-title { display: none; }
 .clipboard-panel.compact .cb-queue-chip { max-width: 88px; }
 

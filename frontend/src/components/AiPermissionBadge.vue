@@ -207,15 +207,15 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
 .ai-perm-badge {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   height: 22px;
-  padding: 0 8px;
+  padding: 0 var(--space-4);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-text-muted);
   font-family: inherit;
-  font-size: 11px;
+  font-size: var(--text-xs);
   white-space: nowrap;
   cursor: pointer;
   transition: border-color var(--transition-fast), color var(--transition-fast), background-color var(--transition-fast);
@@ -224,8 +224,8 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
 .ai-perm-badge:hover { color: var(--color-text-primary); border-color: var(--color-border-light); }
 
 .ai-perm-badge.is-full {
-  border-color: color-mix(in srgb, var(--color-warning) 55%, transparent);
-  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  border-color: var(--color-warning-border);
+  background: var(--color-warning-bg);
   color: var(--color-warning);
 }
 
@@ -244,7 +244,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
   bottom: calc(100% + 8px);
   z-index: 41;
   width: 260px;
-  padding: 6px;
+  padding: var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-bg-primary);
@@ -252,8 +252,8 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
 }
 
 .ai-perm-menu-title {
-  padding: 2px 8px 4px;
-  font-size: 10px;
+  padding: var(--space-1) var(--space-4) var(--space-2);
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.06em;
   
@@ -263,9 +263,9 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
 .ai-perm-opt {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: var(--space-4);
   width: 100%;
-  padding: 7px 8px;
+  padding: 7px var(--space-4);
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -283,11 +283,11 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
 
 .ai-perm-opt-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 
-.ai-perm-opt-head { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; }
+.ai-perm-opt-head { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-sm); font-weight: 500; }
 
-.ai-perm-opt-now { font-size: 10px; font-weight: 400; color: var(--color-accent); }
+.ai-perm-opt-now { font-size: var(--text-2xs); font-weight: 400; color: var(--color-accent); }
 
-.ai-perm-opt-desc { font-size: 11px; line-height: 1.45; color: var(--color-text-muted); }
+.ai-perm-opt-desc { font-size: var(--text-xs); line-height: 1.45; color: var(--color-text-muted); }
 
 /* ── 确认卡 ── */
 
@@ -298,8 +298,8 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
-  background: rgba(0, 0, 0, 0.45);
+  padding: var(--space-8);
+  background: var(--color-bg-overlay);
 }
 
 .ai-perm-dialog {
@@ -307,14 +307,14 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
   max-width: 420px;
   max-height: 86vh;
   overflow: auto;
-  padding: 16px 18px 14px;
+  padding: var(--space-6) 18px 14px;
   border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg);
   background: var(--color-popover-bg);
   box-shadow: var(--shadow-lg);
 }
 
-.ai-perm-dialog-head { display: flex; align-items: center; gap: 8px; }
+.ai-perm-dialog-head { display: flex; align-items: center; gap: var(--space-4); }
 
 .ai-perm-dialog-icon { flex: none; color: var(--color-danger); }
 
@@ -338,14 +338,14 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
 
 .ai-perm-dialog-desc {
   margin-top: 10px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.65;
   color: var(--color-text-secondary);
 }
 
 .ai-perm-risks {
-  margin-top: 12px;
-  padding: 10px 12px;
+  margin-top: var(--space-5);
+  padding: 10px var(--space-5);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -354,21 +354,21 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
   background: var(--color-bg-primary);
 }
 
-.ai-perm-risk-row { display: flex; align-items: flex-start; gap: 8px; color: var(--color-text-secondary); }
+.ai-perm-risk-row { display: flex; align-items: flex-start; gap: var(--space-4); color: var(--color-text-secondary); }
 
-.ai-perm-risk-row > svg { flex: none; margin-top: 2px; }
+.ai-perm-risk-row > svg { flex: none; margin-top: var(--space-1); }
 
-.ai-perm-risk-name { font-size: 12px; font-weight: 500; color: var(--color-text-primary); }
+.ai-perm-risk-name { font-size: var(--text-sm); font-weight: 500; color: var(--color-text-primary); }
 
-.ai-perm-risk-desc { margin-top: 1px; font-size: 11px; line-height: 1.5; color: var(--color-text-muted); }
+.ai-perm-risk-desc { margin-top: 1px; font-size: var(--text-xs); line-height: 1.5; color: var(--color-text-muted); }
 
 /* 勾选行：整行可点，复选框自己画——原生 checkbox 在不同主题下深一块浅一块。 */
 .ai-perm-agree {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-  font-size: 12px;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+  font-size: var(--text-sm);
   color: var(--color-text-primary);
   cursor: pointer;
 }
@@ -384,21 +384,21 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-xs);
   background: transparent;
-  color: #fff;
+  color: var(--color-text-primary);
   cursor: pointer;
   transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
-.ai-perm-check.is-on { background: var(--color-danger); border-color: var(--color-danger); }
+.ai-perm-check.is-on { background: var(--color-danger); border-color: var(--color-danger); color: var(--color-danger-text); }
 
 .ai-perm-dialog-note {
   margin-top: 10px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.55;
   color: var(--color-text-muted);
 }
 
-.ai-perm-dialog-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.ai-perm-dialog-foot { display: flex; justify-content: flex-end; gap: var(--space-4); margin-top: 14px; }
 
 .ai-perm-btn {
   padding: 5px 14px;
@@ -407,7 +407,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
   background: transparent;
   color: var(--color-text-secondary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 
@@ -416,10 +416,10 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
 .ai-perm-btn.is-danger {
   border-color: var(--color-danger);
   background: var(--color-danger);
-  color: #fff;
+  color: var(--color-danger-text);
 }
 
-.ai-perm-btn.is-danger:hover { background: color-mix(in srgb, var(--color-danger) 85%, #000); }
+.ai-perm-btn.is-danger:hover { background: var(--color-danger-hover); }
 
 .ai-perm-btn.is-danger:disabled {
   border-color: var(--color-border);

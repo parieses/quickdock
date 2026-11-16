@@ -306,7 +306,7 @@ onUnmounted(() => {
   text-align: center;
   background: var(--color-popover-bg);
   border: 1px solid var(--color-border);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-pop);
   animation: lock-card-in 200ms cubic-bezier(0.22, 0.9, 0.3, 1);
 }
@@ -317,8 +317,8 @@ onUnmounted(() => {
   position: absolute;
   inset: 0 0 auto 0;
   height: 1px;
-  border-radius: 16px 16px 0 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.09), transparent);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: linear-gradient(90deg, transparent, var(--color-hairline), transparent);
   pointer-events: none;
 }
 
@@ -328,7 +328,7 @@ onUnmounted(() => {
   justify-content: center;
   gap: var(--space-2);
   margin-bottom: var(--space-6);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -350,24 +350,23 @@ onUnmounted(() => {
   width: 46px;
   height: 46px;
   margin: 0 auto var(--space-5);
-  border-radius: 13px;
+  border-radius: var(--radius-lg);
   color: var(--color-accent);
   background: var(--color-accent-bg);
   border: 1px solid var(--color-accent-border);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .lock-title {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--text-xl);
   font-weight: 600;
-  letter-spacing: -0.01em;
+  
   color: var(--color-text-primary);
 }
 
 .lock-desc {
   margin: var(--space-3) 0 var(--space-6);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.65;
   color: var(--color-text-muted);
 }
@@ -386,7 +385,7 @@ onUnmounted(() => {
   min-width: 0;
   height: 40px;
   padding: 0 var(--space-5);
-  font-size: 13px;
+  font-size: var(--text-md);
   color: var(--color-text-primary);
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
@@ -412,7 +411,7 @@ onUnmounted(() => {
 
 /* 恢复码比密码长，且带连字符：用等宽字体让 16 位一眼能对齐核对 */
 .lock-input-code {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -426,7 +425,7 @@ onUnmounted(() => {
   height: 40px;
   padding: 0 var(--space-4);
   flex-shrink: 0;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -467,7 +466,7 @@ onUnmounted(() => {
   justify-content: center;
   gap: var(--space-2);
   margin: var(--space-4) 0 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.5;
   color: var(--color-text-disabled);
 }
@@ -480,7 +479,7 @@ onUnmounted(() => {
 .lock-error {
   margin: var(--space-4) 0 0;
   padding: var(--space-3) var(--space-4);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--color-danger);
   background: var(--color-danger-bg);
@@ -501,7 +500,7 @@ onUnmounted(() => {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2);
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
   background: none;
   border: none;
@@ -536,7 +535,7 @@ onUnmounted(() => {
   }
 
   .lock-title {
-    font-size: 16px;
+    font-size: var(--text-xl);
   }
 
   .lock-desc {

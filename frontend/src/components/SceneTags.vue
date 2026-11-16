@@ -112,7 +112,9 @@ function onClickAway() {
 <template>
   <div v-if="openedTabs.length > 0" class="tag-tabs">
     <div class="tabs-container">
-      <button
+      <!-- 外层改成 div 容器 + 两个同级 button：span 嵌在 button 里是无效的嵌套交互，
+           键盘也摸不到关闭按钮。标签与关闭各自是一个可 Tab 到的控件。 -->
+      <div v-key-click
         v-for="(tab, i) in openedTabs"
         :key="tab.id"
         :class="['tab', { active: tab.id === store.activeSceneId, dragging: dragTabId === tab.id, 'drag-over': dragOverIndex === i }]"
@@ -125,9 +127,17 @@ function onClickAway() {
         @drop="onDropTab(tab.id, $event)"
         @dragend="onDragEndTab"
       >
-        <span class="tab-label">{{ tab.name }}</span>
-        <span class="tab-close" @click="closeTab(tab.id, $event)">✕</span>
-      </button>
+        <!-- 标签本身也是 button，便于键盘 Tab 聚焦；click 冒泡到容器统一处理切换，
+             关闭按钮在 closeTab 里 stopPropagation，不会误触发切换。 -->
+        <button class="tab-label">{{ tab.name }}</button>
+        <button
+          v-key-click
+          class="tab-close"
+          :aria-label="t('close')"
+          :title="t('close')"
+          @click="closeTab(tab.id, $event)"
+        >✕</button>
+      </div>
     </div>
     <div class="tab-line" />
 
@@ -161,12 +171,12 @@ function onClickAway() {
 .tabs-container {
   display: flex;
   align-items: flex-end;
-  gap: 2px;
+  gap: var(--space-1);
   /* 高度对齐一级页头（.qd-page-header 46px）：工作空间没有传统页头，
      这条标签栏就是它的顶栏；不等高的话从工作空间切到其它页会上下跳。
      减去 1px 是因为下面还有 .tab-line 那条分隔线。 */
   min-height: 45px;
-  padding: 6px 10px 0;
+  padding: var(--space-3) 10px 0;
   overflow: hidden;
   --wails-draggable: no-drag;
 }
@@ -175,7 +185,7 @@ function onClickAway() {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   padding: 7px 10px;
   min-width: 80px;
   max-width: 180px;
@@ -196,9 +206,12 @@ function onClickAway() {
   color: var(--color-text-secondary);
 }
 
-.tab:hover .tab-close {
+.tab:hover .tab-close,
+.tab:focus-within .tab-close {
   opacity: 0.6;
 }
+/* 键盘 Tab 到关闭按钮时也得看得见，不能只靠行 hover */
+.tab-close:focus-visible { opacity: 1 !important; }
 
 .tab.active {
   background: var(--color-bg-primary);
@@ -225,7 +238,7 @@ function onClickAway() {
   right: 1px;
   height: 2px;
   background: linear-gradient(90deg, var(--color-accent), var(--color-accent-light));
-  border-radius: 0 0 1px 1px;
+  border-radius: 0 0 var(--radius-2xs) var(--radius-2xs);
 }
 
 .tab-label {
@@ -234,21 +247,40 @@ function onClickAway() {
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.3;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .tab-close {
+  position: relative;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 16px;
   height: 16px;
+  padding: 0;
+  border: none;
   border-radius: var(--radius-xs);
-  font-size: 10px;
+  background: none;
+  font-size: var(--text-2xs);
   line-height: 1;
   color: var(--color-text-muted);
+  cursor: pointer;
   opacity: 0;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
+}
+/* 命中区补到 24px：伪元素外扩 4px，不动布局尺寸、不改标签行高 */
+.tab-close::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: var(--radius-xs);
 }
 
 .tab-close:hover {
@@ -265,57 +297,5 @@ function onClickAway() {
   height: 1px;
   background: var(--color-border);
   flex-shrink: 0;
-}
-</style>
-
-<!-- 右键菜单样式（非 scoped：Teleport 到 body 后 scoped 不生效） -->
-<style>
-.context-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  background: transparent;
-}
-
-.context-menu {
-  position: fixed;
-  display: flex;
-  flex-direction: column;
-  min-width: 120px;
-  background: var(--color-popover-bg);
-  border: 1px solid var(--popover-border-color);
-  border-radius: var(--radius-md);
-  padding: 4px;
-  box-shadow: 0 8px 32px var(--color-bg-overlay);
-  backdrop-filter: blur(12px);
-}
-
-.context-menu .menu-item {
-  display: flex;
-  align-items: center;
-  padding: 7px 12px;
-  border: none;
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  border-radius: var(--radius-xs);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.1s;
-}
-
-.context-menu .menu-item:hover {
-  background: var(--color-bg-active);
-  color: var(--color-text-primary);
-}
-
-.context-menu .menu-item:disabled {
-  color: var(--color-text-disabled);
-  cursor: default;
-}
-
-.context-menu .menu-item:disabled:hover {
-  background: transparent;
-  color: var(--color-text-disabled);
 }
 </style>

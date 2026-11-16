@@ -866,7 +866,7 @@ defineExpose({
 }
 
 .sess-name {
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 500;
   color: var(--color-text-primary);
   overflow: hidden;
@@ -876,7 +876,7 @@ defineExpose({
 
 .sess-target {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -888,7 +888,7 @@ defineExpose({
   align-items: center;
   gap: var(--space-2);
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 
@@ -924,8 +924,8 @@ defineExpose({
   align-items: center;
   gap: var(--space-2);
   flex: 0 0 auto;
-  height: 24px; padding: 0 8px;
-  font-size: 11px;
+  height: 24px; padding: 0 var(--space-4);
+  font-size: var(--text-xs);
   font-family: inherit;
   color: var(--color-text-secondary);
   background: transparent;
@@ -947,7 +947,7 @@ defineExpose({
 }
 
 .sess-btn--sm {
-  padding: 2px var(--space-4);
+  padding: var(--space-1) var(--space-4);
 }
 
 /* 状态条紧贴会话头下沿，不占终端空间。
@@ -960,7 +960,7 @@ defineExpose({
   flex: 0 0 auto;
   padding: 3px var(--space-5);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
@@ -973,7 +973,7 @@ defineExpose({
   gap: var(--space-4);
   flex: 0 0 auto;
   padding: var(--space-2) var(--space-5);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-secondary);
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
@@ -1033,7 +1033,7 @@ defineExpose({
   align-items: center;
   justify-content: center;
   gap: var(--space-4);
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
   /* 必须实色：材质档位下 --color-terminal-bg 是半透明，用它当连接中/失败遮罩
      会漏出底下的旧终端画面。 */
@@ -1051,14 +1051,14 @@ defineExpose({
 
 .sess-card-title {
   margin: 0 0 var(--space-3);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--color-danger);
 }
 
 .sess-card-msg {
   margin: 0 0 var(--space-6);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.6;
   color: var(--color-text-secondary);
   word-break: break-word;
@@ -1088,13 +1088,13 @@ defineExpose({
 .sess-banner-text {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  font-size: 12px;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
   color: var(--color-text-secondary);
 }
 
 .sess-banner-hint {
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-style: normal;
   color: var(--color-text-muted);
 }

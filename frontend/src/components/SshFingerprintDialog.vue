@@ -277,7 +277,7 @@ function onKeydown(e: KeyboardEvent) {
 
 .fp-desc {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.7;
   color: var(--color-text-secondary);
 }
@@ -291,7 +291,7 @@ function onKeydown(e: KeyboardEvent) {
 .fp-label {
   flex: 0 0 auto;
   width: 64px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 
@@ -306,7 +306,7 @@ function onKeydown(e: KeyboardEvent) {
 .fp-key,
 .fp-cmd {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   word-break: break-all;
   user-select: text;
 }
@@ -349,7 +349,7 @@ function onKeydown(e: KeyboardEvent) {
 .fp-note {
   margin: 0;
   padding: var(--space-4) var(--space-5);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.6;
   color: var(--color-warning);
   background: var(--color-warning-bg);
@@ -366,7 +366,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 .fp-verify-label {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 
@@ -379,7 +379,7 @@ function onKeydown(e: KeyboardEvent) {
   align-items: flex-start;
   gap: var(--space-4);
   padding: var(--space-4) var(--space-5);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.6;
   color: var(--color-text-primary);
   background: var(--color-danger-bg);
@@ -388,7 +388,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 .fp-ack input {
-  margin-top: 2px;
+  margin-top: var(--space-1);
   /* 指纹确认是破坏性动作的守门勾选，用红色区分于普通勾选。 */
   --qd-check-color: var(--color-danger);
   cursor: pointer;
@@ -397,7 +397,7 @@ function onKeydown(e: KeyboardEvent) {
 .fp-err {
   margin: 0;
   padding: var(--space-3) var(--space-4);
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-danger);
   background: var(--color-danger-bg);
   border-radius: var(--radius-xs);
@@ -412,9 +412,9 @@ function onKeydown(e: KeyboardEvent) {
   background: var(--color-bg-tertiary);
 }
 
-.btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
-  height: 32px; padding: 0 16px;
-  font-size: 13px;
+.btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
+  height: 32px; padding: 0 var(--space-6);
+  font-size: var(--text-md);
   font-weight: 500;
   font-family: inherit;
   color: var(--color-text-primary);

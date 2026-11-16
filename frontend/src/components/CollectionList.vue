@@ -229,7 +229,7 @@ function onDropCol(e: DragEvent, targetId: string) {
     <div class="qd-panel-body">
       <template v-if="visibleCollections.length">
         <template v-for="grp in groupedCollections" :key="grp.name || 'ungrouped'">
-          <div
+          <div v-key-click
             v-if="hasGroupsCollection"
             class="qd-group-header"
             @click="toggleGroupCol(grp.name)"
@@ -239,7 +239,7 @@ function onDropCol(e: DragEvent, targetId: string) {
             <span class="qd-group-count">{{ grp.cols.length }}</span>
           </div>
           <ul v-show="!hasGroupsCollection || !collapsedGroups.has(grp.name)" class="qd-group-list">
-            <li
+            <li v-key-click
               v-for="(col, i) in grp.cols"
               :key="col.id"
               class="qd-row"
@@ -259,7 +259,7 @@ function onDropCol(e: DragEvent, targetId: string) {
                 <span class="qd-row-title">{{ col.name }}</span>
                 <span class="qd-row-sub">{{ col.type }}</span>
               </span>
-              <span class="qd-row-actions" @click.stop>
+              <span v-key-click class="qd-row-actions" @click.stop>
                 <button class="qd-row-btn" @click="handleOpenByStrategy(col)" :title="openStrategyTitle(col)">
                   <Play :size="13" />
                 </button>
@@ -324,23 +324,39 @@ function onDropCol(e: DragEvent, targetId: string) {
 .collection-list {
   /* 集合行的信息只有「名称 + 类型」两行短文字，300px 太奢侈；收窄到 240px。
      再窄就放不下 3 个 22px 行尾按钮 + 名称了。 */
-  width: 240px;
-  min-width: 240px;
+  width: var(--collection-width);
+  min-width: var(--collection-width);
   flex-shrink: 0;
   background: var(--color-bg-primary);
   border-right: 1px solid var(--color-border);
+}
+
+/* <900px：集合栏真正折叠成抽屉（DESIGN.md §9），不再只是收窄到 180px。
+   默认 width:0 + 移出，功能仍在 DOM 里；点常驻页头按钮后由 WorkspacePage 的
+   .is-collection-open 展开成覆盖层，展开宽度仍走 --collection-width token
+   （单一来源在 WorkspacePage，这里不写死展开宽度）。 */
+@media (max-width: 900px) {
+  .collection-list {
+    width: 0;
+    min-width: 0;
+    transform: translateX(-100%);
+    border-right-width: 0;
+    pointer-events: none;
+    transition: width var(--transition-base), min-width var(--transition-base),
+      transform var(--transition-base);
+  }
 }
 
 /* 分组头（与 SceneRail 同款样式语义） */
 .qd-group-header {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   padding: 5px 10px 3px;
   cursor: pointer;
   user-select: none;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.03em;
 }
@@ -356,7 +372,7 @@ function onDropCol(e: DragEvent, targetId: string) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.qd-group-count { font-size: 10px; opacity: 0.65; }
+.qd-group-count { font-size: var(--text-2xs); opacity: 0.65; }
 .qd-group-list { list-style: none; margin: 0; padding: 0; }
 
 /* 右键菜单：与 ItemList / GitPage 同一套视觉（fixed + 透明遮罩） */
@@ -364,7 +380,7 @@ function onDropCol(e: DragEvent, targetId: string) {
   position: fixed; inset: 0; z-index: 900;
 }
 .ctx-menu {
-  position: fixed; min-width: 168px; padding: 4px;
+  position: fixed; min-width: 168px; padding: var(--space-2);
   background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
   display: flex; flex-direction: column; gap: 1px;
@@ -372,7 +388,7 @@ function onDropCol(e: DragEvent, targetId: string) {
 .ctx-item {
   display: flex; align-items: center; height: 28px; padding: 0 10px;
   border: none; border-radius: var(--radius-sm); background: none;
-  color: var(--color-text-secondary); font-size: 12px; font-family: inherit;
+  color: var(--color-text-secondary); font-size: var(--text-sm); font-family: inherit;
   text-align: left; cursor: pointer;
 }
 .ctx-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }

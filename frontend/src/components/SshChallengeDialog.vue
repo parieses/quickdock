@@ -139,14 +139,14 @@ function onCancel() {
 
 .challenge-title {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--color-text-primary);
 }
 
 .challenge-name {
   margin: 0 0 var(--space-2);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 500;
   color: var(--color-text-primary);
   word-break: break-word;
@@ -154,7 +154,7 @@ function onCancel() {
 
 .challenge-instruction {
   margin: 0 0 var(--space-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.7;
   color: var(--color-text-secondary);
   white-space: pre-wrap;
@@ -163,7 +163,7 @@ function onCancel() {
 
 .challenge-desc {
   margin: 0 0 var(--space-4);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.7;
   color: var(--color-text-secondary);
 }
@@ -181,7 +181,7 @@ function onCancel() {
 }
 
 .challenge-label {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   word-break: break-word;
 }
@@ -189,7 +189,7 @@ function onCancel() {
 .challenge-input {
   height: 30px;
   padding: 0 var(--space-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   color: var(--color-text-primary);
   background: var(--color-bg-primary);
@@ -204,7 +204,7 @@ function onCancel() {
 
 .challenge-hint {
   margin: var(--space-4) 0 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--color-text-muted);
 }
@@ -222,7 +222,7 @@ function onCancel() {
   justify-content: center;
   height: 28px;
   padding: 0 11px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   color: var(--color-text-secondary);
   background: var(--color-bg-primary);

@@ -599,7 +599,7 @@ function onKeyDown(e: KeyboardEvent) {
   outline: none;
   background: transparent;
   color: var(--color-text-primary);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-family: inherit;
   line-height: 1.5;
   white-space: pre-wrap;

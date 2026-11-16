@@ -54,9 +54,9 @@ function formatDuration(ms: number): string {
 .ai-round-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 16px;
-  font-size: 12px;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-6);
+  font-size: var(--text-sm);
   color: var(--color-text-secondary);
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);

@@ -1100,7 +1100,7 @@ onUnmounted(() => {
           @drop="onDrop(m)"
           @dragend="dragId = ''"
         >
-        <div class="item-head" @click="toggleExpand(m)">
+        <div v-key-click class="item-head" :aria-expanded="isExpanded(m.id)" @click="toggleExpand(m)">
           <input
             type="checkbox"
             class="mon-check"
@@ -1146,7 +1146,7 @@ onUnmounted(() => {
               </span>
             </div>
           </div>
-          <div class="item-actions" @click.stop>
+          <div v-key-click class="item-actions" @click.stop>
             <button class="toggle-btn" :class="{ active: m.enabled }" @click="toggleEnabled(m)"
                     :title="m.enabled ? t('mon_enabled') : t('mon_disabled')">
               <span class="toggle-knob" />
@@ -1165,7 +1165,7 @@ onUnmounted(() => {
             </button>
             <button class="act danger" @click="remove(m)" :title="t('mon_delete')"><Trash2 :size="14" /></button>
           </div>
-          <button class="expand-btn" @click.stop="toggleExpand(m)" :title="t('mon_logs')">
+          <button class="expand-btn" :aria-expanded="isExpanded(m.id)" @click.stop="toggleExpand(m)" :title="t('mon_logs')">
             <ChevronDown v-if="!isExpanded(m.id)" :size="16" />
             <ChevronUp v-else :size="16" />
           </button>
@@ -1435,44 +1435,44 @@ onUnmounted(() => {
   display: inline-flex; align-items: center; gap: 5px; padding: 0 10px;
   height: 28px; background: transparent; color: var(--color-text-secondary);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  font-size: 12px; cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
+  font-size: var(--text-sm); cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .refresh-control:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .refresh-select {
-  border: none; background: transparent; color: inherit; font-size: 12px;
+  border: none; background: transparent; color: inherit; font-size: var(--text-sm);
   font-family: inherit; outline: none; cursor: pointer; padding: 0;
   max-width: 64px;
 }
-.refresh-select option { background: var(--color-surface); color: var(--color-text-primary); }
+.refresh-select option { background: var(--color-popover-bg); color: var(--color-text-primary); }
 
 .mon-error {
-  margin: 12px 20px 0; padding: 8px 12px; font-size: 12px;
+  margin: var(--space-5) var(--space-7) 0; padding: var(--space-4) var(--space-5); font-size: var(--text-sm);
   color: var(--color-danger); background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); flex-shrink: 0;
 }
 
 .mon-summary {
-  display: flex; gap: var(--space-3); margin: 14px 20px 12px; flex-shrink: 0;
+  display: flex; gap: var(--space-3); margin: 14px var(--space-7) var(--space-5); flex-shrink: 0;
 }
 .sum-item {
-  flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 10px 14px;
+  flex: 1; display: flex; flex-direction: column; gap: var(--space-1); padding: 10px 14px;
   background: var(--color-card-bg); border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
 }
-.sum-num { font-size: 18px; font-weight: 600; color: var(--color-text-primary); }
-.sum-num i { font-size: 11px; font-style: normal; color: var(--color-text-disabled); margin-left: 2px; }
-.sum-lbl { font-size: 11px; color: var(--color-text-disabled); }
+.sum-num { font-size: var(--text-xl); font-weight: 600; color: var(--color-text-primary); }
+.sum-num i { font-size: var(--text-xs); font-style: normal; color: var(--color-text-disabled); margin-left: var(--space-1); }
+.sum-lbl { font-size: var(--text-xs); color: var(--color-text-disabled); }
 .sum-item.up .sum-num { color: var(--color-success); }
 .sum-item.down .sum-num { color: var(--color-danger); }
 
-.mon-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); padding: 0 20px 16px; }
+.mon-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); padding: 0 var(--space-7) var(--space-6); }
 
 /* ---- 分组筛选与分组头 ---- */
-.group-filter { display: flex; gap: 4px; flex-wrap: wrap; margin: 0 20px 10px; flex-shrink: 0; }
+.group-filter { display: flex; gap: var(--space-2); flex-wrap: wrap; margin: 0 var(--space-7) 10px; flex-shrink: 0; }
 .group-chip {
   padding: 3px 10px; border-radius: var(--radius-md);
   border: 1px solid var(--color-border); background: transparent;
-  color: var(--color-text-secondary); font-size: 11px; font-family: inherit;
+  color: var(--color-text-secondary); font-size: var(--text-xs); font-family: inherit;
   cursor: pointer; white-space: nowrap;
   transition: background-color 0.1s, color 0.1s, border-color 0.1s;
 }
@@ -1481,18 +1481,18 @@ onUnmounted(() => {
   background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent);
 }
 .group-head {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: var(--space-4);
   margin: var(--space-2) 0 0; flex-shrink: 0;
-  font-size: 11px; font-weight: 600; color: var(--color-text-muted);
+  font-size: var(--text-xs); font-weight: 600; color: var(--color-text-muted);
 }
 .group-head-name { letter-spacing: 0.06em; }
 .group-head-count {
-  font-weight: 400; padding: 0 6px; border-radius: var(--radius-md);
+  font-weight: 400; padding: 0 var(--space-3); border-radius: var(--radius-md);
   background: var(--color-bg-tertiary); color: var(--color-text-disabled);
 }
 /* 组头右侧的全选本组：只在组内多于一条时出现 */
 .group-sel {
-  margin-left: auto; padding: 1px 6px; font-size: 10px; font-family: inherit;
+  margin-left: auto; padding: 1px var(--space-3); font-size: var(--text-2xs); font-family: inherit;
   color: var(--color-text-muted); background: none; border: 1px solid var(--color-border);
   border-radius: var(--radius-xs); cursor: pointer;
 }
@@ -1501,37 +1501,37 @@ onUnmounted(() => {
 /* ---- 搜索 + 批量条 ---- */
 .mon-tools {
   display: flex; align-items: center; gap: var(--space-3);
-  padding: 0 20px var(--space-2);
+  padding: 0 var(--space-7) var(--space-2);
 }
 .mon-selall { display: inline-flex; align-items: center; flex-shrink: 0; cursor: pointer; }
 .mon-search {
-  display: flex; align-items: center; gap: 6px;
-  width: 220px; padding: 4px 8px; flex-shrink: 0;
+  display: flex; align-items: center; gap: var(--space-3);
+  width: 220px; padding: var(--space-2) var(--space-4); flex-shrink: 0;
   background: var(--color-bg-secondary); border: 1px solid var(--color-border);
   border-radius: var(--radius-sm); color: var(--color-text-muted);
 }
 .mon-search:focus-within { border-color: var(--color-border-focus-soft); }
 .mon-search-input {
   flex: 1; min-width: 0; border: none; outline: none; background: none;
-  color: var(--color-text-primary); font-size: 12px; font-family: inherit;
+  color: var(--color-text-primary); font-size: var(--text-sm); font-family: inherit;
 }
 .mon-search-clear {
   display: inline-flex; align-items: center; border: none; background: none;
   color: var(--color-text-muted); cursor: pointer; padding: 0;
 }
-.mon-search-count { font-size: 11px; color: var(--color-text-muted); flex-shrink: 0; }
+.mon-search-count { font-size: var(--text-xs); color: var(--color-text-muted); flex-shrink: 0; }
 .mon-tools-fill { flex: 1; }
-.mon-sel-count { font-size: 11px; font-weight: 500; color: var(--color-accent); }
+.mon-sel-count { font-size: var(--text-xs); font-weight: 500; color: var(--color-accent); }
 .mon-selbtn {
-  height: 24px; padding: 0 8px; font-size: 11px; font-family: inherit; cursor: pointer;
+  height: 24px; padding: 0 var(--space-4); font-size: var(--text-xs); font-family: inherit; cursor: pointer;
   color: var(--color-text-secondary); background: var(--color-bg-secondary);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap;
 }
 .mon-selbtn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
 .mon-selbtn:disabled { opacity: 0.5; cursor: not-allowed; }
 .mon-check { flex-shrink: 0; cursor: pointer; }
-.field-hint { margin: 4px 0 0; font-size: 11px; color: var(--color-text-disabled); }
+.field-hint { margin: var(--space-2) 0 0; font-size: var(--text-xs); color: var(--color-text-disabled); }
 .mon-empty { text-align: center; padding: 72px var(--space-4); color: var(--color-text-disabled); }
 /* 空状态图标：一根细线图标直接浮在深底上，容易被读成「没加载出来」。
    给一层方底 + 细边，它才是一个完整的标识；padding 配合 content-box，
@@ -1544,9 +1544,9 @@ onUnmounted(() => {
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  margin-bottom: 12px;
+  margin-bottom: var(--space-5);
 }
-.empty-hint { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: 6px; }
+.empty-hint { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: var(--space-3); }
 
 .mon-item {
   background: var(--color-card-bg); border: 1px solid var(--card-border-color);
@@ -1578,14 +1578,14 @@ onUnmounted(() => {
 .mon-item .act.active { color: var(--color-warning, var(--color-accent)); }
 
 /* 视图切换 tab：活动列表 / 状态页，像标签页一样一眼分清当前在哪 */
-.mon-viewtabs { display: flex; gap: var(--space-2); padding: 0 20px 10px; }
+.mon-viewtabs { display: flex; gap: var(--space-2); padding: 0 var(--space-7) 10px; }
 /* 状态页与列表互斥，继承同一块可滚动内容区，避免多出一截空白。 */
-.mon-status-wrap { flex: 1; min-height: 0; overflow-y: auto; padding: 0 20px 16px; }
+.mon-status-wrap { flex: 1; min-height: 0; overflow-y: auto; padding: 0 var(--space-7) var(--space-6); }
 .vt-tab {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 5px 12px; border-radius: var(--radius-full);
+  display: inline-flex; align-items: center; gap: var(--space-3);
+  padding: 5px var(--space-5); border-radius: var(--radius-full);
   background: var(--color-bg-secondary); border: 1px solid var(--color-border);
-  color: var(--color-text-muted); font-size: 13px; cursor: pointer;
+  color: var(--color-text-muted); font-size: var(--text-md); cursor: pointer;
 }
 /* 视图 tab 的选中态与全站一致：淡底 + 强调色描边 + 强调色文字。
    原来用「灰底 + 蓝框」，蓝框在深色底上像聚焦环，反而不像"当前这一档"。 */
@@ -1598,12 +1598,12 @@ onUnmounted(() => {
 .vt-count {
   min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--radius-md);
   display: inline-flex; align-items: center; justify-content: center;
-  background: var(--color-bg-tertiary); color: var(--color-text-muted); font-size: 11px;
+  background: var(--color-bg-tertiary); color: var(--color-text-muted); font-size: var(--text-xs);
 }
 .vt-count.warn { background: var(--color-danger-bg, var(--color-bg-tertiary)); color: var(--color-danger, var(--color-text-muted)); }
-.mon-state { display: flex; align-items: center; gap: 8px; justify-content: center; padding: 24px; color: var(--color-text-muted); }
+.mon-state { display: flex; align-items: center; gap: var(--space-4); justify-content: center; padding: var(--space-8); color: var(--color-text-muted); }
 
-.item-head { display: flex; align-items: center; gap: var(--space-3); padding: 12px 14px; cursor: pointer; }
+.item-head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-5) 14px; cursor: pointer; }
 
 .status-dot { flex-shrink: 0; width: 10px; height: 10px; border-radius: 50%; background: var(--color-text-disabled); }
 .status-dot.up { background: var(--color-success); box-shadow: 0 0 6px var(--color-success-border); }
@@ -1611,13 +1611,13 @@ onUnmounted(() => {
 .status-dot.unknown { background: var(--color-text-disabled); }
 
 .item-main { flex: 1; min-width: 0; }
-.item-line1 { display: flex; align-items: center; gap: 8px; }
-.item-name { font-size: 13px; font-weight: 500; color: var(--color-text-primary); }
-.status-badge { font-size: 10px; padding: 1px 7px; border-radius: var(--radius-md); }
+.item-line1 { display: flex; align-items: center; gap: var(--space-4); }
+.item-name { font-size: var(--text-md); font-weight: 500; color: var(--color-text-primary); }
+.status-badge { font-size: var(--text-2xs); padding: 1px 7px; border-radius: var(--radius-md); }
 .status-badge.up { background: var(--color-success-bg); color: var(--color-success); }
 .status-badge.down { background: var(--color-danger-bg); color: var(--color-danger); }
-.item-url { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; display: flex; align-items: center; gap: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.item-meta { font-size: 11px; color: var(--color-text-disabled); margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; }
+.item-url { font-size: var(--text-sm); color: var(--color-text-secondary); margin-top: var(--space-1); display: flex; align-items: center; gap: var(--space-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.item-meta { font-size: var(--text-xs); color: var(--color-text-disabled); margin-top: var(--space-2); display: flex; gap: 10px; flex-wrap: wrap; }
 .meta-up { color: var(--color-accent); }
 .meta-lat { color: var(--color-text-muted); }
 .meta-avg { color: var(--color-text-muted); }
@@ -1659,15 +1659,15 @@ onUnmounted(() => {
 }
 .expand-btn:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
 
-.logs-panel { border-top: 1px solid var(--color-border); padding: 8px 14px 12px; }
+.logs-panel { border-top: 1px solid var(--color-border); padding: var(--space-4) 14px var(--space-5); }
 /* 面板头部允许换行：范围切换 + 导出 + 清空三个控件加起来比一行还宽时，
    原来 justify-content 会把右侧那组挤到溢出，导出按钮直接看不见。 */
-.logs-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; gap: 8px; flex-wrap: wrap; }
-.logs-head > span { font-size: 12px; color: var(--color-text-secondary); font-weight: 500; }
-.logs-head-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; row-gap: 6px; }
-.range-tabs { display: inline-flex; gap: 2px; padding: 2px; background: var(--color-bg-tertiary); border-radius: var(--radius-sm); }
+.logs-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-3); gap: var(--space-4); flex-wrap: wrap; }
+.logs-head > span { font-size: var(--text-sm); color: var(--color-text-secondary); font-weight: 500; }
+.logs-head-right { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; row-gap: var(--space-3); }
+.range-tabs { display: inline-flex; gap: var(--space-1); padding: var(--space-1); background: var(--color-bg-tertiary); border-radius: var(--radius-sm); }
 .range-tab {
-  font-size: 11px; padding: 2px 9px; border: none; background: transparent;
+  font-size: var(--text-xs); padding: var(--space-1) 9px; border: none; background: transparent;
   color: var(--color-text-muted); border-radius: var(--radius-xs); cursor: pointer; font-family: inherit;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
@@ -1681,8 +1681,8 @@ onUnmounted(() => {
 /* 导出/清空是一组并列的次要操作：做成同样大小的按钮，导出用强调色描边，
    否则和「清空」一样灰，用户会以为那只是条说明文字。 */
 .logs-btn {
-  display: inline-flex; align-items: center; gap: 4px;
-  height: 24px; padding: 0 8px; font-size: 11px; font-family: inherit; cursor: pointer;
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  height: 24px; padding: 0 var(--space-4); font-size: var(--text-xs); font-family: inherit; cursor: pointer;
   color: var(--color-text-secondary); background: var(--color-bg-secondary);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   white-space: nowrap;
@@ -1690,19 +1690,19 @@ onUnmounted(() => {
 .logs-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
 .logs-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .logs-btn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); }
-.logs-empty { font-size: 11px; color: var(--color-text-disabled); padding: 6px 0; }
+.logs-empty { font-size: var(--text-xs); color: var(--color-text-disabled); padding: var(--space-3) 0; }
 
 /* 日志可视化：正常率环（原生 SVG）+ 延迟折线（QdLineChart） */
-.logs-viz { display: flex; align-items: stretch; gap: 12px; }
+.logs-viz { display: flex; align-items: stretch; gap: var(--space-5); }
 .chart-canvas { flex: 1; min-width: 0; }
 
 /* ---- 正常率环形图 ---- */
 /* 108px 固定宽：再窄环和百分比会互相挤压，再宽就抢折线图的空间。 */
 .uptime-ring {
   flex: 0 0 108px; width: 108px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3);
   background: var(--color-card-bg); border: 1px solid var(--card-border-color);
-  border-radius: var(--radius-md); padding: 8px 6px;
+  border-radius: var(--radius-md); padding: var(--space-4) var(--space-3);
 }
 .ring-wrap { position: relative; width: 72px; height: 72px; }
 .ring-svg { width: 72px; height: 72px; display: block; }
@@ -1720,30 +1720,30 @@ onUnmounted(() => {
   position: absolute; inset: 0; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 0;
 }
-.ring-pct { font-size: 15px; font-weight: 600; color: var(--color-text-primary); line-height: 1.1; font-variant-numeric: tabular-nums; }
-.ring-pct i { font-size: 10px; font-style: normal; color: var(--color-text-disabled); margin-left: 1px; }
-.ring-lbl { font-size: 10px; color: var(--color-text-disabled); }
-.ring-legend { display: flex; gap: 8px; font-size: 10px; font-variant-numeric: tabular-nums; }
+.ring-pct { font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.ring-pct i { font-size: var(--text-2xs); font-style: normal; color: var(--color-text-disabled); margin-left: 1px; }
+.ring-lbl { font-size: var(--text-2xs); color: var(--color-text-disabled); }
+.ring-legend { display: flex; gap: var(--space-4); font-size: var(--text-2xs); font-variant-numeric: tabular-nums; }
 .ring-legend .ok { color: var(--color-success); }
 .ring-legend .bad { color: var(--color-danger); }
 
 /* ---- 停机日历 ---- */
 .down-cal { margin-top: 10px; }
 .cal-head {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  font-size: 11px; color: var(--color-text-muted); margin-bottom: 6px;
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
+  font-size: var(--text-xs); color: var(--color-text-muted); margin-bottom: var(--space-3);
 }
-.cal-legend { display: inline-flex; align-items: center; gap: 2px; font-size: 10px; color: var(--color-text-disabled); }
-.cal-legend .cal-cell { margin-left: 2px; }
+.cal-legend { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-2xs); color: var(--color-text-disabled); }
+.cal-legend .cal-cell { margin-left: var(--space-1); }
 /* 一周一列（7 行），列自动流；格子 11px + 3px 间距，12 周约 190px 宽 */
 .cal-grid {
   display: grid; grid-auto-flow: column;
   grid-template-rows: repeat(7, 11px);
   grid-auto-columns: 11px; gap: 3px;
-  overflow-x: auto; padding-bottom: 2px;
+  overflow-x: auto; padding-bottom: var(--space-1);
 }
 .cal-cell {
-  display: block; width: 11px; height: 11px; border-radius: 2px;
+  display: block; width: 11px; height: 11px; border-radius: var(--radius-2xs);
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
 }
 .cal-cell.lv0 { background: var(--color-success-bg); border-color: var(--color-success-border); }
@@ -1768,8 +1768,8 @@ onUnmounted(() => {
    「告诉用户有哪些探针」的职责——展开过的下拉里看不到另外三个选项。 */
 .kind-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-1); margin-bottom: var(--space-2); }
 .kind-tab {
-  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
-  padding: var(--space-2) var(--space-1); font-size: 12px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-1); font-size: var(--text-sm); cursor: pointer;
   color: var(--color-text-secondary); background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border); border-radius: var(--radius-md);
   transition: background 150ms, color 150ms, border-color 150ms;
@@ -1784,16 +1784,16 @@ onUnmounted(() => {
 .interval-num { flex: 1; min-width: 0; }
 .interval-num--fixed { flex: 0 0 72px; }
 .mt-2 { margin-top: var(--space-2); }
-.unit-suffix { font-size: 12px; color: var(--color-text-disabled); width: 90px; flex-shrink: 0; text-align: center; }
+.unit-suffix { font-size: var(--text-sm); color: var(--color-text-disabled); width: 90px; flex-shrink: 0; text-align: center; }
 
-.toggle-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-text-secondary); cursor: pointer; margin: var(--space-2) 0 0; }
+.toggle-label { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-sm); color: var(--color-text-secondary); cursor: pointer; margin: var(--space-2) 0 0; }
 .toggle-label input { cursor: pointer; }
 .toggle-row { display: flex; gap: var(--space-5); margin-top: var(--space-3); flex-wrap: wrap; }
 
 .modal-actions { display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-5); }
 /* 弹窗内校验提示：弹窗自己有内边距，这里不再加外边距 */
 .form-err {
-  margin: var(--space-3) 0 0; padding: 7px 10px; font-size: 12px;
+  margin: var(--space-3) 0 0; padding: 7px 10px; font-size: var(--text-sm);
   color: var(--color-danger); background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-md);
 }

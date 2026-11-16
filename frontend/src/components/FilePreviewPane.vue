@@ -459,7 +459,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
              后者用户不用管，前者用户得知道是打不开而不是里面没东西。 -->
         <div v-if="res.note === 'read_dir_failed'" class="fp-hint">{{ t('previewFailed') }}</div>
         <div v-else-if="res.entries.length === 0" class="fp-hint">{{ t('previewDirEmpty') }}</div>
-        <div
+        <div v-key-click
           v-for="(e, i) in res.entries"
           :key="i"
           class="fp-entry"
@@ -515,7 +515,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
 
 .fp-hint {
   padding: var(--space-4) 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
 }
 
@@ -523,7 +523,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-4);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   flex-shrink: 0;
 }
@@ -542,7 +542,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
   border: none;
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   border-radius: var(--radius-xs);
   cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast);
@@ -564,7 +564,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-1);
   flex-shrink: 0;
 }
 
@@ -593,7 +593,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
   border-radius: var(--radius-xs);
   background: var(--color-bg-primary);
   color: var(--color-text-primary);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .fp-search-input:focus {
@@ -604,7 +604,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
 .fp-search-count {
   min-width: 26px;
   text-align: right;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 
@@ -673,8 +673,8 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
   margin: 0;
   /* 全局 body 是 user-select:none，不放开就划选不了、复制出来是空的（与笔记预览同坑） */
   user-select: text;
-  font-family: var(--font-mono, monospace);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--color-text-secondary);
   white-space: pre;
@@ -682,7 +682,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
 }
 
 .fp-markdown {
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.6;
   color: var(--color-text-secondary);
   word-break: break-word;
@@ -691,7 +691,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
 .fp-markdown :deep(h1),
 .fp-markdown :deep(h2),
 .fp-markdown :deep(h3) {
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--color-text-primary);
   margin: var(--space-4) 0 var(--space-2);
@@ -709,8 +709,8 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
 }
 
 .fp-markdown :deep(code) {
-  font-family: var(--font-mono, monospace);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
 }
 
 .fp-markdown :deep(a) {
@@ -722,7 +722,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
   align-items: center;
   gap: var(--space-4);
   padding: var(--space-1) 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-secondary);
 }
 
@@ -742,7 +742,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
 }
 
 .fp-entry-name.is-dir {
@@ -751,7 +751,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
 
 .fp-entry-size {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 
@@ -770,7 +770,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
 
 .fp-note {
   margin-top: var(--space-2);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 </style>

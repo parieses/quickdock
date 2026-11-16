@@ -159,6 +159,8 @@ const TREE_W_KEY = 'quickdock.notes.treeWidth'
 const TREE_C_KEY = 'quickdock.notes.treeCollapsed'
 const treeWidth = ref(250)
 const treeCollapsed = ref(false)
+// 下面三处 localStorage catch 是刻意静默：隐私模式 / 配额满时写盘会抛错，
+// 拿不到偏好就用默认值，弹提示反而每次进页面都刷一条。
 function loadTreePrefs() {
   try {
     const w = parseInt(localStorage.getItem(TREE_W_KEY) || '', 10)
@@ -1380,13 +1382,13 @@ watch(pendingOpenNoteId, (id) => {
                 <span class="rt-label">{{ t('notesRecent') }}</span>
                 <span class="rt-count">{{ recentDisplay.length }}</span>
               </div>
-              <div
+              <div v-key-click
                 v-for="n in recentDisplay" :key="'recent-'+n.id"
                 class="qd-row recent-row"
                 :class="{ active: !selectMode && selectedDocId === n.id, 'sel-on': selectMode && selectedIds.has(n.id) }"
                 @click="selectMode ? toggleSelect(n.id) : onDoc(n)"
               >
-                <span v-if="selectMode" class="tn-check" :class="{ on: selectedIds.has(n.id) }" @click.stop="toggleSelect(n.id)"></span>
+                <span v-key-click v-if="selectMode" class="tn-check" :class="{ on: selectedIds.has(n.id) }" @click.stop="toggleSelect(n.id)"></span>
                 <FileText :size="13" class="tn-icon" />
                 <div class="rn-text">
                   <div class="rn-line1">
@@ -1414,8 +1416,8 @@ watch(pendingOpenNoteId, (id) => {
           </template>
           <!-- 搜索/标签结果：扁平展示 -->
           <template v-else>
-            <div v-for="n in flatResults" :key="'res-'+n.id" class="qd-row sr-row" :class="{ active: !selectMode && selectedDocId === n.id, 'sel-on': selectMode && selectedIds.has(n.id) }" @click="selectMode ? toggleSelect(n.id) : (n.isFolder ? toggleFolder(n.id) : onDoc(n))">
-              <span v-if="selectMode" class="tn-check" :class="{ on: selectedIds.has(n.id) }" @click.stop="toggleSelect(n.id)"></span>
+            <div v-key-click v-for="n in flatResults" :key="'res-'+n.id" class="qd-row sr-row" :class="{ active: !selectMode && selectedDocId === n.id, 'sel-on': selectMode && selectedIds.has(n.id) }" @click="selectMode ? toggleSelect(n.id) : (n.isFolder ? toggleFolder(n.id) : onDoc(n))">
+              <span v-key-click v-if="selectMode" class="tn-check" :class="{ on: selectedIds.has(n.id) }" @click.stop="toggleSelect(n.id)"></span>
               <component :is="n.isFolder ? Folder : FileText" :size="13" class="tn-icon" />
               <div class="sr-text">
                 <div class="sr-title"><template v-for="(p, i) in rowHighlight(n)" :key="i"><mark v-if="p.hit" class="tn-hl">{{ p.s }}</mark><template v-else>{{ p.s }}</template></template></div>
@@ -1427,7 +1429,7 @@ watch(pendingOpenNoteId, (id) => {
       </div>
 
       <!-- 树收起后的恢复条 -->
-      <div v-if="treeCollapsed" class="tree-reopen" :title="t('notesExpandTree')" @click="toggleTreeCollapsed">
+      <div v-key-click v-if="treeCollapsed" class="tree-reopen" :title="t('notesExpandTree')" @click="toggleTreeCollapsed">
         <PanelLeft :size="16" />
       </div>
       <!-- 可拖拽分割线：调树宽 -->
@@ -1569,7 +1571,7 @@ watch(pendingOpenNoteId, (id) => {
               class="ne-editor"
               :class="{ 'ne-editor-only': selectedDoc.format === 'text' }"
             ></div>
-            <div v-show="selectedDoc.format !== 'text' && noteView !== 'source'" ref="previewRef" class="ne-preview markdown-body" v-html="previewHtml"
+            <div v-key-click v-show="selectedDoc.format !== 'text' && noteView !== 'source'" ref="previewRef" class="ne-preview markdown-body" v-html="previewHtml"
               @scroll="syncScroll('preview')" @click="onPreviewClick"></div>
             <NoteOutlinePanel
               v-if="outlineOpen && outlineHeadings.length"
@@ -1618,8 +1620,8 @@ watch(pendingOpenNoteId, (id) => {
 .notes-search { width: 240px; flex-shrink: 0; }
 .ns-input { padding-left: 28px; padding-right: 26px; }
 .ns-clear { position: absolute; right: 6px; border: none; background: none; color: var(--color-text-muted); cursor: pointer; display: flex; align-items: center; }
-.notes-tags { flex: 1; min-width: 0; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-left: 8px; }
-.nt-chip { padding: 2px 6px; border: none; background: transparent; color: var(--color-text-muted); font-size: 12px; cursor: pointer; font-family: inherit; flex-shrink: 0; line-height: 1; transition: color var(--transition-fast), font-weight var(--transition-fast); }
+.notes-tags { flex: 1; min-width: 0; display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center; margin-left: var(--space-4); }
+.nt-chip { padding: var(--space-1) var(--space-3); border: none; background: transparent; color: var(--color-text-muted); font-size: var(--text-sm); cursor: pointer; font-family: inherit; flex-shrink: 0; line-height: 1; transition: color var(--transition-fast), font-weight var(--transition-fast); }
 .nt-chip:hover { color: var(--color-text-primary); }
 .nt-chip.active { color: var(--color-accent); font-weight: 600; }
 
@@ -1627,15 +1629,15 @@ watch(pendingOpenNoteId, (id) => {
 .notes-tree { width: 250px; flex-shrink: 0; border-right: 1px solid var(--color-border); display: flex; flex-direction: column; background: var(--color-bg-primary); }
 /* 整组一起换行，单个图标不会散到第二行：树宽是用户可拖的，窄栏下
    原来 7 个图标各自折行，看起来像工具栏被拆坏了。 */
-.tree-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--color-border); }
-.tt-group { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.tree-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border); }
+.tt-group { display: flex; align-items: center; gap: var(--space-1); flex-shrink: 0; }
 .tt-btn { width: 26px; height: 26px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: none; background: none; color: var(--color-text-muted); cursor: pointer; border-radius: var(--radius-sm); }
 .tt-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 /* 分组线只占图标高度的一半，不再是拉满整条工具栏的一根长线 */
-.tt-sep { width: 1px; height: 14px; flex-shrink: 0; background: var(--color-border); margin: 0 2px; }
-.tree-wrap { flex: 1; overflow-y: auto; padding: 4px; }
-.tree-empty { color: var(--color-text-disabled); font-size: 12px; padding: 20px; text-align: center; }
-.sr-row { display: flex; align-items: center; gap: 6px; padding: 6px; margin-bottom: 0; min-height: 26px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; }
+.tt-sep { width: 1px; height: 14px; flex-shrink: 0; background: var(--color-border); margin: 0 var(--space-1); }
+.tree-wrap { flex: 1; overflow-y: auto; padding: var(--space-2); }
+.tree-empty { color: var(--color-text-disabled); font-size: var(--text-sm); padding: var(--space-7); text-align: center; }
+.sr-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3); margin-bottom: 0; min-height: 26px; border-radius: var(--radius-sm); cursor: pointer; font-size: var(--text-md); }
 .sr-row:hover { background: var(--color-bg-hover); }
 
 .notes-editor { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
@@ -1646,7 +1648,7 @@ watch(pendingOpenNoteId, (id) => {
   color: var(--color-text-muted); gap: 10px;
 }
 .ne-empty :deep(svg) {
-  padding: 12px;
+  padding: var(--space-5);
   box-sizing: content-box;
   color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
@@ -1654,17 +1656,17 @@ watch(pendingOpenNoteId, (id) => {
   border-radius: var(--radius-md);
 }
 .ne-empty p { margin: 0; font-size: var(--text-md); color: var(--color-text-secondary); }
-.ne-head { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--color-border); position: relative; }
-.ne-name { flex: 1; padding: 6px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: var(--text-base); font-weight: 600; outline: none; font-family: inherit; }
+.ne-head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--color-border); position: relative; }
+.ne-name { flex: 1; padding: var(--space-3) 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: var(--text-base); font-weight: 600; outline: none; font-family: inherit; }
 .ne-name:focus { border-color: var(--color-border-focus-soft); }
-.ne-format { display: flex; gap: 2px; flex-shrink: 0; }
-.ne-format button { padding: 4px 10px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-muted); font-size: 12px; cursor: pointer; font-family: inherit; }
+.ne-format { display: flex; gap: var(--space-1); flex-shrink: 0; }
+.ne-format button { padding: var(--space-2) 10px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-muted); font-size: var(--text-sm); cursor: pointer; font-family: inherit; }
 .ne-format button:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
 .ne-format button:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-left: -1px; }
 .ne-format button.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
 .ne-format button:hover:not(.active) { color: var(--color-text-primary); }
 /* Markdown 视图三段切换（源码 / 分屏 / 预览）：仅 markdown 格式出现，与格式按钮紧邻 */
-.ne-view { display: flex; gap: 2px; flex-shrink: 0; }
+.ne-view { display: flex; gap: var(--space-1); flex-shrink: 0; }
 .ne-view button { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-muted); cursor: pointer; font-family: inherit; border-radius: var(--radius-sm); }
 .ne-view button:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
 .ne-view button:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-left: -1px; }
@@ -1674,45 +1676,45 @@ watch(pendingOpenNoteId, (id) => {
    故这里必须 !important 才能压过内联样式；编辑器无 v-show，正常隐藏即可。 */
 .ne-view-source .ne-preview { display: none !important; }
 .ne-view-preview .ne-editor { display: none !important; }
-.ne-copy { border: none; background: none; color: var(--color-text-muted); cursor: pointer; padding: 6px; border-radius: var(--radius-sm); }
+.ne-copy { border: none; background: none; color: var(--color-text-muted); cursor: pointer; padding: var(--space-3); border-radius: var(--radius-sm); }
 .ne-copy:hover { background: var(--color-bg-hover); color: var(--color-accent); }
 /* 大纲按钮的开启态。此前只有 :class="{ active: tocOpen }" 而没有任何 .active 规则，
    点了完全没反馈（11-12 补）。 */
 .ne-copy.active { background: var(--color-accent-bg); color: var(--color-accent); }
 /* 插入 wiki 链接的候选浮层：挂在 .ne-head 上，absolute 不占布局高度 */
-.ne-wiki-pop { position: absolute; top: 100%; right: 12px; z-index: 20; width: 260px; margin-top: 4px; padding: 6px; border: 1px solid var(--popover-border-color); border-radius: var(--radius-sm); background: var(--color-popover-bg); box-shadow: var(--shadow-sm); }
-.ne-wiki-search { display: flex; align-items: center; gap: 6px; color: var(--color-text-muted); }
-.ne-wiki-input { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 12px; outline: none; font-family: inherit; }
+.ne-wiki-pop { position: absolute; top: 100%; right: 12px; z-index: 20; width: 260px; margin-top: var(--space-2); padding: var(--space-3); border: 1px solid var(--popover-border-color); border-radius: var(--radius-sm); background: var(--color-popover-bg); box-shadow: var(--shadow-sm); }
+.ne-wiki-search { display: flex; align-items: center; gap: var(--space-3); color: var(--color-text-muted); }
+.ne-wiki-input { flex: 1; min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: var(--text-sm); outline: none; font-family: inherit; }
 .ne-wiki-input:focus { border-color: var(--color-border-focus-soft); }
-.ne-wiki-list { max-height: 180px; overflow-y: auto; margin-top: 6px; }
-.ne-wiki-empty { padding: 6px; color: var(--color-text-disabled); font-size: 12px; }
-.ne-wiki-item { display: flex; align-items: center; gap: 6px; width: 100%; padding: 4px 6px; border: none; border-radius: var(--radius-xs); background: transparent; color: var(--color-text-primary); text-align: left; cursor: pointer; font-family: inherit; font-size: 12px; }
+.ne-wiki-list { max-height: 180px; overflow-y: auto; margin-top: var(--space-3); }
+.ne-wiki-empty { padding: var(--space-3); color: var(--color-text-disabled); font-size: var(--text-sm); }
+.ne-wiki-item { display: flex; align-items: center; gap: var(--space-3); width: 100%; padding: var(--space-2) var(--space-3); border: none; border-radius: var(--radius-xs); background: transparent; color: var(--color-text-primary); text-align: left; cursor: pointer; font-family: inherit; font-size: var(--text-sm); }
 .ne-wiki-item:hover { background: var(--color-bg-hover); }
 .ne-wiki-type { flex-shrink: 0; color: var(--color-text-muted); }
 .ne-wiki-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ne-tags { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-bottom: 1px solid var(--color-border); }
-.ne-tags-label { font-size: 11px; color: var(--color-text-muted); flex-shrink: 0; }
-.ne-tags-input { flex: 1; padding: 4px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 12px; outline: none; font-family: inherit; }
+.ne-tags { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-5); border-bottom: 1px solid var(--color-border); }
+.ne-tags-label { font-size: var(--text-xs); color: var(--color-text-muted); flex-shrink: 0; }
+.ne-tags-input { flex: 1; padding: var(--space-2) var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: var(--text-sm); outline: none; font-family: inherit; }
 .ne-tags-input:focus { border-color: var(--color-border-focus-soft); }
 /* 字数统计：右对齐、弱化显示，写作时能瞄一眼但不抢注意力 */
-.ne-stats { flex-shrink: 0; font-size: 11px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.ne-stats { flex-shrink: 0; font-size: var(--text-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 
 /* 目录：浮在编辑区顶部，长文档跳转到标题用。层级用左缩进表达，不画竖线保持轻。 */
 .ne-toc {
-  max-height: 180px; overflow-y: auto; padding: 6px; border-bottom: 1px solid var(--color-border);
+  max-height: 180px; overflow-y: auto; padding: var(--space-3); border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-secondary); display: flex; flex-direction: column; gap: 1px;
 }
 .ne-toc-item {
-  text-align: left; padding: 4px 8px; border: none; background: transparent; cursor: pointer;
-  color: var(--color-text-muted); font-size: 12px; border-radius: var(--radius-sm); white-space: nowrap;
+  text-align: left; padding: var(--space-2) var(--space-4); border: none; background: transparent; cursor: pointer;
+  color: var(--color-text-muted); font-size: var(--text-sm); border-radius: var(--radius-sm); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
 }
 .ne-toc-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 /* 搜索命中高亮：只覆盖文字底色，不用 <mark> 的默认黄底（深色主题下会刺眼） */
-.tn-hl { background: var(--color-accent-bg); color: var(--color-accent); border-radius: 2px; padding: 0 1px; }
+.tn-hl { background: var(--color-accent-bg); color: var(--color-accent); border-radius: var(--radius-2xs); padding: 0 1px; }
 /* 视图 tab：文档 / 图谱。图谱是覆盖层，tab 必须压在它上面（z-index 更高）。 */
-.ne-viewtabs { display: flex; align-items: center; gap: 4px; padding: 2px 8px; flex-shrink: 0; border-bottom: 1px solid var(--color-border); background: var(--color-bg-secondary); position: relative; z-index: 11; }
-.ne-viewtabs button { display: flex; align-items: center; gap: 4px; padding: 4px 10px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted); font-size: 12px; cursor: pointer; font-family: inherit; }
+.ne-viewtabs { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-4); flex-shrink: 0; border-bottom: 1px solid var(--color-border); background: var(--color-bg-secondary); position: relative; z-index: 11; }
+.ne-viewtabs button { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 10px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted); font-size: var(--text-sm); cursor: pointer; font-family: inherit; }
 .ne-viewtabs button:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .ne-viewtabs button.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
 .ne-viewtabs-spacer { flex: 1; }
@@ -1727,14 +1729,14 @@ watch(pendingOpenNoteId, (id) => {
 .ne-editor { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--color-bg-secondary); border-right: 1px solid var(--color-border); }
 .ne-editor.ne-editor-only { border-right: none; }
 .ne-editor :deep(.cm-editor) { flex: 1; min-height: 0; }
-.ne-editor :deep(.cm-content) { padding: 10px 14px 24px 4px; }
+.ne-editor :deep(.cm-content) { padding: 10px 14px var(--space-8) var(--space-2); }
 /* 预览区必须显式放开划选：全局 body/html 是 user-select:none，继承下来后
    选区根本建立不起来（程序化 addRange 也会被立刻清空），
    表现为「预览没办法复制」。 */
-.ne-preview { flex: 1; min-width: 0; overflow: auto; padding: 12px 16px; background: var(--color-bg-primary); user-select: text; }
+.ne-preview { flex: 1; min-width: 0; overflow: auto; padding: var(--space-5) var(--space-6); background: var(--color-bg-primary); user-select: text; }
 .ne-load-error {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 12;
-  display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+  display: flex; align-items: center; gap: 10px; padding: var(--space-5) 14px;
   border: 1px solid var(--popover-border-color); border-radius: var(--radius-md);
   background: var(--color-popover-bg); box-shadow: var(--shadow-md);
   color: var(--color-text-primary); font-size: var(--text-md);
@@ -1770,35 +1772,35 @@ watch(pendingOpenNoteId, (id) => {
 
 /* 最近打开分区：融入式，靠顶部分隔线和树分开，不堆生硬卡片边框 */
 .recent-block {
-  margin: 4px 0 6px;
-  padding: 6px 4px 0;
+  margin: var(--space-2) 0 var(--space-3);
+  padding: var(--space-3) var(--space-2) 0;
   border-top: 1px solid var(--color-border);
 }
 .recent-title {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
   color: var(--color-text-secondary);
   font-weight: 600;
   letter-spacing: 0.02em;
-  padding: 0 4px 4px;
+  padding: 0 var(--space-2) var(--space-2);
 }
 .recent-title :deep(svg) { color: var(--color-text-muted); opacity: 0.9; }
 .recent-title .rt-label { flex: 1; }
 .recent-title .rt-count {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--color-text-disabled);
   font-weight: 500;
   background: var(--color-bg-secondary);
   border-radius: var(--radius-full);
-  padding: 1px 6px;
+  padding: 1px var(--space-3);
 }
 .recent-row {
   display: flex;
   align-items: flex-start;
   gap: 7px;
-  padding: 5px 6px;
+  padding: 5px var(--space-3);
   margin-bottom: 0; /* 抵消全局 .qd-row 的 2px 行距 */
   min-height: 0;    /* 抵消全局 .qd-row 的 34px 行高，保持双行文字自然高度 */
   border-radius: var(--radius-sm);
@@ -1809,21 +1811,21 @@ watch(pendingOpenNoteId, (id) => {
 .recent-row .tn-icon { margin-top: 1px; flex-shrink: 0; color: var(--color-text-muted); }
 .recent-row .tn-check { margin-top: 1px; flex-shrink: 0; }
 .recent-row .rn-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.recent-row .rn-line1 { display: flex; align-items: baseline; gap: 6px; }
-.recent-row .rn-name { font-size: 13px; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
-.recent-row .rn-time { font-size: 10px; color: var(--color-text-disabled); flex-shrink: 0; }
-.recent-row .rn-path { font-size: 11px; color: var(--color-text-disabled); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-row .rn-line1 { display: flex; align-items: baseline; gap: var(--space-3); }
+.recent-row .rn-name { font-size: var(--text-md); color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.recent-row .rn-time { font-size: var(--text-2xs); color: var(--color-text-disabled); flex-shrink: 0; }
+.recent-row .rn-path { font-size: var(--text-xs); color: var(--color-text-disabled); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 批量操作栏 */
-.tree-batch { border-bottom: 1px solid var(--color-border); padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; background: var(--color-bg-secondary); }
-.tb-line { display: flex; gap: 4px; align-items: center; }
-.tb-count { flex: 1; font-size: 11px; color: var(--color-text-muted); }
-.tb-clear { border: none; background: none; color: var(--color-text-muted); cursor: pointer; font-size: 11px; padding: 2px 6px; border-radius: var(--radius-xs); }
+.tree-batch { border-bottom: 1px solid var(--color-border); padding: var(--space-3) var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); background: var(--color-bg-secondary); }
+.tb-line { display: flex; gap: var(--space-2); align-items: center; }
+.tb-count { flex: 1; font-size: var(--text-xs); color: var(--color-text-muted); }
+.tb-clear { border: none; background: none; color: var(--color-text-muted); cursor: pointer; font-size: var(--text-xs); padding: var(--space-1) var(--space-3); border-radius: var(--radius-xs); }
 .tb-clear:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .tb-clear:disabled { opacity: 0.4; cursor: default; }
-.tb-input, .tb-select { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 12px; outline: none; font-family: inherit; }
+.tb-input, .tb-select { flex: 1; min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: var(--text-sm); outline: none; font-family: inherit; }
 .tb-input:focus, .tb-select:focus { border-color: var(--color-border-focus-soft); }
-.tb-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px;  flex-shrink: 0; height: 28px; padding: 0 11px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-secondary); font-size: 12px; cursor: pointer; border-radius: var(--radius-sm); font-family: inherit; }
+.tb-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);  flex-shrink: 0; height: 28px; padding: 0 11px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-secondary); font-size: var(--text-sm); cursor: pointer; border-radius: var(--radius-sm); font-family: inherit; }
 .tb-btn:hover:not(:disabled) { color: var(--color-text-primary); border-color: var(--color-border-focus); }
 .tb-btn:disabled { opacity: 0.4; cursor: default; }
 .tb-btn.danger { color: var(--color-danger); border-color: var(--color-danger-border); }
@@ -1841,29 +1843,29 @@ watch(pendingOpenNoteId, (id) => {
 .tree-splitter:hover { background: var(--color-accent); }
 
 /* Markdown 渲染（复用统一插件样式） */
-.markdown-body { color: var(--color-text-primary); font-size: 13px; line-height: 1.7; word-break: break-word; }
-.markdown-body :deep(h1), .markdown-body :deep(h2), .markdown-body :deep(h3), .markdown-body :deep(h4) { margin: 12px 0 8px; line-height: 1.3; }
-.markdown-body :deep(h1) { font-size: var(--text-2xl); border-bottom: 1px solid var(--color-border); padding-bottom: 6px; }
-.markdown-body :deep(h2) { font-size: 18px; border-bottom: 1px solid var(--color-border); padding-bottom: 4px; }
-.markdown-body :deep(h3) { font-size: 15px; }
-.markdown-body :deep(p) { margin: 8px 0; }
+.markdown-body { color: var(--color-text-primary); font-size: var(--text-md); line-height: 1.7; word-break: break-word; }
+.markdown-body :deep(h1), .markdown-body :deep(h2), .markdown-body :deep(h3), .markdown-body :deep(h4) { margin: var(--space-5) 0 var(--space-4); line-height: 1.3; }
+.markdown-body :deep(h1) { font-size: var(--text-2xl); border-bottom: 1px solid var(--color-border); padding-bottom: var(--space-3); }
+.markdown-body :deep(h2) { font-size: var(--text-xl); border-bottom: 1px solid var(--color-border); padding-bottom: var(--space-2); }
+.markdown-body :deep(h3) { font-size: var(--text-lg); }
+.markdown-body :deep(p) { margin: var(--space-4) 0; }
 .markdown-body :deep(a) { color: var(--color-accent); }
 /* wiki 链接没有 href（避免 DOMPurify 过滤伪协议），补手型与虚下划线让它可点 */
 .markdown-body :deep(a.qd-wiki) { cursor: pointer; border-bottom: 1px dashed var(--color-accent); }
-.markdown-body :deep(code) { background: var(--color-bg-tertiary); padding: 1px 5px; border-radius: var(--radius-xs); font-family: 'Consolas','Monaco',monospace; font-size: 13px; }
-.markdown-body :deep(pre) { background: var(--color-bg-tertiary); padding: 10px 12px; border-radius: var(--radius-sm); overflow: auto; }
+.markdown-body :deep(code) { background: var(--color-bg-tertiary); padding: 1px 5px; border-radius: var(--radius-xs); font-family: 'Consolas','Monaco',monospace; font-size: var(--text-md); }
+.markdown-body :deep(pre) { background: var(--color-bg-tertiary); padding: 10px var(--space-5); border-radius: var(--radius-sm); overflow: auto; }
 .markdown-body :deep(pre code) { background: none; padding: 0; }
-.markdown-body :deep(blockquote) { border-left: 3px solid var(--color-border-focus); margin: 8px 0; padding: 2px 12px; color: var(--color-text-muted); }
-.markdown-body :deep(ul), .markdown-body :deep(ol) { padding-left: 22px; margin: 8px 0; }
-.markdown-body :deep(table) { border-collapse: collapse; margin: 8px 0; }
-.markdown-body :deep(th), .markdown-body :deep(td) { border: 1px solid var(--color-border); padding: 4px 8px; }
+.markdown-body :deep(blockquote) { border-left: 3px solid var(--color-border-focus); margin: var(--space-4) 0; padding: var(--space-1) var(--space-5); color: var(--color-text-muted); }
+.markdown-body :deep(ul), .markdown-body :deep(ol) { padding-left: 22px; margin: var(--space-4) 0; }
+.markdown-body :deep(table) { border-collapse: collapse; margin: var(--space-4) 0; }
+.markdown-body :deep(th), .markdown-body :deep(td) { border: 1px solid var(--color-border); padding: var(--space-2) var(--space-4); }
 .markdown-body :deep(img) { max-width: 100%; }
 /* 数学公式：与 AI 对话页同一套容器规则（见 utils/mathMarkdown.ts） */
 .markdown-body :deep(.md-math-inline) { display: inline; }
 .markdown-body :deep(.md-math-block) { display: block; margin: 10px 0; overflow-x: auto; overflow-y: hidden; }
 .markdown-body :deep(.md-math-block .katex-display) { margin: 0; }
 .markdown-body :deep(.md-math-raw) {
-  font-family: 'Consolas','Monaco',monospace; font-size: 12px;
+  font-family: 'Consolas','Monaco',monospace; font-size: var(--text-sm);
   white-space: pre-wrap; word-break: break-word; color: var(--color-text-secondary);
 }
 

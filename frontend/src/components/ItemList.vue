@@ -8,6 +8,7 @@ import ItemEditor from './ItemEditor.vue'
 import CreateDialog, { type CreateField } from './CreateDialog.vue'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
+import { ITEM_TYPE } from '../constants/itemTypes'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 import { DeleteItem, UpdateItem } from '../../bindings/quickdock/services/item/itemservice'
 import { matchesTextOrPinyin } from '../utils/pinyin'
@@ -146,7 +147,7 @@ async function handleSaveItem(data: Partial<CollectionItem>) {
     if (editingItem.value) {
       await store.updateItemAction(editingItem.value.id, data)
     } else {
-      await store.addItem(data.name || '', data.type || '目录', data.value || '')
+      await store.addItem(data.name || '', data.type || ITEM_TYPE.DIR, data.value || '')
     }
     showEditor.value = false
     editingItem.value = null
@@ -401,7 +402,7 @@ function onDropItem(e: DragEvent, targetId: string) {
     <div class="qd-panel-body" ref="scrollEl" @scroll.passive="onScroll">
       <div v-if="useVirtual" class="item-vlist">
         <div class="item-vspacer" :style="{ height: offsetY + 'px' }"></div>
-        <div
+        <div v-key-click
           v-for="item in slice"
           :key="item.id"
           class="qd-row"
@@ -432,7 +433,7 @@ function onDropItem(e: DragEvent, targetId: string) {
           <span v-if="item.usageCount" class="item-usage" :title="t('openCount') + item.usageCount + t('times')">
             {{ item.usageCount }}
           </span>
-          <span class="qd-row-actions" @click.stop>
+          <span v-key-click class="qd-row-actions" @click.stop>
             <button class="qd-row-btn" @click="handleItemClick(item)" :title="t('open')">
               <Play :size="13" />
             </button>
@@ -447,7 +448,7 @@ function onDropItem(e: DragEvent, targetId: string) {
         <div class="item-vspacer" :style="{ height: bottomPad + 'px' }"></div>
       </div>
       <ul v-else-if="visibleItems.length">
-        <li
+        <li v-key-click
           v-for="item in visibleItems"
           :key="item.id"
           class="qd-row"
@@ -478,7 +479,7 @@ function onDropItem(e: DragEvent, targetId: string) {
           <span v-if="item.usageCount" class="item-usage" :title="t('openCount') + item.usageCount + t('times')">
             {{ item.usageCount }}
           </span>
-          <span class="qd-row-actions" @click.stop>
+          <span v-key-click class="qd-row-actions" @click.stop>
             <button class="qd-row-btn" @click="handleItemClick(item)" :title="t('open')">
               <Play :size="13" />
             </button>
@@ -562,7 +563,7 @@ function onDropItem(e: DragEvent, targetId: string) {
   position: fixed; inset: 0; z-index: 900;
 }
 .ctx-menu {
-  position: fixed; min-width: 168px; padding: 4px;
+  position: fixed; min-width: 168px; padding: var(--space-2);
   background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
   display: flex; flex-direction: column; gap: 1px;
@@ -570,7 +571,7 @@ function onDropItem(e: DragEvent, targetId: string) {
 .ctx-item {
   display: flex; align-items: center; height: 28px; padding: 0 10px;
   border: none; border-radius: var(--radius-sm); background: none;
-  color: var(--color-text-secondary); font-size: 12px; font-family: inherit;
+  color: var(--color-text-secondary); font-size: var(--text-sm); font-family: inherit;
   text-align: left; cursor: pointer;
 }
 .ctx-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
@@ -579,11 +580,11 @@ function onDropItem(e: DragEvent, targetId: string) {
 
 .item-usage {
   flex-shrink: 0;
-  padding: 1px 6px;
+  padding: 1px var(--space-3);
   border-radius: var(--radius-xs);
   background: var(--color-bg-tertiary);
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--text-2xs);
 }
 
 /* 快捷链接徽标（value 里含 {query} 的条目） */
@@ -592,11 +593,11 @@ function onDropItem(e: DragEvent, targetId: string) {
   align-items: center;
   gap: 3px;
   flex-shrink: 0;
-  padding: 2px 6px;
+  padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-xs);
   background: var(--color-accent-bg);
   color: var(--color-accent);
-  font-size: 10px;
+  font-size: var(--text-2xs);
 }
 
 /* 虚拟滚动：窗口化容器与撑高占位块。.qd-row 在虚拟列表里强制固定 44px，
@@ -617,25 +618,25 @@ function onDropItem(e: DragEvent, targetId: string) {
 
 .item-batch {
   display: flex; align-items: center; gap: var(--space-2);
-  padding: 6px 12px; border-bottom: 1px solid var(--color-border);
+  padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
 }
 .item-selall { display: inline-flex; align-items: center; }
-.item-batch-count { font-size: 12px; color: var(--color-text-secondary); }
+.item-batch-count { font-size: var(--text-sm); color: var(--color-text-secondary); }
 .item-batch-fill { flex: 1; }
 .batch-move-wrap { position: relative; }
 .batch-move-menu {
   position: absolute; right: 0; top: calc(100% + 4px); z-index: 30;
   min-width: 140px; max-height: 220px; overflow-y: auto;
-  padding: 4px; border-radius: var(--radius-md);
+  padding: var(--space-2); border-radius: var(--radius-md);
   background: var(--color-bg-primary); border: 1px solid var(--color-border);
-  box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.15));
+  box-shadow: var(--shadow-lg);
   display: flex; flex-direction: column; gap: 1px;
 }
 .batch-move-item {
-  text-align: left; padding: 6px 10px; border: none; background: transparent;
+  text-align: left; padding: var(--space-3) 10px; border: none; background: transparent;
   border-radius: var(--radius-sm); cursor: pointer;
-  color: var(--color-text-primary); font-size: 13px; white-space: nowrap;
+  color: var(--color-text-primary); font-size: var(--text-md); white-space: nowrap;
 }
 .batch-move-item:hover { background: var(--color-bg-hover); }
 </style>

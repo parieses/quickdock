@@ -46,7 +46,7 @@ async function openMain() {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  padding: var(--space-6);
   background: var(--color-bg-primary);
 }
 
@@ -83,7 +83,7 @@ async function openMain() {
 
 .notice-title {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -96,7 +96,7 @@ async function openMain() {
 }
 
 .notice-btn {
-  margin-top: 4px;
+  margin-top: var(--space-2);
   padding: 0 14px;
   height: 34px;
   font-size: var(--text-sm);

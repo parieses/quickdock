@@ -420,7 +420,7 @@ defineExpose({ capturing })
 </template>
 
 <style scoped>
-.hotkey-page { width: 100%; max-width: 720px; }
+.hotkey-page { width: 100%; max-width: var(--settings-max); }
 
 .hk-header {
   display: flex;
@@ -429,7 +429,7 @@ defineExpose({ capturing })
   gap: var(--space-4);
   margin-bottom: 14px;
 }
-.page-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--color-text-primary); }
+.page-title { margin: 0; font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
 
 /* 列表容器：细边框 + 圆角，行间用 1px 分隔线而不再各自成卡，密度更高 */
 .hk-panel {
@@ -443,12 +443,12 @@ defineExpose({ capturing })
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-4);
-  padding: 8px 12px;
+  padding: var(--space-4) var(--space-5);
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
 }
-.hk-panel-title { font-size: 11px; font-weight: 600; color: var(--color-text-muted); letter-spacing: 0.6px; }
-.hk-panel-hint { font-size: 11px; color: var(--color-text-disabled); }
+.hk-panel-title { font-size: var(--text-xs); font-weight: 600; color: var(--color-text-muted); letter-spacing: 0.6px; }
+.hk-panel-hint { font-size: var(--text-xs); color: var(--color-text-disabled); }
 
 /* 单行栅格：图标 / 功能名 / 说明（可伸长可省略） / 键帽 / 重置 */
 .hk-row {
@@ -456,7 +456,7 @@ defineExpose({ capturing })
   grid-template-columns: 20px 84px minmax(0, 1fr) auto 26px;
   align-items: center;
   gap: 10px;
-  padding: 7px 12px;
+  padding: 7px var(--space-5);
   transition: background-color var(--transition-fast);
 }
 .hk-row + .hk-row { border-top: 1px solid var(--color-border); }
@@ -466,9 +466,9 @@ defineExpose({ capturing })
 
 .hk-icon { display: inline-flex; align-items: center; justify-content: center; color: var(--color-text-disabled); }
 .hk-row.capturing .hk-icon { color: var(--color-accent); }
-.hk-name { font-size: 13px; font-weight: 500; color: var(--color-text-primary); white-space: nowrap; }
+.hk-name { font-size: var(--text-md); font-weight: 500; color: var(--color-text-primary); white-space: nowrap; }
 .hk-desc {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-disabled);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -484,7 +484,7 @@ defineExpose({ capturing })
   height: 26px;
   padding: 0 10px;
   font-family: 'Consolas', ui-monospace, SFMono-Regular, monospace;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   line-height: 1;
   color: var(--color-text-primary);
@@ -499,13 +499,14 @@ defineExpose({ capturing })
 .hk-kbd.capturing {
   border-color: var(--color-accent);
   border-bottom-color: var(--color-accent);
-  background: var(--color-surface);
+  /* 捕获态是「按下待录入」，用低透明强调底；废弃的 --color-surface 比卡片还暗，会像挖了个洞。 */
+  background: var(--color-accent-bg);
   color: var(--color-accent);
   box-shadow: 0 0 0 2px var(--color-accent-border);
   animation: hk-pulse 1.1s ease-in-out infinite;
 }
 @keyframes hk-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.6 } }
-.hk-capturing { font-family: inherit; font-size: 11px; font-weight: 500; }
+.hk-capturing { font-family: inherit; font-size: var(--text-xs); font-weight: 500; }
 
 /* 重置：已是默认值时用 visibility 隐藏而不是 display:none ——
    保留栅格列宽，避免某行"少一个按钮"导致键帽位置左右跳动 */
@@ -525,16 +526,16 @@ defineExpose({ capturing })
 .hk-reset:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
 .hk-reset.is-idle { visibility: hidden; }
 
-.hk-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.hk-actions { display: flex; align-items: center; gap: var(--space-5); margin-top: var(--space-5); }
 .hk-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   height: 28px;
   padding: 0 11px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
@@ -544,15 +545,15 @@ defineExpose({ capturing })
 .hk-btn-ghost { background: transparent; color: var(--color-text-secondary); border-color: var(--color-border); }
 .hk-btn-ghost:hover { color: var(--color-text-primary); background: var(--color-bg-hover); border-color: var(--color-border-focus); }
 
-.hk-msg { margin: 0; font-size: 12px; color: var(--color-success); }
+.hk-msg { margin: 0; font-size: var(--text-sm); color: var(--color-success); }
 .hk-msg.is-error { color: var(--color-danger); }
 
 .hk-tip {
-  margin: 12px 0 0;
+  margin: var(--space-5) 0 0;
   display: flex;
   align-items: flex-start;
-  gap: 6px;
-  font-size: 11px;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
   color: var(--color-text-disabled);
   line-height: 1.6;
 }

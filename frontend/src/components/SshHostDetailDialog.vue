@@ -227,13 +227,13 @@ async function copyTarget() {
 .hdd-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 14px;
+  gap: var(--space-4);
+  padding: var(--space-5) 14px;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
 .hdd-head-icon { color: var(--color-accent); }
-.hdd-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
+.hdd-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
 .hdd-x {
   margin-left: auto;
   display: flex; align-items: center;
@@ -245,15 +245,15 @@ async function copyTarget() {
 .hdd-body {
   flex: 1; min-height: 0;
   overflow-y: auto;
-  padding: 12px 14px;
+  padding: var(--space-5) 14px;
 }
 .hdd-body--empty {
   display: flex; align-items: center; justify-content: center;
-  min-height: 120px; font-size: 12px; color: var(--color-text-muted);
+  min-height: 120px; font-size: var(--text-sm); color: var(--color-text-muted);
 }
 
 .hdd-hero {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: var(--space-4);
   margin-bottom: 10px;
 }
 .hdd-hero-name {
@@ -262,42 +262,42 @@ async function copyTarget() {
 }
 .hdd-env {
   flex-shrink: 0;
-  font-size: 10px; line-height: 16px; padding: 0 6px;
+  font-size: var(--text-2xs); line-height: 16px; padding: 0 var(--space-3);
   border-radius: var(--radius-sm);
 }
 
-.hdd-grid { display: flex; flex-direction: column; gap: 6px; }
+.hdd-grid { display: flex; flex-direction: column; gap: var(--space-3); }
 .hdd-row {
   display: grid;
   grid-template-columns: 88px minmax(0, 1fr);
-  gap: 8px;
+  gap: var(--space-4);
   align-items: baseline;
 }
-.hdd-k { font-size: 11px; color: var(--color-text-muted); }
-.hdd-v { font-size: 12px; color: var(--color-text-primary); min-width: 0; }
-.hdd-v--mono { font-family: var(--font-mono); font-size: 11px; }
+.hdd-k { font-size: var(--text-xs); color: var(--color-text-muted); }
+.hdd-v { font-size: var(--text-sm); color: var(--color-text-primary); min-width: 0; }
+.hdd-v--mono { font-family: var(--font-mono); font-size: var(--text-xs); }
 /* 路径与 ID 会比面板宽，截断之后剩下的那点信息恰恰没用（看不出是哪台机器） */
 .hdd-v--wrap { word-break: break-all; }
-.hdd-sub { color: var(--color-text-muted); font-size: 11px; margin-left: 3px; }
+.hdd-sub { color: var(--color-text-muted); font-size: var(--text-xs); margin-left: 3px; }
 
-.hdd-note { margin-top: 8px; font-size: 11px; color: var(--color-text-muted); }
+.hdd-note { margin-top: var(--space-4); font-size: var(--text-xs); color: var(--color-text-muted); }
 .hdd-note--warn { color: var(--color-warning); }
 
 .hdd-foot {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: var(--space-4);
   padding: 10px 14px;
   border-top: 1px solid var(--color-border);
   flex-shrink: 0;
 }
 .hdd-foot-spacer { flex: 1; }
 .hdd-btn {
-  display: inline-flex; align-items: center; gap: 4px;
+  display: inline-flex; align-items: center; gap: var(--space-2);
   height: 28px; padding: 0 11px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--color-bg-secondary);
   color: var(--color-text-secondary);
-  font: inherit; font-size: 12px; cursor: pointer;
+  font: inherit; font-size: var(--text-sm); cursor: pointer;
 }
 .hdd-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .hdd-btn--primary {

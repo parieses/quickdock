@@ -119,12 +119,12 @@ watch(() => props.selectedId, () => { void nextTick(revealActive) }, { immediate
   width: 196px; flex-shrink: 0;
   border-right: 1px solid var(--color-border);
   background: var(--color-bg-primary);
-  overflow-y: auto; padding: 12px 10px;
-  display: flex; flex-direction: column; gap: 4px;
+  overflow-y: auto; padding: var(--space-5) 10px;
+  display: flex; flex-direction: column; gap: var(--space-2);
 }
 
 .cats-search {
-  display: flex; align-items: center; gap: 5px; margin: 0 8px 8px;
+  display: flex; align-items: center; gap: 5px; margin: 0 var(--space-4) var(--space-4);
   padding: 0 7px; height: 26px; flex-shrink: 0;
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
   border-radius: var(--radius-sm); color: var(--color-text-disabled);
@@ -134,7 +134,7 @@ watch(() => props.selectedId, () => { void nextTick(revealActive) }, { immediate
 
 .cats-search-input {
   flex: 1; min-width: 0; border: none; outline: none; background: none;
-  color: var(--color-text-primary); font-size: 11px; font-family: inherit;
+  color: var(--color-text-primary); font-size: var(--text-xs); font-family: inherit;
 }
 
 .cats-search-input::placeholder { color: var(--color-text-disabled); }
@@ -147,21 +147,21 @@ watch(() => props.selectedId, () => { void nextTick(revealActive) }, { immediate
 .cats-search-clear:hover { color: var(--color-text-primary); }
 
 .cats-empty {
-  padding: 16px 10px; font-size: 11px; text-align: center;
+  padding: var(--space-6) 10px; font-size: var(--text-xs); text-align: center;
   color: var(--color-text-disabled);
 }
 
 .cats-title {
-  font-size: 11px; letter-spacing: 0.5px;
-  color: var(--color-text-disabled); padding: 2px 8px 8px;
+  font-size: var(--text-xs); letter-spacing: 0.5px;
+  color: var(--color-text-disabled); padding: var(--space-1) var(--space-4) var(--space-4);
 }
 
 .cat-btn {
   display: flex; align-items: center; gap: 10px;
-  padding: 8px 10px; border-radius: var(--radius-sm);
+  padding: var(--space-4) 10px; border-radius: var(--radius-sm);
   border: 1px solid transparent; background: transparent;
   color: var(--color-text-secondary); cursor: pointer;
-  font-family: inherit; font-size: 13px; text-align: left; width: 100%;
+  font-family: inherit; font-size: var(--text-md); text-align: left; width: 100%;
   transition: background var(--transition-fast), border-color var(--transition-fast);
 }
 
@@ -170,33 +170,33 @@ watch(() => props.selectedId, () => { void nextTick(revealActive) }, { immediate
 .cat-avatar {
   width: 28px; height: 28px; border-radius: var(--radius-sm); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  font-size: 13px; font-weight: 700; color: var(--color-accent-text);
+  font-size: var(--text-md); font-weight: 600; color: var(--color-accent-text);
 }
 
 .cat-avatar :deep(svg) { width: 20px; height: 20px; display: block; }
 
 .cat-meta { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
 
-.cat-name { font-weight: 600; font-size: 13px; }
+.cat-name { font-weight: 600; font-size: var(--text-md); }
 
-.cat-id { font-size: 10px; color: var(--color-text-disabled); }
+.cat-id { font-size: var(--text-2xs); color: var(--color-text-disabled); }
 
-.cat-trail { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.cat-trail { margin-left: auto; display: flex; align-items: center; gap: var(--space-3); }
 
 .cat-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-success); box-shadow: 0 0 5px var(--color-success-border); flex-shrink: 0; }
 
 .cat-count {
-  min-width: 20px; text-align: center; font-size: 11px; padding: 1px 6px; border-radius: var(--radius-md);
+  min-width: 20px; text-align: center; font-size: var(--text-xs); padding: 1px var(--space-3); border-radius: var(--radius-md);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
 }
 
-.cats-sep { height: 1px; background: var(--color-border); margin: 8px 6px; flex-shrink: 0; }
+.cats-sep { height: 1px; background: var(--color-border); margin: var(--space-4) var(--space-3); flex-shrink: 0; }
 
 /* 分组标题不是按钮：做成"有边框 + 左侧强调色块"的实心条后，它比下面的
    语言项更像主操作，整列读起来有三个层级在抢。降为文字标签 + 上间距，
    分组关系靠留白和字重表达，点击区仍是整行。 */
 .cats-group-label {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: var(--space-4);
   width: 100%; text-align: left; cursor: pointer; font-family: inherit;
   font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.08em;
   
@@ -204,7 +204,7 @@ watch(() => props.selectedId, () => { void nextTick(revealActive) }, { immediate
   background: none;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  padding: 7px 8px; margin-top: 10px;
+  padding: 7px var(--space-4); margin-top: 10px;
   transition: background var(--transition-fast), color var(--transition-fast);
 }
 
@@ -213,7 +213,7 @@ watch(() => props.selectedId, () => { void nextTick(revealActive) }, { immediate
   color: var(--color-text-secondary);
 }
 
-.cats-chevron { margin-left: auto; font-size: 11px; line-height: 1; color: var(--color-text-disabled); transition: transform 120ms ease; }
+.cats-chevron { margin-left: auto; font-size: var(--text-xs); line-height: 1; color: var(--color-text-disabled); transition: transform 120ms ease; }
 
 /* 选中项与侧栏 / 三栏同一套：整行淡底 + 左缘竖条。
    原来用 border-color 变蓝，等于给这一行描了个亮蓝框，比页头的主按钮还抢。 */

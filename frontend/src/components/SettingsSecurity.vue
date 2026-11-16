@@ -216,7 +216,7 @@ function dismissRecovery() {
 
 <style scoped>
 .sec-state {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
 }
 .sec-state.is-on {
@@ -235,15 +235,15 @@ function dismissRecovery() {
   align-items: center;
   gap: var(--space-2);
   margin: 0 0 var(--space-4);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--color-accent);
 }
 .sec-recovery-code {
   display: block;
   padding: var(--space-4) var(--space-5);
-  font-family: var(--font-mono, monospace);
-  font-size: 15px;
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
   letter-spacing: 0.1em;
   text-align: center;
   color: var(--color-text-primary);
@@ -253,7 +253,7 @@ function dismissRecovery() {
 }
 .sec-recovery-hint {
   margin: var(--space-3) 0 var(--space-4);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.6;
   color: var(--color-text-muted);
 }
@@ -280,7 +280,7 @@ function dismissRecovery() {
 
 .sec-msg {
   margin: var(--space-4) 0 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-danger);
 }
 .sec-msg.is-ok {
@@ -291,7 +291,7 @@ function dismissRecovery() {
   margin: var(--space-7) 0 0;
   padding-top: var(--space-5);
   border-top: 1px solid var(--color-border);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.7;
   color: var(--color-text-muted);
 }

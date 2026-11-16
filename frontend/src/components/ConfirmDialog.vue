@@ -77,28 +77,28 @@ function onConfirm() {
 .confirm-panel {
   background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md); width: 360px; max-width: 90vw;
-  padding: 24px; text-align: center;
+  padding: var(--space-8); text-align: center;
   box-shadow: 0 12px 48px var(--color-bg-overlay);
 }
-.confirm-icon { color: var(--color-warning); margin-bottom: 12px; }
-.confirm-message { font-size: var(--text-base); color: var(--color-text-primary); margin: 0 0 24px; line-height: 1.6; }
+.confirm-icon { color: var(--color-warning); margin-bottom: var(--space-5); }
+.confirm-message { font-size: var(--text-base); color: var(--color-text-primary); margin: 0 0 var(--space-8); line-height: 1.6; }
 /* 明细清单：等宽左对齐，权限声明这类内容需要逐字可核对 */
 .confirm-details {
-  margin: -12px 0 16px; padding: 8px 12px; text-align: left;
+  margin: -12px 0 var(--space-6); padding: var(--space-4) var(--space-5); text-align: left;
   max-height: 180px; overflow-y: auto;
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   list-style: none;
-  font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+  font-family: ui-monospace, Consolas, monospace; font-size: var(--text-sm);
   color: var(--color-text-secondary); line-height: 1.7;
   word-break: break-all;
 }
 .confirm-check {
-  display: flex; align-items: center; gap: 6px; justify-content: center;
-  margin: -8px 0 16px; font-size: 13px; color: var(--color-text-secondary); cursor: pointer;
+  display: flex; align-items: center; gap: var(--space-3); justify-content: center;
+  margin: -8px 0 var(--space-6); font-size: var(--text-md); color: var(--color-text-secondary); cursor: pointer;
 }
-.confirm-footer { display: flex; justify-content: center; gap: 12px; }
-.btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
-  height: 32px; padding: 0 16px; border-radius: var(--radius-sm); font-size: 13px;
+.confirm-footer { display: flex; justify-content: center; gap: var(--space-5); }
+.btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
+  height: 32px; padding: 0 var(--space-6); border-radius: var(--radius-sm); font-size: var(--text-md);
   cursor: pointer; border: none; font-family: inherit;
   transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s; font-weight: 500;
 }

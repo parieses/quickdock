@@ -114,7 +114,7 @@ function close() { emit('cancel') }
         <!-- 场景层 -->
         <ul v-else-if="level === 'scene'" class="picker-list">
           <li v-if="!scenes.length" class="picker-empty">{{ t('sched_picker_no_scene') }}</li>
-          <li v-for="s in scenes" :key="s.id" class="qd-row" @click="pickScene(s)">
+          <li v-key-click v-for="s in scenes" :key="s.id" class="qd-row" @click="pickScene(s)">
             <span class="qd-row-icon"><Layers :size="17" /></span>
             <span class="qd-row-main">
               <span class="qd-row-title">{{ s.name }}</span>
@@ -127,7 +127,7 @@ function close() { emit('cancel') }
         <!-- 集合层 -->
         <ul v-else-if="level === 'collection'" class="picker-list">
           <li v-if="!collections.length" class="picker-empty">{{ t('sched_picker_no_collection') }}</li>
-          <li v-for="c in collections" :key="c.id" class="qd-row" @click="pickCollection(c)">
+          <li v-key-click v-for="c in collections" :key="c.id" class="qd-row" @click="pickCollection(c)">
             <span class="qd-row-icon"><TypeIcon :type="c.type || '目录集合'" :size="17" /></span>
             <span class="qd-row-main">
               <span class="qd-row-title">{{ c.name }}</span>
@@ -140,7 +140,7 @@ function close() { emit('cancel') }
         <!-- 项目层 -->
         <ul v-else class="picker-list">
           <li v-if="!items.length" class="picker-empty">{{ t('sched_picker_no_item') }}</li>
-          <li v-for="it in items" :key="it.id" class="qd-row" @click="chooseItem(it)">
+          <li v-key-click v-for="it in items" :key="it.id" class="qd-row" @click="chooseItem(it)">
             <span class="qd-row-icon">
               <img v-if="it.icon" :src="it.icon" class="item-icon-img" alt="" />
               <TypeIcon v-else :type="it.type" :size="17" />
@@ -178,14 +178,14 @@ h3 {
 }
 .modal-x {
   border: none; background: none; color: var(--color-text-disabled);
-  cursor: pointer; padding: 2px; border-radius: var(--radius-sm); line-height: 0;
+  cursor: pointer; padding: var(--space-1); border-radius: var(--radius-sm); line-height: 0;
 }
 .modal-x:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 
-.crumb { display: flex; align-items: center; gap: 4px; margin: var(--space-3) 0; flex-wrap: wrap; }
+.crumb { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-3) 0; flex-wrap: wrap; }
 .crumb-item {
-  border: none; background: none; padding: 3px 6px; border-radius: var(--radius-sm);
-  font-size: 12px; color: var(--color-text-secondary); cursor: pointer; font-family: inherit;
+  border: none; background: none; padding: 3px var(--space-3); border-radius: var(--radius-sm);
+  font-size: var(--text-sm); color: var(--color-text-secondary); cursor: pointer; font-family: inherit;
 }
 .crumb-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .crumb-item.on { color: var(--color-accent); background: var(--color-accent-bg); }
@@ -193,20 +193,20 @@ h3 {
 
 .picker-body {
   flex: 1; overflow-y: auto; min-height: 140px; max-height: 52vh;
-  border: 1px solid var(--color-border); border-radius: var(--radius-md); margin-top: 2px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-md); margin-top: var(--space-1);
 }
-.picker-list { list-style: none; margin: 0; padding: var(--space-1); display: flex; flex-direction: column; gap: 2px; }
+.picker-list { list-style: none; margin: 0; padding: var(--space-1); display: flex; flex-direction: column; gap: var(--space-1); }
 /* .qd-row 及其子元素（.qd-row-icon/.qd-row-main/.qd-row-title/.qd-row-sub/.qd-row-actions）
    是 panels.css 的公共类，这里只补 picker 特有的交互态 */
 .picker-list .qd-row { cursor: pointer; }
 .item-icon-img { width: 20px; height: 20px; object-fit: contain; border-radius: var(--radius-xs); }
 .picker-empty, .picker-err, .picker-loading {
   padding: var(--space-7) var(--space-2); text-align: center;
-  font-size: 12px; color: var(--color-text-disabled);
+  font-size: var(--text-sm); color: var(--color-text-disabled);
 }
 .picker-err { color: var(--color-danger); }
 .picker-loading .spin {
-  animation: picker-spin 1s linear infinite; vertical-align: -3px; margin-right: 6px;
+  animation: picker-spin 1s linear infinite; vertical-align: -3px; margin-right: var(--space-3);
 }
 @keyframes picker-spin { to { transform: rotate(360deg); } }
 

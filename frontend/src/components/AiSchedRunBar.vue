@@ -110,9 +110,9 @@ const stepText = computed(() => {
 .ai-sched-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 16px;
-  font-size: 12px;
+  gap: var(--space-4);
+  padding: 5px var(--space-6);
+  font-size: var(--text-sm);
   color: var(--color-text-secondary);
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
@@ -134,14 +134,14 @@ const stepText = computed(() => {
 .ai-sched-state {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.ai-sched-state.is-fail { color: var(--color-danger, #e5534b); }
+.ai-sched-state.is-fail { color: var(--color-danger); }
 
 .ai-sched-dot {
   width: 7px;
@@ -161,14 +161,14 @@ const stepText = computed(() => {
 .ai-sched-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   height: 22px;
-  padding: 0 8px;
+  padding: 0 var(--space-4);
   border: 1px solid transparent;
   border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
   transition: color var(--transition-fast), border-color var(--transition-fast),

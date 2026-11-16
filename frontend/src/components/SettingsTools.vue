@@ -7,18 +7,19 @@ import { getErrorMessage } from '../utils/error'
 import { ListTools, CreateTool, UpdateTool, DeleteTool } from '../../bindings/quickdock/services/appservice'
 import type { OpenTool } from '../types'
 import type { ToastAPI } from '../types'
+import { TOOL_TYPES, SENTINEL_TOOL_NAME } from '../constants/itemTypes'
 
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 const props = defineProps<{ visible: boolean }>()
 
 // 可选的工具类型（与后端 EnsureDefaultTools 及 TYPE_TOOL_MAP 保持一致）
-const TOOL_TYPES = [
-  { value: '系统', label: t('toolType_system') },
-  { value: '编辑器', label: t('toolType_editor') },
-  { value: '浏览器', label: t('toolType_browser') },
-  { value: '终端', label: t('toolType_terminal') },
-  { value: 'Office', label: t('toolType_office') },
+const TOOL_TYPE_OPTIONS = [
+  { value: TOOL_TYPES.SYSTEM, label: t('toolType_system') },
+  { value: TOOL_TYPES.EDITOR, label: t('toolType_editor') },
+  { value: TOOL_TYPES.BROWSER, label: t('toolType_browser') },
+  { value: TOOL_TYPES.TERMINAL, label: t('toolType_terminal') },
+  { value: TOOL_TYPES.OFFICE, label: t('toolType_office') },
 ]
 
 const tools = ref<OpenTool[]>([])
@@ -32,11 +33,11 @@ const saving = ref(false)
 const savingError = ref('')
 
 function isSentinel(t: OpenTool): boolean {
-  return t.name === '系统默认' && t.isDefault === 1
+  return t.name === SENTINEL_TOOL_NAME && t.isDefault === 1
 }
 
 function emptyDraft(): OpenTool {
-  return { id: '', name: '', type: '系统', path: '', args: '', isDefault: 0 }
+  return { id: '', name: '', type: TOOL_TYPES.SYSTEM, path: '', args: '', isDefault: 0 }
 }
 
 async function load() {
@@ -53,9 +54,9 @@ async function load() {
   }
 }
 
-// 按类型分组（保持 TOOL_TYPES 顺序）；仅展示有工具的分组
+// 按类型分组（保持 TOOL_TYPE_OPTIONS 顺序）；仅展示有工具的分组
 const groupedTools = computed(() => {
-  return TOOL_TYPES
+  return TOOL_TYPE_OPTIONS
     .map((opt) => ({
       type: opt.value,
       label: opt.value,
@@ -94,7 +95,7 @@ async function save() {
   saving.value = true
   savingError.value = ''
   try {
-    const type = draft.type || '系统'
+    const type = draft.type || TOOL_TYPES.SYSTEM
     const path = draft.path || ''
     const args = draft.args || ''
     if (isNew.value) {
@@ -220,7 +221,7 @@ async function setDefault(tool: OpenTool) {
             <div class="field">
               <label class="field-label">{{ t('toolType') }}</label>
               <select v-model="editing.type" class="field-input">
-                <option v-for="opt in TOOL_TYPES" :key="opt.value" :value="opt.value">
+                <option v-for="opt in TOOL_TYPE_OPTIONS" :key="opt.value" :value="opt.value">
                   {{ opt.label }}
                 </option>
               </select>
@@ -272,37 +273,37 @@ async function setDefault(tool: OpenTool) {
 <style scoped>
 .tool-manage {
   width: 100%;
-  max-width: 720px;
+  max-width: var(--settings-max);
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-6);
 }
 .tool-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-5);
 }
 .tool-title {
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 600;
   color: var(--color-text-primary);
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-2);
 }
 .tool-desc {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-disabled);
   margin: 0;
 }
 .tool-loading,
 .tool-empty {
-  font-size: 13px;
+  font-size: var(--text-md);
   color: var(--color-text-disabled);
-  padding: 24px 0;
+  padding: var(--space-8) 0;
   text-align: center;
 }
 .tool-error {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-danger);
   margin: 0;
 }
@@ -316,25 +317,25 @@ async function setDefault(tool: OpenTool) {
 .tool-group {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-4);
 }
 .tool-group-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 2px;
+  gap: var(--space-4);
+  padding: 0 var(--space-1);
 }
 .tool-group-title {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--color-text-secondary);
   letter-spacing: 0.02em;
 }
 .tool-group-count {
-  font-size: 11px;
+  font-size: var(--text-xs);
   min-width: 18px;
   height: 18px;
-  padding: 0 6px;
+  padding: 0 var(--space-3);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -347,13 +348,13 @@ async function setDefault(tool: OpenTool) {
 .tool-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-4);
 }
 .tool-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: var(--space-5);
+  padding: var(--space-5) 14px;
   background: var(--color-card-bg);
   border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
@@ -369,12 +370,12 @@ async function setDefault(tool: OpenTool) {
 .tool-item-main {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   min-width: 0;
   flex: 1;
 }
 .tool-name {
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 500;
   color: var(--color-text-primary);
   overflow: hidden;
@@ -382,16 +383,16 @@ async function setDefault(tool: OpenTool) {
   white-space: nowrap;
 }
 .tool-type-badge {
-  font-size: 11px;
-  padding: 1px 8px;
+  font-size: var(--text-xs);
+  padding: 1px var(--space-4);
   border-radius: var(--radius-md);
   background: var(--color-bg-active);
   color: var(--color-text-secondary);
   flex-shrink: 0;
 }
 .tool-default-badge {
-  font-size: 11px;
-  padding: 1px 8px;
+  font-size: var(--text-xs);
+  padding: 1px var(--space-4);
   border-radius: var(--radius-md);
   background: var(--color-accent);
   color: var(--color-accent-text);
@@ -406,14 +407,14 @@ async function setDefault(tool: OpenTool) {
   text-align: right;
 }
 .tool-path {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .tool-args {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-disabled);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -421,7 +422,7 @@ async function setDefault(tool: OpenTool) {
 }
 .tool-item-actions {
   display: flex;
-  gap: 2px;
+  gap: var(--space-1);
   align-items: center;
   flex-shrink: 0;
 }
@@ -466,7 +467,7 @@ async function setDefault(tool: OpenTool) {
   max-height: 85vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-pop);
 }
 .tool-modal-header {
   display: flex;
@@ -477,7 +478,7 @@ async function setDefault(tool: OpenTool) {
   flex-shrink: 0;
 }
 .tool-modal-header h3 {
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 600;
   margin: 0;
   color: var(--color-text-primary);
@@ -509,19 +510,19 @@ async function setDefault(tool: OpenTool) {
 }
 .tool-modal-footer {
   display: flex;
-  gap: 8px;
+  gap: var(--space-4);
   justify-content: flex-end;
-  padding: 12px 18px;
+  padding: var(--space-5) 18px;
   border-top: 1px solid var(--color-border);
   flex-shrink: 0;
 }
 .field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-3);
 }
 .field-label {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
   font-weight: 500;
 }
@@ -529,9 +530,9 @@ async function setDefault(tool: OpenTool) {
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  padding: 9px 12px;
+  padding: 9px var(--space-5);
   color: var(--color-text-primary);
-  font-size: 13px;
+  font-size: var(--text-md);
   outline: none;
   transition: border-color 0.15s;
   font-family: inherit;
@@ -542,7 +543,7 @@ async function setDefault(tool: OpenTool) {
   border-color: var(--color-border-focus-soft);
 }
 .field-hint {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-disabled);
   margin: 0;
   line-height: 1.5;
@@ -550,8 +551,8 @@ async function setDefault(tool: OpenTool) {
 .tool-default-toggle {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
+  gap: var(--space-4);
+  font-size: var(--text-md);
   color: var(--color-text-muted);
   cursor: pointer;
 }
@@ -562,12 +563,12 @@ async function setDefault(tool: OpenTool) {
   height: 28px; padding: 0 11px;
   border: none;
   border-radius: var(--radius-sm);
-  font-size: 12px;
+  font-size: var(--text-sm);
   cursor: pointer;
   font-family: inherit;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
 .btn:disabled {

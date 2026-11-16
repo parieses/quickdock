@@ -517,7 +517,7 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px;
+  padding: var(--space-4) 10px;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
@@ -525,15 +525,15 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 .ai-panel-title {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
   font-weight: 500;
   color: var(--color-text-primary);
 }
 
 .ai-panel-head-actions {
   display: flex;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 .ai-panel-icon {
@@ -567,22 +567,22 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
   padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .ai-panel-empty {
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.6;
 }
 
 .ai-panel-empty p {
-  margin: 0 0 6px;
+  margin: 0 0 var(--space-3);
 }
 
 .ai-panel-empty ul {
   margin: 0;
-  padding-left: 16px;
+  padding-left: var(--space-6);
   color: var(--color-text-disabled);
 }
 
@@ -603,20 +603,20 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 }
 
 .ai-panel-empty-tip {
-  margin: 8px 0 0;
-  padding-top: 8px;
+  margin: var(--space-4) 0 0;
+  padding-top: var(--space-4);
   border-top: 1px solid var(--color-border);
   color: var(--color-text-disabled);
 }
 
 .ai-panel-err {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-danger);
   background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border);
   border-radius: var(--radius-sm);
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
   line-height: 1.5;
 }
 
@@ -628,7 +628,7 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
  */
 .ai-panel-answer {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.6;
   color: var(--color-text-primary);
   word-break: break-word;
@@ -636,7 +636,7 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 
 /* markdown 渲染出的块级元素自带 margin，这里统一压平，避免段间距过大。 */
 .ai-panel-answer :deep(p) {
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-2);
 }
 
 .ai-panel-answer :deep(p:last-child) {
@@ -645,7 +645,7 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 
 .ai-panel-answer :deep(ul),
 .ai-panel-answer :deep(ol) {
-  margin: 4px 0;
+  margin: var(--space-2) 0;
   padding-left: 18px;
 }
 
@@ -660,7 +660,7 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 
 .ai-panel-answer :deep(.md-math-block) {
   display: block;
-  margin: 6px 0;
+  margin: var(--space-3) 0;
   overflow-x: auto;
   overflow-y: hidden;
 }
@@ -670,8 +670,8 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 }
 
 .ai-panel-answer :deep(.md-math-raw) {
-  font-family: var(--font-mono, monospace);
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--color-text-secondary);
@@ -689,8 +689,8 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 /* 行内代码：命令名/参数常被模型这样标注，给等宽字体更好认。 */
 .ai-panel-answer :deep(code) {
   font-family: var(--font-mono);
-  font-size: 11px;
-  padding: 1px 4px;
+  font-size: var(--text-xs);
+  padding: 1px var(--space-2);
   border-radius: var(--radius-sm);
   background: var(--color-bg-secondary);
   color: var(--color-accent);
@@ -706,8 +706,8 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 }
 
 .ai-panel-answer :deep(blockquote) {
-  margin: 4px 0;
-  padding: 2px 0 2px 8px;
+  margin: var(--space-2) 0;
+  padding: var(--space-1) 0 var(--space-1) var(--space-4);
   border-left: 2px solid var(--color-border);
   color: var(--color-text-muted);
 }
@@ -718,13 +718,13 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 
 .ai-panel-risk {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.5;
   color: var(--color-danger);
   background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border);
   border-radius: var(--radius-sm);
-  padding: 5px 8px;
+  padding: 5px var(--space-4);
 }
 
 .ai-panel-cmd {
@@ -732,7 +732,7 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  padding: 6px 28px 6px 8px;
+  padding: var(--space-3) 28px var(--space-3) var(--space-4);
 }
 
 .ai-panel-cmd.danger {
@@ -742,7 +742,7 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 .ai-panel-cmd-text {
   display: block;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--color-text-primary);
   word-break: break-all;
@@ -780,14 +780,14 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 .ai-panel-cmd-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-1);
   /* 负偏移让按钮左缘对齐内容文本，而不是缩进在卡片内边距之后 */
-  margin: 4px 0 0 -5px;
+  margin: var(--space-2) 0 0 -5px;
 }
 
 .ai-panel-meta {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-disabled);
 }
 
@@ -795,9 +795,9 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 .ai-panel-result-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-1);
   flex-wrap: wrap;
-  margin: 2px 0 0 -5px;
+  margin: var(--space-1) 0 0 -5px;
 }
 
 /* 流式光标：一个随呼吸闪烁的窄条，比旋转图标更贴近"文字正在长出来"的观感 */
@@ -825,9 +825,9 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 .ai-panel-busy {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
 }
 
@@ -848,24 +848,24 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 .ai-panel-foot {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: var(--space-3);
+  padding: var(--space-4) 10px;
   border-top: 1px solid var(--color-border);
   flex-shrink: 0;
 }
 
 .ai-panel-input-row {
   display: flex;
-  gap: 6px;
+  gap: var(--space-3);
   align-items: flex-end;
 }
 
 .ai-panel-input {
   flex: 1;
   resize: none;
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--color-text-primary);
   background: var(--color-bg-secondary);

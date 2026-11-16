@@ -406,7 +406,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
     </div>
 
     <div v-else class="market-grid">
-      <div v-for="p in filteredPlugins" :key="p.id" class="market-card" @click="openDetail(p)">
+      <div v-key-click v-for="p in filteredPlugins" :key="p.id" class="market-card" @click="openDetail(p)">
         <div class="card-head">
           <img v-if="p.icon" :src="p.icon" class="card-icon" alt="" />
           <Store v-else :size="34" class="card-icon-fallback" />
@@ -430,7 +430,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
         <div class="card-perms" v-if="p.permissions && Object.keys(p.permissions).length">
           <span v-for="k in Object.keys(p.permissions)" :key="k" class="perm-tag">{{ k }}</span>
         </div>
-        <div class="card-actions" @click.stop>
+        <div v-key-click class="card-actions" @click.stop>
           <div v-if="dlState(p)" class="dl-bar">
             <div
               :class="['dl-bar-fill', { indeterminate: !dlState(p)!.total }]"
@@ -565,28 +565,28 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 </template>
 
 <style scoped>
-.market-page { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 10px 20px 16px; }
+.market-page { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 10px var(--space-7) var(--space-6); }
 /* 头部改为 .qd-toolbar（副工具栏），只承担状态 + 操作，不再重复标题 */
 .market-header { padding: 0; box-shadow: none; }
-.market-header-left { display: flex; align-items: center; gap: 8px; }
-.market-header-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
-.market-count { font-size: 11px; color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px 8px; border-radius: var(--radius-xs); }
-.market-updated { font-size: 10px; color: var(--color-text-disabled); margin-left: 4px; }
+.market-header-left { display: flex; align-items: center; gap: var(--space-4); }
+.market-header-actions { margin-left: auto; display: flex; align-items: center; gap: var(--space-3); }
+.market-count { font-size: var(--text-xs); color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px var(--space-4); border-radius: var(--radius-xs); }
+.market-updated { font-size: var(--text-2xs); color: var(--color-text-disabled); margin-left: var(--space-2); }
 .update-all-btn:hover:not(:disabled) { background: var(--color-warning-border); }
 .update-all-btn:disabled { opacity: .7; cursor: default; }
 .filter-chip {
-  display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 10px; border-radius: var(--radius-lg);
+  display: inline-flex; align-items: center; gap: var(--space-2); height: 32px; padding: 0 10px; border-radius: var(--radius-lg);
   border: 1px solid var(--color-border); background: var(--color-bg-secondary);
-  color: var(--color-text-secondary); font-size: 12px; cursor: pointer; white-space: nowrap;
+  color: var(--color-text-secondary); font-size: var(--text-sm); cursor: pointer; white-space: nowrap;
 }
 .filter-chip:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
 .filter-chip.active { background: var(--color-warning-bg); border-color: var(--color-warning-border); color: var(--color-warning); }
 .filter-chip:disabled { opacity: .45; cursor: default; }
 .chip-count {
-  font-size: 10px; padding: 0 6px; border-radius: var(--radius-md); background: var(--color-warning-bg);
-  color: var(--color-warning); font-weight: 700;
+  font-size: var(--text-2xs); padding: 0 var(--space-3); border-radius: var(--radius-md); background: var(--color-warning-bg);
+  color: var(--color-warning); font-weight: 600;
 }
-.market-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.market-toolbar { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
 .market-search {
   display: flex; align-items: center; gap: 7px; flex: 1; min-width: 180px;
   height: 32px; padding: 0 10px; border-radius: var(--radius-sm);
@@ -597,16 +597,16 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .search-icon { flex: none; }
 .market-search-input {
   flex: 1; min-width: 0; border: 0; background: transparent; outline: none;
-  font: inherit; font-size: 13px; color: var(--color-text-primary);
+  font: inherit; font-size: var(--text-md); color: var(--color-text-primary);
 }
 .market-search-input::placeholder { color: var(--color-text-disabled); }
 .market-cat-select {
-  height: 32px; padding: 0 8px; border-radius: var(--radius-sm); cursor: pointer;
+  height: 32px; padding: 0 var(--space-4); border-radius: var(--radius-sm); cursor: pointer;
   border: 1px solid var(--color-border); background: var(--color-bg-secondary);
-  color: var(--color-text-primary); font: inherit; font-size: 13px;
+  color: var(--color-text-primary); font: inherit; font-size: var(--text-md);
 }
 .market-cat-select:focus { outline: none; border-color: var(--color-border-focus-soft); }
-.market-result { font-size: 11px; color: var(--color-text-muted); white-space: nowrap; }
+.market-result { font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap; }
 .market-loading, .market-empty {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 10px; color: var(--color-text-muted);
@@ -622,7 +622,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  margin-bottom: 12px;
+  margin-bottom: var(--space-5);
 }
 .empty-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-secondary); }
 /* 最小三列；主窗口加宽时逐级增加列数。
@@ -634,7 +634,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
       CSS 视口，Zoom 放大后视口比物理宽度小，用物理断点会导致宽窗口也升不了列。
       当前取值以 1.1 档为准——uiZoom 现已是设置项（标准 1 / 较大 1.1 / 超大 1.2，
       默认 1），放大档位下视口更窄、列数更少，标准档下更宽、列数更多，均属预期。 */
-.market-grid { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; gap: 12px; padding-right: 2px; }
+.market-grid { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; gap: var(--space-5); padding-right: var(--space-1); }
 @media (min-width: 1250px) { .market-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (min-width: 1560px) { .market-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
 @media (min-width: 1870px) { .market-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
@@ -648,12 +648,12 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .card-head { display: flex; align-items: flex-start; gap: 10px; }
 .card-icon { width: 36px; height: 36px; border-radius: var(--radius-md); background: var(--color-bg-tertiary); padding: 5px; }
 .card-icon-fallback { color: var(--color-text-muted); }
-.card-title-wrap { flex: 1; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.card-title-wrap { flex: 1; display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
 .card-title { font-size: var(--text-base); font-weight: 600; color: var(--color-text-primary); }
 /* 插件 ID 是无空格的长串（如 io.github.parieses.database），默认不可断行，
    会撑出很大的 min-content 宽度把列顶宽；anywhere 让它在窄列里也能断行。 */
-.card-id { font-size: 10px; color: var(--color-text-disabled); font-family: var(--font-mono, monospace); width: 100%; overflow-wrap: anywhere; }
-.badge { font-size: 10px; padding: 1px 7px; border-radius: var(--radius-md); background: var(--color-accent-bg); color: var(--color-accent); }
+.card-id { font-size: var(--text-2xs); color: var(--color-text-disabled); font-family: var(--font-mono); width: 100%; overflow-wrap: anywhere; }
+.badge { font-size: var(--text-2xs); padding: 1px 7px; border-radius: var(--radius-md); background: var(--color-accent-bg); color: var(--color-accent); }
 .badge-installed { background: var(--color-success-bg); color: var(--color-success); }
 .badge-upgrade { background: var(--color-warning-bg); color: var(--color-warning); }
 /* 描述：固定两行高度（12px × 1.5 × 2 = 36px），卡片等高、按行对齐；
@@ -661,18 +661,18 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
    卡片是 flex column，desc 默认 stretch 到容器宽，但超长无空格词（英文描述/URL）
    仍会撑出这一行，anywhere 与 .card-id 同一处理 */
 .card-desc {
-  font-size: 12px; color: var(--color-text-secondary); line-height: 1.5;
+  font-size: var(--text-sm); color: var(--color-text-secondary); line-height: 1.5;
   min-height: 36px;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden; overflow-wrap: anywhere;
   margin: 0;
 }
-.card-meta { display: flex; gap: 8px; font-size: 11px; color: var(--color-text-muted); }
-.card-perms { display: flex; gap: 4px; flex-wrap: wrap; }
-.perm-tag { font-size: 10px; padding: 1px 6px; border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-muted); }
+.card-meta { display: flex; gap: var(--space-4); font-size: var(--text-xs); color: var(--color-text-muted); }
+.card-perms { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.perm-tag { font-size: var(--text-2xs); padding: 1px var(--space-3); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .card-actions { margin-top: auto; }
 .dl-bar {
-  height: 3px; margin-bottom: 6px; border-radius: var(--radius-xs);
+  height: 3px; margin-bottom: var(--space-3); border-radius: var(--radius-xs);
   background: var(--color-bg-tertiary); overflow: hidden;
 }
 .dl-bar-fill {
@@ -691,7 +691,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
   display: inline-flex; align-items: center; gap: 5px; width: 100%; justify-content: center;
   height: 28px; padding: 0 11px; border-radius: var(--radius-sm); border: 1px solid var(--color-border);
   background: var(--color-bg-tertiary); color: var(--color-text-primary);
-  font-size: 12px; cursor: pointer; transition: all .15s;
+  font-size: var(--text-sm); cursor: pointer; transition: all .15s;
 }
 .action-btn:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
 .action-btn:disabled { opacity: .6; cursor: default; }
@@ -712,16 +712,16 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
   border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg);
   box-shadow: 0 18px 56px var(--color-bg-overlay);
-  padding: 20px 22px;
+  padding: var(--space-7) 22px;
   color: var(--color-text-primary);
 }
 .plugin-detail { position: relative; max-width: 560px; width: 92%; max-height: 82vh; overflow-y: auto; }
 .modal-actions {
-  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
-  margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--color-border);
+  display: flex; align-items: center; justify-content: flex-end; gap: var(--space-4);
+  margin-top: var(--space-6); padding-top: 14px; border-top: 1px solid var(--color-border);
 }
-.op-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
-  font-size: 12px; height: 28px; padding: 0 11px; border-radius: var(--radius-sm); cursor: pointer;
+.op-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
+  font-size: var(--text-sm); height: 28px; padding: 0 11px; border-radius: var(--radius-sm); cursor: pointer;
   border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
   font-family: inherit; transition: background .15s, color .15s; white-space: nowrap;
 }
@@ -730,37 +730,37 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .detail-close {
   position: absolute; top: 10px; right: 12px; width: 26px; height: 26px; border-radius: var(--radius-sm);
   border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
-  color: var(--color-text-muted); cursor: pointer; font-size: 13px; line-height: 1;
+  color: var(--color-text-muted); cursor: pointer; font-size: var(--text-md); line-height: 1;
 }
 .detail-close:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
-.detail-head { display: flex; align-items: center; gap: 12px; padding-right: 30px; }
-.detail-icon { width: 44px; height: 44px; border-radius: var(--radius-md); background: var(--color-bg-tertiary); padding: 6px; }
+.detail-head { display: flex; align-items: center; gap: var(--space-5); padding-right: 30px; }
+.detail-icon { width: 44px; height: 44px; border-radius: var(--radius-md); background: var(--color-bg-tertiary); padding: var(--space-3); }
 .detail-icon-fallback { color: var(--color-text-muted); }
 .detail-titles { min-width: 0; }
-.detail-name-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-.detail-name { font-size: 15px; font-weight: 600; color: var(--color-text-primary); }
-.detail-id { font-size: 10px; color: var(--color-text-disabled); font-family: var(--font-mono, monospace); margin-top: 2px; }
+.detail-name-row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
+.detail-name { font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
+.detail-id { font-size: var(--text-2xs); color: var(--color-text-disabled); font-family: var(--font-mono); margin-top: var(--space-1); }
 .detail-body { display: flex; flex-direction: column; gap: 14px; margin: 14px 0; }
 .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .detail-section { display: flex; flex-direction: column; gap: 5px; }
-.detail-h { font-size: 11px; font-weight: 700; letter-spacing: .3px; color: var(--color-text-disabled); margin: 0; }
-.detail-desc, .detail-meta { font-size: 12px; color: var(--color-text-secondary); line-height: 1.55; margin: 0; white-space: pre-wrap; }
+.detail-h { font-size: var(--text-xs); font-weight: 600; letter-spacing: .3px; color: var(--color-text-disabled); margin: 0; }
+.detail-desc, .detail-meta { font-size: var(--text-sm); color: var(--color-text-secondary); line-height: 1.55; margin: 0; white-space: pre-wrap; }
 .detail-muted { color: var(--color-text-disabled); }
 .detail-tags { display: flex; flex-wrap: wrap; gap: 5px; }
-.detail-tag { font-size: 10px; padding: 2px 8px; border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-secondary); }
-.detail-perms { display: flex; flex-direction: column; gap: 8px; }
-.detail-perm { display: flex; flex-direction: column; gap: 4px; }
-.detail-perm-label { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); }
-.detail-perm-on { font-size: 11px; color: var(--color-success); }
-.detail-tag-path { font-family: var(--font-mono, monospace); word-break: break-all; }
+.detail-tag { font-size: var(--text-2xs); padding: var(--space-1) var(--space-4); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-secondary); }
+.detail-perms { display: flex; flex-direction: column; gap: var(--space-4); }
+.detail-perm { display: flex; flex-direction: column; gap: var(--space-2); }
+.detail-perm-label { font-size: var(--text-xs); font-weight: 600; color: var(--color-text-secondary); }
+.detail-perm-on { font-size: var(--text-xs); color: var(--color-success); }
+.detail-tag-path { font-family: var(--font-mono); word-break: break-all; }
 .detail-changelog {
-  font-size: 11px; line-height: 1.5; color: var(--color-text-secondary);
+  font-size: var(--text-xs); line-height: 1.5; color: var(--color-text-secondary);
   background: var(--color-bg-primary); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  padding: 8px 10px; max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 0;
+  padding: var(--space-4) 10px; max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 0;
 }
-.detail-shots { display: flex; flex-wrap: wrap; gap: 8px; }
+.detail-shots { display: flex; flex-wrap: wrap; gap: var(--space-4); }
 .detail-shot { width: 160px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); }
-.detail-install { width: auto; padding: 7px 16px; text-decoration: none; }
+.detail-install { width: auto; padding: 7px var(--space-6); text-decoration: none; }
 </style>
 
 

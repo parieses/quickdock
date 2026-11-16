@@ -7,6 +7,8 @@ import {
   GetNoteHotkeyConfig, GetScreenshotHotkeyConfig, GetSshHotkeyConfig,
 } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
+import { useToast } from '../composables/useToast'
+import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import type { HotkeyConfig } from '../types'
 
@@ -20,6 +22,7 @@ const emit = defineEmits<{
   (e: 'open-settings', page: string): void
 }>()
 const { t } = useI18n()
+const toast = useToast()
 
 // Esc 关闭：命令面板自己也有 Esc 处理（那边遇备忘单会让路），这里再兜一层，
 // 保证从设置页等非面板场景打开时同样能 Esc 退出。
@@ -107,7 +110,10 @@ async function copyMarkdown() {
     copied.value = true
     if (copyTimer) clearTimeout(copyTimer)
     copyTimer = setTimeout(() => { copied.value = false; copyTimer = null }, 1800)
-  } catch (e) { logErr('CheatSheet:copy', e) }
+  } catch (e) {
+    logErr('CheatSheet:copy', e)
+    toast.error(getErrorMessage(e))
+  }
 }
 
 function goHotkeySettings() {
@@ -194,13 +200,13 @@ function goHotkeySettings() {
   display: flex;
   align-items: flex-start;
   gap: var(--space-4);
-  padding: 14px 16px 12px;
+  padding: 14px var(--space-6) var(--space-5);
   border-bottom: 1px solid var(--color-border);
 }
-.cs-head-icon { color: var(--color-accent); flex-shrink: 0; margin-top: 2px; }
+.cs-head-icon { color: var(--color-accent); flex-shrink: 0; margin-top: var(--space-1); }
 .cs-head-text { flex: 1; min-width: 0; }
-.cs-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--color-text-primary); }
-.cs-desc { margin: 3px 0 0; font-size: 11px; color: var(--color-text-disabled); line-height: 1.5; }
+.cs-title { margin: 0; font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
+.cs-desc { margin: 3px 0 0; font-size: var(--text-xs); color: var(--color-text-disabled); line-height: 1.5; }
 .cs-icon-btn {
   flex-shrink: 0;
   display: inline-flex;
@@ -221,13 +227,13 @@ function goHotkeySettings() {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 4px 16px 12px;
+  padding: var(--space-2) var(--space-6) var(--space-5);
 }
-.cs-group { padding: 10px 0 4px; }
+.cs-group { padding: 10px 0 var(--space-2); }
 .cs-group + .cs-group { border-top: 1px solid var(--color-border); }
 .cs-group-title {
-  margin: 0 0 8px;
-  font-size: 11px;
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--color-text-muted);
   
@@ -243,7 +249,7 @@ function goHotkeySettings() {
 .cs-row-label {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--text-md);
   color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -260,7 +266,7 @@ function goHotkeySettings() {
   height: 24px;
   padding: 0 10px;
   font-family: 'Consolas', ui-monospace, SFMono-Regular, monospace;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   line-height: 1;
   color: var(--color-text-primary);
@@ -273,12 +279,12 @@ function goHotkeySettings() {
 /* 语法样例不是键位，去掉"键帽"的下沿厚度，避免被误读成要按的键 */
 .cs-kbd-sample { border-bottom-width: 1px; background: var(--color-bg-hover); font-weight: 500; }
 .cs-link {
-  margin-top: 6px;
+  margin-top: var(--space-3);
   padding: 0;
   border: none;
   background: transparent;
   color: var(--color-accent);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   cursor: pointer;
 }
@@ -288,19 +294,19 @@ function goHotkeySettings() {
   flex-shrink: 0;
   display: flex;
   justify-content: flex-end;
-  padding: 10px 16px;
+  padding: 10px var(--space-6);
   border-top: 1px solid var(--color-border);
 }
 .cs-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   height: 28px;
   padding: 0 11px;
   border: 1px solid var(--color-border);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   border-radius: var(--radius-sm);
   cursor: pointer;

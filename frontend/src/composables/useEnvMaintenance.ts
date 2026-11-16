@@ -205,7 +205,6 @@ export function useEnvMaintenance(deps: Deps = {}) {
     newPathEntry: '',
     newName: '',
     newValue: '',
-    pendingDelete: '', // 二次确认：同一行再点一次才真的删
     // 就地编辑：后端 EnvUserEnvSetVar 对同名变量就是覆盖，所以「改值」不需要新接口。
     // 之前只能新增/删除，想改一个已存在变量的值，得先删再建——中间那个空档里
     // 依赖它的程序读到的是「变量不存在」。
@@ -297,7 +296,6 @@ export function useEnvMaintenance(deps: Deps = {}) {
   function startEditVar(v: UserEnvVarItem) {
     userEnv.editingName = v.name
     userEnv.editingValue = v.value
-    userEnv.pendingDelete = ''
   }
 
   function cancelEditVar() {
@@ -329,13 +327,9 @@ export function useEnvMaintenance(deps: Deps = {}) {
     }
   }
 
-  // deleteUserVar 两段式：第一次点亮「确认删除」，再点一次才执行。
-  // 删的是系统环境变量，误删会影响其它程序，不值得为省一次点击冒险。
+  // 删除确认统一由调用方（EnvConfigDialogs.confirmDeleteVar）走 toast.confirm，
+  // 这里只负责执行，不再维护「点两次」的 armed 态。
   async function deleteUserVar(name: string) {
-    if (userEnv.pendingDelete !== name) {
-      userEnv.pendingDelete = name
-      return
-    }
     userEnv.saving = true
     userEnv.error = ''
     try {
@@ -346,7 +340,6 @@ export function useEnvMaintenance(deps: Deps = {}) {
       logErr('env/envvar', e)
     } finally {
       userEnv.saving = false
-      userEnv.pendingDelete = ''
     }
   }
 

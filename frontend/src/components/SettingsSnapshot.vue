@@ -308,38 +308,38 @@ function formatDate(iso: string): string {
 /* 新样式只写在本 SFC 的 scoped 块里，不动全局 settings.css / style.css。
    颜色、圆角、字体一律复用项目已有的 CSS token。 */
 .snapshot-settings {
-  margin-bottom: 16px; padding: 12px 14px;
+  margin-bottom: var(--space-6); padding: var(--space-5) 14px;
   background: var(--color-card-bg); border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
 }
-.snapshot-settings-title { font-size: 13px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 10px; }
-.snapshot-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
-.snapshot-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.snapshot-field-label { font-size: 12px; color: var(--color-text-secondary); }
-.snapshot-settings-hint { font-size: 11px; color: var(--color-text-disabled); margin: 8px 0 0; line-height: 1.5; }
+.snapshot-settings-title { font-size: var(--text-md); font-weight: 500; color: var(--color-text-primary); margin-bottom: 10px; }
+.snapshot-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px var(--space-5); }
+.snapshot-field { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.snapshot-field-label { font-size: var(--text-sm); color: var(--color-text-secondary); }
+.snapshot-settings-hint { font-size: var(--text-xs); color: var(--color-text-disabled); margin: var(--space-4) 0 0; line-height: 1.5; }
 .snapshot-settings-save { margin-top: 10px; }
 
 .snapshot-preview {
-  margin: -2px 0 4px; padding: 10px 14px;
+  margin: -2px 0 var(--space-2); padding: 10px 14px;
   background: var(--color-card-bg); border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
 }
-.snapshot-preview-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.snapshot-preview-title { font-size: 12px; font-weight: 500; color: var(--color-text-primary); }
+.snapshot-preview-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-4); }
+.snapshot-preview-title { font-size: var(--text-sm); font-weight: 500; color: var(--color-text-primary); }
 .snapshot-preview-close {
   display: flex; align-items: center; justify-content: center;
   width: 22px; height: 22px; border: none; background: transparent;
   color: var(--color-text-muted); border-radius: var(--radius-sm); cursor: pointer;
 }
 .snapshot-preview-close:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.snapshot-preview-empty { font-size: 12px; color: var(--color-text-disabled); margin: 0; }
-.snapshot-module-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 16px; }
+.snapshot-preview-empty { font-size: var(--text-sm); color: var(--color-text-disabled); margin: 0; }
+.snapshot-module-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2) var(--space-6); }
 .snapshot-module-row {
   display: flex; align-items: center; justify-content: space-between;
-  font-size: 12px; padding: 2px 0; border-bottom: 1px solid var(--color-border);
+  font-size: var(--text-sm); padding: var(--space-1) 0; border-bottom: 1px solid var(--color-border);
 }
 .snapshot-module-name { color: var(--color-text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.snapshot-module-count { color: var(--color-text-primary); font-variant-numeric: tabular-nums; font-family: var(--font-mono, monospace); }
+.snapshot-module-count { color: var(--color-text-primary); font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
 .snapshot-module-total { border-bottom: none; font-weight: 500; }
 .snapshot-module-total .snapshot-module-name { color: var(--color-text-primary); }
 </style>

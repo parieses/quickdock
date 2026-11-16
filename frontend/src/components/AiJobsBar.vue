@@ -83,13 +83,13 @@ function formatDuration(ms: number): string {
   gap: 7px;
   width: var(--ai-column-w);
   min-width: 0;
-  margin: 0 auto 6px;
+  margin: 0 auto var(--space-3);
   padding: 5px 10px;
   border: none;
   border-radius: var(--radius-sm);
   background: var(--color-bg-secondary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-secondary);
   text-align: left;
   cursor: pointer;
@@ -127,7 +127,7 @@ function formatDuration(ms: number): string {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-primary);
 }
 

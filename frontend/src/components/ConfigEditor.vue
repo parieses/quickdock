@@ -131,7 +131,7 @@ defineExpose({ markSaved, focus })
   min-height: 0;
   display: flex;
   flex-direction: column;
-  margin: 12px 18px 0;
+  margin: var(--space-5) 18px 0;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--color-bg-primary);
@@ -153,7 +153,7 @@ defineExpose({ markSaved, focus })
   padding: 5px 10px;
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-tertiary);
-  font-size: 11px; color: var(--color-text-muted);
+  font-size: var(--text-xs); color: var(--color-text-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .ce-st-sep { color: var(--color-text-disabled); }

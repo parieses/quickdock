@@ -10,6 +10,7 @@ import { EnvList, EnvSetActive, EnvProjectVersions } from '../../bindings/quickd
 import AppTargetPicker from './AppTargetPicker.vue'
 import EntityLinkPicker from './EntityLinkPicker.vue'
 import type { CollectionItem, OpenTool, EnvRuntimeInfo, ToastAPI } from '../types';
+import { ITEM_TYPE, ITEM_TYPES } from '../constants/itemTypes'
 
 const { t, tm } = useI18n()
 
@@ -27,7 +28,9 @@ const emit = defineEmits<{
 }>();
 
 const name = ref('');
-const type = ref('目录');
+// 显式放宽到 string：items.type 在 DB 里是自由文本（见 constants/itemTypes.ts），
+// 写成 ref(ITEM_TYPE.DIR) 会被推断成字面量类型 "目录"，后续赋值与其它类型比较都会报错。
+const type = ref<string>(ITEM_TYPE.DIR);
 const value = ref('');
 const remark = ref('');
 const toolId = ref('');
@@ -88,9 +91,8 @@ const toolOptions = computed(() => {
 })
 
 const itemTypeOptions = computed(() => {
-  const types = ['目录', '网页', '命令', '文件', '应用', '快速链接']
   const labels = tm('itemTypes') as Record<string, string>
-  return types.map(v => ({ label: labels[v] || v, value: v }))
+  return ITEM_TYPES.map(v => ({ label: labels[v] || v, value: v }))
 })
 
 // ---- 项目级版本切换 ----
@@ -114,7 +116,7 @@ const addRuntime = ref('')
 const addVersion = ref('')
 
 // 项目目录：目录型条目取 value，其余取工作目录——两者都没有就没什么可探测的。
-const projectDir = computed(() => (type.value === '目录' ? value.value : workingDirectory.value || '').trim())
+const projectDir = computed(() => (type.value === ITEM_TYPE.DIR ? value.value : workingDirectory.value || '').trim())
 
 const runtimesWithInstalls = computed(() => runtimes.value.filter(r => r.installed.length > 0))
 
@@ -225,7 +227,7 @@ function envJSON(): string {
 watch(() => [props.visible, props.item], ([v]) => {
   if (v) {
     name.value = props.item?.name ?? '';
-    type.value = props.item?.type ?? '目录';
+    type.value = props.item?.type ?? ITEM_TYPE.DIR;
     value.value = props.item?.value ?? '';
     remark.value = props.item?.remark ?? '';
     toolId.value = props.item?.toolId ?? '';
@@ -245,7 +247,7 @@ watch(() => [props.visible, props.item], ([v]) => {
 });
 
 watch(type, (newType) => {
-  if (newType === '快速链接' && !value.value.includes('{query}')) {
+  if (newType === ITEM_TYPE.LINK && !value.value.includes('{query}')) {
     // 自动补成「协议 + 域名 + {query}」的示例，但不能无脑拼前缀：
     // 用户填的常常已经是完整地址（https://a.com/search?q=），再拼一次就变成
     // https://https://a.com/search?q={query}，点了直接打不开。
@@ -327,9 +329,9 @@ function onKeydown(e: KeyboardEvent) {
             </label>
             <label class="field">
               <span class="field-label">{{ t('itemValue') }}</span>
-              <AppTargetPicker v-if="type === '应用'" v-model="value" :placeholder="t('itemValue')" />
-              <input v-else v-model="value" type="text" :placeholder="type === '网页' ? 'https://...' : type === '快速链接' ? t('quicklinkUrlPlaceholder') : t('itemValue')" class="field-input" />
-              <p class="field-hint">{{ type === '快速链接' ? t('quicklinkDesc') : t('itemValueHint') }}</p>
+              <AppTargetPicker v-if="type === ITEM_TYPE.APP" v-model="value" :placeholder="t('itemValue')" />
+              <input v-else v-model="value" type="text" :placeholder="type === ITEM_TYPE.URL ? 'https://...' : type === ITEM_TYPE.LINK ? t('quicklinkUrlPlaceholder') : t('itemValue')" class="field-input" />
+              <p class="field-hint">{{ type === ITEM_TYPE.LINK ? t('quicklinkDesc') : t('itemValueHint') }}</p>
             </label>
             <label class="field">
               <span class="field-label">{{ t('workingDir') }}</span>
@@ -457,41 +459,41 @@ function onKeydown(e: KeyboardEvent) {
 }
 .editor-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 20px; border-bottom: 1px solid var(--color-border);
+  padding: var(--space-6) var(--space-7); border-bottom: 1px solid var(--color-border);
 }
-.editor-title { font-size: 15px; font-weight: 600; color: var(--color-text-primary); }
+.editor-title { font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
 .editor-close {
   background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
   width: 28px; height: 28px; border-radius: var(--radius-sm);
-  display: flex; align-items: center; justify-content: center; font-size: 18px;
+  display: flex; align-items: center; justify-content: center; font-size: var(--text-xl);
 }
 .editor-close:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .editor-body {
-  flex: 1; overflow-y: auto; padding: 20px;
-  display: flex; flex-direction: column; gap: 16px;
+  flex: 1; overflow-y: auto; padding: var(--space-7);
+  display: flex; flex-direction: column; gap: var(--space-6);
 }
-.field { display: flex; flex-direction: column; gap: 6px; }
-.field-label { font-size: 12px; font-weight: 600; color: var(--color-text-muted); }
+.field { display: flex; flex-direction: column; gap: var(--space-3); }
+.field-label { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-muted); }
 .field-input {
-  padding: 8px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  padding: var(--space-4) var(--space-5); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-primary);
-  font-size: 13px; font-family: inherit; outline: none; transition: border-color 0.12s;
+  font-size: var(--text-md); font-family: inherit; outline: none; transition: border-color 0.12s;
 }
 .field-input:focus { border-color: var(--color-border-focus-soft); }
 .field-input.input-error { border-color: var(--color-danger); }
 .field-input::placeholder { color: var(--color-text-disabled); }
 .field-textarea {
   resize: vertical; min-height: 60px;
-  padding: 8px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  padding: var(--space-4) var(--space-5); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-primary);
-  font-size: 13px; font-family: inherit; outline: none;
+  font-size: var(--text-md); font-family: inherit; outline: none;
 }
 .field-textarea:focus { border-color: var(--color-border-focus-soft); }
-.field-error { font-size: 11px; color: var(--color-danger); margin-top: 2px; }
-.field-hint { font-size: 11px; color: var(--color-text-disabled); margin-top: 2px; }
+.field-error { font-size: var(--text-xs); color: var(--color-danger); margin-top: var(--space-1); }
+.field-hint { font-size: var(--text-xs); color: var(--color-text-disabled); margin-top: var(--space-1); }
 
 /* 外观行：颜色 + 自定义图标（都是可选，默认不占视觉重量） */
-.appearance-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.appearance-row { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
 .color-input {
   width: 32px; height: 24px; padding: 0; cursor: pointer;
   border: 1px solid var(--color-border); border-radius: var(--radius-xs);
@@ -508,34 +510,34 @@ function onKeydown(e: KeyboardEvent) {
 /* 项目环境：探测到的版本要求 + 全局切换/仅本项目绑定 */
 .project-env {
   border: 1px solid var(--color-border); border-radius: var(--radius-md);
-  padding: 10px 12px; background: var(--color-bg-tertiary); gap: 8px;
+  padding: 10px var(--space-5); background: var(--color-bg-tertiary); gap: var(--space-4);
 }
 .project-env-head { display: flex; align-items: center; justify-content: space-between; }
-.env-row { display: flex; flex-direction: column; gap: 4px; padding: 6px 0; border-top: 1px solid var(--color-border); }
-.env-row-main { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; }
+.env-row { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) 0; border-top: 1px solid var(--color-border); }
+.env-row-main { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); font-size: var(--text-sm); }
 .env-rt { font-weight: 600; color: var(--color-text-primary); }
 .env-req { color: var(--color-text-muted); }
-.env-tag { padding: 1px 6px; border-radius: var(--radius-xs); font-size: 11px; }
+.env-tag { padding: 1px var(--space-3); border-radius: var(--radius-xs); font-size: var(--text-xs); }
 .env-tag.ok { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .env-tag.bad { background: var(--color-danger); color: var(--color-accent-text); }
-.env-active { color: var(--color-text-disabled); font-size: 11px; }
-.env-row-actions { display: flex; align-items: center; gap: 8px; }
-.env-add { display: flex; align-items: center; gap: 6px; padding-top: 6px; border-top: 1px solid var(--color-border); }
-.env-add-select { flex: 1; padding: 4px 8px; font-size: 12px; }
-.env-select { padding: 3px 6px; font-size: 11px; border: 1px solid var(--color-border); border-radius: var(--radius-xs); background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.env-active { color: var(--color-text-disabled); font-size: var(--text-xs); }
+.env-row-actions { display: flex; align-items: center; gap: var(--space-4); }
+.env-add { display: flex; align-items: center; gap: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--color-border); }
+.env-add-select { flex: 1; padding: var(--space-2) var(--space-4); font-size: var(--text-sm); }
+.env-select { padding: 3px var(--space-3); font-size: var(--text-xs); border: 1px solid var(--color-border); border-radius: var(--radius-xs); background: var(--color-bg-tertiary); color: var(--color-text-primary); }
 .link-btn {
-  background: none; border: none; padding: 0; font-size: 12px; font-family: inherit;
+  background: none; border: none; padding: 0; font-size: var(--text-sm); font-family: inherit;
   color: var(--color-accent); cursor: pointer;
 }
 .link-btn:hover:not(:disabled) { text-decoration: underline; }
 .link-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 .link-btn.active { color: var(--color-text-primary); font-weight: 600; }
 .editor-footer {
-  display: flex; justify-content: flex-end; gap: 8px;
-  padding: 14px 20px; border-top: 1px solid var(--color-border);
+  display: flex; justify-content: flex-end; gap: var(--space-4);
+  padding: 14px var(--space-7); border-top: 1px solid var(--color-border);
 }
-.btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
-  height: 32px; padding: 0 16px; border: none; border-radius: var(--radius-sm); font-size: 13px;
+.btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
+  height: 32px; padding: 0 var(--space-6); border: none; border-radius: var(--radius-sm); font-size: var(--text-md);
   cursor: pointer; font-family: inherit; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
 .btn-cancel { background: var(--color-bg-active); color: var(--color-text-muted); }

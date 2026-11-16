@@ -4,6 +4,9 @@ import { useI18n } from 'vue-i18n'
 import { Bell, BellOff, CheckCheck, Trash2, X, Search } from '@lucide/vue'
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
+import { useToast } from '../composables/useToast'
+import { getErrorMessage } from '../utils/error'
+import { logErr } from '../utils/logger'
 // 页面跳转统一复用 bridge 的 navigateTo / pendingTarget 深链，不再走组件自定义
 // emit('navigate') 那条事件链：后者只能切页、带不了 refId，还得绕过 Sidebar 转发一次。
 import { navigate, navigateTo, pendingOpenTodoId } from '../composables/bridge'
@@ -29,6 +32,7 @@ interface NotifyItem {
 }
 
 const { t } = useI18n()
+const toast = useToast()
 const emit = defineEmits<{
   // 保留 'navigate' 声明仅为兼容 Sidebar 现有的 @navigate 监听（本组件已不再触发它）：
   // 切页改走 bridge 的 navigateTo，好把 refId 一并挂到 pendingTarget 深链上。
@@ -48,6 +52,9 @@ const search = ref('')
 // 用它动态生成类型标签，新增 kind 不必再改前端硬编码列表。
 const backendKinds = ref<string[]>([])
 const loading = ref(false)
+/** 写操作防连点：markAll / clearAll / removeOne / 标已读共用一个闸，
+    避免同一条通知被并发写、或清空与标记已读互相踩。 */
+const busy = ref(false)
 
 // 定位：面板挂在侧栏底部，从按钮右侧弹出。
 // 用 fixed + 实时量按钮位置，而不是把它塞进侧栏 DOM——侧栏是 overflow:hidden，
@@ -207,58 +214,83 @@ function resolveTarget(n: NotifyItem): NavTarget | null {
 }
 
 async function activate(n: NotifyItem) {
-  if (!n.read) {
-    n.read = true
-    unread.value = Math.max(0, unread.value - 1)
-    try { unwrap(await NotifyMarkRead(n.id)) } catch { /* ignore */ }
-  }
-  close()
-  const dest = resolveTarget(n)
-  if (!dest) return
-  if ('settingsPage' in dest) { emit('open-settings', dest.settingsPage); return }
-  // 待办页已有 pendingOpenTodoId 深链（滚动 + 高亮），复用它能真正落到那一条；
-  // 其余页统一用 bridge 的 navigateTo 把 refId 挂到 pendingTarget，目标页 watch 取走。
-  if (dest.page === 'todo') {
-    pendingOpenTodoId.value = dest.target
-    navigate('todo')
-  } else {
-    navigateTo(dest.page, dest.target)
+  if (busy.value) return
+  busy.value = true
+  try {
+    if (!n.read) {
+      const prevUnread = unread.value
+      n.read = true
+      unread.value = Math.max(0, unread.value - 1)
+      try { unwrap(await NotifyMarkRead(n.id)) } catch (e) {
+        // 后端没标上已读就把乐观更新回滚，否则刷新后红点又回来且没有任何解释。
+        n.read = false
+        unread.value = prevUnread
+        logErr('notify.markRead', e)
+        toast.error(getErrorMessage(e))
+      }
+    }
+    close()
+    const dest = resolveTarget(n)
+    if (!dest) return
+    if ('settingsPage' in dest) { emit('open-settings', dest.settingsPage); return }
+    // 待办页已有 pendingOpenTodoId 深链（滚动 + 高亮），复用它能真正落到那一条；
+    // 其余页统一用 bridge 的 navigateTo 把 refId 挂到 pendingTarget，目标页 watch 取走。
+    if (dest.page === 'todo') {
+      pendingOpenTodoId.value = dest.target
+      navigate('todo')
+    } else {
+      navigateTo(dest.page, dest.target)
+    }
+  } finally {
+    busy.value = false
   }
 }
 
 async function markAll() {
+  if (busy.value) return
+  busy.value = true
   try {
     unwrap(await NotifyMarkAllRead())
     items.value = items.value.map((n) => ({ ...n, read: true }))
     unread.value = 0
-  } catch { /* ignore */ }
+  } catch (e) {
+    logErr('notify.markAll', e)
+    toast.error(getErrorMessage(e))
+  } finally {
+    busy.value = false
+  }
 }
 
-// 清空点两次：不可逆，但也不珍贵，不值得弹模态框打断。
-const clearArmed = ref(false)
-let clearTimer: ReturnType<typeof setTimeout> | null = null
+// 清空不可逆：走一次 toast.confirm，不再用「点两次」的组件内 armed 态。
 async function clearAll() {
-  if (!clearArmed.value) {
-    clearArmed.value = true
-    if (clearTimer) clearTimeout(clearTimer)
-    clearTimer = setTimeout(() => { clearArmed.value = false }, 3000)
-    return
-  }
-  if (clearTimer) clearTimeout(clearTimer)
-  clearArmed.value = false
+  if (busy.value) return
+  if (!(await toast.confirm(t('ncClearConfirm')))) return
+  busy.value = true
   try {
     unwrap(await NotifyClear())
     items.value = []
     unread.value = 0
-  } catch { /* ignore */ }
+  } catch (e) {
+    logErr('notify.clearAll', e)
+    toast.error(getErrorMessage(e))
+  } finally {
+    busy.value = false
+  }
 }
 
 async function removeOne(n: NotifyItem) {
+  if (busy.value) return
+  busy.value = true
   try {
     unwrap(await NotifyDelete(n.id))
     items.value = items.value.filter((x) => x.id !== n.id)
     if (!n.read) unread.value = Math.max(0, unread.value - 1)
-  } catch { /* ignore */ }
+  } catch (e) {
+    logErr('notify.removeOne', e)
+    toast.error(getErrorMessage(e))
+  } finally {
+    busy.value = false
+  }
 }
 
 // 新通知到达：后端每次写入都会发 notify:new，这里就地插入，
@@ -281,7 +313,6 @@ onUnmounted(() => {
   if (offNew) { offNew(); offNew = null }
   window.removeEventListener('resize', placePanel)
   document.removeEventListener('mousedown', onDocDown, true)
-  if (clearTimer) clearTimeout(clearTimer)
 })
 
 // 面板打开时锁住滚动位置无意义（面板自身滚动），但窗口缩放要重新贴合按钮
@@ -313,7 +344,7 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
           <span v-if="hasUnread" class="nc-head-count">{{ unread }}</span>
           <button
             class="nc-icon-btn"
-            :disabled="!hasUnread"
+            :disabled="!hasUnread || busy"
             :title="t('ncMarkAll')"
             @click="markAll"
           >
@@ -321,8 +352,8 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
           </button>
           <button
             class="nc-icon-btn"
-            :class="{ armed: clearArmed }"
-            :title="clearArmed ? t('ncClearConfirm') : t('ncClear')"
+            :disabled="busy"
+            :title="t('ncClear')"
             @click="clearAll"
           >
             <Trash2 :size="14" />
@@ -363,6 +394,7 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
             :key="n.id"
             class="nc-item"
             :class="[`lv-${n.level}`, { unread: !n.read }]"
+            :disabled="busy"
             @click="activate(n)"
           >
             <span class="nc-item-bar" />
@@ -420,7 +452,7 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
      通知里大部分是「完成任务」，全用红色会和角标的语义脱节。 */
   background: var(--color-accent);
   color: var(--color-accent-text);
-  font-size: 10px; font-weight: 700; line-height: 1;
+  font-size: var(--text-2xs); font-weight: 600; line-height: 1;
   font-variant-numeric: tabular-nums;
   box-shadow: 0 0 0 1.5px var(--color-bg-secondary);
 }
@@ -439,16 +471,16 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
 }
 
 .nc-head {
-  display: flex; align-items: center; gap: 6px;
-  padding: 10px 10px 8px 14px;
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: 10px 10px var(--space-4) 14px;
   border-bottom: 1px solid var(--color-border);
 }
-.nc-head-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
+.nc-head-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
 .nc-head-count {
   min-width: 17px; height: 17px; padding: 0 5px; margin-right: auto;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: var(--radius-md); background: var(--color-danger-bg); color: var(--color-danger-text);
-  font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs); font-weight: 600; font-variant-numeric: tabular-nums;
 }
 .nc-icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
@@ -459,14 +491,13 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
 }
 .nc-icon-btn:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .nc-icon-btn:disabled { opacity: 0.35; cursor: default; }
-.nc-icon-btn.armed { color: var(--color-danger-text); background: var(--color-danger-bg); }
 
-.nc-filters { display: flex; gap: 4px; padding: 8px 12px; flex-wrap: wrap; }
+.nc-filters { display: flex; gap: var(--space-2); padding: var(--space-4) var(--space-5); flex-wrap: wrap; }
 .nc-chip {
   height: 22px; padding: 0 9px;
   border: 1px solid var(--color-border); border-radius: var(--radius-lg);
   background: transparent; color: var(--color-text-muted);
-  font-family: inherit; font-size: 11px; cursor: pointer;
+  font-family: inherit; font-size: var(--text-xs); cursor: pointer;
   transition: all var(--transition-fast);
 }
 .nc-chip:hover { color: var(--color-text-primary); border-color: var(--color-accent-border); }
@@ -475,22 +506,22 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
   color: var(--color-accent);
 }
 .nc-chip-count {
-  margin-left: 4px; font-size: 10px; opacity: 0.72;
+  margin-left: var(--space-2); font-size: var(--text-2xs); opacity: 0.72;
   font-variant-numeric: tabular-nums;
 }
 /* 未读与类型是两个独立维度，用竖线隔开，避免被读成同一组互斥单选项 */
-.nc-sep { width: 1px; align-self: stretch; margin: 2px 3px; background: var(--color-border); }
+.nc-sep { width: 1px; align-self: stretch; margin: var(--space-1) 3px; background: var(--color-border); }
 
 .nc-searchbar {
-  display: flex; align-items: center; gap: 6px;
-  margin: 0 12px 8px; padding: 0 8px; height: 26px;
+  display: flex; align-items: center; gap: var(--space-3);
+  margin: 0 var(--space-5) var(--space-4); padding: 0 var(--space-4); height: 26px;
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   color: var(--color-text-muted);
 }
 .nc-search-input {
   flex: 1; min-width: 0;
   border: none; outline: none; background: transparent;
-  font-family: inherit; font-size: 11px; color: var(--color-text-primary);
+  font-family: inherit; font-size: var(--text-xs); color: var(--color-text-primary);
 }
 .nc-search-input::placeholder { color: var(--color-text-disabled); }
 .nc-search-clear {
@@ -501,12 +532,12 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
 }
 .nc-search-clear:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 
-.nc-list { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+.nc-list { flex: 1; overflow-y: auto; padding: 0 var(--space-4) var(--space-4); }
 
 .nc-item {
   position: relative;
   display: flex; align-items: stretch; gap: 0;
-  width: 100%; padding: 9px 8px 9px 12px; margin-bottom: 2px;
+  width: 100%; padding: 9px var(--space-4) 9px var(--space-5); margin-bottom: var(--space-1);
   border: none; border-radius: var(--radius-sm);
   background: transparent; color: inherit; text-align: left; cursor: pointer;
   transition: background var(--transition-fast);
@@ -516,32 +547,32 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
    整行变色时一屏 8 条全是未读，看着像全是错误。 */
 .nc-item-bar {
   position: absolute; left: 3px; top: 10px; bottom: 10px;
-  width: 2px; border-radius: 1px; background: transparent;
+  width: 2px; border-radius: var(--radius-xs); background: transparent;
 }
 .nc-item.unread .nc-item-bar { background: var(--color-accent); }
 .nc-item.lv-error .nc-item-bar { background: var(--color-danger); }
 .nc-item.lv-warn .nc-item-bar { background: var(--color-warning); }
 .nc-item.lv-success .nc-item-bar { background: var(--color-success); }
 
-.nc-item-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.nc-item-top { display: flex; align-items: center; gap: 6px; }
+.nc-item-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.nc-item-top { display: flex; align-items: center; gap: var(--space-3); }
 .nc-kind {
-  font-size: 10px; padding: 0 5px; height: 15px; line-height: 15px;
+  font-size: var(--text-2xs); padding: 0 5px; height: 15px; line-height: 15px;
   border-radius: var(--radius-xs);
   background: var(--color-bg-tertiary); color: var(--color-text-muted);
 }
-.nc-time { font-size: 10px; color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
+.nc-time { font-size: var(--text-2xs); color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
 .nc-dot {
   margin-left: auto; width: 6px; height: 6px; border-radius: 50%;
   background: var(--color-accent);
 }
 .nc-item-title {
-  font-size: 12px; color: var(--color-text-secondary); line-height: 1.45;
+  font-size: var(--text-sm); color: var(--color-text-secondary); line-height: 1.45;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .nc-item.unread .nc-item-title { color: var(--color-text-primary); font-weight: 500; }
 .nc-item-body {
-  font-size: 11px; color: var(--color-text-disabled); line-height: 1.5;
+  font-size: var(--text-xs); color: var(--color-text-disabled); line-height: 1.5;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden; white-space: pre-wrap;
 }
@@ -557,7 +588,7 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
 .nc-del:hover { color: var(--color-danger-text); background: var(--color-danger-bg); }
 
 .nc-empty {
-  display: flex; flex-direction: column; align-items: center; gap: 8px;
-  padding: 44px 0; color: var(--color-text-disabled); font-size: 12px;
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-4);
+  padding: 44px 0; color: var(--color-text-disabled); font-size: var(--text-sm);
 }
 </style>

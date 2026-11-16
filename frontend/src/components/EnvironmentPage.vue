@@ -279,6 +279,9 @@ function runtimeName(id: string): string {
 // 每个运行时的官方品牌图标（内联 SVG，白色填充，配合上方品牌色圆形背景）。
 // 32×32 viewBox；cat-avatar 28px / detail-avatar 40px 都可直接缩放。
 // 选 simple-icons 风格的极简版本，单色易识别。
+// 【例外说明】这些是第三方图形资源（simple-icons 路径数据），fill="#fff" 是
+// 字形本身的颜色、要压在品牌色圆底上，不是 UI 色值，不进 --color-* token；
+// 而且 SVG 以字符串形式塞进 v-html，改 CSS 变量也穿不进去。全仓 CSS 收敛跳过本段。
 // AUTO-GENERATED official brand icons (simple-icons)
 const RUNTIME_ICONS: Record<string, string> = {
   node: '<svg viewBox="0 0 24 24" fill="#fff" xmlns="http://www.w3.org/2000/svg"><path d="M11.998,24c-0.321,0-0.641-0.084-0.922-0.247l-2.936-1.737c-0.438-0.245-0.224-0.332-0.08-0.383 c0.585-0.203,0.703-0.25,1.328-0.604c0.065-0.037,0.151-0.023,0.218,0.017l2.256,1.339c0.082,0.045,0.197,0.045,0.272,0l8.795-5.076 c0.082-0.047,0.134-0.141,0.134-0.238V6.921c0-0.099-0.053-0.192-0.137-0.242l-8.791-5.072c-0.081-0.047-0.189-0.047-0.271,0 L3.075,6.68C2.99,6.729,2.936,6.825,2.936,6.921v10.15c0,0.097,0.054,0.189,0.139,0.235l2.409,1.392 c1.307,0.654,2.108-0.116,2.108-0.89V7.787c0-0.142,0.114-0.253,0.256-0.253h1.115c0.139,0,0.255,0.112,0.255,0.253v10.021 c0,1.745-0.95,2.745-2.604,2.745c-0.508,0-0.909,0-2.026-0.551L2.28,18.675c-0.57-0.329-0.922-0.945-0.922-1.604V6.921 c0-0.659,0.353-1.275,0.922-1.603l8.795-5.082c0.557-0.315,1.296-0.315,1.848,0l8.794,5.082c0.57,0.329,0.924,0.944,0.924,1.603 v10.15c0,0.659-0.354,1.273-0.924,1.604l-8.794,5.078C12.643,23.916,12.324,24,11.998,24z M19.099,13.993 c0-1.9-1.284-2.406-3.987-2.763c-2.731-0.361-3.009-0.548-3.009-1.187c0-0.528,0.235-1.233,2.258-1.233 c1.807,0,2.473,0.389,2.747,1.607c0.024,0.115,0.129,0.199,0.247,0.199h1.141c0.071,0,0.138-0.031,0.186-0.081 c0.048-0.054,0.074-0.123,0.067-0.196c-0.177-2.098-1.571-3.076-4.388-3.076c-2.508,0-4.004,1.058-4.004,2.833 c0,1.925,1.488,2.457,3.895,2.695c2.88,0.282,3.103,0.703,3.103,1.269c0,0.983-0.789,1.402-2.642,1.402 c-2.327,0-2.839-0.584-3.011-1.742c-0.02-0.124-0.126-0.215-0.253-0.215h-1.137c-0.141,0-0.254,0.112-0.254,0.253 c0,1.482,0.806,3.248,4.655,3.248C17.501,17.007,19.099,15.91,19.099,13.993z"/></svg>',
@@ -313,7 +316,8 @@ const RUNTIME_ICONS: Record<string, string> = {
   mkcert: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/></svg>',
 }
 function avatarIcon(id: string): string {
-  return RUNTIME_ICONS[id] || `<span style="font-size:13px">${(id[0] || '?').toUpperCase()}</span>`
+  // v-html 注入的内容没有 scoped 的 data-v 属性，样式必须走全局类（styles/app.css）。
+  return RUNTIME_ICONS[id] || `<span class="qd-runtime-fallback">${(id[0] || '?').toUpperCase()}</span>`
 }
 
 // 运行时目录是写死的（与后端 services/env/source.go registry 一一对应）：
@@ -1943,7 +1947,7 @@ const dialogCtx = reactive({
               </div>
               <div v-for="s in httpServers" :key="s.id" class="ver-row">
                 <div class="col-ver"><span class="ver-ver">{{ s.name }}</span></div>
-                <div class="col-path clickable" :title="t('openInExplorer') + ': ' + s.dir" @click="reveal(s.dir)">{{ s.dir }}</div>
+                <div v-key-click class="col-path clickable" :title="t('openInExplorer') + ': ' + s.dir" @click="reveal(s.dir)">{{ s.dir }}</div>
                 <div class="col-env">
                   <span class="env-badge" :class="httpRunning[s.id] ? 'on' : 'off'">{{ httpRunning[s.id] ? t('httpRunning') : t('httpStopped') }}</span>
                   <a
@@ -2271,7 +2275,7 @@ const dialogCtx = reactive({
                 <span class="status-dot" :class="row.status"></span>{{ row.status }}
               </span>
               <span class="g-cmd"><code>{{ row.command }}</code></span>
-              <span class="g-path clickable" v-if="row.path" :title="t('openInExplorer') + ': ' + row.path" @click="reveal(row.path)">{{ row.path }}</span>
+              <span v-key-click class="g-path clickable" v-if="row.path" :title="t('openInExplorer') + ': ' + row.path" @click="reveal(row.path)">{{ row.path }}</span>
               <span class="g-path" v-else>—</span>
               <span class="g-result" :title="row.result">{{ row.result }}</span>
             </div>
@@ -2324,7 +2328,7 @@ const dialogCtx = reactive({
                   {{ ins.scope === 'system' ? t('scopeSystem') : t('scopePortable') }}
                 </span>
               </div>
-              <div class="col-path clickable" :title="t('openInExplorer') + ': ' + ins.path" @click="reveal(ins.path)">{{ ins.path }}</div>
+              <div v-key-click class="col-path clickable" :title="t('openInExplorer') + ': ' + ins.path" @click="reveal(ins.path)">{{ ins.path }}</div>
               <div class="col-note" :title="ins.note">{{ ins.note || '—' }}</div>
               <div class="col-env">
                 <span v-if="ins.inSystemPath" class="env-badge on" :title="t('envVarSetTitle')">{{ t('envVarSet') }}</span>
@@ -2486,7 +2490,7 @@ const dialogCtx = reactive({
               <span class="g-item">{{ t('evVersion') }}</span>
               <span class="g-status">—</span>
               <span class="g-cmd">—</span>
-              <span class="g-path clickable" v-if="evStatus?.exePath" :title="t('openInExplorer')" @click="reveal(evStatus.exePath)">{{ evStatus.exePath }}</span>
+              <span v-key-click class="g-path clickable" v-if="evStatus?.exePath" :title="t('openInExplorer')" @click="reveal(evStatus.exePath)">{{ evStatus.exePath }}</span>
               <span class="g-path" v-else>—</span>
               <span class="g-result">{{ evStatus?.version || t('notInstalled') }}</span>
             </div>
@@ -2494,7 +2498,7 @@ const dialogCtx = reactive({
               <span class="g-item">es.exe</span>
               <span class="g-status"><span class="status-dot" :class="evStatus?.hasEsExe ? 'ok' : 'fail'"></span>{{ evStatus?.hasEsExe ? t('evOk') : t('evMissing') }}</span>
               <span class="g-cmd">—</span>
-              <span class="g-path clickable" v-if="evStatus?.esExePath" :title="t('openInExplorer')" @click="reveal(evStatus.esExePath)">{{ evStatus.esExePath }}</span>
+              <span v-key-click class="g-path clickable" v-if="evStatus?.esExePath" :title="t('openInExplorer')" @click="reveal(evStatus.esExePath)">{{ evStatus.esExePath }}</span>
               <span class="g-path" v-else>—</span>
               <span class="g-result">{{ evStatus?.hasEsExe ? t('evOk') : t('evMissingEsHint') }}</span>
             </div>
@@ -2548,7 +2552,7 @@ const dialogCtx = reactive({
             <p class="ev-hint">{{ t('evTestSearchHint') }}</p>
             <p v-if="evSearchMsg" class="env-msg" :class="{ error: evSearchErr }">{{ evSearchMsg }}</p>
             <div v-if="evResults.length" class="ev-results">
-              <div
+              <div v-key-click
                 v-for="(r, i) in evResults"
                 :key="i"
                 class="ev-res"
@@ -2817,13 +2821,13 @@ const dialogCtx = reactive({
               <!-- 展开的版本列表 -->
               <div v-if="s.listExpanded" class="version-list-panel">
                 <div v-if="s.fetching" class="version-list-loading">{{ t('loading') }}…</div>
-                <div v-else-if="s.loadError" class="version-list-error"
+                <div v-key-click v-else-if="s.loadError" class="version-list-error"
                   @click="loadAvailable(selected.id)">{{ t('fetchFailed') }}: {{ s.loadError }}
                   <span class="retry-link">{{ t('retry') }}</span></div>
-                <div v-else-if="!s.available.length" class="version-list-empty"
+                <div v-key-click v-else-if="!s.available.length" class="version-list-empty"
                   @click="loadAvailable(selected.id)">{{ t('fetchVersions') }}</div>
                 <template v-else>
-                  <div
+                  <div v-key-click
                     v-for="v in s.available"
                     :key="v"
                     class="version-item"
@@ -2951,7 +2955,7 @@ const dialogCtx = reactive({
 .env-info {
   width: 15px; height: 15px; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 700; line-height: 1; cursor: help;
+  font-size: var(--text-xs); font-weight: 600; line-height: 1; cursor: help;
   color: var(--color-text-muted); background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
 }
@@ -2970,23 +2974,23 @@ const dialogCtx = reactive({
 /* 右侧详情 */
 .env-detail {
   flex: 1; min-width: 0; overflow-y: auto;
-  padding: 14px 22px 24px;
+  padding: 14px 22px var(--space-8);
   display: flex; flex-direction: column; gap: 14px;
 }
-.detail-head { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.detail-head { display: flex; align-items: center; gap: var(--space-5); flex-shrink: 0; }
 .detail-avatar {
   width: 34px; height: 34px; border-radius: var(--radius-md); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  font-size: 15px; font-weight: 700; color: var(--color-accent-text);
+  font-size: var(--text-lg); font-weight: 600; color: var(--color-accent-text);
 }
 .detail-avatar :deep(svg) { width: 22px; height: 22px; display: block; }
 .detail-avatar--accent { background: var(--color-accent); }
-.detail-titles { display: flex; flex-direction: column; gap: 4px; }
-.detail-title-row { display: flex; align-items: center; gap: 8px; }
+.detail-titles { display: flex; flex-direction: column; gap: var(--space-2); }
+.detail-title-row { display: flex; align-items: center; gap: var(--space-4); }
 .detail-name { font-size: var(--text-xl); font-weight: 600; color: var(--color-text-primary); }
 .detail-id {
-  font-size: 11px; color: var(--color-text-disabled);
-  background: var(--color-bg-tertiary); padding: 1px 6px; border-radius: var(--radius-xs);
+  font-size: var(--text-xs); color: var(--color-text-disabled);
+  background: var(--color-bg-tertiary); padding: 1px var(--space-3); border-radius: var(--radius-xs);
 }
 /* 运行时介绍：标题右边的小问号。默认跟次级文字同色，hover 才亮成强调色，
    不跟标题抢注意力；尺寸固定 16px，避免不同字号的运行时名把标题行撑高。 */
@@ -2995,7 +2999,7 @@ const dialogCtx = reactive({
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: 50%; border: 1px solid var(--color-border);
   background: transparent; color: var(--color-text-disabled);
-  font-size: 11px; font-weight: 700; line-height: 1; cursor: pointer;
+  font-size: var(--text-xs); font-weight: 600; line-height: 1; cursor: pointer;
   transition: color .15s ease, border-color .15s ease;
 }
 .doc-btn:hover, .doc-btn.on { color: var(--color-accent); border-color: var(--color-accent); }
@@ -3007,15 +3011,15 @@ const dialogCtx = reactive({
   position: fixed; z-index: 9000;
   width: 368px; max-width: calc(100vw - 16px);
   max-height: calc(100vh - 16px); overflow-y: auto;
-  padding: 14px 16px; border-radius: var(--radius-md);
+  padding: 14px var(--space-6); border-radius: var(--radius-md);
   background: var(--color-popover-bg);
   border: 1px solid var(--color-border);
   box-shadow: var(--shadow-pop);
 }
-.doc-pop-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.doc-pop-head { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
 .doc-pop-name { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
 .doc-pop-id {
-  font-size: 10px; color: var(--color-text-disabled);
+  font-size: var(--text-2xs); color: var(--color-text-disabled);
   background: var(--color-bg-tertiary); padding: 1px 5px; border-radius: var(--radius-xs);
 }
 .doc-pop-kind {
@@ -3026,9 +3030,9 @@ const dialogCtx = reactive({
   margin: 10px 0 0; font-size: var(--text-xs); line-height: 1.65;
   color: var(--color-text-secondary);
 }
-.doc-pop-section { margin-top: 12px; }
+.doc-pop-section { margin-top: var(--space-5); }
 .doc-pop-label {
-  margin-bottom: 6px; font-size: var(--text-2xs); font-weight: 600;
+  margin-bottom: var(--space-3); font-size: var(--text-2xs); font-weight: 600;
   color: var(--color-text-disabled);
 }
 .doc-pop-points {
@@ -3046,8 +3050,8 @@ const dialogCtx = reactive({
 /* 上手提示是整张卡里唯一带底色的块：它是「第一次用最容易踩的坑」，
    用 warning 的边框和底色跟中性资料区隔开，不靠加粗硬抢注意力。 */
 .doc-pop-tip {
-  display: flex; align-items: flex-start; gap: 8px;
-  margin-top: 12px; padding: 8px 10px;
+  display: flex; align-items: flex-start; gap: var(--space-4);
+  margin-top: var(--space-5); padding: var(--space-4) 10px;
   border: 1px solid var(--color-warning-border);
   border-radius: var(--radius-sm); background: var(--color-warning-bg);
   font-size: var(--text-xs); line-height: 1.6; color: var(--color-text-secondary);
@@ -3059,8 +3063,8 @@ const dialogCtx = reactive({
   background: var(--color-bg-tertiary); color: var(--color-text-muted); font-size: var(--text-2xs);
 }
 .doc-pop-actions {
-  display: flex; flex-wrap: wrap; gap: 8px;
-  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--color-border);
+  display: flex; flex-wrap: wrap; gap: var(--space-4);
+  margin-top: 14px; padding-top: var(--space-5); border-top: 1px solid var(--color-border);
 }
 .doc-link {
   padding: 3px 10px; border-radius: var(--radius-sm); cursor: pointer;
@@ -3069,17 +3073,18 @@ const dialogCtx = reactive({
   transition: color .15s ease, border-color .15s ease;
 }
 .doc-link:hover { color: var(--color-accent); border-color: var(--color-accent); }
-.detail-badges { display: flex; align-items: center; gap: 6px; }
-.badge { font-size: 11px; padding: 1px 7px; border-radius: var(--radius-md); background: var(--color-bg-tertiary); color: var(--color-text-muted); }
+.detail-badges { display: flex; align-items: center; gap: var(--space-3); }
+.badge { font-size: var(--text-xs); padding: 1px 7px; border-radius: var(--radius-md); background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .badge.svc { background: var(--color-accent-bg); color: var(--color-accent); }
 /* 常驻开关（服务类运行时）：开=随应用自启/崩溃自愈，关=停止 */
-.svc-switch { display: inline-flex; align-items: center; gap: 6px; margin-left: 4px; cursor: pointer; user-select: none; -webkit-user-select: none; }
+.svc-switch { display: inline-flex; align-items: center; gap: var(--space-3); margin-left: var(--space-2); cursor: pointer; user-select: none; -webkit-user-select: none; }
 .svc-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
-.svc-switch-track { position: relative; width: 34px; height: 18px; border-radius: var(--radius-md); background: var(--color-bg-tertiary); border: 1px solid var(--color-border, transparent); transition: background .18s ease; flex: none; }
-.svc-switch-thumb { position: absolute; top: 1px; left: 1px; width: 14px; height: 14px; border-radius: 50%; background: var(--color-accent-text); box-shadow: var(--shadow-sm); transition: transform .18s ease; }
+/* 开关几何与 QdSwitch.vue 的基线一致：34×18 胶囊、全圆角、统一过渡曲线。 */
+.svc-switch-track { position: relative; width: 34px; height: 18px; border-radius: var(--radius-full); background: var(--color-bg-tertiary); border: 1px solid var(--color-border); transition: background var(--transition-base); flex: none; }
+.svc-switch-thumb { position: absolute; top: 1px; left: 1px; width: 14px; height: 14px; border-radius: 50%; background: var(--color-accent-text); box-shadow: var(--shadow-sm); transition: transform var(--transition-base); }
 .svc-switch.on .svc-switch-track { background: var(--color-accent, var(--color-success)); }
 .svc-switch.on .svc-switch-thumb { transform: translateX(16px); }
-.svc-switch-label { font-size: 11px; color: var(--color-text-muted); white-space: nowrap; }
+.svc-switch-label { font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap; }
 .svc-switch.on .svc-switch-label { color: var(--color-accent, var(--color-success)); }
 .svc-switch.busy { opacity: .6; pointer-events: none; }
 .svc-switch.busy .svc-switch-thumb { animation: svc-thumb-pulse .8s ease-in-out infinite; }
@@ -3096,7 +3101,7 @@ const dialogCtx = reactive({
   background: var(--color-card-bg);
   border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
-  padding: 14px 16px;
+  padding: 14px var(--space-6);
   box-shadow: var(--shadow-card);
 }
 /* 安装区是"可操作的空槽"，虚线保留但压淡：实线会让人以为已经装了东西 */
@@ -3106,21 +3111,21 @@ const dialogCtx = reactive({
   border-color: var(--color-border-light);
   box-shadow: none;
 }
-.block-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.block-head { display: flex; align-items: center; gap: var(--space-4); margin-bottom: var(--space-5); }
 .block-head--spaced { margin-top: var(--space-6); }
-.block-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
+.block-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
 .block-count {
-  min-width: 20px; text-align: center; font-size: 11px; padding: 1px 7px; border-radius: var(--radius-md);
+  min-width: 20px; text-align: center; font-size: var(--text-xs); padding: 1px 7px; border-radius: var(--radius-md);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
 }
 
 /* 版本表 */
-.ver-table { display: flex; flex-direction: column; gap: 6px; }
+.ver-table { display: flex; flex-direction: column; gap: var(--space-3); }
 .ver-row {
   display: grid;
   grid-template-columns: 1.4fr 1.6fr 1.2fr 0.9fr 1.4fr auto;
   align-items: center; gap: 10px;
-  padding: 9px 12px;
+  padding: 9px var(--space-5);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-left: 3px solid var(--color-border);
@@ -3129,7 +3134,7 @@ const dialogCtx = reactive({
 }
 .ver-row.ver-head {
   background: transparent; border: none; border-left: none;
-  padding: 0 12px 4px; font-size: 11px; color: var(--color-text-disabled);
+  padding: 0 var(--space-5) var(--space-2); font-size: var(--text-xs); color: var(--color-text-disabled);
   letter-spacing: 0.4px;
 }
 .ver-row:not(.ver-head):hover { background: var(--color-bg-secondary); }
@@ -3142,12 +3147,12 @@ const dialogCtx = reactive({
 .ollama-row { grid-template-columns: 1.6fr 0.8fr 2fr auto; }
 /* 程序版本行：一行放下「当前 / 最新 / 操作」，只在 ollama 面板出现 */
 .ollama-ver {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 8px 10px; margin-bottom: 10px;
+  display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap;
+  padding: var(--space-4) 10px; margin-bottom: 10px;
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 .ollama-ver-label { color: var(--color-text-muted); }
 .ollama-ver-cur { font-family: monospace; color: var(--color-text-primary); }
@@ -3155,60 +3160,60 @@ const dialogCtx = reactive({
 .ollama-ver-ok { color: var(--color-text-disabled); }
 .ollama-ver-refresh { margin-left: auto; }
 .ollama-run-row { grid-template-columns: 1.6fr 0.8fr 1.6fr; }
-.ollama-time { display: block; font-size: 10px; color: var(--color-text-disabled); }
-.ollama-sub-head { margin-top: 16px; }
+.ollama-time { display: block; font-size: var(--text-2xs); color: var(--color-text-disabled); }
+.ollama-sub-head { margin-top: var(--space-6); }
 /* 官方模型库联想下拉：输入框选模型名，候选来自 ollama.com/api/tags */
 .lib-picker { position: relative; flex: 1; }
 .lib-picker .env-input { width: 100%; }
 .lib-dropdown {
   position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30;
-  max-height: 220px; overflow-y: auto; padding: 4px;
+  max-height: 220px; overflow-y: auto; padding: var(--space-2);
   background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-sm); box-shadow: 0 6px 20px var(--color-bg-overlay);
 }
 .lib-option {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 6px 9px; border-radius: var(--radius-xs); font-size: 12px;
+  padding: var(--space-3) 9px; border-radius: var(--radius-xs); font-size: var(--text-sm);
   color: var(--color-text-secondary); cursor: pointer;
 }
 .lib-option:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
 .lib-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lib-size { flex: 0 0 auto; font-size: 11px; color: var(--color-text-disabled); }
-.lib-loading { padding: 8px 9px; font-size: 11px; color: var(--color-text-disabled); }
+.lib-size { flex: 0 0 auto; font-size: var(--text-xs); color: var(--color-text-disabled); }
+.lib-loading { padding: var(--space-4) 9px; font-size: var(--text-xs); color: var(--color-text-disabled); }
 /* Ollama 更新提示横幅（检测到新版时出现，用户确认才替换） */
 .update-banner {
-  display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
+  display: flex; align-items: center; gap: var(--space-5); margin-bottom: var(--space-5);
   padding: 11px 14px; border-radius: var(--radius-md);
   background: var(--color-accent-bg);
   border: 1px solid var(--color-accent-border);
 }
-.ub-icon { font-size: 15px; color: var(--color-accent); flex: 0 0 auto; }
-.ub-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-.ub-title { font-size: 13px; color: var(--color-text-primary); font-weight: 500; }
-.ub-desc { font-size: 11px; color: var(--color-text-muted); }
+.ub-icon { font-size: var(--text-lg); color: var(--color-accent); flex: 0 0 auto; }
+.ub-text { display: flex; flex-direction: column; gap: var(--space-1); flex: 1; min-width: 0; }
+.ub-title { font-size: var(--text-md); color: var(--color-text-primary); font-weight: 500; }
+.ub-desc { font-size: var(--text-xs); color: var(--color-text-muted); }
 /* 模型下载后的使用引导：给出可直接粘贴的 Base URL 与模型名 */
 .ollama-usage {
-  margin-top: 14px; padding: 12px 14px; border-radius: var(--radius-md);
+  margin-top: 14px; padding: var(--space-5) 14px; border-radius: var(--radius-md);
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
   display: flex; flex-direction: column; gap: 7px;
 }
-.usage-title { font-size: 12px; font-weight: 600; color: var(--color-text-primary); }
-.usage-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.usage-title { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); }
+.usage-row { display: flex; align-items: center; gap: var(--space-4); font-size: var(--text-sm); }
 .usage-k { flex: 0 0 96px; color: var(--color-text-muted); }
 .usage-v {
-  font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+  font-family: ui-monospace, Consolas, monospace; font-size: var(--text-sm);
   color: var(--color-text-primary); background: var(--color-bg-primary);
-  padding: 2px 7px; border-radius: var(--radius-xs); border: 1px solid var(--color-border);
+  padding: var(--space-1) 7px; border-radius: var(--radius-xs); border: 1px solid var(--color-border);
 }
-.usage-tip { font-size: 11px; color: var(--color-text-disabled); line-height: 1.6; }
-.ollama-pull-row { display: flex; gap: 8px; margin-bottom: 10px; }
+.usage-tip { font-size: var(--text-xs); color: var(--color-text-disabled); line-height: 1.6; }
+.ollama-pull-row { display: flex; gap: var(--space-4); margin-bottom: 10px; }
 .ollama-pull-row .env-input { flex: 1; }
 .ollama-prog { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
 .ollama-prog-bar { height: 6px; border-radius: var(--radius-xs); background: var(--color-bg-primary); overflow: hidden; }
 .ollama-prog-fill { height: 100%; background: var(--color-accent); transition: width 0.2s linear; }
 /* 尚未拿到总大小时（拉清单阶段）来回滑动，表示「在动但进度未知」 */
 .ollama-prog-fill.unknown { animation: ollama-slide 1.2s ease-in-out infinite; }
-.ollama-prog-meta { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--color-text-secondary); }
+.ollama-prog-meta { display: flex; align-items: center; gap: 10px; font-size: var(--text-xs); color: var(--color-text-secondary); }
 .ollama-prog-pct { font-variant-numeric: tabular-nums; color: var(--color-text-primary); }
 .ollama-prog-status { color: var(--color-text-disabled); }
 @keyframes ollama-slide {
@@ -3218,12 +3223,12 @@ const dialogCtx = reactive({
 }
 
 /* Git 状态表：每行一个 Git 维度，列固定 Item / Status / Command / Path / Result */
-.git-table { display: flex; flex-direction: column; gap: 6px; }
+.git-table { display: flex; flex-direction: column; gap: var(--space-3); }
 .git-row {
   display: grid;
   grid-template-columns: 0.8fr 0.9fr 1.6fr 1.6fr 1.6fr;
   align-items: center; gap: 10px;
-  padding: 10px 12px;
+  padding: 10px var(--space-5);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-left: 3px solid var(--color-accent);
@@ -3231,18 +3236,18 @@ const dialogCtx = reactive({
 }
 .git-row.git-head {
   background: transparent; border: none; border-left: none;
-  padding: 0 12px 2px; font-size: 11px; color: var(--color-text-disabled);
+  padding: 0 var(--space-5) var(--space-1); font-size: var(--text-xs); color: var(--color-text-disabled);
   letter-spacing: 0.4px;
 }
 .git-row:not(.git-head) .g-item { font-weight: 600; color: var(--color-text-primary); }
-.g-status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; text-transform: capitalize; }
+.g-status { display: inline-flex; align-items: center; gap: var(--space-3); font-size: var(--text-sm); text-transform: capitalize; }
 .g-status.ok { color: var(--color-success); }
 .g-status.warn { color: var(--color-warning); }
 .g-status.fail { color: var(--color-danger); }
 .g-status.missing { color: var(--color-text-disabled); }
-.g-cmd code { font-size: 11px; color: var(--color-text-secondary); background: var(--color-bg-primary); padding: 2px 6px; border-radius: var(--radius-xs); }
+.g-cmd code { font-size: var(--text-xs); color: var(--color-text-secondary); background: var(--color-bg-primary); padding: var(--space-1) var(--space-3); border-radius: var(--radius-xs); }
 .g-path, .g-result {
-  font-size: 11px; color: var(--color-text-disabled);
+  font-size: var(--text-xs); color: var(--color-text-disabled);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: monospace;
 }
 .g-result { font-family: inherit; }
@@ -3254,24 +3259,24 @@ const dialogCtx = reactive({
 }
 
 .col-ver { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.ver-name { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-.ver-alias { font-size: 13px; font-weight: 600; color: var(--color-accent); white-space: nowrap; }
-.ver-ver { font-size: 12px; color: var(--color-text-secondary); font-family: monospace; }
-.ver-scope { font-size: 10px; padding: 1px 7px; border-radius: var(--radius-md); width: fit-content; }
+.ver-name { display: flex; align-items: baseline; gap: var(--space-3); min-width: 0; }
+.ver-alias { font-size: var(--text-md); font-weight: 600; color: var(--color-accent); white-space: nowrap; }
+.ver-ver { font-size: var(--text-sm); color: var(--color-text-secondary); font-family: monospace; }
+.ver-scope { font-size: var(--text-2xs); padding: 1px 7px; border-radius: var(--radius-md); width: fit-content; }
 .ver-scope.portable { background: var(--color-accent-bg); color: var(--color-accent); }
 .ver-scope.system { background: var(--color-border); color: var(--color-text-secondary); }
 .col-path, .col-note {
-  font-size: 11px; color: var(--color-text-disabled);
+  font-size: var(--text-xs); color: var(--color-text-disabled);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: monospace;
 }
 .col-note { font-family: inherit; }
-.env-badge { font-size: 11px; padding: 2px 8px; border-radius: var(--radius-md); width: fit-content; }
+.env-badge { font-size: var(--text-xs); padding: var(--space-1) var(--space-4); border-radius: var(--radius-md); width: fit-content; }
 .env-badge.on { background: var(--color-success-bg); color: var(--color-success); }
 .env-badge.off { background: var(--color-bg-primary); color: var(--color-text-disabled); }
 
-.col-svc { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.svc-usage { font-size: 11px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
-.status { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--color-text-muted); }
+.col-svc { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
+.svc-usage { font-size: var(--text-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.status { display: inline-flex; align-items: center; gap: 5px; font-size: var(--text-xs); color: var(--color-text-muted); }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-text-disabled); }
 .status.on { color: var(--color-success); }
 .status.on .status-dot { background: var(--color-success); box-shadow: 0 0 5px var(--color-success-border); }
@@ -3281,29 +3286,30 @@ const dialogCtx = reactive({
 .status-dot.warn { background: var(--color-warning); box-shadow: 0 0 5px var(--color-warning-border); }
 .status-dot.fail { background: var(--color-danger); box-shadow: 0 0 5px var(--color-danger-border); }
 .status-dot.missing { background: var(--color-text-disabled); }
-.svc-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
-  font-size: 11px; height: 24px; padding: 0 8px; border-radius: var(--radius-sm); border: none; cursor: pointer;
+.svc-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
+  font-size: var(--text-xs); height: 24px; padding: 0 var(--space-4); border-radius: var(--radius-sm); border: none; cursor: pointer;
   font-family: inherit; color: var(--color-accent-text); transition: opacity var(--transition-fast);
 }
-.svc-btn.start { background: var(--color-success); }
-.svc-btn.stop { background: var(--color-danger); }
-.svc-btn.restart { background: var(--color-accent); }
-.svc-btn.console { background: var(--color-text-muted); }
+/* 状态/操作色用 -bg 低透明底 + 同色文字：四个实色块同屏会盖过标题层级。 */
+.svc-btn.start { background: var(--color-success-bg); color: var(--color-success); }
+.svc-btn.stop { background: var(--color-danger-bg); color: var(--color-danger); }
+.svc-btn.restart { background: var(--color-accent-bg); color: var(--color-accent); }
+.svc-btn.console { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .svc-btn:hover { opacity: 0.9; }
 .svc-btn:disabled { opacity: 0.55; cursor: default; }
-.svc-port { font-size: 11px; color: var(--color-text-disabled); }
+.svc-port { font-size: var(--text-xs); color: var(--color-text-disabled); }
 
 .port-conflict-banner {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 10px 0 4px;
-  padding: 8px 12px;
+  gap: var(--space-4);
+  margin: 10px 0 var(--space-2);
+  padding: var(--space-4) var(--space-5);
   border-radius: var(--radius-md);
   background: var(--color-warning-bg);
   border: 1px solid var(--color-warning-border);
   color: var(--color-warning);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.5;
 }
 .dark .port-conflict-banner { color: var(--color-warning); }
@@ -3314,11 +3320,11 @@ const dialogCtx = reactive({
 .svc-port-link.disabled:hover { color: var(--color-text-disabled); text-decoration: none; }
 
 /* 端口全景弹窗 */
-.mono { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
+.mono { font-family: var(--font-mono); }
 
-.col-ops { position: relative; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.op-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
-  font-size: 11px; height: 24px; padding: 0 8px; border-radius: var(--radius-sm); cursor: pointer;
+.col-ops { position: relative; display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; }
+.op-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
+  font-size: var(--text-xs); height: 24px; padding: 0 var(--space-4); border-radius: var(--radius-sm); cursor: pointer;
   border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
   font-family: inherit; transition: background var(--transition-fast), color var(--transition-fast);
   white-space: nowrap;
@@ -3327,7 +3333,7 @@ const dialogCtx = reactive({
 .op-btn.on { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-border-focus); }
 .op-btn.danger:hover { background: var(--color-danger-bg); color: var(--color-danger); border-color: var(--color-danger); }
 .op-btn:disabled { opacity: 0.4; cursor: default; }
-.op-btn.small { border-radius: var(--radius-sm); padding: 2px 9px; font-size: 11px; }
+.op-btn.small { border-radius: var(--radius-sm); padding: var(--space-1) 9px; font-size: var(--text-xs); }
 .op-btn.primary { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
 .op-btn.primary:hover:not(:disabled) { background: var(--color-accent-hover); }
 .badge.ok { background: var(--color-success-bg); color: var(--color-success); }
@@ -3335,80 +3341,80 @@ const dialogCtx = reactive({
 
 
 /* ---- 证书签发面板 ---- */
-.cert-root-line { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 13px; color: var(--color-text-secondary); }
+.cert-root-line { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: var(--text-md); color: var(--color-text-secondary); }
 .cert-root-line .badge { flex: none; }
 .cert-root-line .op-btn { margin-left: auto; }
-.cert-dir-row { display: flex; gap: 6px; margin-bottom: 10px; }
+.cert-dir-row { display: flex; gap: var(--space-3); margin-bottom: 10px; }
 .cert-dir-row .env-input { flex: 1; }
-.cert-msg { margin: 8px 0; word-break: break-all; }
-.cert-hint { font-size: 11px; color: var(--color-text-muted); margin: 10px 0 0; }
+.cert-msg { margin: var(--space-4) 0; word-break: break-all; }
+.cert-hint { font-size: var(--text-xs); color: var(--color-text-muted); margin: 10px 0 0; }
 
 /* ---- MCP 接入面板 ---- */
 .mcp-url-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
 .mcp-url {
-  flex: 1; padding: 6px 10px; border-radius: var(--radius-sm); font-size: 12px;
+  flex: 1; padding: var(--space-3) 10px; border-radius: var(--radius-sm); font-size: var(--text-sm);
   background: var(--color-bg-secondary); color: var(--color-text-primary);
   border: 1px solid var(--color-border); overflow-x: auto; white-space: nowrap;
 }
-.mcp-level-row { display: flex; align-items: center; gap: 10px; margin: 12px 0; flex-wrap: wrap; }
-.mcp-label { font-size: 13px; color: var(--color-text-secondary); flex: none; }
+.mcp-level-row { display: flex; align-items: center; gap: 10px; margin: var(--space-5) 0; flex-wrap: wrap; }
+.mcp-label { font-size: var(--text-md); color: var(--color-text-secondary); flex: none; }
 .mcp-select { flex: none; min-width: 300px; }
-.mcp-hint { font-size: 11px; color: var(--color-text-muted); }
-.mcp-agent-count { font-style: normal; margin-left: 6px; font-size: 11px; color: var(--color-text-muted); }
+.mcp-hint { font-size: var(--text-xs); color: var(--color-text-muted); }
+.mcp-agent-count { font-style: normal; margin-left: var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); }
 .mcp-cfg-head {
   display: flex; align-items: center; justify-content: space-between;
-  margin: 14px 0 6px; font-size: 13px; color: var(--color-text-secondary);
+  margin: 14px 0 var(--space-3); font-size: var(--text-md); color: var(--color-text-secondary);
 }
 .mcp-code {
-  margin: 0; padding: 10px 12px; border-radius: var(--radius-sm); font-size: 12px; line-height: 1.6;
+  margin: 0; padding: 10px var(--space-5); border-radius: var(--radius-sm); font-size: var(--text-sm); line-height: 1.6;
   background: var(--color-bg-secondary); color: var(--color-text-primary);
   border: 1px solid var(--color-border); overflow-x: auto; white-space: pre-wrap; word-break: break-all;
 }
-.mcp-tools { display: flex; flex-direction: column; gap: 4px; }
-.mcp-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
-.mcp-check { margin: 0 0 8px; font-size: 12px; }
+.mcp-tools { display: flex; flex-direction: column; gap: var(--space-2); }
+.mcp-actions { display: flex; gap: var(--space-3); flex-wrap: wrap; margin: 10px 0; }
+.mcp-check { margin: 0 0 var(--space-4); font-size: var(--text-sm); }
 .mcp-check.ok { color: var(--color-success); }
 .mcp-check.err { color: var(--color-danger); }
-.mcp-note { margin: 0 0 6px; font-size: 11px; color: var(--color-text-muted); }
-.mcp-token-value { font-family: var(--font-mono, monospace); letter-spacing: .5px; }
-.mcp-token-require { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; font-size: 12px; color: var(--color-text-secondary); cursor: pointer; }
-.mcp-level-hint { margin: 0 0 6px; font-size: 11px; color: var(--color-warning); }
-.mcp-client-path { margin: 0 0 6px; font-size: 11px; color: var(--color-text-muted); word-break: break-all; }
-.mcp-client-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.mcp-note { margin: 0 0 var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); }
+.mcp-token-value { font-family: var(--font-mono); letter-spacing: .5px; }
+.mcp-token-require { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-1) 0 var(--space-3); font-size: var(--text-sm); color: var(--color-text-secondary); cursor: pointer; }
+.mcp-level-hint { margin: 0 0 var(--space-3); font-size: var(--text-xs); color: var(--color-warning); }
+.mcp-client-path { margin: 0 0 var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); word-break: break-all; }
+.mcp-client-actions { display: flex; align-items: center; gap: var(--space-4); flex: none; }
 /* 两条类选择器压过后面的 .env-input{width:100%}：下拉要有确定宽度，
    否则在 flex:none 的容器里 width:100% 会跟内容互相撑，布局随内容抖动。 */
 .mcp-client-actions .mcp-client-select { width: 240px; min-width: 200px; max-width: 320px; flex: none; }
-.mcp-client-hint { margin: 0 0 8px; }
+.mcp-client-hint { margin: 0 0 var(--space-4); }
 .mcp-tool-row.is-blocked { opacity: .55; }
-.mcp-tool-row { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 3px 0; }
+.mcp-tool-row { display: flex; align-items: center; gap: var(--space-4); font-size: var(--text-sm); padding: 3px 0; }
 .mcp-tool-row.is-off .mcp-tool-name { text-decoration: line-through; }
-.mcp-tool-group { margin: 10px 0 2px; font-size: 11px; color: var(--color-text-muted); }
+.mcp-tool-group { margin: 10px 0 var(--space-1); font-size: var(--text-xs); color: var(--color-text-muted); }
 .mcp-tool-toggle { flex: none; margin-left: auto; }
-.mcp-tool-name { font-family: var(--font-mono, monospace); color: var(--color-text-primary); flex: none; min-width: 140px; }
+.mcp-tool-name { font-family: var(--font-mono); color: var(--color-text-primary); flex: none; min-width: 140px; }
 .mcp-tool-desc { flex: 1; min-width: 0; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cert-sub { font-weight: 400; color: var(--color-text-muted); font-size: 12px; }
-.cert-grid { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 8px 12px; margin: 10px 0 4px; }
-.cert-label { font-size: 12px; color: var(--color-text-secondary); text-align: right; white-space: nowrap; }
-.cert-actions { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.cert-sub { font-weight: 400; color: var(--color-text-muted); font-size: var(--text-sm); }
+.cert-grid { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: var(--space-4) var(--space-5); margin: 10px 0 var(--space-2); }
+.cert-label { font-size: var(--text-sm); color: var(--color-text-secondary); text-align: right; white-space: nowrap; }
+.cert-actions { display: flex; align-items: flex-start; gap: var(--space-5); flex-wrap: wrap; }
 .cert-result { flex: 1; min-width: 220px; }
-.cert-result-label { font-size: 12px; color: var(--color-text-secondary); align-self: center; white-space: nowrap; }
+.cert-result-label { font-size: var(--text-sm); color: var(--color-text-secondary); align-self: center; white-space: nowrap; }
 .cert-grid .cert-dir-row { margin: 0; min-width: 0; }
 
 
 /* 操作列下拉菜单 */
-.menu-trigger { display: inline-flex; align-items: center; gap: 4px; }
-.caret { font-size: 10px; opacity: 0.7; }
+.menu-trigger { display: inline-flex; align-items: center; gap: var(--space-2); }
+.caret { font-size: var(--text-2xs); opacity: 0.7; }
 .op-menu {
   position: absolute; z-index: 30; min-width: 160px;
   background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
-  border-radius: var(--radius-sm); padding: 4px; margin-top: 4px;
+  border-radius: var(--radius-sm); padding: var(--space-2); margin-top: var(--space-2);
   box-shadow: 0 8px 28px var(--color-bg-overlay);
-  display: flex; flex-direction: column; gap: 2px;
+  display: flex; flex-direction: column; gap: var(--space-1);
   /* 特色操作接入后条目变多（Node 一条版本行可到 8 项），限高滚动避免菜单长到屏幕外 */
   max-height: 70vh; overflow-y: auto;
 }
 .op-item {
-  text-align: left; font-size: 12px; padding: 6px 10px; border-radius: var(--radius-sm);
+  text-align: left; font-size: var(--text-sm); padding: var(--space-3) 10px; border-radius: var(--radius-sm);
   border: none; background: transparent; color: var(--color-text-secondary);
   font-family: inherit; cursor: pointer; white-space: nowrap;
 }
@@ -3419,26 +3425,26 @@ const dialogCtx = reactive({
 .menu-backdrop { position: fixed; inset: 0; z-index: 20; }
 .env-install-btn.danger { background: var(--color-danger); }
 .env-install-btn.danger:hover { opacity: 0.9; }
-.env-header-actions { display: flex; align-items: center; gap: 8px; }
+.env-header-actions { display: flex; align-items: center; gap: var(--space-4); }
 .path-flag.ok { color: var(--color-success); background: var(--color-success-bg); }
 .path-summary-dot.ok { background: var(--color-success); }
 
-.empty-state { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 26px 0; }
+.empty-state { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); padding: 26px 0; }
 .empty-actions { margin-top: 10px; }
-.empty-icon { font-size: 28px; color: var(--color-text-disabled); }
-.empty-text { font-size: 13px; color: var(--color-text-muted); }
-.empty-hint { font-size: 11px; color: var(--color-text-disabled); }
+.empty-icon { font-size: var(--text-3xl); color: var(--color-text-disabled); }
+.empty-text { font-size: var(--text-md); color: var(--color-text-muted); }
+.empty-hint { font-size: var(--text-xs); color: var(--color-text-disabled); }
 
 /* 安装区 */
-.install-grid { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.install-grid { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
 .cur-ver { font-weight: 600; color: var(--color-text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.up-to-date { color: var(--color-success); font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
+.up-to-date { color: var(--color-success); font-size: var(--text-sm); font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
 .up-to-date::before { content: '✓'; }
 .install-input-wrap { flex: 1; min-width: 160px; }
 .env-input, .env-select {
   width: 100%; min-width: 0;
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
-  color: var(--color-text-primary); border-radius: var(--radius-sm); padding: 7px 9px; font-size: 12px;
+  color: var(--color-text-primary); border-radius: var(--radius-sm); padding: 7px 9px; font-size: var(--text-sm);
   font-family: inherit; outline: none;
 }
 .env-input.custom { margin-top: 10px; }
@@ -3446,13 +3452,13 @@ const dialogCtx = reactive({
 .env-textarea {
   width: 100%; min-width: 0; resize: vertical;
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
-  color: var(--color-text-primary); border-radius: var(--radius-sm); padding: 7px 9px; font-size: 12px;
-  font-family: inherit; outline: none; margin-top: 6px;
+  color: var(--color-text-primary); border-radius: var(--radius-sm); padding: 7px 9px; font-size: var(--text-sm);
+  font-family: inherit; outline: none; margin-top: var(--space-3);
 }
 .env-select { width: auto; flex-shrink: 0; }
 .env-select:focus, .env-input:focus, .env-textarea:focus { border-color: var(--color-border-focus-soft); }
-.link-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
-  flex-shrink: 0; font-size: 11px; height: 24px; padding: 0 8px; border-radius: var(--radius-sm); cursor: pointer;
+.link-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
+  flex-shrink: 0; font-size: var(--text-xs); height: 24px; padding: 0 var(--space-4); border-radius: var(--radius-sm); cursor: pointer;
   border: 1px solid var(--color-border); background: transparent; color: var(--color-accent);
   font-family: inherit; transition: background var(--transition-fast);
 }
@@ -3461,28 +3467,28 @@ const dialogCtx = reactive({
 .link-btn.danger { color: var(--color-danger); border-color: var(--color-danger); }
 .link-btn.danger:hover { background: var(--color-danger-bg); }
 .env-install-btn {
-  flex-shrink: 0; padding: 8px 16px; border-radius: var(--radius-sm); border: none;
-  background: var(--color-accent); color: var(--color-accent-text); font-size: 13px; font-weight: 500;
+  flex-shrink: 0; padding: var(--space-4) var(--space-6); border-radius: var(--radius-sm); border: none;
+  background: var(--color-accent); color: var(--color-accent-text); font-size: var(--text-md); font-weight: 500;
   cursor: pointer; font-family: inherit; transition: opacity var(--transition-fast);
 }
 .env-install-btn:hover { opacity: 0.9; }
 .env-install-btn.busy { opacity: 0.7; cursor: default; }
 .env-install-btn:disabled { opacity: 0.4; cursor: default; }
 
-.env-progress { display: flex; flex-direction: column; gap: 5px; margin-top: 12px; }
+.env-progress { display: flex; flex-direction: column; gap: 5px; margin-top: var(--space-5); }
 .env-progress-bar { height: 6px; background: var(--color-bg-tertiary); border-radius: var(--radius-xs); overflow: hidden; }
 .env-progress-fill { height: 100%; background: var(--color-accent); border-radius: var(--radius-xs); transition: width var(--transition-base); }
 .env-progress-fill.indeterminate { animation: env-indet 1.1s ease-in-out infinite; }
 @keyframes env-indet { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
-.env-progress-text { display: flex; justify-content: space-between; font-size: 11px; color: var(--color-text-muted); }
-.env-msg { font-size: 11px; color: var(--color-text-disabled); margin: 10px 0 0; word-break: break-all; user-select: text; -webkit-user-select: text; }
+.env-progress-text { display: flex; justify-content: space-between; font-size: var(--text-xs); color: var(--color-text-muted); }
+.env-msg { font-size: var(--text-xs); color: var(--color-text-disabled); margin: 10px 0 0; word-break: break-all; user-select: text; -webkit-user-select: text; }
 .env-msg.error { color: var(--color-danger); }
-.ftp-form .env-input { margin-bottom: 6px; }
+.ftp-form .env-input { margin-bottom: var(--space-3); }
 .env-update-hint {
-  display: flex; align-items: center; gap: 8px; margin-top: 12px;
+  display: flex; align-items: center; gap: var(--space-4); margin-top: var(--space-5);
   padding: 7px 10px; border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-  font-size: 12px; color: var(--color-text-secondary);
+  background: var(--color-accent-bg);
+  font-size: var(--text-sm); color: var(--color-text-secondary);
 }
 .env-update-dot {
   width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent); flex: none;
@@ -3497,7 +3503,7 @@ const dialogCtx = reactive({
 /* 通用配置编辑弹窗（现代化：分层头部 / 路径胶囊 / 等宽编辑器 / 分隔页脚） */
 
 /* 分组侧栏 */
-.import-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px;  margin-left: auto; font-size: 11px; height: 24px; padding: 0 8px; border-radius: var(--radius-sm); }
+.import-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);  margin-left: auto; font-size: var(--text-xs); height: 24px; padding: 0 var(--space-4); border-radius: var(--radius-sm); }
 .op-sep { height: 1px; background: var(--color-border); margin: 3px 0; }
 
 /* PHP 配置弹窗 */
@@ -3508,7 +3514,7 @@ const dialogCtx = reactive({
 /* 日志区域（.lv-*）已随查看器迁到 RuntimeLogView.vue 自身的 scoped 样式里 */
 /* 特色操作输出弹窗：宽度略宽于普通弹窗，输出区可滚动 */
 .op-group {
-  padding: 4px 10px 2px; font-size: 10px; letter-spacing: 0.04em;
+  padding: var(--space-2) 10px var(--space-1); font-size: var(--text-2xs); letter-spacing: 0.04em;
   color: var(--color-text-disabled); 
 }
 
@@ -3523,10 +3529,10 @@ const dialogCtx = reactive({
 /* 行尾两个按钮（编辑 / 删除，或 保存 / 取消）：右对齐，不占额外列宽 */
 
 /* Everything 测试搜索：输入行 + 结果列表 */
-.ev-test { display: flex; flex-direction: column; gap: 6px; }
-.ev-test-row { display: flex; gap: 8px; }
+.ev-test { display: flex; flex-direction: column; gap: var(--space-3); }
+.ev-test-row { display: flex; gap: var(--space-4); }
 .ev-test-row .env-input { flex: 1; }
-.ev-hint { font-size: 11px; color: var(--color-text-disabled); margin: 0; }
+.ev-hint { font-size: var(--text-xs); color: var(--color-text-disabled); margin: 0; }
 .ev-results {
   max-height: 220px; overflow-y: auto;
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
@@ -3534,13 +3540,13 @@ const dialogCtx = reactive({
 }
 .ev-res {
   display: flex; flex-direction: column; gap: 1px;
-  padding: 5px 8px; cursor: pointer;
+  padding: 5px var(--space-4); cursor: pointer;
   border-bottom: 1px solid var(--color-border);
 }
 .ev-res:last-child { border-bottom: none; }
 .ev-res:hover { background: var(--color-bg-hover); }
-.ev-res-name { font-size: 12px; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ev-res-dir { font-size: 10px; font-family: monospace; color: var(--color-text-disabled); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev-res-name { font-size: var(--text-sm); color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev-res-dir { font-size: var(--text-2xs); font-family: monospace; color: var(--color-text-disabled); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* 项目版本要求检查弹窗 */
 .pc-row .env-input { flex: 1; }
@@ -3556,11 +3562,11 @@ const dialogCtx = reactive({
 .ev-state-stopped { color: var(--color-warning); }
 .ev-state-missing_es,
 .ev-state-not_installed { color: var(--color-danger); }
-.ev-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.ev-settings { margin-top: 4px; }
-.ev-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--color-text-primary); }
-.ev-hint { display: block; margin: 6px 0 14px; font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; }
-.ev-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
-.ev-field label { font-size: 12px; color: var(--color-text-secondary); }
+.ev-actions { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-top: 14px; }
+.ev-settings { margin-top: var(--space-2); }
+.ev-toggle { display: flex; align-items: center; gap: var(--space-4); font-size: var(--text-md); color: var(--color-text-primary); }
+.ev-hint { display: block; margin: var(--space-3) 0 14px; font-size: var(--text-sm); color: var(--color-text-secondary); line-height: 1.5; }
+.ev-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: var(--space-5); }
+.ev-field label { font-size: var(--text-sm); color: var(--color-text-secondary); }
 .ev-field .env-input { max-width: 420px; }
 </style>

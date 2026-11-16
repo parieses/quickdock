@@ -43,6 +43,7 @@ import { useEnvServiceControl } from '../composables/useEnvServiceControl'
 import { usePaletteExecutor } from '../composables/usePaletteExecutor'
 import { usePaletteActions, createNoteFromPalette, createTodoFromPalette } from '../composables/usePaletteActions'
 import { usePaletteData } from '../composables/usePaletteData'
+import { ITEM_TYPE } from '../constants/itemTypes'
 import PluginFrame from './PluginFrame.vue'
 import CheatSheetModal from './CheatSheetModal.vue'
 import FilePreviewPane from './FilePreviewPane.vue'
@@ -345,7 +346,7 @@ watch(systemCommands, () => { rebuildPinyinCache() })
 
 // ---- 项目类型图标 ----
 const ITEM_TYPE_ICONS: Record<string, any> = {
-  '网页': Globe, '命令': Terminal, '文件': FileText, '应用': AppWindow, '快速链接': Link,
+  [ITEM_TYPE.URL]: Globe, [ITEM_TYPE.CMD]: Terminal, [ITEM_TYPE.FILE]: FileText, [ITEM_TYPE.APP]: AppWindow, [ITEM_TYPE.LINK]: Link,
 }
 function itemIcon(item: CollectionItem): any { return ITEM_TYPE_ICONS[item.type] || Folder }
 function appIcon(name: string): any {
@@ -383,7 +384,7 @@ const selectedFilePath = computed(() => {
   const r = displayFlat.value[selectedIndex.value]
   if (!r) return ''
   if (r.type === 'item' && r.item) {
-    if (r.item.type !== '文件' && r.item.type !== '目录') return ''
+    if (r.item.type !== ITEM_TYPE.FILE && r.item.type !== ITEM_TYPE.DIR) return ''
     return r.item.value || ''
   }
   // Everything 全盘搜索命中的文件（type=file）：这是本功能最常用的入口，
@@ -412,14 +413,14 @@ watch(selectedFilePath, (p) => {
 // 只看得到选中项的 type，Everything 搜出来的 file 结果没有目录信息，一律按文件算。
 const previewIsDir = computed(() => {
   const r = displayFlat.value[selectedIndex.value]
-  return !!r && r.type === 'item' && r.item?.type === '目录'
+  return !!r && r.type === 'item' && r.item?.type === ITEM_TYPE.DIR
 })
 
 // 预览正文：只服务非文件类结果（文件/目录已由 FilePreviewPane 渲染）
 const previewLines = computed(() => {
   const base = previewResult.value?.lines || []
   const r = displayFlat.value[selectedIndex.value]
-  if (r?.type !== 'item' || !r.item || r.item.type !== '命令') return base
+  if (r?.type !== 'item' || !r.item || r.item.type !== ITEM_TYPE.CMD) return base
   const extra: string[] = []
   if (r.item.workingDirectory) extra.push(t('previewWorkingDir') + ': ' + r.item.workingDirectory)
   if (r.item.tool) extra.push(t('previewTool') + ': ' + r.item.tool)
@@ -961,7 +962,7 @@ onUnmounted(() => {
           </button>
           <span class="group-count">{{ group.totalCount ?? group.results.length }}</span>
         </div>
-        <div
+        <div v-key-click
           v-for="(result, iIdx) in group.results"
           :key="group.type + '-' + (result.item?.id || result.cmd?.id || result.note?.id || result.navTarget || result.createKind || result.url || iIdx)"
           :class="['result-item', { active: getFlatIndex(gIdx, iIdx) === selectedIndex, selected: selectedSet.has(getFlatIndex(gIdx, iIdx)) }]"
@@ -1031,7 +1032,7 @@ onUnmounted(() => {
 
     <!-- Ctrl+K 二级动作菜单 -->
     <div v-if="actionMenuOpen" class="action-backdrop" @click="closeActionMenu()">
-      <div class="action-menu" @click.stop>
+      <div v-key-click class="action-menu" @click.stop>
         <div class="action-menu-head">
           <span class="action-menu-target">{{ actionTarget?.label }}</span>
         </div>
@@ -1124,7 +1125,7 @@ onUnmounted(() => {
   border: none;
   outline: none;
   color: var(--color-text-primary);
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-family: inherit;
   font-weight: 450;
   letter-spacing: 0.01em;
@@ -1143,9 +1144,9 @@ onUnmounted(() => {
 .inline-prefix {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   color: var(--color-accent);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 500;
   flex-shrink: 0;
 }
@@ -1164,11 +1165,11 @@ onUnmounted(() => {
 .palette-results {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px 8px;
+  gap: var(--space-2) var(--space-4);
   align-content: start;
   flex: 1;
   overflow-y: auto;
-  padding: 6px 8px 10px;
+  padding: var(--space-3) var(--space-4) 10px;
 }
 
 .group-header {
@@ -1176,18 +1177,18 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  font-size: 11px;
+  gap: var(--space-4);
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--color-text-muted);
   
   letter-spacing: 0.09em;
-  padding: 14px 12px 6px;
+  padding: 14px var(--space-5) var(--space-3);
   user-select: none;
 }
 .group-header:not(:first-of-type) {
   border-top: 1px solid var(--color-border);
-  margin-top: 4px;
+  margin-top: var(--space-2);
 }
 .group-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .group-expand {
@@ -1198,7 +1199,7 @@ onUnmounted(() => {
   width: 18px;
   height: 18px;
   border: none;
-  border-radius: var(--radius-full, 999px);
+  border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
@@ -1207,7 +1208,7 @@ onUnmounted(() => {
 .group-expand:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
 .group-count {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 500;
   letter-spacing: 0;
   color: var(--color-text-disabled);
@@ -1220,8 +1221,8 @@ onUnmounted(() => {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 9px 12px;
+  gap: var(--space-5);
+  padding: 9px var(--space-5);
   border-radius: var(--radius-lg);
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
@@ -1236,7 +1237,7 @@ onUnmounted(() => {
   transform: translateY(-50%);
   width: 3px;
   height: 56%;
-  border-radius: 0 2px 2px 0;
+  border-radius: 0 var(--radius-2xs) var(--radius-2xs) 0;
   background: var(--color-accent);
 }
 
@@ -1252,7 +1253,7 @@ onUnmounted(() => {
 
 .result-app-icon { width: 20px; height: 20px; object-fit: contain; border-radius: var(--radius-xs); }
 
-.result-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.result-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
 
 .result-label {
   font-size: var(--text-base); font-weight: 500; color: var(--color-text-primary);
@@ -1262,25 +1263,25 @@ onUnmounted(() => {
 /* 「新」角标：内联在结果标签后 */
 .result-new-badge {
   flex-shrink: 0;
-  font-size: 10px; line-height: 14px; font-weight: 600;
+  font-size: var(--text-2xs); line-height: 14px; font-weight: 600;
   padding: 0 5px; border-radius: var(--radius-sm);
   background: var(--color-accent); color: var(--color-accent-text);
   letter-spacing: 0.5px; align-self: center;
 }
 
 .result-desc {
-  font-size: 12px; color: var(--color-text-muted);
+  font-size: var(--text-sm); color: var(--color-text-muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0.01em;
 }
 
-.result-meta { color: var(--color-text-muted); flex-shrink: 0; display: flex; align-items: center; gap: 4px; }
+.result-meta { color: var(--color-text-muted); flex-shrink: 0; display: flex; align-items: center; gap: var(--space-2); }
 .result-item.active .result-meta { color: var(--color-text-secondary); }
 
 .meta-tag {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
-  padding: 2px 7px;
+  padding: var(--space-1) 7px;
   border-radius: var(--radius-full);
   color: var(--color-text-muted);
   letter-spacing: 0.02em;
@@ -1290,22 +1291,22 @@ onUnmounted(() => {
 
 .palette-empty {
   flex: 1; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 8px; padding: 32px;
+  justify-content: center; gap: var(--space-4); padding: var(--space-9);
 }
-.empty-icon { color: var(--color-text-disabled); margin-bottom: 4px; }
+.empty-icon { color: var(--color-text-disabled); margin-bottom: var(--space-2); }
 .empty-title { font-size: var(--text-base); font-weight: 500; color: var(--color-text-secondary); margin: 0; }
-.empty-desc { font-size: 12px; color: var(--color-text-muted); margin: 0; text-align: center; max-width: 360px; line-height: 1.5; }
+.empty-desc { font-size: var(--text-sm); color: var(--color-text-muted); margin: 0; text-align: center; max-width: 360px; line-height: 1.5; }
 
 .palette-footer {
-  display: flex; align-items: center; gap: 20px;
-  padding: 8px 18px; border-top: 1px solid var(--color-border); flex-shrink: 0;
+  display: flex; align-items: center; gap: var(--space-7);
+  padding: var(--space-4) 18px; border-top: 1px solid var(--color-border); flex-shrink: 0;
 }
-.footer-hint { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--color-text-muted); }
+.footer-hint { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--color-text-muted); }
 .footer-hint kbd {
   display: flex; align-items: center; justify-content: center;
-  min-width: 18px; height: 18px; padding: 0 4px; border-radius: var(--radius-xs);
+  min-width: 18px; height: 18px; padding: 0 var(--space-2); border-radius: var(--radius-xs);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
-  font-size: 10px; font-family: var(--font-mono, monospace); font-weight: 500;
+  font-size: var(--text-2xs); font-family: var(--font-mono); font-weight: 500;
 }
 
 .result-item.selected { background: var(--color-select-bg); }
@@ -1313,7 +1314,7 @@ onUnmounted(() => {
   content: '';
   position: absolute;
   left: 3px; top: 50%; transform: translateY(-50%);
-  width: 3px; height: 56%; border-radius: 0 2px 2px 0;
+  width: 3px; height: 56%; border-radius: 0 var(--radius-2xs) var(--radius-2xs) 0;
   background: var(--color-accent);
 }
 .result-check {
@@ -1323,7 +1324,7 @@ onUnmounted(() => {
 
 .palette-close {
   display: flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px; margin-left: 2px; flex-shrink: 0;
+  width: 24px; height: 24px; margin-left: var(--space-1); flex-shrink: 0;
   border: none; background: transparent; border-radius: var(--radius-sm);
   color: var(--color-text-muted); cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast);
@@ -1332,7 +1333,7 @@ onUnmounted(() => {
 
 .palette-preview {
   flex-shrink: 0; max-height: 170px; overflow-y: auto;
-  padding: 8px 16px; border-top: 1px solid var(--color-border); background: var(--color-bg-secondary);
+  padding: var(--space-4) var(--space-6); border-top: 1px solid var(--color-border); background: var(--color-bg-secondary);
 }
 /* 文件预览要高一些才看得清内容（图片/PDF/代码），滚动交给内层各区块自己管，
    否则整个预览区被一条滚动条拖住，头部信息会跟着划走。 */
@@ -1356,11 +1357,11 @@ onUnmounted(() => {
 /* 预览体吃掉标题行剩下的高度；不给 min-height: 0 的话，内部滚动区会被
    flex 的最小内容尺寸顶出去，长文件把面板撑破。 */
 .palette-preview.is-rich .preview-rich-body { flex: 1; min-height: 0; }
-.preview-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
-.preview-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.preview-subtitle { font-size: 11px; color: var(--color-text-muted); flex-shrink: 0; }
-.preview-body { display: flex; flex-direction: column; gap: 2px; }
-.preview-line { font-size: 12px; color: var(--color-text-secondary); font-family: var(--font-mono, monospace); white-space: pre-wrap; word-break: break-all; line-height: 1.45; }
+.preview-head { display: flex; align-items: baseline; gap: var(--space-4); margin-bottom: var(--space-2); }
+.preview-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.preview-subtitle { font-size: var(--text-xs); color: var(--color-text-muted); flex-shrink: 0; }
+.preview-body { display: flex; flex-direction: column; gap: var(--space-1); }
+.preview-line { font-size: var(--text-sm); color: var(--color-text-secondary); font-family: var(--font-mono); white-space: pre-wrap; word-break: break-all; line-height: 1.45; }
 
 .palette-results::-webkit-scrollbar { width: 5px; }
 .palette-results::-webkit-scrollbar-track { background: transparent; }
@@ -1400,12 +1401,12 @@ onUnmounted(() => {
 
 .action-menu-head {
   flex-shrink: 0;
-  padding: 8px 12px 6px;
+  padding: var(--space-4) var(--space-5) var(--space-3);
   border-bottom: 1px solid var(--color-border);
 }
 .action-menu-target {
   display: block;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.06em;
   
@@ -1418,7 +1419,7 @@ onUnmounted(() => {
 .action-menu-list {
   flex: 1;
   overflow-y: auto;
-  padding: 4px;
+  padding: var(--space-2);
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -1434,10 +1435,10 @@ onUnmounted(() => {
   width: 100%;
   padding: 7px 9px;
   border: none;
-  border-radius: var(--radius-md, 6px);
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-family: inherit;
   font-weight: 450;
   text-align: left;
@@ -1453,7 +1454,7 @@ onUnmounted(() => {
 .action-menu-icon { flex-shrink: 0; opacity: 0.85; }
 .action-menu-index {
   flex-shrink: 0; min-width: 14px; text-align: center;
-  font-size: 10px; line-height: 14px; font-weight: 600;
+  font-size: var(--text-2xs); line-height: 14px; font-weight: 600;
   color: var(--color-text-muted);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-xs); padding: 0 3px; opacity: 0.8;
@@ -1468,14 +1469,14 @@ onUnmounted(() => {
    NonClientRegionSupport 时不生效，还会吞掉 mousedown 让整扇窗口拖不动。
    分隔线用 border-bottom，不用 inset shadow（底色压深后几乎看不见）。 */
 .palette-plugin-header {
-  display: flex; align-items: center; gap: 6px; height: 38px; flex-shrink: 0;
+  display: flex; align-items: center; gap: var(--space-3); height: 38px; flex-shrink: 0;
   padding: 0 10px; background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
   --wails-draggable: drag; user-select: none;
 }
 
 .plugin-back-btn {
-  display: flex; align-items: center; gap: 2px; height: 28px; padding: 0 6px;
+  display: flex; align-items: center; gap: var(--space-1); height: 28px; padding: 0 var(--space-3);
   border: none; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted);
   font-size: var(--text-sm); font-weight: 500; font-family: inherit; cursor: pointer;
   --wails-draggable: no-drag;
@@ -1486,12 +1487,12 @@ onUnmounted(() => {
 .plugin-back-btn svg { width: 15px; height: 15px; }
 
 .plugin-title {
-  flex: 1; font-size: 12px; font-weight: 500; color: var(--color-text-muted);
+  flex: 1; font-size: var(--text-sm); font-weight: 500; color: var(--color-text-muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   text-align: center; letter-spacing: 0.02em;
 }
 
-.plugin-header-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.plugin-header-actions { display: flex; align-items: center; gap: var(--space-1); flex-shrink: 0; }
 
 .plugin-detach-btn {
   display: flex; align-items: center; justify-content: center;
@@ -1507,9 +1508,9 @@ onUnmounted(() => {
 
 .palette-plugin-status {
   flex: 1; display: flex; align-items: center; justify-content: center;
-  font-size: 13px; color: var(--color-text-disabled); user-select: none;
+  font-size: var(--text-md); color: var(--color-text-disabled); user-select: none;
 }
-.palette-plugin-error { color: var(--color-danger); padding: 0 24px; text-align: center; line-height: 1.6; }
+.palette-plugin-error { color: var(--color-danger); padding: 0 var(--space-8); text-align: center; line-height: 1.6; }
 
 .palette-plugin-iframe { flex: 1; width: 100%; height: 100%; border: none; background: var(--color-bg-primary); }
 </style>

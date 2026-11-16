@@ -9,10 +9,14 @@ import { LogTailOpen, LogTailStop, LogTailPause } from '../../bindings/quickdock
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { logErr } from '../utils/logger'
 import { copyToClipboard } from '../utils/clipboard'
 import { formatBytes } from '../utils/ssh'
+import { useToast } from '../composables/useToast'
 
 const { t } = useI18n()
+// 破坏性动作的确认走全局 toast.confirm（useToast 是模块级单例，不依赖注入点）。
+const { confirm: toastConfirm, error: toastError } = useToast()
 
 // 进日志页时从侧栏角标快照下来的「新增崩溃数」：设置按钮上的红点在这里要有
 // 明确落点（工具栏按钮 + 崩溃分组的「新增 N」）。已读水位在进页时就清了，
@@ -168,10 +172,18 @@ async function loadFiles() {
       selected.value = logFiles.value[0].name
       source.value = 'log'
     }
-  } catch (_) { /* ignore */ }
+  } catch (e) {
+    // 列表读失败不能只留一张空白列表：用户会以为「今天没日志」。
+    logErr('LogViewer:loadFiles', e)
+    toastError(getErrorMessage(e))
+  }
   try {
     crashFiles.value = unwrap<CrashFile[]>(await ListCrashFiles()) || []
-  } catch (_) { crashFiles.value = [] }
+  } catch (e) {
+    // 崩溃列表是次要数据，读失败降级成空即可，只上报不弹窗刷屏。
+    crashFiles.value = []
+    logErr('LogViewer:crashFiles', e)
+  }
 }
 
 // 崩溃文件复用 ReadLogFile 读（它接受 "crash/x.log" 相对路径并做穿越校验，
@@ -215,20 +227,9 @@ async function loadContent() {
   }
 }
 
-// 清空崩溃记录：二次点击确认（与 SSH 生产机执行同一套「再点一次」模式），
-// 不额外引入确认弹窗——这个动作不可逆但也不珍贵，两次点击够了。
-const clearArmed = ref(false)
-let clearTimer: ReturnType<typeof setTimeout> | null = null
-
+// 清空崩溃记录：不可逆，走一次 toast.confirm。
 async function clearCrash() {
-  if (!clearArmed.value) {
-    clearArmed.value = true
-    if (clearTimer) clearTimeout(clearTimer)
-    clearTimer = setTimeout(() => { clearArmed.value = false }, 3000)
-    return
-  }
-  if (clearTimer) clearTimeout(clearTimer)
-  clearArmed.value = false
+  if (!(await toastConfirm(t('crashClearConfirm')))) return
   try {
     unwrap(await ClearCrashFiles())
     crashFiles.value = []
@@ -276,23 +277,16 @@ const logPercent = computed(() => {
 async function loadStorage() {
   try {
     storage.value = unwrap<LogStorageInfo>(await GetLogStorage())
-  } catch (_) { storage.value = null }
+  } catch (e) {
+    // 占用卡片读不到就整块隐藏，是刻意降级；只上报，不打断页面。
+    storage.value = null
+    logErr('LogViewer:loadStorage', e)
+  }
 }
 
-// 清理一律「点两次」：删文件不可逆，而这里的收益只是省空间，
-// 不值得为它弹一个模态框打断正在看的日志——与清空崩溃记录保持同一套手感。
-const cleanArmed = ref<'old' | 'all' | null>(null)
-let cleanTimer: ReturnType<typeof setTimeout> | null = null
-
+// 清理删文件不可逆：走一次 toast.confirm，与清空崩溃记录保持同一套手感。
 async function runCleanup(scope: 'old' | 'all') {
-  if (cleanArmed.value !== scope) {
-    cleanArmed.value = scope
-    if (cleanTimer) clearTimeout(cleanTimer)
-    cleanTimer = setTimeout(() => { cleanArmed.value = null }, 3000)
-    return
-  }
-  if (cleanTimer) clearTimeout(cleanTimer)
-  cleanArmed.value = null
+  if (!(await toastConfirm(t('logCleanupConfirm')))) return
   try {
     // keepDays=30 对齐宿主的自动清理线；scope=all 时传 0，删到只剩今天。
     // 今天的永远不删（后端保证）——logger 正握着它的写句柄，删了也不真释放。
@@ -311,8 +305,8 @@ async function runCleanup(scope: 'old' | 'all') {
   }
 }
 
-// 清理结果的提示：本组件不 inject toast（设置页与主页面都挂它，注入点不统一），
-// 用一行自带的横条反馈，位置固定在占用卡片下方，不会跑到别的实例身上。
+// 清理结果的提示仍用一行自带横条，位置固定在占用卡片下方、不会跑到别的实例身上；
+// 确认弹窗则走全局 toast.confirm（模块级单例，不依赖注入点，与横条互不冲突）。
 const toastMsg = ref('')
 let toastTimer: ReturnType<typeof setTimeout> | null = null
 function msgTimer() {
@@ -346,7 +340,11 @@ function toggleFollow() {
         lastFollowContent = joined
         await nextTick()
         scrollToBottom()
-      } catch (_) { /* ignore */ }
+      } catch (e) {
+        // 【刻意静默】跟随轮询每 2s 一次，文件轮转 / 暂时不可读是常态；
+        // 弹 toast 会每 2s 刷一条，也不改 follow 状态（下一轮自愈），只留日志。
+        logErr('LogViewer:follow', e)
+      }
     }, LOG_FOLLOW_INTERVAL_MS)
   } else if (followTimer) {
     clearInterval(followTimer)
@@ -435,7 +433,8 @@ async function closeTail(tab: TailTab) {
   if (idx >= 0) tailTabs.value.splice(idx, 1)
   // 必须通知后端停掉轮询 goroutine：前端删掉标签只是不显示了，
   // 后端还会继续 stat 到进程退出（ServiceShutdown 才能收，那是几分钟以后的事）。
-  try { unwrap(await LogTailStop(tab.id)) } catch (_) { /* ignore */ }
+  // 停不掉会让后端轮询 goroutine 一直留到进程退出：用户看不见，但必须留下日志。
+  try { unwrap(await LogTailStop(tab.id)) } catch (e) { logErr('LogViewer:closeTail.stop', e) }
   if (tailId.value === tab.id) {
     tailId.value = tailTabs.value[0]?.id || ''
     if (!tailTabs.value.length) source.value = 'log'
@@ -443,22 +442,21 @@ async function closeTail(tab: TailTab) {
 }
 
 async function toggleTabPause(tab: TailTab) {
-  tab.paused = !tab.paused
-  try { unwrap(await LogTailPause(tab.id, tab.paused)) } catch (_) { /* ignore */ }
+  const next = !tab.paused
+  tab.paused = next
+  try {
+    unwrap(await LogTailPause(tab.id, next))
+  } catch (e) {
+    // 后端没停就成了「界面显示已暂停、实际还在追」：必须回滚并给出可见反馈。
+    tab.paused = !next
+    logErr('LogViewer:toggleTabPause', e)
+    toastError(getErrorMessage(e))
+  }
 }
 
-// 清空同样「点两次」：与本组件其它破坏性动作保持一致的手感。
-const clearTailArmed = ref(false)
-let clearTailTimer: ReturnType<typeof setTimeout> | null = null
-function clearTail() {
-  if (!clearTailArmed.value) {
-    clearTailArmed.value = true
-    if (clearTailTimer) clearTimeout(clearTailTimer)
-    clearTailTimer = setTimeout(() => { clearTailArmed.value = false }, 3000)
-    return
-  }
-  if (clearTailTimer) clearTimeout(clearTailTimer)
-  clearTailArmed.value = false
+// 清空已攒的尾随行走一次 toast.confirm：与本组件其它破坏性动作保持一致的手感。
+async function clearTail() {
+  if (!(await toastConfirm(t('ltClearConfirm')))) return
   const tab = activeTab.value
   if (tab) tab.lines = []
 }
@@ -510,7 +508,8 @@ function onTailLine(ev: any) {
 async function stopAllTails() {
   if (offTail) { offTail(); offTail = null }
   for (const tab of tailTabs.value) {
-    try { unwrap(await LogTailStop(tab.id)) } catch (_) { /* ignore */ }
+    // 卸载路径不弹窗；逐个上报，失败的那个 id 才追得到。
+    try { unwrap(await LogTailStop(tab.id)) } catch (e) { logErr('LogViewer:stopAllTails.stop', e) }
   }
   tailTabs.value = []
   tailId.value = ''
@@ -543,9 +542,7 @@ onUnmounted(() => {
   // 后端按 id 幂等处理，页面先消失也不影响结果。
   void stopAllTails()
   if (followTimer) clearInterval(followTimer)
-  if (cleanTimer) clearTimeout(cleanTimer)
   if (toastTimer) clearTimeout(toastTimer)
-  if (clearTailTimer) clearTimeout(clearTailTimer)
 })
 </script>
 
@@ -594,9 +591,9 @@ onUnmounted(() => {
         <p v-if="!crashFiles.length" class="log-empty">{{ t('crashEmpty') }}</p>
       </div>
       <div v-if="crashFiles.length" class="crash-actions">
-        <button class="log-btn" :class="{ armed: clearArmed }" @click="clearCrash">
+        <button class="log-btn" @click="clearCrash">
           <Trash2 :size="13" />
-          {{ clearArmed ? t('crashClearConfirm') : t('crashClear') }}
+          {{ t('crashClear') }}
         </button>
       </div>
 
@@ -611,7 +608,7 @@ onUnmounted(() => {
         </button>
       </div>
       <div class="crash-list">
-        <div
+        <div v-key-click
           v-for="tab in tailTabs"
           :key="tab.id"
           :class="['log-file', 'tail-tab', { active: source === 'tail' && tab.id === tailId }]"
@@ -695,9 +692,9 @@ onUnmounted(() => {
               <Play v-else :size="13" />
               {{ activeTab.paused ? t('ltResume') : t('ltPause') }}
             </button>
-            <button class="log-btn" :class="{ armed: clearTailArmed }" @click="clearTail">
+            <button class="log-btn" @click="clearTail">
               <Trash2 :size="13" />
-              {{ clearTailArmed ? t('ltClearConfirm') : t('ltClear') }}
+              {{ t('ltClear') }}
             </button>
           </template>
         </div>
@@ -773,21 +770,19 @@ onUnmounted(() => {
         <div class="storage-actions">
           <button
             class="log-btn"
-            :class="{ armed: cleanArmed === 'old' }"
             :title="t('logCleanupOldTitle')"
             @click="runCleanup('old')"
           >
             <Trash2 :size="12" />
-            {{ cleanArmed === 'old' ? t('logCleanupConfirm') : t('logCleanupOld') }}
+            {{ t('logCleanupOld') }}
           </button>
           <button
             class="log-btn"
-            :class="{ armed: cleanArmed === 'all' }"
             :title="t('logCleanupAllTitle')"
             @click="runCleanup('all')"
           >
             <Trash2 :size="12" />
-            {{ cleanArmed === 'all' ? t('logCleanupConfirm') : t('logCleanupAll') }}
+            {{ t('logCleanupAll') }}
           </button>
         </div>
         <div v-if="toastMsg" class="storage-msg">{{ toastMsg }}</div>
@@ -819,27 +814,27 @@ onUnmounted(() => {
 /* 三个分区（应用日志 / 崩溃记录 / 实时尾随）共用一条标题语言：等高、同色、
    统一上分隔线；不再让 .crash-head / .tail-head 各自带 margin 把侧栏切成五段。 */
 .log-side-head {
-  display: flex; align-items: center; gap: 6px; flex-shrink: 0;
-  padding: 10px 12px 6px;
+  display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0;
+  padding: 10px var(--space-5) var(--space-3);
   border-top: 1px solid var(--color-border);
-  font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.06em;
   color: var(--color-text-muted);
   user-select: none;
 }
-.log-side-head:first-child { border-top: none; padding-top: 12px; }
+.log-side-head:first-child { border-top: none; padding-top: var(--space-5); }
 .log-side-head svg { opacity: 0.75; flex-shrink: 0; }
 .crash-head { padding-top: 10px; }
 .crash-num {
   margin-left: auto; min-width: 16px; padding: 0 5px;
   border-radius: var(--radius-full); text-align: center;
-  font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs); font-weight: 600; font-variant-numeric: tabular-nums;
   background: var(--color-danger-bg); color: var(--color-danger-text);
 }
 /* 侧栏设置按钮的红点对应到日志页：顶栏按钮说明来源，分组标题标出「新增 N」。
    两者共用同一份快照（进页时取、清空崩溃记录时失效）。 */
 .crash-new {
   padding: 0 5px; border-radius: var(--radius-full);
-  font-size: 10px; font-weight: 600; white-space: nowrap;
+  font-size: var(--text-2xs); font-weight: 600; white-space: nowrap;
   background: var(--color-danger-bg); color: var(--color-danger);
 }
 .crash-jump {
@@ -851,13 +846,13 @@ onUnmounted(() => {
 
 .log-file-list {
   flex: 1 1 auto; min-height: 72px;
-  overflow-y: auto; padding: 0 8px 8px;
+  overflow-y: auto; padding: 0 var(--space-4) var(--space-4);
 }
 /* 崩溃 / 尾随列表给固定上限：三个分区始终同屏可见。崩溃记录是侧栏红点的
    落点，不能藏进折叠面板，也不能被主列表挤到需要额外滚动。 */
 .crash-list {
   flex: 0 1 auto; min-height: 0; max-height: 140px;
-  overflow-y: auto; padding: 0 8px 8px;
+  overflow-y: auto; padding: 0 var(--space-4) var(--space-4);
 }
 
 .log-file {
@@ -882,19 +877,19 @@ onUnmounted(() => {
    容器的 text-overflow: ellipsis 就不再作用于它，长文件名会直接溢出。 */
 .log-file-name {
   display: block;
-  font-family: var(--font-mono); font-size: 12px; line-height: 1.5;
+  font-family: var(--font-mono); font-size: var(--text-sm); line-height: 1.5;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .log-file-meta {
-  font-size: 10px; line-height: 1.4;
+  font-size: var(--text-2xs); line-height: 1.4;
   color: var(--color-text-disabled); font-variant-numeric: tabular-nums;
 }
 .log-file.active .log-file-meta { color: var(--color-accent); opacity: 0.7; }
 
 .crash-badge {
   display: inline-block; flex-shrink: 0;
-  margin-right: 5px; padding: 0 4px; border-radius: var(--radius-xs);
-  font-family: var(--font-family); font-size: 10px; font-weight: 700;
+  margin-right: 5px; padding: 0 var(--space-2); border-radius: var(--radius-xs);
+  font-family: var(--font-family); font-size: var(--text-2xs); font-weight: 600;
   line-height: 15px; letter-spacing: 0.02em; 
   background: var(--color-bg-tertiary); color: var(--color-text-muted);
 }
@@ -902,13 +897,9 @@ onUnmounted(() => {
 .crash-badge[data-kind='js'] { background: var(--color-warning-bg); color: var(--color-warning); }
 .log-file.active .crash-badge { background: transparent; color: inherit; }
 
-.crash-actions { padding: 8px; border-top: 1px solid var(--color-border); flex-shrink: 0; }
+.crash-actions { padding: var(--space-4); border-top: 1px solid var(--color-border); flex-shrink: 0; }
 .crash-actions .log-btn { width: 100%; justify-content: center; }
-.crash-actions .log-btn.armed {
-  border-color: var(--color-danger-border); color: var(--color-danger-text);
-  background: var(--color-danger-bg);
-}
-.log-empty { padding: 12px 6px; font-size: 12px; color: var(--color-text-disabled); }
+.log-empty { padding: var(--space-5) var(--space-3); font-size: var(--text-sm); color: var(--color-text-disabled); }
 
 /* === 实时尾随 ===
    状态点刻意做成「呼吸」而不是静态圆点：尾随是一个持续进行的动作，
@@ -927,7 +918,7 @@ onUnmounted(() => {
 .tail-tab { position: relative; }
 /* 名称行让出右侧 20px：关闭按钮是绝对定位的，不占栅格宽度，
    但文字必须提前避让，否则「hover 时按钮盖住文件名尾部」 */
-.tail-tab .log-file-name { display: flex; align-items: center; gap: 5px; padding-right: 20px; }
+.tail-tab .log-file-name { display: flex; align-items: center; gap: 5px; padding-right: var(--space-7); }
 /* ellipsis 必须落在自己的盒子上：flex 容器里的匿名文本不吃 text-overflow */
 .tail-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tail-dot {
@@ -950,7 +941,7 @@ onUnmounted(() => {
 .tail-x:focus-visible { opacity: 1; }
 
 .tail-error {
-  margin: 0 0 8px; padding: 6px 10px;
+  margin: 0 0 var(--space-4); padding: var(--space-3) 10px;
   border-radius: var(--radius-sm);
   background: var(--color-warning-bg); color: var(--color-warning);
 }
@@ -959,49 +950,45 @@ onUnmounted(() => {
    原来钉在 232px 侧栏底部做成卡片，和三个文件分区挤在一起把主列表压成一条缝。
    占用是「整个目录」的全局读数，不是某个文件的属性，横排放到主区底部层级更对。 */
 .storage-strip {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap;
   flex-shrink: 0; min-height: 38px;
-  padding: 6px 12px;
+  padding: var(--space-3) var(--space-5);
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
-  font-size: 11px; color: var(--color-text-muted);
+  font-size: var(--text-xs); color: var(--color-text-muted);
 }
-.storage-head { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.storage-head { display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; }
 .storage-title { font-weight: 600; letter-spacing: 0.04em; }
 .storage-total {
-  font-family: var(--font-mono, monospace); font-size: 12px;
+  font-family: var(--font-mono); font-size: var(--text-sm);
   color: var(--color-text-primary);
 }
 .storage-bar {
   display: flex; height: 6px; width: 90px; flex-shrink: 0;
-  border-radius: var(--radius-full, 999px);
+  border-radius: var(--radius-full);
   overflow: hidden; background: var(--color-bg-tertiary);
 }
 .storage-seg { height: 100%; }
 .storage-seg--log { background: var(--color-accent); }
 .storage-seg--crash { background: var(--color-danger); }
-.storage-facts { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.storage-facts { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 .storage-range { color: var(--color-text-disabled); }
-.storage-legend { display: flex; gap: 10px; flex-shrink: 0; font-size: 10px; }
-.lg { display: inline-flex; align-items: center; gap: 4px; color: var(--color-text-muted); }
+.storage-legend { display: flex; gap: 10px; flex-shrink: 0; font-size: var(--text-2xs); }
+.lg { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--color-text-muted); }
 /* 小色块用 ::before 而不是再画一个元素：这里只需要一个 6px 的点 */
 .lg::before {
   content: ''; width: 6px; height: 6px; border-radius: 50%;
 }
 .lg--log::before { background: var(--color-accent); }
 .lg--crash::before { background: var(--color-danger); }
-.storage-actions { display: flex; gap: 6px; margin-left: auto; flex-shrink: 0; }
-.storage-actions .log-btn { height: 24px; padding: 0 8px; font-size: 11px; }
-.storage-actions .log-btn.armed {
-  border-color: var(--color-danger-border); color: var(--color-danger-text);
-  background: var(--color-danger-bg);
-}
+.storage-actions { display: flex; gap: var(--space-3); margin-left: auto; flex-shrink: 0; }
+.storage-actions .log-btn { height: 24px; padding: 0 var(--space-4); font-size: var(--text-xs); }
 /* 清理回执出现时才占一整行（flex-basis:100%），平时不撑高状态条 */
 .storage-msg {
   flex-basis: 100%; padding: 5px 7px;
   border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
-  font-size: 11px; color: var(--color-text-secondary);
+  font-size: var(--text-xs); color: var(--color-text-secondary);
   word-break: break-all;
 }
 
@@ -1012,51 +999,51 @@ onUnmounted(() => {
    与下一行工具条拆开后，工具条只剩过滤与动作，不再因为按钮增减随机折行。 */
 .log-context {
   display: flex; align-items: center; gap: 10px; flex-shrink: 0;
-  min-height: 38px; padding: 6px 12px;
+  min-height: 38px; padding: var(--space-3) var(--space-5);
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
 }
-.log-context-main { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; }
+.log-context-main { display: flex; align-items: center; gap: var(--space-4); flex: 1 1 auto; min-width: 0; }
 .log-context-icon { flex-shrink: 0; color: var(--color-accent); }
 .log-context-icon.is-crash { color: var(--color-danger); }
 .log-context-name {
   min-width: 0;
-  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+  font-family: var(--font-mono); font-size: var(--text-sm); font-weight: 600;
   color: var(--color-text-primary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .log-context-kind {
-  flex-shrink: 0; padding: 1px 6px; border-radius: var(--radius-full);
-  font-size: 10px; color: var(--color-text-muted);
+  flex-shrink: 0; padding: 1px var(--space-3); border-radius: var(--radius-full);
+  font-size: var(--text-2xs); color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
 }
-.log-context-stats { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.log-context-stats { display: flex; align-items: center; gap: var(--space-4); flex-shrink: 0; }
 
 .log-toolbar {
-  display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap;
-  padding: 7px 12px; flex-shrink: 0;
+  display: flex; align-items: center; gap: 10px var(--space-5); flex-wrap: wrap;
+  padding: 7px var(--space-5); flex-shrink: 0;
   border-bottom: 1px solid var(--color-border);
 }
 /* 左侧「过滤条件」与右侧「动作」分组：中间留白把它们分开，
    否则七个控件排成一排，找按钮时得逐个读文字。 */
 .log-toolbar-left { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; }
-.log-toolbar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-left: auto; }
+.log-toolbar-right { display: flex; align-items: center; gap: var(--space-4); flex-shrink: 0; margin-left: auto; }
 .log-count {
-  font-size: 11px; color: var(--color-text-disabled);
-  font-variant-numeric: tabular-nums; white-space: nowrap; padding-right: 2px;
+  font-size: var(--text-xs); color: var(--color-text-disabled);
+  font-variant-numeric: tabular-nums; white-space: nowrap; padding-right: var(--space-1);
 }
 .log-capped { color: var(--color-warning); }
 
 /* 级别开关：开着的按钮有淡底，关掉的透明且半透明——状态一眼可辨，
    比原来「都一样、只差 0.3 透明度」清楚 */
 .log-levels {
-  display: flex; gap: 2px; flex-shrink: 0; padding: 2px;
+  display: flex; gap: var(--space-1); flex-shrink: 0; padding: var(--space-1);
   border-radius: var(--radius-sm); background: var(--color-bg-secondary);
 }
 .lv {
   width: 22px; height: 20px; border: none; border-radius: var(--radius-xs);
   background: transparent; cursor: pointer;
-  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  font-family: var(--font-mono); font-size: var(--text-xs); font-weight: 600;
   line-height: 1;
   transition: background var(--transition-fast), opacity var(--transition-fast);
 }
@@ -1068,7 +1055,7 @@ onUnmounted(() => {
 .lv:hover { opacity: 1; }
 
 .log-search {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: var(--space-3);
   flex: 1 1 auto; min-width: 120px; max-width: 340px; height: 26px;
   padding: 0 9px;
   color: var(--color-text-disabled);
@@ -1081,13 +1068,13 @@ onUnmounted(() => {
 .log-search-input {
   flex: 1; min-width: 0;
   border: none; outline: none; background: transparent;
-  font-family: var(--font-family); font-size: 12px;
+  font-family: var(--font-family); font-size: var(--text-sm);
   color: var(--color-text-primary);
 }
 
 .log-follow {
   display: flex; align-items: center; gap: 5px; flex-shrink: 0;
-  font-size: 12px; color: var(--color-text-muted);
+  font-size: var(--text-sm); color: var(--color-text-muted);
   cursor: pointer; user-select: none;
   transition: color var(--transition-fast);
 }
@@ -1098,7 +1085,7 @@ onUnmounted(() => {
 .log-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   height: 28px; padding: 0 11px;
-  font-family: var(--font-family); font-size: 12px; white-space: nowrap;
+  font-family: var(--font-family); font-size: var(--text-sm); white-space: nowrap;
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-secondary); color: var(--color-text-muted);
   cursor: pointer;
@@ -1111,9 +1098,9 @@ onUnmounted(() => {
 /* === 日志正文 === */
 .log-body {
   flex: 1; overflow-y: auto; overflow-x: hidden;
-  padding: 6px 0 12px;
+  padding: var(--space-3) 0 var(--space-5);
   background: var(--color-bg-primary);
-  font-family: var(--font-mono); font-size: 12px; line-height: 1.6;
+  font-family: var(--font-mono); font-size: var(--text-sm); line-height: 1.6;
 }
 
 .log-line-row {
@@ -1122,8 +1109,8 @@ onUnmounted(() => {
   /* 时间戳列宽按 "2026-10-23 21:06:29.648" 在 11px 等宽下量出，再留一点余量；
      三列共用同一套栅格，栈追踪这类没有前缀的行也自动对齐到正文列。 */
   grid-template-columns: 154px 14px minmax(0, 1fr);
-  align-items: start; column-gap: 8px;
-  padding: 0 32px 0 12px;   /* 右侧 32px 给悬浮复制按钮留位，不压正文 */
+  align-items: start; column-gap: var(--space-4);
+  padding: 0 var(--space-9) 0 var(--space-5);   /* 右侧 32px 给悬浮复制按钮留位，不压正文 */
   border-left: 2px solid transparent;
   transition: background var(--transition-fast);
 }
@@ -1134,13 +1121,13 @@ onUnmounted(() => {
 .log-line-row.lv-E { border-left-color: var(--color-log-error); }
 
 .log-ts {
-  font-size: 11px; color: var(--color-text-muted);
+  font-size: var(--text-xs); color: var(--color-text-muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
   user-select: text;
 }
 /* info 是基线，不上色：一旦整屏每行都带颜色，警告和错误就失去信号意义 */
-.log-lv { font-size: 11px; font-weight: 700; text-align: center; color: var(--color-text-disabled); }
+.log-lv { font-size: var(--text-xs); font-weight: 600; text-align: center; color: var(--color-text-disabled); }
 .lv-W .log-lv { color: var(--color-warning); }
 .lv-E .log-lv { color: var(--color-log-error); }
 
@@ -1168,30 +1155,30 @@ onUnmounted(() => {
 .log-line-row:hover .line-copy { opacity: 1; }
 .line-copy:hover { color: var(--color-accent); border-color: var(--color-accent-border); }
 
-.log-empty-body { padding: 48px 0; text-align: center; font-size: 13px; }
+.log-empty-body { padding: var(--space-11) 0; text-align: center; font-size: var(--text-md); }
 
 /* 崩溃现场头块：把 time/kind/label/message 从「正文堆」里拎出来做成卡片，
    下方堆栈每行才有统一的现场时间与级别上色。否则这些头字段会和堆栈混在一块，
    时间列要么空着要么在「time: ...」这种伪行上重复。 */
 .crash-meta {
-  margin: 6px 12px 10px; padding: 9px 12px;
+  margin: var(--space-3) var(--space-5) 10px; padding: 9px var(--space-5);
   border: 1px solid var(--card-border-color);
   border-left: 3px solid var(--color-log-error);
   border-radius: var(--radius-sm);
   background: var(--color-card-bg);
 }
 .crash-meta[data-kind='js'] { border-left-color: var(--color-warning); }
-.crash-meta-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.crash-meta-head { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
 .crash-meta-time {
-  font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted);
+  font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
 }
 .crash-meta-label {
-  font-size: 12px; color: var(--color-text-secondary); font-weight: 600;
+  font-size: var(--text-sm); color: var(--color-text-secondary); font-weight: 600;
 }
 .crash-meta-msg {
   margin-top: 5px;
-  font-family: var(--font-mono); font-size: 12px; line-height: 1.5;
+  font-family: var(--font-mono); font-size: var(--text-sm); line-height: 1.5;
   color: var(--color-text-primary); white-space: pre-wrap; overflow-wrap: anywhere;
 }
 

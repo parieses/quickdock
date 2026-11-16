@@ -68,11 +68,11 @@ function keyOf(m: AIMentionItem, i: number): string {
 </template>
 
 <style scoped>
-.ai-mention-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ai-mention-chips { display: flex; flex-wrap: wrap; gap: var(--space-3); }
 
 .ai-mention-chip {
   display: inline-flex; align-items: center; gap: 3px; max-width: 260px;
-  padding: 2px 4px 2px 6px; font-size: 11px;
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3); font-size: var(--text-xs);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-secondary); color: var(--color-text-secondary);
 }
@@ -84,22 +84,22 @@ function keyOf(m: AIMentionItem, i: number): string {
 
 .ai-mention-chip-del {
   border: none; background: transparent; color: var(--color-text-muted);
-  cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px;
+  cursor: pointer; font-size: var(--text-md); line-height: 1; padding: 0 var(--space-1);
 }
 
 .ai-mention-chip-del:hover { color: var(--color-danger); }
 
 .ai-mention-pop {
   position: absolute; left: 16px; right: 16px; bottom: calc(100% - 6px);
-  max-height: 240px; overflow: auto; z-index: 30; padding: 4px;
+  max-height: 240px; overflow: auto; z-index: 30; padding: var(--space-2);
   background: var(--color-bg-primary); border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
 }
 
 .ai-mention-item {
-  display: flex; align-items: center; gap: 6px; padding: 4px 6px;
-  font-size: 12px; color: var(--color-text-secondary); cursor: pointer;
+  display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm); color: var(--color-text-secondary); cursor: pointer;
   border-radius: var(--radius-sm);
 }
 
@@ -109,7 +109,7 @@ function keyOf(m: AIMentionItem, i: number): string {
 
 .ai-mention-path {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--font-mono); font-size: 11px;
+  font-family: var(--font-mono); font-size: var(--text-xs);
   color: var(--color-text-muted); text-align: right;
 }
 </style>

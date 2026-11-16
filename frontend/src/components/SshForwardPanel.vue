@@ -55,7 +55,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const { error: toastError, success: toastSuccess } = useToast()
+const { error: toastError, success: toastSuccess, confirm: toastConfirm, confirmItems } = useToast()
 
 const forwards = ref<SshForwardView[]>([])
 /** props.hosts 为空时的兜底：面板自己调一次 ListHosts()，同样只取 !isFolder */
@@ -69,7 +69,6 @@ const editingId = ref('')
 const saving = ref(false)
 const formErr = ref('')
 /** 非回环监听地址的二次确认态（组件内态，不用 confirm()） */
-const lanPending = ref(false)
 const form = reactive<SshForwardInput>({
   id: '',
   hostId: '',
@@ -91,9 +90,6 @@ function ownerTabLabel(v: SshForwardView): string {
   if (!id) return t('sshForwardOwnerGlobal')
   return props.tabs.find((tb) => tb.id === id)?.label || id
 }
-
-// —— 行内删除二次确认态（组件内态，不用 confirm()）——
-const deleteId = ref('')
 
 const panelEl = ref<HTMLElement | null>(null)
 
@@ -187,7 +183,6 @@ async function loadHosts() {
 // —— 表单 ——
 function closeForm() {
   formVisible.value = false
-  lanPending.value = false
   saving.value = false
   formErr.value = ''
   editingId.value = ''
@@ -195,8 +190,6 @@ function closeForm() {
 
 function openForm(v: SshForwardView | null) {
   formErr.value = ''
-  lanPending.value = false
-  deleteId.value = ''
   if (v) {
     editingId.value = v.id
     Object.assign(form, {
@@ -248,22 +241,20 @@ function validate(): boolean {
   return true
 }
 
-function save() {
+async function save() {
   formErr.value = ''
   if (!validate()) {
     formErr.value = t('sshForwardError')
     return
   }
-  // 监听地址改成非回环（对局域网/公网开放）前必须二次确认
+  // 非回环监听会把端口暴露到局域网/公网，确认统一走全局 toast.confirm。
   if (!isLoopback(String(form.bindHost || ''))) {
-    lanPending.value = true
-    return
+    if (!(await toastConfirm(t('sshForwardLanWarn')))) return
   }
   void persist()
 }
 
 async function persist() {
-  lanPending.value = false
   saving.value = true
   try {
     unwrap(await SaveSshForward({ ...form }))
@@ -295,9 +286,9 @@ async function doStop(v: SshForwardView) {
 }
 
 async function doDelete(v: SshForwardView) {
+  if (!(await toastConfirm(t('sshForwardDeleteConfirm')))) return
   try {
     unwrap(await DeleteSshForward(v.id))
-    deleteId.value = ''
     await load()
   } catch (e) {
     handleErr(e)
@@ -310,18 +301,20 @@ let offForward: (() => void) | null = null
 // —— 关闭：点击外部 / Esc ——
 function onDocMouseDown(e: MouseEvent) {
   if (!props.open) return
+  // 全局 confirm 弹窗挂在 body 上，点它的按钮不该被当成「点击抽屉外部」而关掉抽屉
+  if (confirmItems.length) return
   if (panelEl.value && panelEl.value.contains(e.target as Node)) return
   emit('close')
 }
 
-/** Esc：一次只收一层（LAN 确认 → 删除确认 → 表单 → 抽屉）。
+/** Esc：一次只收一层（LAN 确认 → 表单 → 抽屉）。
  *  中文输入法组词（isComposing / keyCode 229）放行，回车确认候选不被误判关闭。 */
 function onKeydown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
   if (e.isComposing || e.keyCode === 229) return
   if (!props.open) return
-  if (lanPending.value) { lanPending.value = false; return }
-  if (deleteId.value) { deleteId.value = ''; return }
+  // 全局 confirm 弹窗打开时 Esc 归它处理，别把抽屉一起关掉
+  if (confirmItems.length) return
   if (formVisible.value) { closeForm(); return }
   emit('close')
 }
@@ -337,7 +330,6 @@ watch(
       stopPoll()
       reqSeq++ // 让在途响应失效，快速开关时不覆盖新列表
       closeForm()
-      deleteId.value = ''
       errMsg.value = ''
     }
   },
@@ -445,15 +437,7 @@ onBeforeUnmount(() => {
 
       <p v-if="formErr" class="sfp-err sfp-form-err">{{ formErr }}</p>
 
-      <!-- 非回环监听地址：组件内二次确认态 -->
-      <div v-if="lanPending" class="sfp-lan">
-        <p class="sfp-lan-warn">{{ t('sshForwardLanWarn') }}</p>
-        <div class="sfp-foot">
-          <button class="sfp-btn" @click="lanPending = false">{{ t('sshForwardCancel') }}</button>
-          <button class="sfp-btn sfp-btn--danger" @click="persist()">{{ t('sshForwardLanConfirm') }}</button>
-        </div>
-      </div>
-      <div v-else class="sfp-foot">
+      <div class="sfp-foot">
         <button class="sfp-btn" @click="closeForm()">{{ t('sshForwardCancel') }}</button>
         <button class="sfp-btn sfp-btn--primary" :disabled="saving" @click="save()">{{ t('sshForwardSave') }}</button>
       </div>
@@ -485,25 +469,18 @@ onBeforeUnmount(() => {
           <span class="sfp-k">{{ t('sshForwardError') }}</span> {{ v.error }}
         </div>
         <div class="sfp-acts">
-          <template v-if="deleteId === v.id">
-            <span class="sfp-confirm">{{ t('sshForwardDeleteConfirm') }}</span>
-            <button class="sfp-act" @click="deleteId = ''">{{ t('sshForwardCancel') }}</button>
-            <button class="sfp-act is-danger" @click="doDelete(v)">{{ t('sshForwardDelete') }}</button>
-          </template>
-          <template v-else>
-            <button v-if="canStart(v)" class="sfp-act" @click="doStart(v)">
-              <Play :size="11" /> {{ t('sshForwardStart') }}
-            </button>
-            <button v-else class="sfp-act" @click="doStop(v)">
-              <Square :size="11" /> {{ t('sshForwardStop') }}
-            </button>
-            <button class="sfp-act" @click="openForm(v)">
-              <Pencil :size="11" /> {{ t('sshForwardEdit') }}
-            </button>
-            <button class="sfp-act is-danger" @click="deleteId = v.id">
-              <Trash2 :size="11" /> {{ t('sshForwardDelete') }}
-            </button>
-          </template>
+          <button v-if="canStart(v)" class="sfp-act" @click="doStart(v)">
+            <Play :size="11" /> {{ t('sshForwardStart') }}
+          </button>
+          <button v-else class="sfp-act" @click="doStop(v)">
+            <Square :size="11" /> {{ t('sshForwardStop') }}
+          </button>
+          <button class="sfp-act" @click="openForm(v)">
+            <Pencil :size="11" /> {{ t('sshForwardEdit') }}
+          </button>
+          <button class="sfp-act is-danger" @click="doDelete(v)">
+            <Trash2 :size="11" /> {{ t('sshForwardDelete') }}
+          </button>
         </div>
       </div>
 
@@ -612,7 +589,6 @@ onBeforeUnmount(() => {
 }
 .sfp-act:hover { color: var(--color-accent); background: var(--color-bg-active); }
 .sfp-act.is-danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
-.sfp-confirm { flex: 1 1 auto; font-size: var(--text-2xs); color: var(--color-warning); }
 
 .sfp-empty { padding: var(--space-6) var(--space-3); text-align: center; font-size: var(--text-xs); color: var(--color-text-disabled); }
 .sfp-empty.is-err { color: var(--color-danger); }
@@ -645,9 +621,9 @@ onBeforeUnmount(() => {
 }
 .sfp-lan-warn { margin: 0 0 var(--space-3); font-size: var(--text-xs); line-height: 1.5; color: var(--color-warning); }
 .sfp-foot { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-4); }
-.sfp-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+.sfp-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
   height: 28px; padding: 0 11px;
-  font: inherit; font-size: 12px;
+  font: inherit; font-size: var(--text-sm);
   color: var(--color-text-secondary); background: transparent;
   border: 1px solid var(--color-border); border-radius: var(--radius-sm); cursor: pointer;
 }

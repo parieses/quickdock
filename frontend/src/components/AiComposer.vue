@@ -307,14 +307,14 @@ defineExpose({
 .ai-input-area {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-4);
   /* 单圆角框容器：去顶边框、改为整框描边 + 圆角 + 浅底，输入框本体透明无边框，
      整体质感与落地页「新建任务」输入框一致（参考截图）。 */
-  padding: 10px 12px 8px;
+  padding: 10px var(--space-5) var(--space-4);
   /* 与落地页 hero 的输入框同一个宽度（--ai-column-w，见 style.css）；
      原来是不带上限的 80%，大屏上比 hero 还宽，切页面时会跳一下。 */
   width: var(--ai-column-w);
-  margin: 0 auto 12px;
+  margin: 0 auto var(--space-5);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-bg-tertiary);
@@ -334,11 +334,11 @@ defineExpose({
 .ai-input-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 2px;
+  gap: var(--space-4);
+  margin-top: var(--space-1);
 }
 
-.ai-input-bar-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ai-input-bar-left { display: flex; align-items: center; gap: var(--space-4); min-width: 0; }
 
 /* 左下角的 +：与右侧图片/链接同尺寸的图标按钮，只多一个「打开中」的底色。
    它承载「技能和连接器」——不写成文字按钮是因为这里已经有 git 分支 chip，
@@ -361,7 +361,7 @@ defineExpose({
 .ai-plus-btn:hover,
 .ai-plus-btn.is-open { background: var(--color-bg-active); color: var(--color-text-primary); }
 
-.ai-input-bar-right { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-shrink: 0; }
+.ai-input-bar-right { display: flex; align-items: center; gap: var(--space-3); margin-left: auto; flex-shrink: 0; }
 
 /* 模型胶囊：与落地页输入框底栏、以及本排的 git 分支 / 权限徽标同一套尺寸
    （22px 全圆角）。做成实心边而不是纯文字，是因为它挨着同样有底的分支 chip，
@@ -374,12 +374,12 @@ defineExpose({
   max-width: 150px;
   min-width: 0;
   flex: 0 1 auto;
-  padding: 0 8px;
+  padding: 0 var(--space-4);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
   background: var(--color-bg-secondary);
   color: var(--color-text-secondary);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
   text-overflow: ellipsis;
@@ -404,15 +404,15 @@ defineExpose({
 .ai-git-branch {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   height: 22px;
   max-width: 100%;
-  padding: 0 8px;
+  padding: 0 var(--space-4);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
   background: var(--color-bg-secondary);
   color: var(--color-text-secondary);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: var(--font-mono);
 }
 
@@ -424,25 +424,25 @@ defineExpose({
 
 .ai-hook-banner {
   margin: 0;
-  padding: 8px 12px;
-  border: 1px solid color-mix(in srgb, var(--color-warning) 45%, transparent);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--color-warning-border);
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--color-warning) 10%, var(--color-bg-primary));
+  background: var(--color-warning-bg);
 }
 
-.ai-hook-banner-title { font-size: 12px; font-weight: 600; color: var(--color-text-primary); }
+.ai-hook-banner-title { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); }
 
-.ai-hook-banner-desc { margin-top: 2px; font-size: 11px; line-height: 1.5; color: var(--color-text-secondary); word-break: break-all; }
+.ai-hook-banner-desc { margin-top: var(--space-1); font-size: var(--text-xs); line-height: 1.5; color: var(--color-text-secondary); word-break: break-all; }
 
-.ai-hook-banner-actions { display: flex; gap: 8px; margin-top: 6px; }
+.ai-hook-banner-actions { display: flex; gap: var(--space-4); margin-top: var(--space-3); }
 
 .ai-hook-ok {
-  padding: 2px 10px; font-size: 11px; border-radius: var(--radius-xs); cursor: pointer;
+  padding: var(--space-1) 10px; font-size: var(--text-xs); border-radius: var(--radius-xs); cursor: pointer;
   border: 1px solid var(--color-accent); background: var(--color-accent); color: var(--color-accent-text);
 }
 
 .ai-hook-no {
-  padding: 2px 10px; font-size: 11px; border-radius: var(--radius-xs); cursor: pointer;
+  padding: var(--space-1) 10px; font-size: var(--text-xs); border-radius: var(--radius-xs); cursor: pointer;
   border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
 }
 
@@ -459,7 +459,7 @@ defineExpose({
   border: none;
   border-radius: 50%;
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-accent-text);
   cursor: pointer;
   flex-shrink: 0;
   transition: opacity var(--transition-fast), background-color var(--transition-fast);
@@ -476,5 +476,5 @@ defineExpose({
 
 /* 生成中：圆形发送按钮原地翻成红色停止按钮，承载「中止」语义，一眼可辨。 */
 .ai-send-stop { background: var(--color-danger); color: var(--color-danger-text); }
-.ai-send-stop:hover { background: color-mix(in srgb, var(--color-danger) 85%, #000); }
+.ai-send-stop:hover { background: var(--color-danger-hover); }
 </style>

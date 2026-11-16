@@ -853,7 +853,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 空状态 -->
-    <div v-else-if="plugins.length === 0" class="plugin-empty" @click="selectAndInstall">
+    <div v-key-click v-else-if="plugins.length === 0" class="plugin-empty" @click="selectAndInstall">
       <Puzzle :size="48" class="empty-icon" />
       <p class="empty-title">{{ t('pluginNoPlugins') }}</p>
       <p class="empty-desc">{{ t('pluginDragToInstall') }}</p>
@@ -957,7 +957,7 @@ onUnmounted(() => {
           命令与热键：卡片上露触发方式 + 热键，点开看完整清单（含参数声明）。
           取不到增强数据时 v-if 直接隐藏这一块，不抛错也不留空壳。
         -->
-        <div
+        <div v-key-click
           v-if="p.commands && p.commands.length"
           class="card-cmds"
           :title="cmdListTitle(p)"
@@ -1004,7 +1004,7 @@ onUnmounted(() => {
         <div v-if="loadingLogs" class="history-loading">{{ t('loading') }}</div>
         <div v-else-if="execLogs.length === 0" class="history-empty">{{ t('pluginExecHistoryEmpty') }}</div>
         <div v-else class="history-list">
-          <div
+          <div v-key-click
             v-for="log in execLogs"
             :key="log.id"
             :class="['exec-row', { 'exec-fail': !log.success, 'exec-expanded': expandedLog === log.id }]"
@@ -1139,7 +1139,7 @@ onUnmounted(() => {
   flex: 1; min-height: 0;
   display: flex; flex-direction: column;
   overflow: hidden;
-  padding: 12px 20px 16px;
+  padding: var(--space-5) var(--space-7) var(--space-6);
 }
 
 .plugin-page {
@@ -1151,7 +1151,7 @@ onUnmounted(() => {
 }
 
 /* ---- 头部：已统一到 styles/app.css 的 .qd-page-header ---- */
-.plugin-count { font-size: 10px; color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px 7px; border-radius: var(--radius-xs); }
+.plugin-count { font-size: var(--text-2xs); color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px 7px; border-radius: var(--radius-xs); }
 
 /* ---- 加载 / 空状态 ---- */
 .plugin-loading, .plugin-empty {
@@ -1170,10 +1170,10 @@ onUnmounted(() => {
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  margin-bottom: 12px;
+  margin-bottom: var(--space-5);
 }
 .empty-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-secondary); margin: 0; }
-.empty-desc { font-size: var(--text-sm); margin: 6px 0 0; color: var(--color-text-muted); }
+.empty-desc { font-size: var(--text-sm); margin: var(--space-3) 0 0; color: var(--color-text-muted); }
 
 /* ---- 网格 ---- */
 .plugin-grid {
@@ -1181,9 +1181,9 @@ onUnmounted(() => {
   min-height: 0; /* 同上：允许网格收缩到可视高度，超出才滚动 */
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-  gap: 8px;
+  gap: var(--space-4);
   align-content: start;
-  padding: 2px 0;
+  padding: var(--space-1) 0;
 }
 
 /* ---- 插件卡片 ---- */
@@ -1211,7 +1211,7 @@ onUnmounted(() => {
 /* 「新」角标 */
 .new-badge {
   position: absolute; top: 4px; left: 4px;
-  font-size: 10px; line-height: 14px; font-weight: 600;
+  font-size: var(--text-2xs); line-height: 14px; font-weight: 600;
   padding: 0 5px; border-radius: var(--radius-sm);
   background: var(--color-accent); color: var(--color-accent-text);
   z-index: 1; letter-spacing: 0.5px;
@@ -1220,7 +1220,7 @@ onUnmounted(() => {
 /* 顶部操作悬停 */
 .card-actions-top {
   position: absolute; top: 4px; right: 4px;
-  display: flex; gap: 2px; opacity: 0;
+  display: flex; gap: var(--space-1); opacity: 0;
   transition: opacity 120ms;
 }
 .plugin-card:hover .card-actions-top { opacity: 1; }
@@ -1229,7 +1229,7 @@ onUnmounted(() => {
   width: 22px; height: 22px; border-radius: var(--radius-xs);
   border: none; background: var(--color-bg-tertiary);
   color: var(--color-text-muted); cursor: pointer;
-  font-size: 10px; transition: background-color 100ms, color 100ms, border-color 100ms;
+  font-size: var(--text-2xs); transition: background-color 100ms, color 100ms, border-color 100ms;
 }
 .action-top-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .action-top-btn.btn-stop-top:hover { color: var(--color-warning); }
@@ -1242,18 +1242,18 @@ onUnmounted(() => {
 .card-icon-wrap {
   width: 36px; height: 36px;
   display: flex; align-items: center; justify-content: center;
-  margin-bottom: 2px;
+  margin-bottom: var(--space-1);
 }
 .card-icon-img { width: 36px; height: 36px; object-fit: contain; }
 .card-icon-fallback { color: var(--color-text-muted); }
 
 /* 名称 */
-.card-name { font-size: 12px; font-weight: 500; color: var(--color-text-primary); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.card-meta { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: center; }
-.card-version { font-size: 10px; color: var(--color-text-muted); }
+.card-name { font-size: var(--text-sm); font-weight: 500; color: var(--color-text-primary); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.card-meta { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; justify-content: center; }
+.card-version { font-size: var(--text-2xs); color: var(--color-text-muted); }
 
 /* 状态 */
-.status-badge { font-size: 10px; padding: 0 6px; border-radius: var(--radius-md); font-weight: 500; line-height: 16px; }
+.status-badge { font-size: var(--text-2xs); padding: 0 var(--space-3); border-radius: var(--radius-md); font-weight: 500; line-height: 16px; }
 .badge-running { background: var(--color-success-bg); color: var(--color-success); }
 .badge-stopped { background: var(--color-border); color: var(--color-text-muted); }
 .badge-disabled { background: var(--color-danger-bg); color: var(--color-danger); }
@@ -1264,9 +1264,9 @@ onUnmounted(() => {
 
 /* 权限标签：与状态徽标同尺寸，但用中性底 —— 权限是"事实"不是"状态"，
    给它们上色会和运行状态抢注意力 */
-.card-perms { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: center; }
+.card-perms { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; justify-content: center; }
 .perm-tag {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   line-height: 15px;
   padding: 0 5px;
   border-radius: var(--radius-md);
@@ -1281,20 +1281,20 @@ onUnmounted(() => {
 /* 命令与热键：卡片上只露前两条，完整清单在 title 里。
    热键用 kbd 的等宽感是刻意的 —— 它是「按键」而不是「标签」。 */
 .card-cmds {
-  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
   justify-content: center;
   max-width: 100%;
 }
 .cmd-chip {
-  display: inline-flex; align-items: center; gap: 4px;
+  display: inline-flex; align-items: center; gap: var(--space-2);
   max-width: 100%;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--color-text-secondary);
 }
 .cmd-kbd {
-  padding: 0 4px;
-  font-family: var(--font-mono, monospace);
-  font-size: 10px;
+  padding: 0 var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
   line-height: 14px;
   color: var(--color-text-secondary);
   background: var(--color-bg-primary);
@@ -1308,23 +1308,23 @@ onUnmounted(() => {
   color: var(--color-text-muted);
 }
 .cmd-more {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   line-height: 15px;
-  padding: 0 4px;
+  padding: 0 var(--space-2);
   border-radius: var(--radius-md);
   color: var(--color-text-disabled);
   background: var(--color-bg-tertiary);
 }
 
 /* 使用次数 */
-.card-usage { display: inline-flex; align-items: center; gap: 2px; font-size: 10px; color: var(--color-text-muted); }
-.usage-icon { font-size: 10px; }
-.usage-count { font-family: var(--font-mono, monospace); font-weight: 500; }
+.card-usage { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-2xs); color: var(--color-text-muted); }
+.usage-icon { font-size: var(--text-2xs); }
+.usage-count { font-family: var(--font-mono); font-weight: 500; }
 
 /* 描述：固定两行高度（10px × 1.3 × 2），卡片按行对齐；超出部分由
    line-clamp 裁掉，鼠标移入时由 applyOverflowTitle 补上 title 看全文 */
 .card-desc {
-  font-size: 10px; color: var(--color-text-muted);
+  font-size: var(--text-2xs); color: var(--color-text-muted);
   margin: 1px 0 0; line-height: 1.3;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden;
@@ -1340,7 +1340,7 @@ onUnmounted(() => {
 /* 搜索框跟分类 tab 同一行靠右：装得多时先搜再筛，比先筛再翻更快 */
 .plugin-search {
   display: flex; align-items: center; gap: 5px; margin-left: auto;
-  height: 26px; padding: 0 8px; min-width: 150px;
+  height: 26px; padding: 0 var(--space-4); min-width: 150px;
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
 }
@@ -1348,7 +1348,7 @@ onUnmounted(() => {
 .plugin-search-icon { color: var(--color-text-disabled); flex-shrink: 0; }
 .plugin-search-input {
   flex: 1; min-width: 0; border: none; outline: none; background: none;
-  color: var(--color-text-primary); font-size: 11px; font-family: inherit;
+  color: var(--color-text-primary); font-size: var(--text-xs); font-family: inherit;
 }
 .plugin-search-input::placeholder { color: var(--color-text-disabled); }
 .plugin-search-clear {
@@ -1360,16 +1360,16 @@ onUnmounted(() => {
 .plugin-categories {
   display: flex; gap: 3px; flex-wrap: wrap;
   margin-bottom: 10px; flex-shrink: 0;
-  padding-bottom: 8px;
+  padding-bottom: var(--space-4);
   border-bottom: 1px solid var(--color-border);
 }
 .cat-tab {
   display: inline-flex; align-items: center; gap: 3px;
-  padding: 4px 10px; border-radius: var(--radius-sm);
+  padding: var(--space-2) 10px; border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 11px; font-family: inherit;
+  font-size: var(--text-xs); font-family: inherit;
   cursor: pointer; white-space: nowrap;
   transition: background-color 0.1s, color 0.1s, border-color 0.1s;
 }
@@ -1383,46 +1383,46 @@ onUnmounted(() => {
   color: var(--color-accent);
 }
 .cat-count {
-  font-size: 10px; opacity: 0.6;
+  font-size: var(--text-2xs); opacity: 0.6;
 }
 
 /* ---- 执行历史（5.2） ---- */
 .exec-history {
   flex-shrink: 0;
-  margin-top: 12px;
+  margin-top: var(--space-5);
   border-top: 1px solid var(--color-border);
-  padding-top: 8px;
+  padding-top: var(--space-4);
 }
 .history-head {
-  display: flex; align-items: center; gap: 6px;
-  width: 100%; padding: 4px 2px;
+  display: flex; align-items: center; gap: var(--space-3);
+  width: 100%; padding: var(--space-2) var(--space-1);
   background: transparent; border: none; cursor: pointer;
-  color: var(--color-text-secondary); font-size: 12px; font-family: inherit;
+  color: var(--color-text-secondary); font-size: var(--text-sm); font-family: inherit;
 }
 .history-head:hover { color: var(--color-text-primary); }
 .history-count {
-  font-size: 10px; color: var(--color-text-muted);
-  background: var(--color-bg-tertiary); padding: 0 6px; border-radius: var(--radius-md);
+  font-size: var(--text-2xs); color: var(--color-text-muted);
+  background: var(--color-bg-tertiary); padding: 0 var(--space-3); border-radius: var(--radius-md);
 }
 .history-err-dot {
   width: 6px; height: 6px; border-radius: 50%;
-  background: var(--color-danger); margin-left: 2px;
+  background: var(--color-danger); margin-left: var(--space-1);
 }
-.history-body { margin-top: 6px; }
+.history-body { margin-top: var(--space-3); }
 .history-loading, .history-empty {
-  font-size: 11px; color: var(--color-text-disabled);
-  padding: 8px 2px;
+  font-size: var(--text-xs); color: var(--color-text-disabled);
+  padding: var(--space-4) var(--space-1);
 }
 .history-list {
   max-height: 220px; overflow-y: auto;
-  display: flex; flex-direction: column; gap: 2px;
+  display: flex; flex-direction: column; gap: var(--space-1);
 }
 .exec-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 5px 6px; border-radius: var(--radius-sm);
+  display: flex; align-items: center; gap: var(--space-4);
+  padding: 5px var(--space-3); border-radius: var(--radius-sm);
   background: var(--color-card-bg);
   border: 1px solid transparent;
-  cursor: pointer; font-size: 11px;
+  cursor: pointer; font-size: var(--text-xs);
 }
 .exec-row:hover { background: var(--color-bg-hover); }
 .exec-row.exec-fail { background: var(--color-danger-bg); }
@@ -1433,26 +1433,26 @@ onUnmounted(() => {
 .row-plugin { color: var(--color-text-primary); font-weight: 500; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-cmd { color: var(--color-text-secondary); max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-trigger {
-  font-size: 10px; color: var(--color-text-muted);
-  background: var(--color-bg-tertiary); padding: 0 6px; border-radius: var(--radius-md); flex-shrink: 0;
+  font-size: var(--text-2xs); color: var(--color-text-muted);
+  background: var(--color-bg-tertiary); padding: 0 var(--space-3); border-radius: var(--radius-md); flex-shrink: 0;
 }
-.row-dur { color: var(--color-text-muted); font-family: var(--font-mono, monospace); flex-shrink: 0; }
-.row-time { color: var(--color-text-disabled); font-size: 10px; margin-left: auto; flex-shrink: 0; }
+.row-dur { color: var(--color-text-muted); font-family: var(--font-mono); flex-shrink: 0; }
+.row-time { color: var(--color-text-disabled); font-size: var(--text-2xs); margin-left: auto; flex-shrink: 0; }
 .row-caret { color: var(--color-text-disabled); flex-shrink: 0; }
 .exec-detail {
-  padding: 6px 8px 8px; margin: -2px 0 2px;
+  padding: var(--space-3) var(--space-4) var(--space-4); margin: -2px 0 var(--space-1);
   background: var(--color-bg-primary);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
 }
-.detail-block { margin-top: 6px; }
+.detail-block { margin-top: var(--space-3); }
 .detail-block:first-child { margin-top: 0; }
-.detail-label { font-size: 10px; color: var(--color-text-muted); margin-bottom: 3px; }
+.detail-label { font-size: var(--text-2xs); color: var(--color-text-muted); margin-bottom: 3px; }
 .detail-label.detail-err { color: var(--color-danger); }
 .detail-pre {
-  font-family: var(--font-mono, monospace); font-size: 10px;
+  font-family: var(--font-mono); font-size: var(--text-2xs);
   color: var(--color-text-secondary);
   background: var(--color-bg-tertiary); border-radius: var(--radius-xs);
-  padding: 6px 8px; margin: 0; max-height: 140px; overflow-y: auto;
+  padding: var(--space-3) var(--space-4); margin: 0; max-height: 140px; overflow-y: auto;
   white-space: pre-wrap; word-break: break-all;
 }
 .detail-pre-err { color: var(--color-danger); }
@@ -1467,8 +1467,8 @@ onUnmounted(() => {
   backdrop-filter: blur(1.5px);
 }
 .install-overlay-box {
-  display: flex; flex-direction: column; align-items: center; gap: 12px;
-  padding: 24px 34px;
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-5);
+  padding: var(--space-8) 34px;
   background: var(--color-popover-bg);
   border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
@@ -1488,11 +1488,11 @@ onUnmounted(() => {
 }
 .drop-hint-box {
   display: flex; flex-direction: column; align-items: center; gap: 10px;
-  padding: 20px 30px;
+  padding: var(--space-7) 30px;
   background: var(--color-card-bg);
   border: 1px dashed var(--color-accent);
   border-radius: var(--radius-md);
-  color: var(--color-accent); font-size: 13px;
+  color: var(--color-accent); font-size: var(--text-md);
   box-shadow: 0 8px 24px var(--color-bg-overlay);
 }
 
@@ -1508,17 +1508,17 @@ onUnmounted(() => {
 /* ---- 离线缓存横幅：网络失败降级时必须显式标注，不能静默用旧数据 ---- */
 .market-offline-banner {
   flex-shrink: 0;
-  display: flex; align-items: center; gap: 8px;
-  margin: 0 20px 8px;
-  padding: 7px 12px;
+  display: flex; align-items: center; gap: var(--space-4);
+  margin: 0 var(--space-7) var(--space-4);
+  padding: 7px var(--space-5);
   border: 1px solid var(--color-warning-border);
   border-radius: var(--radius-sm);
   background: var(--color-warning-bg);
   color: var(--color-warning);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 .offline-tag {
-  flex-shrink: 0; font-weight: 700;
+  flex-shrink: 0; font-weight: 600;
   padding: 1px 7px; border-radius: var(--radius-xs);
   background: var(--color-warning-bg);
   border: 1px solid var(--color-warning-border);
@@ -1535,17 +1535,17 @@ onUnmounted(() => {
   border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg);
   box-shadow: 0 18px 56px var(--color-bg-overlay);
-  padding: 16px 18px;
+  padding: var(--space-6) 18px;
   color: var(--color-text-primary);
   display: flex; flex-direction: column;
   max-height: 76vh;
 }
 .qd-modal-head {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: var(--space-4);
   padding-bottom: 10px; margin-bottom: 10px;
   border-bottom: 1px solid var(--color-border);
 }
-.qd-modal-title { font-size: 13px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qd-modal-title { font-size: var(--text-md); font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qd-modal-close {
   display: flex; align-items: center; justify-content: center;
   width: 24px; height: 24px; flex-shrink: 0;
@@ -1557,27 +1557,27 @@ onUnmounted(() => {
 /* ---- 命令清单 ---- */
 .card-cmds { cursor: pointer; } /* 点开完整命令表 */
 .cmd-dialog { width: 520px; max-width: 90%; }
-.cmd-dialog-body { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.cmd-dialog-body { overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-3); }
 .cmd-row {
-  padding: 8px 10px;
+  padding: var(--space-4) 10px;
   border: 1px solid var(--card-border-color); border-radius: var(--radius-sm);
   background: var(--color-card-bg);
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: var(--space-2);
 }
-.cmd-row-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.cmd-row-title { font-size: 12px; color: var(--color-text-primary); font-weight: 500; }
+.cmd-row-top { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.cmd-row-title { font-size: var(--text-sm); color: var(--color-text-primary); font-weight: 500; }
 .cmd-trigger {
-  font-size: 10px; line-height: 15px; padding: 0 5px;
+  font-size: var(--text-2xs); line-height: 15px; padding: 0 5px;
   border-radius: var(--radius-md);
   background: var(--color-accent-bg); color: var(--color-accent);
   white-space: nowrap;
 }
-.cmd-row-hint, .cmd-row-desc { font-size: 11px; color: var(--color-text-muted); overflow-wrap: anywhere; }
-.cmd-row-hint { font-family: var(--font-mono, monospace); }
+.cmd-row-hint, .cmd-row-desc { font-size: var(--text-xs); color: var(--color-text-muted); overflow-wrap: anywhere; }
+.cmd-row-hint { font-family: var(--font-mono); }
 .cmd-row-params { display: flex; flex-direction: column; gap: 3px; }
-.cmd-row-label { font-size: 10px; color: var(--color-text-disabled); }
+.cmd-row-label { font-size: var(--text-2xs); color: var(--color-text-disabled); }
 .cmd-row-params code {
-  font-family: var(--font-mono, monospace); font-size: 10px;
+  font-family: var(--font-mono); font-size: var(--text-2xs);
   color: var(--color-text-secondary);
   background: var(--color-bg-tertiary); border-radius: var(--radius-xs);
   padding: 5px 7px; word-break: break-all; white-space: pre-wrap;
@@ -1585,24 +1585,24 @@ onUnmounted(() => {
 
 /* ---- 市场源编辑 ---- */
 .sources-dialog { width: 460px; max-width: 90%; }
-.sources-list { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.sources-list { overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-3); }
 .source-row {
-  display: flex; align-items: flex-start; gap: 8px;
-  padding: 8px; border: 1px solid var(--card-border-color); border-radius: var(--radius-sm);
+  display: flex; align-items: flex-start; gap: var(--space-4);
+  padding: var(--space-4); border: 1px solid var(--card-border-color); border-radius: var(--radius-sm);
   background: var(--color-card-bg);
 }
-.source-enabled { margin-top: 6px; cursor: pointer; }
+.source-enabled { margin-top: var(--space-3); cursor: pointer; }
 .source-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .source-input {
   width: 100%; box-sizing: border-box;
-  height: 26px; padding: 0 8px;
+  height: 26px; padding: 0 var(--space-4);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-primary); color: var(--color-text-primary);
-  font-size: 11px; font-family: inherit; outline: none;
+  font-size: var(--text-xs); font-family: inherit; outline: none;
 }
 .source-input:focus { border-color: var(--color-border-focus-soft); }
 .source-input::placeholder { color: var(--color-text-disabled); }
-.source-builtin-name { font-size: 12px; font-weight: 500; color: var(--color-text-secondary); line-height: 26px; }
+.source-builtin-name { font-size: var(--text-sm); font-weight: 500; color: var(--color-text-secondary); line-height: 26px; }
 .source-remove {
   display: flex; align-items: center; justify-content: center;
   width: 26px; height: 26px; flex-shrink: 0;
@@ -1610,6 +1610,6 @@ onUnmounted(() => {
   background: var(--color-bg-tertiary); color: var(--color-text-muted); cursor: pointer;
 }
 .source-remove:hover { color: var(--color-danger); border-color: var(--color-danger); }
-.sources-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--color-border); }
+.sources-actions { display: flex; justify-content: flex-end; gap: var(--space-4); margin-top: var(--space-5); padding-top: 10px; border-top: 1px solid var(--color-border); }
 
 </style>

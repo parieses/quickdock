@@ -268,13 +268,13 @@ onBeforeUnmount(() => {
       <!-- 星标：横切任务与空间，所以单独一组放最上面。
            原位置不移走 —— 星标是快捷入口，不是搬进收藏夹。 -->
       <template v-if="starredConvs.length">
-        <div class="ai-group-head ai-group-head-btn" @click="emit('update:starredOpen', !starredOpen)">
+        <div v-key-click class="ai-group-head ai-group-head-btn" :aria-expanded="starredOpen" @click="emit('update:starredOpen', !starredOpen)">
           <component :is="starredOpen ? ChevronDown : ChevronRight" :size="11" class="ai-group-caret" />
           <Star :size="11" class="ai-group-caret" />
           <span>{{ t('aiStarGroup') }} ({{ starredConvs.length }})</span>
         </div>
         <template v-if="starredOpen">
-          <div
+          <div v-key-click
             v-for="c in starredConvs"
             :key="'star-' + c.id"
             :class="['ai-conv-item', { active: c.id === activeId }]"
@@ -293,12 +293,12 @@ onBeforeUnmount(() => {
            这种最常用的找法永远搜不到——而标题往往只写「修复配置」。
            放在任务组之上：搜索时用户要的几乎总是它。 -->
       <template v-if="msgHits.length || msgHitsLoading">
-        <div class="ai-group-head ai-group-head-btn" @click="emit('update:msgHitsOpen', !msgHitsOpen)">
+        <div v-key-click class="ai-group-head ai-group-head-btn" :aria-expanded="msgHitsOpen" @click="emit('update:msgHitsOpen', !msgHitsOpen)">
           <component :is="msgHitsOpen ? ChevronDown : ChevronRight" :size="11" class="ai-group-caret" />
           <span>{{ t('aiGroupMsgHits') }} ({{ msgHits.length }})</span>
         </div>
         <template v-if="msgHitsOpen">
-          <div
+          <div v-key-click
             v-for="h in msgHits"
             :key="h.conv_id"
             :class="['ai-conv-item', 'is-msg-hit', { active: h.conv_id === activeId }]"
@@ -321,13 +321,13 @@ onBeforeUnmount(() => {
       </template>
 
       <!-- 任务组：不属于任何空间的任务。组标题可点 = 整组折叠 -->
-      <div class="ai-group-head ai-group-head-btn" @click="emit('update:tasksOpen', !tasksOpen)">
+      <div v-key-click class="ai-group-head ai-group-head-btn" :aria-expanded="tasksOpen" @click="emit('update:tasksOpen', !tasksOpen)">
         <component :is="tasksOpen ? ChevronDown : ChevronRight" :size="11" class="ai-group-caret" />
         <span>{{ t('aiGroupTasks') }} ({{ taskConversations.length }})</span>
       </div>
       <template v-if="tasksOpen">
       <template v-for="c in shownTaskConversations" :key="c.id">
-        <div
+        <div v-key-click
           :class="['ai-conv-item', { active: c.id === activeId }]"
           @click="selectConv(c.id)"
           @contextmenu.stop="openCtxMenu($event, { kind: 'conv', conv: c })"
@@ -346,12 +346,15 @@ onBeforeUnmount(() => {
             @keydown.esc.prevent="cancelRename()"
             @blur="commitRename(c)"
           />
-          <!-- 双击标题也能改名：改名是低频操作，给它常驻按钮不如给个不占位的手势 -->
+          <!-- 双击 / F2 都能改名：改名是低频操作，给它常驻按钮不如给个不占位的手势。
+               v-key-click 让标题可 Tab 聚焦，@keydown.f2 提供键盘触发（Enter 留给选中会话）。 -->
           <span
             v-else
+            v-key-click
             class="ai-conv-title"
             :title="t('aiRenameHint')"
             @dblclick.stop="startRename(c)"
+            @keydown.f2.stop.prevent="startRename(c)"
           >{{ c.title || t('aiNewChat') }}</span>
           <!-- 任务累计用量：只统计「问答」，标题生成 / 摘要压缩不计入（见 ai_usage.go），
                所以这里的数字应该等于该任务各条回复下方统计之和。
@@ -371,13 +374,13 @@ onBeforeUnmount(() => {
       </template>
 
       <!-- 空间组：绑定目录的任务容器 -->
-      <div class="ai-group-head ai-group-head-space ai-group-head-btn" @click="emit('update:spacesOpen', !spacesOpen)">
+      <div v-key-click class="ai-group-head ai-group-head-space ai-group-head-btn" :aria-expanded="spacesOpen" @click="emit('update:spacesOpen', !spacesOpen)">
         <component :is="spacesOpen ? ChevronDown : ChevronRight" :size="11" class="ai-group-caret" />
         <span>{{ t('aiGroupSpaces') }} ({{ shownSpaces.length }})</span>
       </div>
       <template v-if="spacesOpen">
       <div v-for="g in visibleSpaces" :key="g.space.id" class="ai-space">
-        <div
+        <div v-key-click
           :id="'ai-space-' + g.space.id"
           :class="['ai-space-row', { 'is-flash': flashSpaceId === g.space.id }]"
           @click="toggleSpace(g.space.id)"
@@ -406,7 +409,7 @@ onBeforeUnmount(() => {
             @keydown.esc.prevent="cancelRenameSpace()"
             @blur="commitRenameSpace(g.space)"
           />
-          <span v-else class="ai-space-name" :title="g.space.task_gone ? `${g.space.cwd || g.space.name} · ${t('aiSpaceTaskGone')}` : (g.space.cwd || g.space.name)" @dblclick.stop="startRenameSpace(g.space)">{{ g.space.name }}</span>
+          <span v-else v-key-click class="ai-space-name" :title="g.space.task_gone ? `${g.space.cwd || g.space.name} · ${t('aiSpaceTaskGone')}` : (g.space.cwd || g.space.name)" @dblclick.stop="startRenameSpace(g.space)" @keydown.f2.stop.prevent="startRenameSpace(g.space)">{{ g.space.name }}</span>
           <AiConvRunDot :state="spaceRunState(g)" />
           <span v-if="spaceUnread(g)" class="ai-conv-unread" :title="t('aiUnreadHint')" />
           <span class="ai-space-count">{{ g.tasks.length }}</span>
@@ -434,7 +437,7 @@ onBeforeUnmount(() => {
           </button>
         </div>
         <template v-if="isSpaceExpanded(g.space.id)">
-          <div
+          <div v-key-click
             v-for="c in spaceTasksShown(g)"
             :key="c.id"
             :class="['ai-conv-item', 'is-in-space', { active: c.id === activeId }]"
@@ -443,7 +446,7 @@ onBeforeUnmount(() => {
           >
             <component :is="modeIcon(c.mode)" :size="12" class="ai-conv-mode" />
             <AiConvRunDot :state="c.id === activeId ? undefined : runState[c.id]" />
-            <span class="ai-conv-title" @dblclick.stop="startRename(c)">{{ c.title || t('aiNewChat') }}</span>
+            <span v-key-click class="ai-conv-title" :title="t('aiRenameHint')" @dblclick.stop="startRename(c)" @keydown.f2.stop.prevent="startRename(c)">{{ c.title || t('aiNewChat') }}</span>
             <span v-if="c.unread" class="ai-conv-unread" :title="t('aiUnreadHint')" />
           </div>
           <button
@@ -515,37 +518,37 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  margin: 12px;
-  padding: 8px;
+  gap: var(--space-3);
+  margin: var(--space-5);
+  padding: var(--space-4);
   border: 1px dashed var(--color-border);
   background: transparent;
   color: var(--color-text-secondary);
   border-radius: var(--radius-md);
   cursor: pointer;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--text-md);
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .ai-new-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
-.ai-conv-list { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
+.ai-conv-list { flex: 1; overflow-y: auto; padding: 0 var(--space-4) var(--space-5); }
 
 /* 分组标题：任务 / 空间。两组用同一套样式，视觉上是对等的两个区域，
    而不是「任务」为主、「空间」为附属——空间才是带目录的那个。 */
 .ai-group-head {
-  padding: 12px 10px 6px;
-  font-size: 11px;
+  padding: var(--space-5) 10px var(--space-3);
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--color-text-disabled);
   letter-spacing: 0.4px;
 }
-.ai-group-head-space { margin-top: 4px; border-top: 1px solid var(--color-border); padding-top: 12px; }
+.ai-group-head-space { margin-top: var(--space-2); border-top: 1px solid var(--color-border); padding-top: var(--space-5); }
 /* 组标题可点（收起整组）：条目一多时，先收起一整组比在里面翻找更快。
    箭头与空间行同一套语义——展开是向下箭头。 */
 .ai-group-head-btn {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   cursor: pointer;
   user-select: none;
   transition: color var(--transition-fast);
@@ -560,18 +563,18 @@ onBeforeUnmount(() => {
 .ai-conv-mode { flex-shrink: 0; opacity: 0.7; }
 .ai-conv-item.active .ai-conv-mode { opacity: 1; }
 
-.ai-space { margin-bottom: 2px; }
+.ai-space { margin-bottom: var(--space-1); }
 
-.ai-space { margin-bottom: 2px; }
+.ai-space { margin-bottom: var(--space-1); }
 .ai-space-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px 10px 7px 4px;
+  gap: var(--space-3);
+  padding: 7px 10px 7px var(--space-2);
   border-radius: var(--radius-md);
   cursor: pointer;
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: var(--text-md);
   transition: background var(--transition-fast);
 }
 .ai-space-row:hover { background: var(--color-bg-hover); }
@@ -579,8 +582,8 @@ onBeforeUnmount(() => {
    「当前任务」的选择态混在一起，用户分不清哪个是「我在这」哪个是「刚跳到这」。 */
 .ai-space-row.is-flash { animation: ai-space-flash 1.8s ease-out; }
 @keyframes ai-space-flash {
-  0% { background: color-mix(in srgb, var(--color-accent) 28%, transparent); }
-  60% { background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+  0% { background: var(--color-accent-flash); }
+  60% { background: var(--color-accent-bg); }
   100% { background: transparent; }
 }
 /* 立即运行一次：常驻显示而不是 hover 才出——它是个「动作入口」，
@@ -605,9 +608,8 @@ onBeforeUnmount(() => {
 .ai-space-run .spin { animation: ai-space-run-spin 0.9s linear infinite; }
 @keyframes ai-space-run-spin { to { transform: rotate(360deg); } }
 /* 行内按钮只剩「运行」和「新建任务」两个：删除/改名/星标都进了右键菜单，
-   别再把 .ai-conv-del 抄回来——那个类已经没有对应节点了。 */
-.ai-space-row .ai-conv-add { flex-shrink: 0; }
-.ai-space-row:hover .ai-conv-add { display: flex; }
+   别再把 .ai-conv-del 抄回来——那个类已经没有对应节点了。
+   「新建任务」的显隐规则统一收在下面 .ai-conv-add 那一组，这里不再重复。 */
 .ai-space-caret { flex-shrink: 0; opacity: 0.6; }
 .ai-space-icon { flex-shrink: 0; color: var(--color-accent); opacity: 0.85; }
 /* 定时任务空间是全自动产出物，和「我建的项目目录」不是一类东西：
@@ -623,24 +625,24 @@ onBeforeUnmount(() => {
    「这里面有多少东西」的信息，藏起来等于逼用户一个个展开。 */
 .ai-space-count {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-disabled);
   background: var(--color-bg-tertiary);
   border-radius: var(--radius-md);
-  padding: 0 6px;
+  padding: 0 var(--space-3);
 }
-.ai-conv-item.is-in-space { margin-left: 18px; padding: 6px 10px; font-size: 13px; }
-.ai-space-empty { padding: 4px 10px 8px 28px; font-size: 11px; color: var(--color-text-disabled); }
+.ai-conv-item.is-in-space { margin-left: 18px; padding: var(--space-3) 10px; font-size: var(--text-md); }
+.ai-space-empty { padding: var(--space-2) 10px var(--space-4) 28px; font-size: var(--text-xs); color: var(--color-text-disabled); }
 
 .ai-conv-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: var(--space-3);
+  padding: var(--space-4) 10px;
   border-radius: var(--radius-md);
   cursor: pointer;
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: var(--text-md);
   transition: background var(--transition-fast);
 }
 .ai-conv-item:hover { background: var(--color-bg-hover); }
@@ -665,33 +667,51 @@ onBeforeUnmount(() => {
 .ai-conv-item.is-msg-hit { align-items: flex-start; padding: 7px 10px; }
 .ai-conv-item.is-msg-hit .ai-conv-mode { margin-top: 3px; }
 .ai-msg-hit-body { flex: 1; min-width: 0; }
-.ai-msg-hit-head { display: flex; align-items: center; gap: 4px; }
+.ai-msg-hit-head { display: flex; align-items: center; gap: var(--space-2); }
 /* 「还有 N 条」用数字而不是一条分隔线：同一段话被追问、被复述都会重复命中，
    这个数说明「这条对话里提过好几次」，是选哪条进去的关键。 */
 .ai-msg-hit-count {
-  flex: none; font-size: 10px; color: var(--color-text-disabled);
+  flex: none; font-size: var(--text-2xs); color: var(--color-text-disabled);
   font-variant-numeric: tabular-nums;
 }
 .ai-msg-hit-snippet {
-  margin-top: 2px; font-size: 11px; line-height: 1.45; color: var(--color-text-disabled);
+  margin-top: var(--space-1); font-size: var(--text-xs); line-height: 1.45; color: var(--color-text-muted);
   overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
 .ai-conv-item.active .ai-msg-hit-snippet { color: var(--color-text-secondary); }
 /* 空间行的「+ 在本空间新建任务」：星标/改名/删除都收进了右键菜单（见文件末的菜单样式），
-   只有这一个动作因为高频留在行内，hover 才显形。 */
+   只有这一个动作因为高频留在行内。常驻占位 + opacity 显隐（而不是 display:none → flex），
+   行宽不会在 hover 时跳变，键盘 / 触屏也能摸到它。 */
 .ai-conv-add {
-  background: none; border: none; color: var(--color-text-disabled);
-  cursor: pointer; display: none; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: var(--radius-sm);
+  position: relative;
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0;
+  background: none; border: none; border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), color var(--transition-fast), background-color var(--transition-fast);
 }
-.ai-conv-add:hover { color: var(--color-accent); background: var(--color-bg-tertiary); }
+/* 行 hover / 行内任意控件聚焦 / 按钮自身键盘聚焦时显形 */
+.ai-space-row:hover .ai-conv-add,
+.ai-space-row:focus-within .ai-conv-add,
+.ai-conv-add:focus-visible { opacity: 1; }
+.ai-conv-add:hover { color: var(--color-accent); background: var(--color-bg-tertiary); opacity: 1; }
+/* 命中区补到 24px：伪元素外扩 1px，不撑大布局、不改行高 */
+.ai-conv-add::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: var(--radius-sm);
+}
 /* 行内编辑：撑满标题那一格，且必须能盖住行本身的点击（改选中了会话就白改了） */
 .ai-conv-rename {
   flex: 1;
   min-width: 0;
-  padding: 0 4px;
+  padding: 0 var(--space-2);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-md);
   color: var(--color-text-primary);
   background: var(--color-bg-primary);
   border: 1px solid var(--color-accent);
@@ -699,15 +719,15 @@ onBeforeUnmount(() => {
   outline: none;
 }
 .ai-conv-tokens {
-  font-size: 10px; color: var(--color-text-disabled); white-space: nowrap;
-  margin-right: 4px; font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs); color: var(--color-text-disabled); white-space: nowrap;
+  margin-right: var(--space-2); font-variant-numeric: tabular-nums;
 }
-.ai-conv-empty { padding: 24px 12px; text-align: center; color: var(--color-text-disabled); font-size: 12px; }
+.ai-conv-empty { padding: var(--space-8) var(--space-5); text-align: center; color: var(--color-text-disabled); font-size: var(--text-sm); }
 
 /* 会话搜索：与新建按钮同宽，同一视觉层级 */
 .ai-conv-search {
   display: flex; align-items: center; gap: 5px;
-  margin: 6px 8px 2px; padding: 0 7px; height: 26px;
+  margin: var(--space-3) var(--space-4) var(--space-1); padding: 0 7px; height: 26px;
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
   border-radius: var(--radius-sm); flex-shrink: 0;
 }
@@ -715,7 +735,7 @@ onBeforeUnmount(() => {
 .ai-conv-search-icon { color: var(--color-text-disabled); flex-shrink: 0; }
 .ai-conv-search-input {
   flex: 1; min-width: 0; border: none; outline: none; background: none;
-  color: var(--color-text-primary); font-size: 11px; font-family: inherit;
+  color: var(--color-text-primary); font-size: var(--text-xs); font-family: inherit;
 }
 .ai-conv-search-input::placeholder { color: var(--color-text-disabled); }
 .ai-conv-search-clear {
@@ -725,19 +745,14 @@ onBeforeUnmount(() => {
 .ai-conv-search-clear:hover { color: var(--color-text-primary); }
 /* 加载更多：整行按钮，不要做成小链接——点中的概率太低 */
 .ai-conv-more {
-  margin: 2px 8px 8px; padding: 5px 0; flex-shrink: 0;
+  margin: var(--space-1) var(--space-4) var(--space-4); padding: 5px 0; flex-shrink: 0;
   border: 1px dashed var(--color-border); border-radius: var(--radius-sm);
-  background: none; color: var(--color-text-muted); font-size: 11px;
+  background: none; color: var(--color-text-muted); font-size: var(--text-xs);
   font-family: inherit; cursor: pointer;
 }
 .ai-conv-more:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
 /* 空间内的「更多」跟着任务缩进，否则会和空间名对齐，看着像另一个空间 */
 .ai-conv-more.is-in-space { margin-left: 26px; margin-right: 0; }
-.ai-space-row:hover { background: var(--color-bg-hover); }
-/* 空间行不是 .ai-conv-item，上面那条「hover 才显示」的规则按 .ai-conv-item 写的，
-   所以这里单独补一遍：不补的话 + 按钮会一直 display:none，看起来像没有这个功能。 */
-.ai-space-row .ai-conv-add { flex-shrink: 0; }
-.ai-space-row:hover .ai-conv-add { display: flex; }
 
 /* ---- 任务行右键菜单 ----
    fixed + 全屏透明遮罩：菜单贴鼠标出现，点遮罩任意位置即关。
@@ -754,7 +769,7 @@ onBeforeUnmount(() => {
      一左一右两次右键像两个不同的控件。196 刚好放下最长的那一项。 */
   width: 196px;
   padding: 5px;
-  background: var(--color-surface-elevated);
+  background: var(--color-popover-bg);
   /* 描边用 border-light：surface-elevated 与侧栏只差一档明度，
      普通 border 在深色下几乎看不见，菜单会像直接浮在文字上。 */
   border: 1px solid var(--color-border-light);
@@ -763,20 +778,20 @@ onBeforeUnmount(() => {
      --color-bg-overlay：它本身就是深浅两套值（深 55% / 浅 14%），
      不用为浅色再写一条 :global 覆盖（那个在 scoped 里会被编译坏）。 */
   box-shadow: 0 10px 28px var(--color-bg-overlay);
-  display: flex; flex-direction: column; gap: 2px;
+  display: flex; flex-direction: column; gap: var(--space-1);
 }
 .ai-conv-ctx-item {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: var(--space-4);
   width: 100%; height: 30px; padding: 0 9px;
   border: none; border-radius: var(--radius-sm); background: none;
   color: var(--color-text-secondary);
-  font-size: 13px; line-height: 1; font-family: inherit;
+  font-size: var(--text-md); line-height: 1; font-family: inherit;
   text-align: left; cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
 }
 /* 分组线：上面是「打开/复制目录」，下面是「改这一行」 */
 .ai-conv-ctx-sep {
-  height: 1px; margin: 3px 4px;
+  height: 1px; margin: 3px var(--space-2);
   background: var(--color-border);
 }
 /* 图标不许被文字挤扁；透明度单独调，hover 时跟文字一起提亮 */

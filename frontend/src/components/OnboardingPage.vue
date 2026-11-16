@@ -114,27 +114,27 @@ function openSettings() {
   align-items: center;
   text-align: center;
   max-width: 420px;
-  padding: 48px 32px;
+  padding: var(--space-11) var(--space-9);
   margin: auto;
 }
 
 .ob-logo {
-  margin-bottom: 24px;
+  margin-bottom: var(--space-8);
   opacity: 0.9;
 }
 
 .ob-title {
-  font-size: 24px;
-  font-weight: 700;
+  font-size: var(--text-2xl);
+  font-weight: 600;
   color: var(--color-text-primary);
-  margin: 0 0 8px;
-  letter-spacing: -0.3px;
+  margin: 0 0 var(--space-4);
+  
 }
 
 .ob-desc {
   font-size: var(--text-base);
   color: var(--color-text-muted);
-  margin: 0 0 32px;
+  margin: 0 0 var(--space-9);
   line-height: 1.6;
 }
 
@@ -142,17 +142,17 @@ function openSettings() {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 32px;
+  padding: var(--space-5) var(--space-9);
   border: none;
   border-radius: var(--radius-md);
   background: var(--color-accent);
   color: var(--color-accent-text);
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
   transition: background-color 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s;
-  margin-bottom: 40px;
+  margin-bottom: var(--space-10);
 }
 .ob-start-btn:hover {
   background: var(--color-accent-hover);
@@ -169,14 +169,14 @@ function openSettings() {
   flex-direction: column;
   gap: 0;
   width: 100%;
-  margin-bottom: 32px;
+  margin-bottom: var(--space-9);
 }
 
 .ob-step {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 14px 16px;
+  gap: var(--space-6);
+  padding: 14px var(--space-6);
   border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
@@ -190,7 +190,7 @@ function openSettings() {
   background: var(--color-accent-bg);
   color: var(--color-accent);
   font-size: var(--text-base);
-  font-weight: 700;
+  font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -200,18 +200,18 @@ function openSettings() {
 .step-body {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
   min-width: 0;
 }
 
 .step-label {
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--color-text-primary);
 }
 
 .step-desc {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
 }
 
@@ -224,19 +224,19 @@ function openSettings() {
 
 /* 底部 */
 .ob-footer {
-  margin-top: 8px;
+  margin-top: var(--space-4);
 }
 
 .ob-link-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
+  gap: var(--space-3);
+  padding: var(--space-4) 14px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   cursor: pointer;
   transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;

@@ -102,7 +102,7 @@ function onResizeStart(e: PointerEvent) {
   resizing.value = true
   // 捕获指针：鼠标一旦离开这 6px 的手柄，move/up 仍然回到这里，
   // 否则快速拖动时手指还在动、手柄已经跟丢了。
-  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+ ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   // 拖动期间禁选中 + 全局改光标：不然手一移到预览 iframe 上，
   // move 事件被 iframe 吃掉，光标也变回箭头，看着像拖断了。
   document.body.style.userSelect = 'none'
@@ -394,7 +394,7 @@ defineExpose({ ensureTab, openArtifact })
       <!-- 标签行只有这一层横向滚动：关闭按钮留在外层固定位。整行都可滚时，
            开得多几个标签 × 就被卷出可视区，等于又回到「找不到关闭」的老问题。 -->
       <div class="ai-side-tabs-scroll">
-        <div
+        <div v-key-click
           v-for="tab in tabs"
           :key="tab.id"
           :class="['ai-side-tab', { active: tab.id === activeTabId }]"
@@ -524,12 +524,12 @@ defineExpose({ ensureTab, openArtifact })
 .ai-side.resizing .ai-side-frame,
 .ai-side.resizing .ai-side-img { pointer-events: none; }
 .ai-side-tabs {
-  display: flex; align-items: center; gap: 4px; padding: 6px 8px;
+  display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border); flex-shrink: 0;
 }
 /* 横向滚动只发生在标签区，右侧关闭按钮始终占着固定位 */
 .ai-side-tabs-scroll {
-  display: flex; align-items: center; gap: 4px;
+  display: flex; align-items: center; gap: var(--space-2);
   flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: thin;
 }
 .ai-side-close {
@@ -540,54 +540,54 @@ defineExpose({ ensureTab, openArtifact })
 }
 .ai-side-close:hover { color: var(--color-text-primary); background: var(--color-bg-tertiary); }
 .ai-side-tab {
-  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
-  max-width: 170px; padding: 4px 8px; border-radius: var(--radius-sm);
+  display: inline-flex; align-items: center; gap: var(--space-3); flex-shrink: 0;
+  max-width: 170px; padding: var(--space-2) var(--space-4); border-radius: var(--radius-sm);
   border: none; background: transparent; color: var(--color-text-secondary);
-  font-size: 12px; font-family: inherit; cursor: pointer; user-select: none;
+  font-size: var(--text-sm); font-family: inherit; cursor: pointer; user-select: none;
 }
 .ai-side-tab:hover { color: var(--color-text-primary); }
 .ai-side-tab.active { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
 .ai-side-tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-side-tab-close {
-  display: flex; padding: 1px; border: none; border-radius: 3px;
+  display: flex; padding: 1px; border: none; border-radius: var(--radius-xs);
   background: transparent; color: var(--color-text-secondary); cursor: pointer; flex-shrink: 0;
 }
 .ai-side-tab-close:hover { color: var(--color-text-primary); background: var(--color-bg-primary); }
 .ai-side-new {
-  display: flex; padding: 4px; flex-shrink: 0; border: none; border-radius: var(--radius-sm);
+  display: flex; padding: var(--space-2); flex-shrink: 0; border: none; border-radius: var(--radius-sm);
   background: transparent; color: var(--color-text-secondary); cursor: pointer;
 }
 .ai-side-new:hover { color: var(--color-text-primary); background: var(--color-bg-tertiary); }
 .ai-side-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .ai-side-home { flex: 1; overflow: auto; padding: 14px; }
-.ai-side-home-title { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 8px; }
-.ai-side-home-empty { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; color: var(--color-text-secondary); font-size: 12px; text-align: center; }
+.ai-side-home-title { font-size: var(--text-sm); color: var(--color-text-secondary); margin-bottom: var(--space-4); }
+.ai-side-home-empty { flex: 1; display: flex; align-items: center; justify-content: center; padding: var(--space-8); color: var(--color-text-secondary); font-size: var(--text-sm); text-align: center; }
 .ai-side-filebar {
-  display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+  display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) 10px;
   border-bottom: 1px solid var(--color-border); flex-shrink: 0;
 }
 /* 磁盘版本已更新、但这一页有未保存改动：一条窄提示，不抢编辑区高度 */
 .ai-side-stale {
-  display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+  display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) 10px;
   border-bottom: 1px solid var(--color-border); flex-shrink: 0;
-  background: var(--color-bg-tertiary); color: var(--color-text-secondary); font-size: 11px;
+  background: var(--color-bg-tertiary); color: var(--color-text-secondary); font-size: var(--text-xs);
 }
 .ai-side-stale > span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ai-side-filebar-name { flex: 1; font-size: 11px; color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-side-filebar-name { flex: 1; font-size: var(--text-xs); color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* HTML 渲染视图：iframe 铺满面板；白底兜底，页面没写 background 时与浏览器一致 */
 .ai-side-frame { flex: 1; width: 100%; border: none; background: var(--color-content-bg); }
-.ai-side-imgwrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 12px; overflow: auto; }
+.ai-side-imgwrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: var(--space-5); overflow: auto; }
 .ai-side-img { max-width: 100%; max-height: 100%; border-radius: var(--radius-md); }
 /* 代码视图宿主：只剩 CodeMirror（行号/高亮/滚动都在编辑器内部） */
 .ai-code-wrap { flex: 1; min-height: 0; display: flex; overflow: hidden; background: var(--color-bg-secondary); }
 .ai-code-cm { flex: 1; min-width: 0; overflow: hidden; display: flex; }
 .ai-code-cm .cm-editor { flex: 1; }
 /* 产物预览统一在本面板，弹层已删；这里只剩面板文件栏也在用的公共小件 */
-.ai-file-binary { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; color: var(--color-text-secondary); font-size: 13px; }
+.ai-file-binary { flex: 1; display: flex; align-items: center; justify-content: center; padding: var(--space-8); color: var(--color-text-secondary); font-size: var(--text-md); }
 .ai-file-act {
-  display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px;
+  display: inline-flex; align-items: center; gap: 5px; padding: var(--space-2) 10px;
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  background: transparent; color: var(--color-text-primary); font-size: 11px; cursor: pointer; font-family: inherit;
+  background: transparent; color: var(--color-text-primary); font-size: var(--text-xs); cursor: pointer; font-family: inherit;
 }
 .ai-file-act:hover { border-color: var(--color-accent); }
 </style>

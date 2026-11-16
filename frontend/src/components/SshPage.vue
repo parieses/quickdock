@@ -1036,14 +1036,14 @@ defineExpose({
   align-items: center;
   gap: var(--space-3);
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--color-text-primary);
 }
 
 .ssh-count {
   padding: 0 var(--space-2);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-style: normal;
   font-weight: 500;
   color: var(--color-text-muted);
@@ -1090,7 +1090,7 @@ defineExpose({
 .ssh-error {
   margin: 0 var(--space-5) var(--space-4);
   padding: var(--space-3) var(--space-4);
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-danger);
   background: var(--color-danger-bg);
   border-radius: var(--radius-xs);
@@ -1103,7 +1103,7 @@ defineExpose({
   gap: var(--space-2);
   flex: 0 0 auto;
   margin: 0 var(--space-4) var(--space-3);
-  padding: 2px var(--space-3);
+  padding: var(--space-1) var(--space-3);
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-xs);
@@ -1121,8 +1121,8 @@ defineExpose({
 .ssh-side-search-input {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 2px 0;
-  font-size: 12px;
+  padding: var(--space-1) 0;
+  font-size: var(--text-sm);
   font-family: inherit;
   color: var(--color-text-primary);
   background: transparent;
@@ -1200,14 +1200,14 @@ defineExpose({
 
 .ssh-welcome-text {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-md);
   color: var(--color-text-secondary);
 }
 
 .ssh-welcome-sub {
   margin: 0;
   max-width: 320px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.6;
 }
 

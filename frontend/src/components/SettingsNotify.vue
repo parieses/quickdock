@@ -297,23 +297,23 @@ async function testExtra(ch: ExtraNotifyChannel) {
 </template>
 
 <style scoped>
-.nt-hint { font-size: 11px; color: var(--color-text-disabled); margin: 0 0 var(--space-3); line-height: 1.6; }
-.nt-label { display: block; font-size: 12px; color: var(--color-text-secondary); margin: var(--space-3) 0 4px; }
+.nt-hint { font-size: var(--text-xs); color: var(--color-text-disabled); margin: 0 0 var(--space-3); line-height: 1.6; }
+.nt-label { display: block; font-size: var(--text-sm); color: var(--color-text-secondary); margin: var(--space-3) 0 var(--space-2); }
 .nt-row { display: flex; gap: var(--space-2); align-items: center; }
 .nt-row .qd-input { flex: 1; min-width: 0; }
 .nt-test {
   flex-shrink: 0; height: 34px; padding: 0 14px; border: 1px solid var(--color-border);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
-  border-radius: var(--radius-md); font-size: 12px; cursor: pointer; font-family: inherit;
+  border-radius: var(--radius-md); font-size: var(--text-sm); cursor: pointer; font-family: inherit;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .nt-test:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .nt-test:disabled { opacity: 0.5; cursor: default; }
-.nt-msg { margin-top: var(--space-3); font-size: 12px; color: var(--color-text-secondary); word-break: break-all; line-height: 1.5; }
+.nt-msg { margin-top: var(--space-3); font-size: var(--text-sm); color: var(--color-text-secondary); word-break: break-all; line-height: 1.5; }
 .nt-msg.ok { color: var(--color-success); }
 .nt-actions { display: flex; justify-content: flex-end; margin-top: var(--space-4); }
 /* 扩展渠道行：字段较多，用 flex-wrap 让窄面板自动换行，不挤成横向滚动条 */
-.ntx-empty { font-size: 12px; color: var(--color-text-disabled); margin: var(--space-3) 0; }
+.ntx-empty { font-size: var(--text-sm); color: var(--color-text-disabled); margin: var(--space-3) 0; }
 .ntx-row {
   display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center;
   padding: var(--space-3) 0; border-bottom: 1px solid var(--color-border);
@@ -325,14 +325,14 @@ async function testExtra(ch: ExtraNotifyChannel) {
 .ntx-eye {
   flex-shrink: 0; height: 34px; padding: 0 10px; border: 1px solid var(--color-border);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
-  border-radius: var(--radius-md); font-size: 12px; cursor: pointer; font-family: inherit;
+  border-radius: var(--radius-md); font-size: var(--text-sm); cursor: pointer; font-family: inherit;
 }
 .ntx-eye:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
-.ntx-enable { display: inline-flex; align-items: center; gap: var(--space-2); flex-shrink: 0; font-size: 12px; color: var(--color-text-secondary); }
+.ntx-enable { display: inline-flex; align-items: center; gap: var(--space-2); flex-shrink: 0; font-size: var(--text-sm); color: var(--color-text-secondary); }
 .ntx-op {
-  flex-shrink: 0; height: 34px; padding: 0 12px; border: 1px solid var(--color-border);
+  flex-shrink: 0; height: 34px; padding: 0 var(--space-5); border: 1px solid var(--color-border);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
-  border-radius: var(--radius-md); font-size: 12px; cursor: pointer; font-family: inherit;
+  border-radius: var(--radius-md); font-size: var(--text-sm); cursor: pointer; font-family: inherit;
 }
 .ntx-op:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .ntx-op:disabled { opacity: 0.5; cursor: default; }

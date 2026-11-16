@@ -146,12 +146,12 @@ onUnmounted(() => {
 .port-page { display: flex; flex-direction: column; padding: 0; }
 .port-head { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: var(--space-5); flex-shrink: 0; gap: var(--space-4); }
 .port-title-wrap { display: flex; align-items: baseline; gap: var(--space-3); }
-.port-title { font-size: 18px; font-weight: 600; color: var(--color-text-primary); margin: 0; }
-.port-sub { font-size: 12px; color: var(--color-text-disabled); }
+.port-title { font-size: var(--text-xl); font-weight: 600; color: var(--color-text-primary); margin: 0; }
+.port-sub { font-size: var(--text-sm); color: var(--color-text-disabled); }
 .port-tools { display: flex; align-items: center; gap: var(--space-3); }
 .port-search { display: flex; align-items: center; gap: 5px; padding: 5px 9px; border-radius: var(--radius-sm); background: var(--color-bg-secondary); color: var(--color-text-disabled); min-width: 200px; }
-.port-search-input { flex: 1; border: none; outline: none; background: transparent; color: var(--color-text-primary); font-size: 13px; }
-.port-btn { display: flex; align-items: center; gap: 4px; font-size: 12px; height: 28px; padding: 0 11px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--color-border); background: var(--color-bg-secondary); color: var(--color-text-primary); }
+.port-search-input { flex: 1; border: none; outline: none; background: transparent; color: var(--color-text-primary); font-size: var(--text-md); }
+.port-btn { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); height: 28px; padding: 0 11px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--color-border); background: var(--color-bg-secondary); color: var(--color-text-primary); }
 .port-btn:disabled { opacity: 0.5; cursor: default; }
 .port-btn.is-loading .port-btn-icon { animation: port-spin 0.8s linear infinite; }
 @keyframes port-spin { to { transform: rotate(360deg); } }
@@ -159,9 +159,9 @@ onUnmounted(() => {
 .port-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); padding: var(--space-9) var(--space-4); color: var(--color-text-disabled); }
 .port-spinner { width: 26px; height: 26px; border-radius: 50%; border: 2.5px solid var(--color-border); border-top-color: var(--color-accent); animation: port-spin 0.8s linear infinite; }
 
-.port-error { margin-bottom: var(--space-4); padding: 8px 12px; font-size: 12px; color: var(--color-danger); background: var(--color-danger-bg); border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); flex-shrink: 0; }
+.port-error { margin-bottom: var(--space-4); padding: var(--space-4) var(--space-5); font-size: var(--text-sm); color: var(--color-danger); background: var(--color-danger-bg); border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); flex-shrink: 0; }
 
-.port-list { display: flex; flex-direction: column; gap: 4px; }
+.port-list { display: flex; flex-direction: column; gap: var(--space-2); }
 .port-empty { text-align: center; padding: var(--space-9) var(--space-4); color: var(--color-text-disabled); }
 /* 空状态图标：一根细线图标直接浮在深底上，容易被读成「没加载出来」。
    给一层方底 + 细边，它才是一个完整的标识；padding 配合 content-box，
@@ -174,20 +174,20 @@ onUnmounted(() => {
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  margin-bottom: 12px;
+  margin-bottom: var(--space-5);
 }
-.port-row { display: flex; align-items: center; gap: var(--space-3); padding: 9px 12px; background: var(--color-card-bg); border: 1px solid var(--card-border-color); border-radius: var(--radius-md); transition: background var(--transition-fast); }
+.port-row { display: flex; align-items: center; gap: var(--space-3); padding: 9px var(--space-5); background: var(--color-card-bg); border: 1px solid var(--card-border-color); border-radius: var(--radius-md); transition: background var(--transition-fast); }
 .port-row:hover { background: var(--color-bg-hover); }
 /* QuickDock 自身监听的端口（内置 HTTP 静态服务等）：描边高亮，避免混在系统进程里认不出 */
 .port-row.is-self { border: 1px solid var(--color-accent); background: var(--color-accent-bg); }
 .port-row.is-self:hover { background: var(--color-accent-bg); }
-.port-self-badge { margin-left: 6px; font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: var(--radius-xs); background: var(--color-accent); color: var(--color-accent-text); white-space: nowrap; }
+.port-self-badge { margin-left: var(--space-3); font-size: var(--text-2xs); font-weight: 600; padding: 1px 5px; border-radius: var(--radius-xs); background: var(--color-accent); color: var(--color-accent-text); white-space: nowrap; }
 .port-num { font-size: var(--text-base); font-weight: 600; color: var(--color-text-primary); font-variant-numeric: tabular-nums; min-width: 64px; }
-.port-proto { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: var(--radius-xs); background: var(--color-bg-tertiary); color: var(--color-text-muted); min-width: 38px; text-align: center; }
+.port-proto { font-size: var(--text-2xs); font-weight: 600; padding: 1px var(--space-3); border-radius: var(--radius-xs); background: var(--color-bg-tertiary); color: var(--color-text-muted); min-width: 38px; text-align: center; }
 .port-proto.proto-udp { color: var(--color-warning); }
-.port-pid { font-size: 11px; color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
-.port-name { flex: 1; min-width: 0; font-size: 13px; color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.port-path { flex: 1.6; min-width: 0; font-size: 12px; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.port-kill { display: flex; align-items: center; gap: 4px; font-size: 12px; padding: 4px 9px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--color-border); background: transparent; color: var(--color-danger); transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast); }
+.port-pid { font-size: var(--text-xs); color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
+.port-name { flex: 1; min-width: 0; font-size: var(--text-md); color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.port-path { flex: 1.6; min-width: 0; font-size: var(--text-sm); color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.port-kill { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); padding: var(--space-2) 9px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--color-border); background: transparent; color: var(--color-danger); transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast); }
 .port-kill:hover { background: var(--color-danger-bg); border-color: var(--color-danger-border); }
 </style>

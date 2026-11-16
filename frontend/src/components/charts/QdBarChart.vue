@@ -157,7 +157,7 @@ function buildOption() {
       // 不挂 body：挂到 body 后定位要跨容器换算，窄卡里容易算到视口外「整个看不到」。
       // 改为留在图表容器（ECharts 默认，定位最稳），由容器 overflow:visible 放行，
       // 再用高 z-index 压住相邻卡片。pointer-events:none 免得它自己吃掉 hover 闪烁。
-      extraCssText: 'z-index:2147483647;box-shadow:0 6px 20px rgba(0,0,0,.22);border-radius: var(--radius-sm);padding:6px 9px;line-height:1.6;white-space:nowrap;pointer-events:none;',
+      extraCssText: 'z-index:2147483647;box-shadow:var(--shadow-md);border-radius:var(--radius-sm);padding:var(--space-3) var(--space-4);line-height:1.6;white-space:nowrap;pointer-events:none;',
       axisPointer: { type: 'shadow', shadowStyle: { color: c.border } },
       backgroundColor: c.tooltipBg,
       borderColor: c.border,
@@ -248,7 +248,7 @@ onBeforeUnmount(() => {
 .qd-chart__state {
   position: absolute; inset: 0; z-index: 1;
   display: flex; align-items: center; justify-content: center;
-  font-size: 11px; color: var(--color-text-muted);
+  font-size: var(--text-xs); color: var(--color-text-muted);
   background: var(--color-bg-secondary);
   border-radius: var(--radius-md);
 }

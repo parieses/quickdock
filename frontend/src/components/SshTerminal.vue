@@ -1220,7 +1220,7 @@ defineExpose({
     </div>
 
     <Teleport to="body">
-      <div
+      <div v-key-click
         v-if="menu"
         class="term-menu"
         :style="{ left: menu.x + 'px', top: menu.y + 'px' }"
@@ -1413,7 +1413,7 @@ defineExpose({
   flex: 1 1 auto;
   min-width: 120px;
   padding: 1px 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   color: var(--color-text-primary);
   background: transparent;
@@ -1425,7 +1425,7 @@ defineExpose({
   flex: 0 0 auto;
   min-width: 34px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   text-align: right;
   color: var(--color-text-muted);
 }
@@ -1433,7 +1433,7 @@ defineExpose({
 .term-search-btn {
   display: flex;
   flex: 0 0 auto;
-  padding: 2px;
+  padding: var(--space-1);
   color: var(--color-text-secondary);
   background: transparent;
   border: none;
@@ -1472,7 +1472,7 @@ defineExpose({
   gap: var(--space-6);
   width: 100%;
   padding: var(--space-3) var(--space-4);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   color: var(--color-text-primary);
   background: transparent;
@@ -1510,7 +1510,7 @@ defineExpose({
 }
 
 .term-menu-kbd {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   font-family: var(--font-mono);
 }

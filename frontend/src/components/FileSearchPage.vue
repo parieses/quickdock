@@ -253,7 +253,7 @@ function onKeydown(e: KeyboardEvent) {
               <p class="qd-empty-hint">{{ t('fileSearchEmptyHint') }}</p>
             </div>
             <template v-else>
-              <div
+              <div v-key-click
                 v-for="(r, i) in rows"
                 :key="r.path || i"
                 :class="['qd-row', 'fs-row', { active: !!r.path && selected.has(r.path) }]"
@@ -298,8 +298,8 @@ function onKeydown(e: KeyboardEvent) {
 .fs-query { flex: 1; min-width: 180px; max-width: 420px; }
 .fs-select { width: auto; min-width: 92px; }
 .fs-limit { min-width: 66px; }
-.fs-count { font-size: 12px; color: var(--color-text-muted); white-space: nowrap; }
-.fs-syntax { font-size: 11px; color: var(--color-text-muted); white-space: nowrap; }
+.fs-count { font-size: var(--text-sm); color: var(--color-text-muted); white-space: nowrap; }
+.fs-syntax { font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap; }
 
 .fs-bulk {
   display: flex;
@@ -311,11 +311,11 @@ function onKeydown(e: KeyboardEvent) {
   border-bottom: 1px solid var(--color-border);
   background: var(--color-accent-bg);
 }
-.fs-bulk-count { font-size: 12px; font-weight: 600; color: var(--color-accent); }
+.fs-bulk-count { font-size: var(--text-sm); font-weight: 600; color: var(--color-accent); }
 .fs-error {
   margin: 0;
   padding: var(--space-3) var(--space-6);
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-danger);
   background: var(--color-danger-bg);
 }
@@ -335,10 +335,10 @@ function onKeydown(e: KeyboardEvent) {
 .fs-preview { flex: 1 1 45%; min-width: 0; overflow: hidden; padding: var(--space-4); }
 
 .fs-row { gap: var(--space-4); }
-.fs-row-main { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 2px; }
+.fs-row-main { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: var(--space-1); }
 .fs-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fs-dir { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.fs-time { flex-shrink: 0; font-size: 11px; color: var(--color-text-muted); white-space: nowrap; }
+.fs-dir { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
+.fs-time { flex-shrink: 0; font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap; }
 .fs-row-actions { display: flex; flex-shrink: 0; gap: var(--space-1); opacity: 0; }
 .fs-row:hover .fs-row-actions, .fs-row.active .fs-row-actions { opacity: 1; }
 </style>

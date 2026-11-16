@@ -142,6 +142,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
 const collapsed = ref(localStorage.getItem('qd_sidebar_collapsed') === '1')
 function toggleCollapse() {
   collapsed.value = !collapsed.value
+  // 写盘失败只影响下次启动的折叠态，静默降级即可（隐私模式 / 配额满），不打断交互。
   try { localStorage.setItem('qd_sidebar_collapsed', collapsed.value ? '1' : '0') } catch { /* ignore */ }
 }
 
@@ -293,12 +294,12 @@ async function handleDeleteWorkspace(wsId: string) {
 <template>
   <aside class="sidebar" :class="{ collapsed }">
     <!-- 工作空间切换器 -->
-    <div class="workspace-selector" @click.stop="toggleWorkspaceMenu">
+    <div v-key-click class="workspace-selector" @click.stop="toggleWorkspaceMenu">
       <FolderKanban :size="16" class="ws-icon" />
       <span class="ws-name">{{ store.activeWorkspace?.name || t('selectWorkspace') }}</span>
       <ChevronDown :size="14" class="ws-arrow" />
       <Transition name="dropdown">
-        <div v-if="showWorkspaceMenu" class="ws-dropdown" @click.stop>
+        <div v-key-click v-if="showWorkspaceMenu" class="ws-dropdown" @click.stop>
           <div class="ws-dropdown-header">{{ t('workspaces') }}</div>
           <div
             v-for="(ws, i) in store.workspaces"
@@ -433,7 +434,7 @@ async function handleDeleteWorkspace(wsId: string) {
 
     <!-- 导航项右键菜单：Teleport 到 body，避免被侧栏 overflow:hidden 裁切 -->
     <Teleport to="body">
-      <div
+      <div v-key-click
         v-if="navMenu"
         class="nav-menu"
         :style="{ top: navMenu.y + 'px', left: navMenu.x + 'px' }"
@@ -482,13 +483,13 @@ async function handleDeleteWorkspace(wsId: string) {
 .sidebar.collapsed .ws-arrow,
 .sidebar.collapsed .nav-item span,
 .sidebar.collapsed .settings-btn span { display: none; }
-.sidebar.collapsed .workspace-selector { justify-content: center; margin: 6px 8px 0; padding: 0; }
+.sidebar.collapsed .workspace-selector { justify-content: center; margin: var(--space-3) var(--space-4) 0; padding: 0; }
 .sidebar.collapsed .nav-item { justify-content: center; padding-left: 0; padding-right: 0; }
 /* 收起态 54px 宽放不下「通知 + 设置 + 折叠」三个横排按钮（实测超 90px），
    居中后最右的折叠/展开箭头会被侧栏 overflow:hidden 裁掉——用户就「找不到展开按钮」。
    改成竖向堆叠：三项各自居中，展开箭头恒定可见，也不挤占横向。 */
-.sidebar.collapsed .sidebar-footer { flex-direction: column; justify-content: center; gap: 8px; padding: 8px 0; }
-.sidebar.collapsed .settings-btn { flex: 0; padding: 6px; }
+.sidebar.collapsed .sidebar-footer { flex-direction: column; justify-content: center; gap: var(--space-4); padding: var(--space-4) 0; }
+.sidebar.collapsed .settings-btn { flex: 0; padding: var(--space-3); }
 .sidebar.collapsed .ws-dropdown { left: 6px; right: auto; width: 200px; }
 /* 收起态同样不能隐藏 span（浮层里的行要靠它显示名字），
    只在不同的 class 上做显隐，不用 :has() —— WebView2 版本不可控。
@@ -510,7 +511,7 @@ async function handleDeleteWorkspace(wsId: string) {
   align-items: center;
   gap: var(--space-4);
   min-height: 32px;
-  margin: 6px 10px 0;
+  margin: var(--space-3) 10px 0;
   padding: 0 10px;
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -524,14 +525,14 @@ async function handleDeleteWorkspace(wsId: string) {
 .sidebar-navigator {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 6px 10px 10px;
-  box-shadow: var(--shadow-border);
+  padding: var(--space-3) 10px 10px;
+  border-bottom: 1px solid var(--color-border);
   overflow-y: auto;
 }
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   position: relative;
   width: 100%;
   min-height: 32px;
@@ -539,7 +540,7 @@ async function handleDeleteWorkspace(wsId: string) {
   border: none;
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: var(--text-md);
   cursor: pointer;
   font-family: inherit;
   border-radius: var(--radius-sm);
@@ -564,15 +565,15 @@ async function handleDeleteWorkspace(wsId: string) {
   background: var(--color-accent);
 }
 .nav-badge {
-  margin-left: auto; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-md);
-  background: var(--color-danger); color: var(--color-accent-text); font-size: 10px; font-weight: 700; line-height: 16px; text-align: center;
+  margin-left: auto; min-width: 16px; height: 16px; padding: 0 var(--space-2); border-radius: var(--radius-md);
+  background: var(--color-danger); color: var(--color-accent-text); font-size: var(--text-2xs); font-weight: 600; line-height: 16px; text-align: center;
 }
 /* 角标色调：红=故障/崩溃，橙=该处理的事，蓝=有好东西可用（统一走语义 token） */
 .nav-badge.tone-danger { background: var(--color-danger); }
 .nav-badge.tone-warning { background: var(--color-warning); }
 .nav-badge.tone-info { background: var(--color-accent); }
 /* footer 上的设置角标：按钮没右侧内边距，且不能让小红点把「设置」文字挤没 */
-.footer-badge { margin-left: 4px; flex-shrink: 0; }
+.footer-badge { margin-left: var(--space-2); flex-shrink: 0; }
 .sidebar.collapsed .nav-item .nav-badge,
 .sidebar.collapsed .settings-btn .footer-badge {
   /* 收起态「只留图标」的规则是 .nav-item span（0-3-1），这里必须至少 0-4-0 才能翻盘；
@@ -586,14 +587,14 @@ async function handleDeleteWorkspace(wsId: string) {
   height: 14px;
   padding: 0 3px;
   line-height: 14px;
-  font-size: 10px;
+  font-size: var(--text-2xs);
 }
 .sidebar.collapsed .settings-btn .footer-badge { top: 0; right: 2px; }
 .nav-item.opening { cursor: default; opacity: .7; }
 .nav-item.opening:hover { background: transparent; color: var(--color-text-secondary); }
 .nav-spinner {
   width: 14px; height: 14px; flex-shrink: 0;
-  border: 2px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  border: 2px solid var(--color-accent-border);
   border-top-color: var(--color-accent);
   border-radius: 50%;
   animation: nav-spin .8s linear infinite;
@@ -611,7 +612,7 @@ async function handleDeleteWorkspace(wsId: string) {
 .nav-dot.running { animation: nav-dot-pulse 1.1s ease-in-out infinite; }
 @keyframes nav-dot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 /* NavBadge 也挂在行尾，两者同排时留一点间距 */
-.nav-dot + * { margin-left: 4px; }
+.nav-dot + * { margin-left: var(--space-2); }
 /* 收起态照样要看见：`.collapsed .nav-item span` 会 display:none（0-3-1），
    这里必须同样的权重以上才能翻盘（nav-badge 是同样的坑，见上） */
 .sidebar.collapsed .nav-item .nav-dot {
@@ -623,11 +624,11 @@ async function handleDeleteWorkspace(wsId: string) {
 }
 
 /* 已隐藏项折叠组：虚线框 + 就地恢复列表 */
-.hidden-group { margin-top: 6px; }
+.hidden-group { margin-top: var(--space-3); }
 .hidden-toggle { color: var(--color-text-disabled); }
 .hidden-caret { margin-left: auto; color: var(--color-text-disabled); transition: transform var(--transition-base); }
 .hidden-caret.open { transform: rotate(180deg); }
-.hidden-list { display: flex; flex-direction: column; gap: 1px; padding-left: 8px; border-left: 1px dashed var(--color-border); margin: 2px 0 0 10px; }
+.hidden-list { display: flex; flex-direction: column; gap: 1px; padding-left: var(--space-4); border-left: 1px dashed var(--color-border); margin: var(--space-1) 0 0 10px; }
 /* 显隐交给 v-if + Transition（高度由 JS 钩子量，见 onCollapseEnter）；
    as-popover 只负责换定位方式，两者互不干涉。 */
 .collapse-enter-active,
@@ -645,7 +646,7 @@ async function handleDeleteWorkspace(wsId: string) {
   overflow-y: auto;
   z-index: 60;
   margin: 0;
-  padding: 6px;
+  padding: var(--space-3);
   border-left: none;
   background: var(--color-popover-bg);
   border: 1px solid var(--popover-border-color);
@@ -684,18 +685,18 @@ async function handleDeleteWorkspace(wsId: string) {
   position: fixed;
   z-index: 200;
   min-width: 150px;
-  padding: 4px;
+  padding: var(--space-2);
   background: var(--color-popover-bg);
   border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
 }
 .nav-menu-title {
-  padding: 4px 8px 6px;
-  font-size: 11px;
+  padding: var(--space-2) var(--space-4) var(--space-3);
+  font-size: var(--text-xs);
   color: var(--color-text-disabled);
   border-bottom: 1px solid var(--color-border);
-  margin-bottom: 4px;
+  margin-bottom: var(--space-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -703,13 +704,13 @@ async function handleDeleteWorkspace(wsId: string) {
 .nav-menu button {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   width: 100%;
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
   border: none;
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-family: inherit;
   cursor: pointer;
   border-radius: var(--radius-sm);
@@ -719,11 +720,11 @@ async function handleDeleteWorkspace(wsId: string) {
 .nav-menu button:hover:not(:disabled) { background: var(--color-bg-active); color: var(--color-text-primary); }
 .nav-menu button:disabled { opacity: 0.4; cursor: default; }
 .nav-menu button.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
-.nav-menu-divider { height: 1px; background: var(--color-border); margin: 4px 2px; }
+.nav-menu-divider { height: 1px; background: var(--color-border); margin: var(--space-2) var(--space-1); }
 
 .ws-name {
   flex: 1;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--color-text-primary);
   overflow: hidden;
@@ -750,7 +751,7 @@ async function handleDeleteWorkspace(wsId: string) {
 }
 .ws-dropdown-header {
   padding: var(--space-4) var(--space-5);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 500;
   color: var(--color-text-disabled);
   
@@ -761,11 +762,11 @@ async function handleDeleteWorkspace(wsId: string) {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: 8px 12px;
+  padding: var(--space-4) var(--space-5);
   border: none;
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: var(--text-md);
   cursor: pointer;
   font-family: inherit;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
@@ -812,7 +813,7 @@ async function handleDeleteWorkspace(wsId: string) {
 /* 底部固定：设置 + 收起 */
 .sidebar-footer {
   flex-shrink: 0;
-  box-shadow: var(--shadow-border);
+  border-top: 1px solid var(--color-border);
   display: flex;
   align-items: center;
   padding: var(--space-3) 10px;
@@ -827,7 +828,7 @@ async function handleDeleteWorkspace(wsId: string) {
   border: none;
   background: transparent;
   color: var(--color-text-disabled);
-  font-size: 12px;
+  font-size: var(--text-sm);
   cursor: pointer;
   font-family: inherit;
   border-radius: var(--radius-sm);

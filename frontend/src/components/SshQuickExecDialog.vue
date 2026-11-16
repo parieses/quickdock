@@ -14,7 +14,7 @@
  *
  * 安全底线与批量执行一致：
  *  1. 风险说明排在执行按钮之前（放在下面等于让用户先点了才看到）；
- *  2. 生产机或高风险命令要点两次，且命令一改就立刻收回确认态；
+ *  2. 生产机或高风险命令执行前过一次 toast.confirm（点那一刻判风险）；
  *  3. 拿不到风险标注时按最保守处理——不预演就不给执行。
  *
  * 与批量不同的一点：这里没有「停止」。Exec 是一次阻塞调用，后端没有
@@ -60,7 +60,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const { error: toastError } = useToast()
+const { error: toastError, confirm: toastConfirm } = useToast()
 
 const panelRef = ref<HTMLElement | null>(null)
 const cmdRef = ref<HTMLTextAreaElement | null>(null)
@@ -77,8 +77,6 @@ const plannedCmd = ref('')
 const out = ref<SshExecResult | null>(null)
 const execErr = ref('')
 const copied = ref(false)
-/** 二次确认已武装 */
-const armed = ref(false)
 
 /** 命令片段：本弹窗自己维护列表与选中态（不做共享 composable）。 */
 const commands = ref<SshCommand[]>([])
@@ -88,7 +86,6 @@ const pickedCmdId = ref('')
 const savingCmd = ref(false)
 const newCmdName = ref('')
 /** 删除片段的组件内二次确认态，不用 confirm() */
-const deletingCmd = ref(false)
 
 /** 按 category 分组供 <optgroup> 用；空分类的不套组，避免出现一个空标签的组。 */
 const cmdGrouped = computed(() => {
@@ -109,7 +106,6 @@ const cmdUngrouped = computed(() => commands.value.filter(c => !c.category))
  */
 let runSeq = 0
 let planTimer: ReturnType<typeof setTimeout> | null = null
-let armTimer: ReturnType<typeof setTimeout> | null = null
 let copyTimer: ReturnType<typeof setTimeout> | null = null
 
 const hostId = computed(() => props.host?.id || '')
@@ -153,14 +149,6 @@ const outputText = computed(() => {
   return parts.join('\n').trim() || t('sshBatchEmptyOutput')
 })
 
-function disarm() {
-  armed.value = false
-  if (armTimer) {
-    clearTimeout(armTimer)
-    armTimer = null
-  }
-}
-
 /**
  * 命令变化 → 重新预演。
  *
@@ -168,7 +156,6 @@ function disarm() {
  * 更要紧的是立刻收回二次确认——确认态必须绑在具体命令内容上。
  */
 function schedulePlan() {
-  disarm()
   if (planTimer) clearTimeout(planTimer)
   const cmd = command.value.trim()
   if (!cmd) {
@@ -215,20 +202,18 @@ async function loadCommands() {
 
 /**
  * 选中片段：填命令后必须走 schedulePlan()。
- * 直接赋值会绕过风险预演——schedulePlan() 开头就 disarm()，确认态必须绑在
+ * 直接赋值会绕过风险预演——schedulePlan() 会立刻重跑预演，风险必须绑在
  * 具体命令上；否则会拿着上一条命令的风险判定放行这条新命令。
  */
 function onPickCmd() {
   const c = commands.value.find(x => x.id === pickedCmdId.value)
   if (!c) return
   command.value = c.command
-  disarm()
   schedulePlan()
 }
 
 function startSaveCmd() {
   savingCmd.value = true
-  deletingCmd.value = false
   newCmdName.value = ''
 }
 
@@ -263,13 +248,19 @@ async function confirmSaveCmd() {
   }
 }
 
+// 删除片段不可逆：与批量执行弹窗共用同一套 toast.confirm 文案与手感。
+async function requestDeleteCmd() {
+  if (!pickedCmdId.value) return
+  if (!(await toastConfirm(t('sshBatchDeleteCmdConfirm')))) return
+  await confirmDeleteCmd()
+}
+
 async function confirmDeleteCmd() {
   const id = pickedCmdId.value
   if (!id) return
   try {
     unwrap(await DeleteSshCommand(id))
     pickedCmdId.value = ''
-    deletingCmd.value = false
     await loadCommands()
   } catch (e) {
     toastError(getErrorMessage(e))
@@ -279,14 +270,9 @@ async function confirmDeleteCmd() {
 
 async function onRunClick() {
   if (!canRun.value) return
-  if (needsConfirm.value && !armed.value) {
-    armed.value = true
-    if (armTimer) clearTimeout(armTimer)
-    // 5 秒自动撤回：不信这个计时器，用户改完别的回来随手一点就绕过了确认。
-    armTimer = setTimeout(disarm, 5000)
-    return
-  }
-  disarm()
+  // 生产机 / 高风险命令：确认走点击那一刻的 toast.confirm，与批量执行弹窗同一套，
+  // 不存在「确认态跨命令残留」的 armed 窗口，也不用计时器自动撤回。
+  if (needsConfirm.value && !(await toastConfirm(t('sshBatchRunConfirm')))) return
   await run()
 }
 
@@ -343,7 +329,6 @@ function requestClose() {
   // （弹了也停不下来，只会让用户以为停下来）。只作废本次结果。
   if (running.value) runSeq++
   running.value = false
-  disarm()
   emit('close')
 }
 
@@ -378,13 +363,11 @@ watch(
     execErr.value = ''
     copied.value = false
     runSeq++
-    disarm()
-    // 片段库：每次打开重新拉一遍（别处可能增删过片段），并复位选中与内联态。
+      // 片段库：每次打开重新拉一遍（别处可能增删过片段），并复位选中与内联态。
     pickedCmdId.value = ''
     savingCmd.value = false
     newCmdName.value = ''
-    deletingCmd.value = false
-    void loadCommands()
+      void loadCommands()
     // 焦点落在命令框而不是开关按钮上（焦点陷阱默认聚焦第一个可聚焦元素＝关闭键，
     // 对「进来就是为了敲一条命令」的弹窗来说那是一次多余的 Tab）。
     // 用 rAF 而不是 nextTick：陷阱也在 rAF 里聚焦，注册在前所以先跑，这样能盖住它。
@@ -394,7 +377,6 @@ watch(
 
 onBeforeUnmount(() => {
   if (planTimer) clearTimeout(planTimer)
-  if (armTimer) clearTimeout(armTimer)
   if (copyTimer) clearTimeout(copyTimer)
 })
 </script>
@@ -456,23 +438,10 @@ onBeforeUnmount(() => {
                 @click="startSaveCmd"
               >{{ t('sshCmdSave') }}</button>
               <button
-                v-if="!deletingCmd"
                 class="qex-snip-btn"
                 :disabled="running || !pickedCmdId || savingCmd"
-                @click="deletingCmd = true"
+                @click="requestDeleteCmd"
               >{{ t('sshCmdDelete') }}</button>
-              <button
-                v-if="deletingCmd"
-                class="qex-snip-btn danger"
-                :disabled="running"
-                @click="confirmDeleteCmd"
-              >{{ t('sshCmdDeleteConfirm') }}</button>
-              <button
-                v-if="deletingCmd"
-                class="qex-snip-btn"
-                :disabled="running"
-                @click="deletingCmd = false"
-              >{{ t('sshCmdCancel') }}</button>
             </div>
 
             <div v-if="savingCmd" class="qex-snip-save">
@@ -535,13 +504,13 @@ onBeforeUnmount(() => {
               <span v-if="runHint" class="qex-run-hint">{{ runHint }}</span>
               <button
                 class="qex-run"
-                :class="{ armed, danger: needsConfirm }"
+                :class="{ danger: needsConfirm }"
                 :disabled="!canRun"
                 @click="onRunClick"
               >
                 <LoaderCircle v-if="running" :size="12" class="qex-spin" />
                 <Play v-else :size="12" />
-                <span>{{ running ? t('sshQuickExecRunning') : (armed ? t('sshBatchRunConfirm') : t('sshBatchRun')) }}</span>
+                <span>{{ running ? t('sshQuickExecRunning') : t('sshBatchRun') }}</span>
               </button>
             </div>
 
@@ -604,13 +573,13 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   gap: var(--space-3);
   flex: 0 0 auto;
-  padding: 12px 14px;
+  padding: var(--space-5) 14px;
   border-bottom: 1px solid var(--color-border);
 }
 .qex-head-icon { color: var(--color-accent); margin-top: 1px; }
-.qex-head-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.qex-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
-.qex-sub { font-size: 11px; color: var(--color-text-muted); }
+.qex-head-text { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.qex-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
+.qex-sub { font-size: var(--text-xs); color: var(--color-text-muted); }
 .qex-x {
   margin-left: auto;
   display: flex; align-items: center;
@@ -626,7 +595,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  padding: 12px 14px 14px;
+  padding: var(--space-5) 14px 14px;
 }
 
 .qex-target {
@@ -635,7 +604,7 @@ onBeforeUnmount(() => {
   gap: var(--space-2);
   min-width: 0;
   padding: var(--space-2) var(--space-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
   background: var(--color-bg-tertiary);
   border-radius: var(--radius-xs);
 }
@@ -647,7 +616,7 @@ onBeforeUnmount(() => {
 .qex-target-addr {
   margin-left: auto;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -655,7 +624,7 @@ onBeforeUnmount(() => {
 .qex-env {
   flex: 0 0 auto;
   padding: 0 5px;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   line-height: 1.6;
   border-radius: var(--radius-full);
   border: 1px solid transparent;
@@ -676,13 +645,13 @@ onBeforeUnmount(() => {
   border-color: var(--color-border);
 }
 
-.qex-label { font-size: 12px; font-weight: 600; color: var(--color-text-primary); }
+.qex-label { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); }
 
 .qex-textarea {
   width: 100%;
   padding: var(--space-3);
-  font-family: var(--font-mono, monospace);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
   line-height: 1.6;
   color: var(--color-text-primary);
   background: var(--color-bg-primary);
@@ -696,12 +665,12 @@ onBeforeUnmount(() => {
 .qex-opts { display: flex; align-items: flex-end; gap: var(--space-4); }
 .qex-opt {
   display: flex; flex-direction: column; gap: 3px;
-  font-size: 11px; color: var(--color-text-muted);
+  font-size: var(--text-xs); color: var(--color-text-muted);
 }
 .qex-opt input {
   width: 72px;
-  padding: 3px 6px;
-  font-size: 12px;
+  padding: 3px var(--space-3);
+  font-size: var(--text-sm);
   font-family: inherit;
   color: var(--color-text-primary);
   background: var(--color-bg-primary);
@@ -710,7 +679,7 @@ onBeforeUnmount(() => {
   outline: none;
 }
 .qex-opt input:focus { border-color: var(--color-border-focus-soft); }
-.qex-kbd { margin-left: auto; font-size: 10px; color: var(--color-text-disabled); }
+.qex-kbd { margin-left: auto; font-size: var(--text-2xs); color: var(--color-text-disabled); }
 
 .qex-warn,
 .qex-risk {
@@ -718,7 +687,7 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   gap: var(--space-2);
   padding: var(--space-3);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.6;
   border-radius: var(--radius-xs);
   border: 1px solid transparent;
@@ -738,15 +707,15 @@ onBeforeUnmount(() => {
   background: var(--color-danger-bg);
   border-color: var(--color-danger-border);
 }
-.qex-risk-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.qex-risk-text { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 .qex-risk-text strong { font-weight: 600; }
 
 .qex-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-3); }
-.qex-run-hint { margin-right: auto; font-size: 11px; color: var(--color-text-muted); }
+.qex-run-hint { margin-right: auto; font-size: var(--text-xs); color: var(--color-text-muted); }
 .qex-run {
   display: inline-flex; align-items: center; gap: var(--space-2);
   padding: 5px 14px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   color: var(--color-accent-text);
   background: var(--color-accent);
@@ -761,13 +730,6 @@ onBeforeUnmount(() => {
   background: var(--color-danger-bg);
   border-color: var(--color-danger-border);
 }
-.qex-run.armed {
-  font-weight: 600;
-  color: var(--color-danger-text);
-  background: var(--color-danger-bg);
-  border-color: var(--color-danger);
-  box-shadow: 0 0 0 1px var(--color-danger);
-}
 .qex-run:disabled { cursor: default; opacity: 0.45; }
 
 .qex-spin { animation: qex-spin 900ms linear infinite; }
@@ -781,11 +743,11 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--color-border);
 }
 .qex-result-head { display: flex; align-items: center; gap: var(--space-2); }
-.qex-result-title { font-size: 12px; font-weight: 600; color: var(--color-text-primary); }
+.qex-result-title { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); }
 .qex-result-meta {
   display: inline-flex; align-items: center; gap: var(--space-2);
   margin-left: auto;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--color-text-muted);
 }
 .qex-result-meta em { font-style: normal; opacity: 0.75; }
@@ -795,7 +757,7 @@ onBeforeUnmount(() => {
 .qex-trunc { color: var(--color-warning); }
 .qex-mini {
   display: flex; align-items: center;
-  padding: 2px 5px;
+  padding: var(--space-1) 5px;
   color: var(--color-text-muted);
   background: transparent;
   border: 1px solid var(--color-border);
@@ -806,7 +768,7 @@ onBeforeUnmount(() => {
 
 .qex-err {
   padding: var(--space-2) var(--space-3);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.55;
   color: var(--color-danger-text);
   background: var(--color-danger-bg);
@@ -819,8 +781,8 @@ onBeforeUnmount(() => {
   padding: var(--space-3);
   max-height: 260px;
   overflow: auto;
-  font-family: var(--font-mono, monospace);
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   line-height: 1.55;
   color: var(--color-text-primary);
   background: var(--color-bg-primary);
@@ -835,8 +797,8 @@ onBeforeUnmount(() => {
 .qex-snip-select {
   flex: 1 1 auto;
   min-width: 120px;
-  padding: 3px 6px;
-  font-size: 11px;
+  padding: 3px var(--space-3);
+  font-size: var(--text-xs);
   font-family: inherit;
   color: var(--color-text-primary);
   background: var(--color-bg-primary);
@@ -846,11 +808,11 @@ onBeforeUnmount(() => {
 }
 .qex-snip-select:focus { border-color: var(--color-border-focus-soft); }
 .qex-snip-select:disabled { opacity: 0.45; cursor: default; }
-.qex-snip-empty { font-size: 11px; color: var(--color-text-muted); }
+.qex-snip-empty { font-size: var(--text-xs); color: var(--color-text-muted); }
 .qex-snip-btn {
   flex: 0 0 auto;
-  padding: 3px 8px;
-  font-size: 11px;
+  padding: 3px var(--space-4);
+  font-size: var(--text-xs);
   font-family: inherit;
   color: var(--color-text-secondary);
   background: var(--color-bg-tertiary);
@@ -869,8 +831,8 @@ onBeforeUnmount(() => {
 .qex-snip-input {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 3px 6px;
-  font-size: 11px;
+  padding: 3px var(--space-3);
+  font-size: var(--text-xs);
   font-family: inherit;
   color: var(--color-text-primary);
   background: var(--color-bg-primary);

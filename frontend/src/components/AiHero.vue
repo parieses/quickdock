@@ -442,8 +442,8 @@ function onModelSelect(e: Event) {
 }
 
 .ai-hero-title {
-  margin: 0 0 4px;
-  font-size: 24px;
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-2xl);
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -452,12 +452,12 @@ function onModelSelect(e: Event) {
 
 .ai-hero-mode {
   display: inline-flex; align-items: center; gap: 5px;
-  padding: 5px 12px;
+  padding: 5px var(--space-5);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 12px; font-family: inherit;
+  font-size: var(--text-sm); font-family: inherit;
   cursor: pointer;
   transition: color var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast);
 }
@@ -471,7 +471,7 @@ function onModelSelect(e: Event) {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-bg-tertiary);
-  padding: 10px 12px 8px;
+  padding: 10px var(--space-5) var(--space-4);
   transition: border-color var(--transition-fast);
   /* 技能和连接器面板的定位锚点（向上展开）。 */
   position: relative;
@@ -513,9 +513,9 @@ function onModelSelect(e: Event) {
 .ai-hero-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   flex-wrap: nowrap;
-  margin-top: 8px;
+  margin-top: var(--space-4);
   /* 与右侧按钮同高，避免「左组矮一截、右组高一截」的错位感。 */
   min-height: 26px;
 }
@@ -525,7 +525,7 @@ function onModelSelect(e: Event) {
 .ai-hero-bar-left {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   min-width: 0;
   flex: 0 1 auto;
 }
@@ -534,7 +534,7 @@ function onModelSelect(e: Event) {
 .ai-hero-bar-mid {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   min-width: 0;
   flex: 1 1 auto;
   overflow: hidden;
@@ -545,27 +545,27 @@ function onModelSelect(e: Event) {
 .ai-hero-bar-div {
   width: 1px;
   height: 12px;
-  margin: 0 2px;
+  margin: 0 var(--space-1);
   flex-shrink: 0;
   background: var(--color-border);
 }
 
-.ai-hero-bar-right { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-shrink: 0; }
+.ai-hero-bar-right { display: flex; align-items: center; gap: var(--space-3); margin-left: auto; flex-shrink: 0; }
 
 /* 当前目录的 git 分支：在仓库里才出现的轻量提示 chip，放在底部工具条左侧。
    高度与 Worktree chip、权限徽标对齐（都是 22px），否则一排控件高低不齐。 */
 .ai-git-branch {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   height: 22px;
   max-width: 100%;
-  padding: 0 8px;
+  padding: 0 var(--space-4);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
   background: var(--color-bg-secondary);
   color: var(--color-text-secondary);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: var(--font-mono);
   /* 可收缩：分支名可能是 feature/xxx-yyy 这种长串，固定不缩会把左组撑出底栏。
      收缩后由 .ai-git-branch-name 的 ellipsis 收尾。 */
@@ -594,12 +594,12 @@ function onModelSelect(e: Event) {
   min-width: 0;
   flex: 0 1 auto;
   /* 右侧留 8px：原生下拉箭头画在 padding 区里，留窄了文字会顶到箭头上。 */
-  padding: 0 8px;
+  padding: 0 var(--space-4);
   border: 1px solid transparent;
   border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
   text-overflow: ellipsis;
@@ -635,7 +635,7 @@ select.ai-hero-select:focus-visible {
 .ai-space-pick-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   max-width: 170px;
   overflow: hidden;
 }
@@ -662,7 +662,7 @@ select.ai-hero-select:focus-visible {
   max-width: 300px;
   max-height: 260px;
   overflow: auto;
-  padding: 4px;
+  padding: var(--space-2);
   background: var(--color-popover-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -673,14 +673,14 @@ select.ai-hero-select:focus-visible {
 .ai-space-pick-item {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   width: 100%;
-  padding: 5px 8px;
+  padding: 5px var(--space-4);
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   text-align: left;
   cursor: pointer;
@@ -689,7 +689,7 @@ select.ai-hero-select:focus-visible {
 .ai-space-pick-item.is-sel { color: var(--color-accent); }
 .ai-space-pick-ico { display: inline-flex; flex-shrink: 0; width: 12px; opacity: 0.8; }
 .ai-space-pick-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ai-space-pick-sep { height: 1px; margin: 4px 6px; background: var(--color-border); }
+.ai-space-pick-sep { height: 1px; margin: var(--space-2) var(--space-3); background: var(--color-border); }
 
 .ai-hero-send {
   display: flex; align-items: center; justify-content: center;
@@ -704,7 +704,7 @@ select.ai-hero-select:focus-visible {
 
 .ai-hero-out {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-disabled);
   text-align: center;
   line-height: 1.5;
@@ -716,9 +716,9 @@ select.ai-hero-select:focus-visible {
    容器和按钮都回到中性面层 —— 提示仍在，但不再和主操作抢注意力。 */
 .ai-hero-needkey {
   margin: 0;
-  display: inline-flex; align-items: center; gap: 8px;
+  display: inline-flex; align-items: center; gap: var(--space-4);
   align-self: center;
-  padding: 3px 4px 3px 10px;
+  padding: 3px var(--space-2) 3px 10px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
   background: var(--color-bg-tertiary);
@@ -749,7 +749,7 @@ select.ai-hero-select:focus-visible {
 }
 .ai-hero-needkey .ai-go-settings:hover { background: var(--color-bg-active); }
 
-.ai-hero-tips { width: 100%; display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.ai-hero-tips { width: 100%; display: flex; flex-direction: column; gap: var(--space-4); margin-top: var(--space-2); }
 
 /* 示例区头部：左标签 + 右侧「换一批」（点击重新随机一批示例）。
    与底栏同款小胶囊视觉语言，整页输入框上下风格统一。 */
@@ -757,12 +757,12 @@ select.ai-hero-select:focus-visible {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 2px;
+  gap: var(--space-4);
+  margin-top: var(--space-1);
 }
 
 .ai-hero-tips-label {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-disabled);
   flex-shrink: 0;
 }
@@ -774,7 +774,7 @@ select.ai-hero-select:focus-visible {
   border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
   transition: color var(--transition-fast), border-color var(--transition-fast);
@@ -783,15 +783,15 @@ select.ai-hero-select:focus-visible {
 .ai-hero-tips-shuffle:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
 
 .ai-hero-tip {
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; gap: var(--space-3);
   align-self: flex-start;
   max-width: 100%;
-  padding: 7px 12px;
+  padding: 7px var(--space-5);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 13px; font-family: inherit; text-align: left;
+  font-size: var(--text-md); font-family: inherit; text-align: left;
   cursor: pointer;
   transition: color var(--transition-fast), border-color var(--transition-fast);
 }

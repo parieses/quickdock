@@ -17,6 +17,7 @@ import {
 } from '../../bindings/quickdock/services/appservice'
 import type { ScheduledTask } from '../../bindings/quickdock/internal/db/models'
 import type { CollectionItem } from '../types'
+import { ITEM_TYPE } from '../constants/itemTypes'
 import SceneItemPicker from './SceneItemPicker.vue'
 
 import { Events } from '@wailsio/runtime'
@@ -357,9 +358,9 @@ function openNotifySettings() {
 // 文件类型没有对应动作，映射到 'app' 同样经 ShellOpen 打开（系统关联打开文件）。
 function mapItemTypeToAction(item: CollectionItem): string {
   const ty = item.type || ''
-  if (ty.includes('命令')) return 'command'
-  if (ty.includes('网页') || ty.includes('快速链接')) return 'url'
-  if (ty.includes('目录')) return 'dir'
+  if (ty.includes(ITEM_TYPE.CMD)) return 'command'
+  if (ty.includes(ITEM_TYPE.URL) || ty.includes(ITEM_TYPE.LINK)) return 'url'
+  if (ty.includes(ITEM_TYPE.DIR)) return 'dir'
   return 'app'
 }
 function onPickItem(item: CollectionItem) {
@@ -987,7 +988,7 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
             </label>
             <!-- 勾了机器人渠道但一个地址都没配，任务不会报错、只是静默发不出去——
                  这里就地给一条去向，省得用户去翻设置菜单。 -->
-            <span class="nf-link" @click="openNotifySettings">{{ t('notifyGoSettings') }}</span>
+            <span v-key-click class="nf-link" @click="openNotifySettings">{{ t('notifyGoSettings') }}</span>
           </template>
         </div>
 
@@ -1052,23 +1053,23 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 .interval-num { flex: 1 1 auto; min-width: 0; }
 .interval-unit { flex: 0 0 96px; width: 96px; }
 /* cron 表达式等宽显示：* 与 / 挤在比例字体里很容易看错列 */
-.cron-input { font-family: var(--font-mono, monospace); letter-spacing: .5px; }
-.cron-presets { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px; }
-.cron-presets-label { font-size: 11px; color: var(--color-text-muted); margin-right: 2px; }
+.cron-input { font-family: var(--font-mono); letter-spacing: .5px; }
+.cron-presets { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); margin: var(--space-4) 0 var(--space-1); }
+.cron-presets-label { font-size: var(--text-xs); color: var(--color-text-muted); margin-right: var(--space-1); }
 .cron-preset {
-  padding: 3px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  padding: 3px var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
-  font-family: var(--font-mono, monospace); font-size: 11px; cursor: pointer;
+  font-family: var(--font-mono); font-size: var(--text-xs); cursor: pointer;
 }
 .cron-preset:hover { color: var(--color-accent); border-color: var(--color-accent-border); }
 
 /* 搜索 / 状态筛选条：跟着页头一起通栏，内边距与列表对齐 */
 .sched-toolbar {
   display: flex; align-items: center; gap: var(--space-3);
-  padding: 10px 20px 0; flex-shrink: 0; flex-wrap: wrap;
+  padding: 10px var(--space-7) 0; flex-shrink: 0; flex-wrap: wrap;
 }
 .sched-search {
-  display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px;
+  display: flex; align-items: center; gap: var(--space-3); height: 28px; padding: 0 9px;
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
   border-radius: var(--radius-sm); flex: 1 1 180px; max-width: 320px;
 }
@@ -1076,27 +1077,27 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 .sched-search-icon { color: var(--color-text-disabled); flex-shrink: 0; }
 .sched-search-input {
   flex: 1; min-width: 0; border: none; outline: none; background: none;
-  color: var(--color-text-primary); font-size: 12px; font-family: inherit;
+  color: var(--color-text-primary); font-size: var(--text-sm); font-family: inherit;
 }
 .sched-search-input::placeholder { color: var(--color-text-disabled); }
-.sched-filters { display: flex; align-items: center; gap: 4px; }
-.sched-count { margin-left: auto; font-size: 11px; color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
+.sched-filters { display: flex; align-items: center; gap: var(--space-2); }
+.sched-count { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
 
 /* 运行统计条（近 7 天） */
 .sched-stats {
   display: flex; align-items: center; gap: var(--space-4);
-  padding: 8px 20px 0; flex-shrink: 0;
+  padding: var(--space-4) var(--space-7) 0; flex-shrink: 0;
 }
-.stat-sum { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--color-text-muted); }
+.stat-sum { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); }
 .stat-ico { color: var(--color-text-disabled); flex-shrink: 0; }
 .stat-label { color: var(--color-text-secondary); }
-.stat-num { font-size: 13px; font-weight: 600; color: var(--color-text-primary); font-variant-numeric: tabular-nums; }
+.stat-num { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); font-variant-numeric: tabular-nums; }
 .stat-unit { color: var(--color-text-muted); }
 .stat-sep { color: var(--color-text-disabled); }
 .stat-fail { color: var(--color-danger); }
 .stat-fail.zero { color: var(--color-text-disabled); }
 .stat-rate {
-  font-size: 10px; padding: 0 5px; border-radius: var(--radius-md);
+  font-size: var(--text-2xs); padding: 0 5px; border-radius: var(--radius-md);
   background: var(--color-bg-tertiary); color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
 }
@@ -1104,14 +1105,14 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 .stat-bars { margin-left: auto; width: 168px; flex-shrink: 0; }
 
 .sched-error {
-  margin: 12px 20px 0; padding: 8px 12px; font-size: 12px;
+  margin: var(--space-5) var(--space-7) 0; padding: var(--space-4) var(--space-5); font-size: var(--text-sm);
   color: var(--color-danger); background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); flex-shrink: 0;
 }
 
 /* 弹窗内校验提示：与页面级 .sched-error 同色系，但去掉外边距（弹窗有自己的内边距） */
 .form-err {
-  margin: var(--space-3) 0 0; padding: 7px 10px; font-size: 12px;
+  margin: var(--space-3) 0 0; padding: 7px 10px; font-size: var(--text-sm);
   color: var(--color-danger); background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-md);
 }
@@ -1119,10 +1120,10 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 /* 表单里的说明文字（如重试的代价说明）。比标签小一号、不用危险色：
    它是解释而不是错误，染红会让人以为填错了。 */
 .form-hint {
-  margin: 4px 0 0; font-size: 11px; line-height: 1.5; color: var(--color-text-muted);
+  margin: var(--space-2) 0 0; font-size: var(--text-xs); line-height: 1.5; color: var(--color-text-muted);
 }
 
-.sched-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); padding: 14px 20px 16px; }
+.sched-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); padding: 14px var(--space-7) var(--space-6); }
 /* 空态在整页高度里落到上 1/3 处：贴着页头会显得"这块是空的"，沉到底部又找不到 */
 .sched-empty { text-align: center; padding: 72px var(--space-4); color: var(--color-text-disabled); }
 /* 空状态图标：一根细线图标直接浮在深底上，容易被读成「没加载出来」。
@@ -1136,12 +1137,12 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  margin-bottom: 12px;
+  margin-bottom: var(--space-5);
 }
-.empty-hint { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: 6px; }
+.empty-hint { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: var(--space-3); }
 
 .sched-item {
-  display: flex; align-items: center; gap: var(--space-3); padding: 12px 14px;
+  display: flex; align-items: center; gap: var(--space-3); padding: var(--space-5) 14px;
   background: var(--color-card-bg); border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md); transition: background var(--transition-fast);
 }
@@ -1173,17 +1174,17 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 .item-icon.a-http { background: var(--color-cat-http); }
 
 .item-main { flex: 1; min-width: 0; }
-.item-line1 { display: flex; align-items: center; gap: 8px; }
-.item-name { font-size: 13px; font-weight: 500; color: var(--color-text-primary); }
+.item-line1 { display: flex; align-items: center; gap: var(--space-4); }
+.item-name { font-size: var(--text-md); font-weight: 500; color: var(--color-text-primary); }
 .item-badge {
-  font-size: 10px; padding: 1px 7px; border-radius: var(--radius-md);
+  font-size: var(--text-2xs); padding: 1px 7px; border-radius: var(--radius-md);
   background: var(--color-bg-tertiary); color: var(--color-text-muted);
 }
 .item-target {
-  font-size: 12px; color: var(--color-text-secondary); margin-top: 2px;
+  font-size: var(--text-sm); color: var(--color-text-secondary); margin-top: var(--space-1);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
-.item-meta { font-size: 11px; color: var(--color-text-disabled); margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.item-meta { font-size: var(--text-xs); color: var(--color-text-disabled); margin-top: var(--space-2); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .meta-next { color: var(--color-accent); }
 .meta-left { color: var(--color-text-muted); }
 .meta-last { display: inline-flex; align-items: center; gap: 3px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1221,16 +1222,16 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
   width: 440px; max-height: 90vh; overflow-y: auto; background: var(--color-popover-bg);
   border-radius: var(--radius-lg); padding: var(--space-5); box-shadow: var(--shadow-lg);
 }
-.modal-area { height: auto; padding: 8px 10px; resize: vertical; line-height: 1.5; }
+.modal-area { height: auto; padding: var(--space-4) 10px; resize: vertical; line-height: 1.5; }
 .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .modal-grid > * { min-width: 0; }
 
 /* 分段选择 */
-.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg { display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .seg-btn {
-  display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 11px;
+  display: inline-flex; align-items: center; gap: var(--space-2); height: 28px; padding: 0 11px;
   border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary); border-radius: var(--radius-sm); font-size: 12px;
+  color: var(--color-text-secondary); border-radius: var(--radius-sm); font-size: var(--text-sm);
   cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .seg-btn:hover { color: var(--color-text-primary); }
@@ -1239,7 +1240,7 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 .wd-row { display: flex; gap: 5px; }
 .wd-btn {
   width: 34px; height: 32px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary); border-radius: var(--radius-sm); font-size: 12px;
+  color: var(--color-text-secondary); border-radius: var(--radius-sm); font-size: var(--text-sm);
   cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .wd-btn:hover { color: var(--color-text-primary); }
@@ -1247,12 +1248,12 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 
 .toggle-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-5); margin-top: var(--space-4); }
 /* 渠道从属于总开关：左移一点 + 略小，视觉上挂在它下面 */
-.toggle-sub { padding-left: var(--space-3); font-size: 11px; color: var(--color-text-muted); }
-.toggle-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-text-secondary); cursor: pointer; margin: 0; }
+.toggle-sub { padding-left: var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); }
+.toggle-label { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-sm); color: var(--color-text-secondary); cursor: pointer; margin: 0; }
 .toggle-label input { cursor: pointer; }
 /* 「机器人地址去设置配」的跳转链接：做成手型+下划线虚线，别用按钮——
    它不是本次操作的动作，只是一条注记。 */
-.nf-link { font-size: 11px; color: var(--color-accent); cursor: pointer; text-decoration: underline dotted; }
+.nf-link { font-size: var(--text-xs); color: var(--color-accent); cursor: pointer; text-decoration: underline dotted; }
 .nf-link:hover { color: var(--color-accent-hover); }
 
 .modal-actions { display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-5); }

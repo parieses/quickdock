@@ -582,7 +582,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 </script>
 
 <template>
-  <div ref="msgArea" class="ai-messages" @scroll="onMsgScroll" @mouseup="emit('msg-mouseup', $event)" @keyup="emit('msg-mouseup', $event)" @click="emit('msg-click', $event)" @contextmenu="emit('msg-contextmenu', $event)">
+  <div v-key-click ref="msgArea" class="ai-messages" @scroll="onMsgScroll" @mouseup="emit('msg-mouseup', $event)" @keyup="emit('msg-mouseup', $event)" @click="emit('msg-click', $event)" @contextmenu="emit('msg-contextmenu', $event)">
     <div ref="msgContent" class="ai-msg-content-wrap">
       <div v-if="!hasKey" class="ai-need-key">
         <Bot :size="40" />
@@ -630,8 +630,8 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
           <!-- 图片缩略图：url 类直发链接，file 类用已加载的 dataUrl；历史 file 图由 loadMessages 懒加载填回 -->
           <div v-if="m.imgList && m.imgList.length" class="ai-msg-imgs">
             <div v-for="(img, bi) in m.imgList" :key="bi" class="ai-msg-img">
-              <img v-if="img.url" :src="img.url" :alt="img.name" class="ai-msg-img-el is-clickable" loading="lazy" @click.stop="emit('open-img', img)" />
-              <img v-else-if="img.dataUrl" :src="img.dataUrl" :alt="img.name" class="ai-msg-img-el is-clickable" loading="lazy" @click.stop="emit('open-img', img)" />
+              <img v-key-click v-if="img.url" :src="img.url" :alt="img.name" class="ai-msg-img-el is-clickable" loading="lazy" @click.stop="emit('open-img', img)" />
+              <img v-key-click v-else-if="img.dataUrl" :src="img.dataUrl" :alt="img.name" class="ai-msg-img-el is-clickable" loading="lazy" @click.stop="emit('open-img', img)" />
               <div v-else class="ai-msg-img-el ai-img-broken">{{ t('aiImageBroken') }}</div>
             </div>
           </div>
@@ -932,7 +932,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
    原来 details 带 --color-bg-active 灰底，和下面的工具卡、正文叠在一起
    会形成一块块深浅不一的方块——同一段回答里三种「容器」叠着，风格就散了。 */
 .ai-reasoning {
-  font-size: 12px; margin: 2px 0; max-width: 100%;
+  font-size: var(--text-sm); margin: var(--space-1) 0; max-width: 100%;
 }
 
 .ai-reasoning details { background: none; border-radius: 0; padding: 0; }
@@ -940,9 +940,9 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 .ai-reasoning summary {
   width: fit-content; max-width: 100%;
   /* 负 margin 抵消内边距：hover 底色向外扩，文字仍与正文同一条左边缘 */
-  padding: 3px 6px; margin-left: -6px;
+  padding: 3px var(--space-3); margin-left: -6px;
   border-radius: var(--radius-sm);
-  cursor: pointer; color: var(--color-text-muted); font-size: 12px;
+  cursor: pointer; color: var(--color-text-muted); font-size: var(--text-sm);
   /* 同 .ai-tools > summary：fit-content 下不 nowrap 会被挤到第二行 */
   white-space: nowrap;
   user-select: none; outline: none;
@@ -952,8 +952,8 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 .ai-reasoning summary:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 
 .ai-reasoning-content {
-  margin-top: 2px; padding: 2px 0 2px 10px; border-left: 2px solid var(--color-border);
-  color: var(--color-text-muted); font-size: 13px; line-height: 1.7;
+  margin-top: var(--space-1); padding: var(--space-1) 0 var(--space-1) 10px; border-left: 2px solid var(--color-border);
+  color: var(--color-text-muted); font-size: var(--text-md); line-height: 1.7;
   white-space: pre-wrap; word-break: break-word;
 }
 
@@ -965,7 +965,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
    每行是「图标 + 动词 + 目标 + 增删 + 箭头」一句连贯的话：动词与正文同亮度，
    目标（文件名 / 命令）用主色跳出来，状态由图标着色表达。 */
 .ai-tools {
-  margin: 4px 0 2px;
+  margin: var(--space-2) 0 var(--space-1);
   max-width: 100%;
 }
 
@@ -976,14 +976,14 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   width: fit-content;
   max-width: 100%;
   /* 负 margin 抵消内边距：hover 底色向外扩，文字仍与正文同一条左边缘 */
-  padding: 3px 6px;
+  padding: 3px var(--space-3);
   margin-left: -6px;
   border-radius: var(--radius-sm);
   list-style: none;
   cursor: pointer;
   user-select: none;
   outline: none;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
   /* 必须 nowrap：summary 是 fit-content，默认的 normal 会让「调用 N 个工具 ·
      M 轮」按最长不可断片段算 min-content，容器一紧「轮」就被挤到第二行；
@@ -1020,7 +1020,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 .ai-tool > summary {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   /* 宽度跟着内容走。铺满整行时，hover 底色会从动词一直拉到右边，中间一大段
      空白，眼睛要横穿过去才发现行尾有个箭头；fit-content 之后这行读起来就是
      一句连续的「读了哪个文件、改了几行」。max-width 卡住 100% 是防止长路径
@@ -1028,7 +1028,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   width: fit-content;
   max-width: 100%;
   /* 左内边距 6px 由负 margin 抵消：hover 底色向外扩，文字仍与正文同一条左边缘 */
-  padding: 4px 6px;
+  padding: var(--space-2) var(--space-3);
   margin-left: -6px;
   border-radius: var(--radius-sm);
   list-style: none;
@@ -1052,7 +1052,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-tool.is-ask .ai-tool-icon { color: var(--color-warning); opacity: 1; }
 
-.ai-tool-verb { flex: 0 0 auto; font-size: 12px; color: var(--color-text-primary); }
+.ai-tool-verb { flex: 0 0 auto; font-size: var(--text-sm); color: var(--color-text-primary); }
 
 /* 这行里唯一需要「一眼确认是谁」的就是目标（文件名 / 命令），用主色把它
    从一串灰字里挑出来；等宽体去掉了——路径不是要对齐的代码，界面字体读得更快，
@@ -1061,7 +1061,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   flex: 0 1 auto;
   min-width: 0;
   max-width: 320px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 500;
   color: var(--color-accent);
   overflow: hidden;
@@ -1069,7 +1069,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   white-space: nowrap;
 }
 
-.ai-tool-diff { display: flex; gap: 4px; flex: 0 0 auto; font-family: var(--font-mono); font-size: 11px; }
+.ai-tool-diff { display: flex; gap: var(--space-2); flex: 0 0 auto; font-family: var(--font-mono); font-size: var(--text-xs); }
 
 .ai-diff-add { color: var(--color-success); font-style: normal; }
 
@@ -1082,7 +1082,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   flex: 0 0 auto;
   padding: 0;
   background: none;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
   color: var(--color-text-disabled);
 }
@@ -1111,35 +1111,35 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
    文字起点落在 18px 处，展开内容跟动词对齐。改 gap / 图标尺寸时要同步改这里。 */
 .ai-tool-err,
 .ai-tool-res,
-.ai-approval { margin: 0 6px 6px 18px; }
+.ai-approval { margin: 0 var(--space-3) var(--space-3) 18px; }
 
-.ai-approval { display: flex; flex-direction: column; gap: 6px; }
+.ai-approval { display: flex; flex-direction: column; gap: var(--space-3); }
 
 .ai-approval-risk {
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.55;
   color: var(--color-text-secondary);
   background: var(--color-bg-tertiary);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  padding: 5px 8px;
+  padding: 5px var(--space-4);
   border-left: 2px solid var(--color-warning);
 }
 
-.ai-approval-hint { font-size: 11px; color: var(--color-warning); }
+.ai-approval-hint { font-size: var(--text-xs); color: var(--color-warning); }
 
-.ai-approval-done { font-size: 11px; color: var(--color-text-muted); }
+.ai-approval-done { font-size: var(--text-xs); color: var(--color-text-muted); }
 
 /* diff 由子组件渲染，.qd-diff 自带边框，这里只补对齐用的外边距 */
-.ai-tool :deep(.qd-diff) { margin: 0 6px 6px 18px; }
+.ai-tool :deep(.qd-diff) { margin: 0 var(--space-3) var(--space-3) 18px; }
 
 .ai-tool-undo {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  padding: 2px 4px;
+  padding: var(--space-1) var(--space-2);
   border: none;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
@@ -1148,8 +1148,8 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 .ai-tool-undo:hover { color: var(--color-accent); background: var(--color-bg-hover); }
 
 .ai-rules {
-  display: flex; align-items: center; gap: 4px;
-  margin: 2px 0 4px; font-size: 11px; color: var(--color-text-muted);
+  display: flex; align-items: center; gap: var(--space-2);
+  margin: var(--space-1) 0 var(--space-2); font-size: var(--text-xs); color: var(--color-text-muted);
 }
 
 .ai-rules-name {
@@ -1159,12 +1159,12 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 
 .ai-tool-err {
-  font-size: 11px; color: var(--color-danger);
+  font-size: var(--text-xs); color: var(--color-danger);
   word-break: break-word;
 }
 
 .ai-tool-res {
-  font-size: 11px; color: var(--color-text-secondary);
+  font-size: var(--text-xs); color: var(--color-text-secondary);
   font-family: var(--font-mono); line-height: 1.55;
   /* 340px ≈ 二十来行。原来 220px 只放得下十三四行，读文件的卡片看起来像
      「AI 只读了十几行」，而它其实一次读的是几百行——内容被可视区藏起来了。 */
@@ -1177,9 +1177,9 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
    后面那几万字，长会话才快得起来。 */
 .ai-tool-more {
   align-self: flex-start;
-  margin: 0 6px 6px 18px;
-  padding: 2px 6px;
-  font-size: 10px;
+  margin: 0 var(--space-3) var(--space-3) 18px;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-2xs);
   color: var(--color-accent);
   background: none;
   border: none;
@@ -1200,9 +1200,9 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
    底色/描边一概不要——它和上面的日志块同属「这一步的附注」，
    画成小卡片会把无框正文重新切碎。 */
 .ai-job-note {
-  display: flex; align-items: center; gap: 8px;
-  margin-top: 4px; padding: 2px 0;
-  font-size: 10px; line-height: 1.5; color: var(--color-text-muted);
+  display: flex; align-items: center; gap: var(--space-4);
+  margin-top: var(--space-2); padding: var(--space-1) 0;
+  font-size: var(--text-2xs); line-height: 1.5; color: var(--color-text-muted);
 }
 
 .ai-job-note-dot {
@@ -1228,9 +1228,9 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 .ai-job-note.is-run .ai-job-note-text { color: var(--color-text-secondary); }
 
 .ai-job-note-open {
-  flex: 0 0 auto; padding: 0 2px;
+  flex: 0 0 auto; padding: 0 var(--space-1);
   border: none; background: none;
-  font-family: inherit; font-size: 10px; color: var(--color-text-muted);
+  font-family: inherit; font-size: var(--text-2xs); color: var(--color-text-muted);
   cursor: pointer;
 }
 
@@ -1297,7 +1297,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
    滚动回来时不会因为「先按 96px 占位」而整页跳动。
    代价是离屏消息里的文字不参与 Ctrl+F 查找——对话页以滚动浏览为主，可以接受。 */
 .ai-msg {
-  display: flex; flex-direction: column; gap: 4px; max-width: 88%;
+  display: flex; flex-direction: column; gap: var(--space-2); max-width: 88%;
   content-visibility: auto; contain-intrinsic-size: auto 96px;
 }
 
@@ -1305,9 +1305,9 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
    做成一行安静的次要按钮，不做成卡片——它只是分页，不是内容。 */
 .ai-load-older {
   align-self: center;
-  margin: 2px 0 6px;
-  padding: 4px 12px;
-  font-size: 11px;
+  margin: var(--space-1) 0 var(--space-3);
+  padding: var(--space-2) var(--space-5);
+  font-size: var(--text-xs);
   color: var(--color-text-secondary);
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
@@ -1322,17 +1322,17 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
    用户消息仍收 88%，气泡太宽就失去「我说的话」那种块感。 */
 .ai-msg.assistant { align-self: flex-start; max-width: 100%; }
 
-.ai-msg-role { font-size: 11px; color: var(--color-text-disabled); margin-bottom: 1px; display: flex; align-items: center; gap: 6px; }
+.ai-msg-role { font-size: var(--text-xs); color: var(--color-text-disabled); margin-bottom: 1px; display: flex; align-items: center; gap: var(--space-3); }
 
 .ai-msg-model {
-  font-size: 10px; color: var(--color-text-disabled);
+  font-size: var(--text-2xs); color: var(--color-text-disabled);
   background: var(--color-bg-tertiary); padding: 0 5px;
   border-radius: var(--radius-xs); opacity: 0.85;
 }
 
 /* 定时任务每轮执行的时刻。等宽数字，纵向看下来时间列是齐的。 */
 .ai-msg-clock {
-  font-size: 10px; color: var(--color-text-disabled);
+  font-size: var(--text-2xs); color: var(--color-text-disabled);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1354,13 +1354,13 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   background: var(--color-accent-bg);
   border: 1px solid var(--color-accent-border);
   color: var(--color-text-primary);
-  padding: 8px 12px;
+  padding: var(--space-4) var(--space-5);
   border-radius: var(--radius-md);
   white-space: pre-wrap;
 }
 
 .ai-msg-actions {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: var(--space-3);
   flex-wrap: wrap;
 }
 
@@ -1377,7 +1377,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 .ai-copy {
   display: flex; align-items: center; gap: 3px;
   background: none; border: none; color: var(--color-text-disabled);
-  font-size: 11px; cursor: pointer; padding: 2px 4px; border-radius: var(--radius-xs);
+  font-size: var(--text-xs); cursor: pointer; padding: var(--space-1) var(--space-2); border-radius: var(--radius-xs);
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
@@ -1388,7 +1388,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 .ai-msg.user .ai-copy:hover { color: var(--color-accent); background: var(--color-accent-bg); }
 
 .ai-msg-stopped {
-  font-size: 10px; padding: 1px 6px; border-radius: var(--radius-xs);
+  font-size: var(--text-2xs); padding: 1px var(--space-3); border-radius: var(--radius-xs);
   color: var(--color-warning);
   background: var(--color-warning-bg);
   border: 1px solid var(--color-warning-border);
@@ -1396,7 +1396,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 }
 
 .ai-msg-stat {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--color-text-disabled);
   font-variant-numeric: tabular-nums;
   /* 允许换行：这行可能同时有「耗时 / 首字 / 输入输出 / 缓存命中」四段，
@@ -1412,7 +1412,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   align-self: flex-start;
   padding: 10px 14px; border-radius: var(--radius-lg);
   background: var(--color-danger-bg); color: var(--color-danger);
-  font-size: 13px; max-width: 80%;
+  font-size: var(--text-md); max-width: 80%;
   /* 错误文案 + 重试按钮同一行；长错误换行，按钮不跟着被挤压 */
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
 }
@@ -1421,10 +1421,10 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-retry {
   flex: 0 0 auto;
-  padding: 3px 12px; border-radius: var(--radius-sm);
+  padding: 3px var(--space-5); border-radius: var(--radius-sm);
   border: 1px solid var(--color-danger-border);
   background: transparent; color: var(--color-danger);
-  font-size: 12px; font-family: inherit; cursor: pointer;
+  font-size: var(--text-sm); font-family: inherit; cursor: pointer;
   transition: background-color var(--transition-fast);
 }
 
@@ -1435,13 +1435,13 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   align-self: center;
   display: flex;
   justify-content: center;
-  margin: 2px 0 8px;
+  margin: var(--space-1) 0 var(--space-4);
 }
 
 .ai-regen-btn {
   display: inline-flex; align-items: center; gap: 5px;
-  padding: 4px 12px;
-  font-size: 11px; font-family: inherit;
+  padding: var(--space-2) var(--space-5);
+  font-size: var(--text-xs); font-family: inherit;
   color: var(--color-text-secondary);
   background: transparent;
   border: 1px solid var(--color-border);
@@ -1470,11 +1470,11 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-need-key, .ai-empty {
   margin: auto;
-  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-5);
   color: var(--color-text-disabled); text-align: center;
 }
 
-.ai-need-key p, .ai-empty p { font-size: 13px; margin: 0; }
+.ai-need-key p, .ai-empty p { font-size: var(--text-md); margin: 0; }
 
 .ai-jump-bottom {
   position: absolute;
@@ -1485,8 +1485,8 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   display: flex; align-items: center; justify-content: center;
   width: 32px; height: 32px;
   border-radius: var(--radius-full);
-  border: 1px solid var(--color-border);
-  background: var(--color-surface-elevated);
+  border: 1px solid var(--popover-border-color);
+  background: var(--color-popover-bg);
   color: var(--color-text-secondary);
   cursor: pointer;
   box-shadow: var(--shadow-md);
@@ -1513,7 +1513,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 /* 代码块靠底色分块，不再画描边：消息区里已经有「正文无框」这条规则，
    代码块是内容、不是容器，描边会让它看起来又变成一张卡片。 */
 .ai-md :deep(.md-code) {
-  margin: 8px 0;
+  margin: var(--space-4) 0;
   border: none;
   border-radius: var(--radius-md);
   overflow: hidden;
@@ -1524,10 +1524,10 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 6px 4px 10px;
+  padding: var(--space-2) var(--space-3) var(--space-2) 10px;
   background: var(--color-code-bar-bg);
   border-bottom: none;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 
@@ -1548,7 +1548,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
-.ai-md :deep(.md-code-actions) { display: flex; align-items: center; gap: 2px; }
+.ai-md :deep(.md-code-actions) { display: flex; align-items: center; gap: var(--space-1); }
 
 .ai-md :deep(.md-code-run) {
   display: flex; align-items: center; justify-content: center;
@@ -1574,24 +1574,24 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-md :deep(pre) {
   margin: 0;
-  padding: 10px 12px;
+  padding: 10px var(--space-5);
   overflow-x: auto;
   background: transparent;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.6;
 }
 
 .ai-md :deep(code) {
-  font-family: var(--font-mono, monospace); font-size: 12px;
+  font-family: var(--font-mono); font-size: var(--text-sm);
   background: var(--color-code-inline-bg); padding: 1px 5px; border-radius: var(--radius-xs);
 }
 
-.ai-md :deep(pre code) { background: none; padding: 0; font-size: 12px; }
+.ai-md :deep(pre code) { background: none; padding: 0; font-size: var(--text-sm); }
 
 /* 表格容器只负责横向滚动，不画框：表格本身已经是「表头底色 + 行下边线」，
    外面再套一圈 border 就等于给数据加了个相框，比内容还抢眼。 */
 .ai-md :deep(.md-table-wrap) {
-  margin: 8px 0;
+  margin: var(--space-4) 0;
   overflow-x: auto;
   width: 100%;
 }
@@ -1600,12 +1600,12 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
    不该占一条带底色的工具条。hover 时才浮出边框和强调色。 */
 .ai-md :deep(.md-table-bar) {
   display: flex; justify-content: flex-end;
-  padding: 0 2px 3px;
+  padding: 0 var(--space-1) 3px;
 }
 
 .ai-md :deep(.md-table-export) {
   display: inline-flex; align-items: center; gap: 3px;
-  font-size: 11px; padding: 1px 7px;
+  font-size: var(--text-xs); padding: 1px 7px;
   border: 1px solid transparent; border-radius: var(--radius-xs);
   background: transparent; color: var(--color-text-disabled);
   cursor: pointer;
@@ -1623,9 +1623,9 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-md :deep(.md-th-sortable:hover) { color: var(--color-accent); }
 
-.ai-md :deep(.md-th-sortable[data-sort-dir="asc"]::after) { content: " ▲"; font-size: 10px; }
+.ai-md :deep(.md-th-sortable[data-sort-dir="asc"]::after) { content: " ▲"; font-size: var(--text-2xs); }
 
-.ai-md :deep(.md-th-sortable[data-sort-dir="desc"]::after) { content: " ▼"; font-size: 10px; }
+.ai-md :deep(.md-th-sortable[data-sort-dir="desc"]::after) { content: " ▼"; font-size: var(--text-2xs); }
 
 .ai-md :deep(hr) { border: none; border-top: 1px solid var(--color-border); margin: 10px 0; }
 
@@ -1637,8 +1637,8 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-md :deep(.md-math-block) {
   display: block;
-  margin: 8px 0;
-  padding: 2px 0;
+  margin: var(--space-4) 0;
+  padding: var(--space-1) 0;
   overflow-x: auto;
   overflow-y: hidden;
 }
@@ -1646,8 +1646,8 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 .ai-md :deep(.md-math-block .katex-display) { margin: 0; }
 
 .ai-md :deep(.md-math-raw) {
-  font-family: var(--font-mono, monospace);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1655,7 +1655,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 }
 
 .ai-md :deep(.md-mermaid) {
-  margin: 8px 0;
+  margin: var(--space-4) 0;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-code-bg);
@@ -1667,10 +1667,10 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 6px 4px 10px;
+  padding: var(--space-2) var(--space-3) var(--space-2) 10px;
   background: var(--color-code-bar-bg);
   border-bottom: 1px solid var(--color-border);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   /* 工具栏只是外壳，别让它参与划词复制 */
   user-select: none;
@@ -1685,7 +1685,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   letter-spacing: 0.02em;
 }
 
-.ai-md :deep(.md-mermaid-acts) { display: flex; align-items: center; gap: 2px; }
+.ai-md :deep(.md-mermaid-acts) { display: flex; align-items: center; gap: var(--space-1); }
 
 .ai-md :deep(.md-mermaid-act) {
   display: flex; align-items: center; justify-content: center;
@@ -1745,16 +1745,16 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 }
 
 .ai-md :deep(.md-mermaid-err) {
-  padding: 4px 10px;
+  padding: var(--space-2) 10px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-code-bar-bg);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 
 .ai-msg.streaming :deep(.ai-md-block:last-child .md-mermaid-bar) { display: none; }
 
-.ai-msg-imgs { display: flex; flex-wrap: wrap; gap: 8px; }
+.ai-msg-imgs { display: flex; flex-wrap: wrap; gap: var(--space-4); }
 
 .ai-msg.user .ai-msg-imgs { justify-content: flex-end; }
 
@@ -1778,21 +1778,21 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.6;
   resize: vertical;
   outline: none;
 }
 .ai-msg-edit-input:focus { border-color: var(--color-accent); }
 .ai-msg-edit-ops { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
-.ai-msg-edit-hint { font-size: 11px; color: var(--color-text-muted); }
+.ai-msg-edit-hint { font-size: var(--text-xs); color: var(--color-text-muted); }
 
 /* 气泡尾部的单条费用：与 .ai-msg-stat 同属「一行安静的辅助信息」——
    无框、最弱一档颜色、允许换行（模型名 + 金额 + token 在窄窗口会折行）。
    只写在本 SFC 的 scoped 块里，不改全局 styles/*.css；
    WebView2 不支持 :has()/:is()/:container，这里也不依赖它们。 */
 .ai-msg-cost {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--color-text-disabled);
   font-variant-numeric: tabular-nums;
   line-height: 1.6;

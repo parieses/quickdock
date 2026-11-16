@@ -826,7 +826,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 .fd-label {
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 500;
   color: var(--color-text-muted);
 }
@@ -835,7 +835,7 @@ function onKeydown(e: KeyboardEvent) {
   width: 100%;
   box-sizing: border-box;
   padding: var(--space-3) var(--space-5);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-family: inherit;
   color: var(--color-text-primary);
   background: var(--color-bg-tertiary);
@@ -902,21 +902,21 @@ select.fd-input {
   display: flex;
   align-items: flex-start;
   gap: var(--space-4);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.6;
   color: var(--color-text-secondary);
   cursor: pointer;
 }
 
 .fd-check input {
-  margin-top: 2px;
+  margin-top: var(--space-1);
   cursor: pointer;
 }
 
 .fd-hint {
   display: block;
   margin-top: var(--space-1);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-style: normal;
   color: var(--color-text-muted);
 }
@@ -972,7 +972,7 @@ select.fd-input {
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-secondary);
 }
 
@@ -983,8 +983,8 @@ select.fd-input {
 /* 分段选择器：比 select 少一次点击，也避免下拉框在深色下样式跳变 */
 .seg {
   display: flex;
-  gap: 2px;
-  padding: 2px;
+  gap: var(--space-1);
+  padding: var(--space-1);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -994,10 +994,10 @@ select.fd-input {
   align-self: flex-start;
 }
 
-.seg-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+.seg-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
   flex: 1 1 auto;
   height: 28px; padding: 0 11px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   color: var(--color-text-muted);
   background: transparent;
@@ -1043,7 +1043,7 @@ select.fd-input {
 .hd-msg {
   margin: 0;
   padding: var(--space-3) var(--space-5);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   border-radius: var(--radius-xs);
   word-break: break-all;
@@ -1077,8 +1077,8 @@ select.fd-input {
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
-  height: 32px; padding: 0 16px;
-  font-size: 13px;
+  height: 32px; padding: 0 var(--space-6);
+  font-size: var(--text-md);
   font-weight: 500;
   font-family: inherit;
   color: var(--color-text-primary);

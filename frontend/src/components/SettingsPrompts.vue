@@ -255,7 +255,7 @@ watch(() => props.visible, (v) => {
 <style scoped>
 .prompt-count {
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
 }
 
@@ -265,7 +265,7 @@ watch(() => props.visible, (v) => {
 
 .prompt-group-title {
   margin-bottom: var(--space-3);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.06em;
   
@@ -292,7 +292,7 @@ watch(() => props.visible, (v) => {
 }
 
 .prompt-name {
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 500;
   color: var(--color-text-primary);
 }
@@ -303,15 +303,15 @@ watch(() => props.visible, (v) => {
   padding: 1px var(--space-2);
   border-radius: var(--radius-xs);
   background: var(--color-bg-hover);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 500;
   color: var(--color-text-muted);
 }
 
 .prompt-preview {
-  margin-top: 2px;
+  margin-top: var(--space-1);
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--color-text-muted);
   white-space: nowrap;
@@ -373,12 +373,12 @@ watch(() => props.visible, (v) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 20px;
+  padding: 14px var(--space-7);
   border-bottom: 1px solid var(--color-border);
 }
 
 .prompt-dialog-title {
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -403,7 +403,7 @@ watch(() => props.visible, (v) => {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  padding: 18px 20px;
+  padding: 18px var(--space-7);
   overflow-y: auto;
 }
 
@@ -420,7 +420,7 @@ watch(() => props.visible, (v) => {
 
 .prompt-dialog-error {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-danger);
 }
 
@@ -428,7 +428,7 @@ watch(() => props.visible, (v) => {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-3);
-  padding: 12px 20px;
+  padding: var(--space-5) var(--space-7);
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-tertiary);
 }
@@ -464,7 +464,7 @@ watch(() => props.visible, (v) => {
   background: var(--color-bg-primary);
   color: var(--color-text-primary);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.6;
   resize: vertical;
 }
@@ -476,7 +476,7 @@ watch(() => props.visible, (v) => {
 
 .prompt-var-hint {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--color-text-muted);
 }

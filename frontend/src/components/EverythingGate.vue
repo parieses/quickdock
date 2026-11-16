@@ -112,7 +112,7 @@ onMounted(loadEverything)
   border-radius: var(--radius-sm);
   background: var(--color-warning-bg);
   color: var(--color-warning);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.6;
   text-align: left;
 }

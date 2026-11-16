@@ -13,6 +13,7 @@ import { unwrap } from '../utils/api'
 import { navEntries } from '../pages/registry'
 import { MATCHERS, matchClipboard, type MatchCtx } from './commandSearch/matchers'
 import { dropEmptyGroups, injectBestMatch, sortGroups } from './commandSearch/ranking'
+import { ITEM_TYPE } from '../constants/itemTypes'
 import type {
   CmdNote, CmdTodo, CmdScene, CmdCollection, InstalledApp, LcIndex, NavSearchItem, RecentEntry, ResultGroup, SearchResult, SystemCmd,
 } from './commandSearch/types'
@@ -66,7 +67,7 @@ export interface SearchDeps {
 }
 
 export function useCommandSearch(deps: SearchDeps) {
-  const { locale } = useI18n()
+  const { locale, tm } = useI18n()
   const { items, installedApps, notes, scenes, collections, systemCommands, query, selectedIndex,
           pluginCmdIndex, clipboardUrlSource,
           frecencyScore, frecencyTick, calcPluginScore,
@@ -467,17 +468,23 @@ export function useCommandSearch(deps: SearchDeps) {
 
   // 预览面板只吃 title / subtitle / lines。早先还带一个 kind 字段，但从来没被读过
   // （模板直接按 result.type 分支），是纯粹的负担，故删掉。
+  // 副标题原本把中文规范值直接当展示文案吐给用户；改走 i18n 的 itemTypes 显示名
+  // （字典 key 就是这些中文值），取不到时 fallback 到原值，规范值本身一个字都不改。
+  function itemTypeSubtitle(rawType: string): string {
+    const labels = tm('itemTypes') as Record<string, string> | undefined
+    return (labels && labels[rawType]) || rawType
+  }
   const previewResult = computed<{ title: string; subtitle?: string; lines: string[] } | null>(() => {
     const r = displayFlat.value[selectedIndex.value]
     if (!r) return null
     if (r.type === 'item' && r.item) {
       const lines = [r.item.value || '']
-      if (r.item.type === '目录' || r.item.type === '文件') {
+      if (r.item.type === ITEM_TYPE.DIR || r.item.type === ITEM_TYPE.FILE) {
         const v = r.item.value || ''
         const idx = Math.max(v.lastIndexOf('/'), v.lastIndexOf('\\'))
         if (idx > 0) lines.push(t('previewParent') + ': ' + v.slice(0, idx))
       }
-      return { title: r.label, subtitle: r.item.type, lines }
+      return { title: r.label, subtitle: itemTypeSubtitle(r.item.type), lines }
     }
     if (r.type === 'note' && r.note) {
       return { title: r.label, subtitle: r.note.isFolder ? '📁' : '', lines: [r.note.content] }

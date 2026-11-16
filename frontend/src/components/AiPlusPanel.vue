@@ -432,15 +432,15 @@ onBeforeUnmount(() => {
 .ai-plus-nav {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   width: 100%;
-  padding: 8px 6px;
+  padding: var(--space-4) var(--space-3);
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-secondary);
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--text-md);
   text-align: left;
   cursor: pointer;
 }
@@ -468,7 +468,7 @@ onBeforeUnmount(() => {
 
 .ai-plus-nav-count {
   flex: none;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
   color: var(--color-text-disabled);
 }
@@ -502,10 +502,10 @@ onBeforeUnmount(() => {
 .ai-plus-search {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   flex: none;
-  margin: 0 8px 5px;
-  padding: 5px 8px;
+  margin: 0 var(--space-4) 5px;
+  padding: 5px var(--space-4);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--color-bg-secondary);
@@ -523,7 +523,7 @@ onBeforeUnmount(() => {
   background: transparent;
   color: var(--color-text-primary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .ai-plus-search-input::placeholder { color: var(--color-text-disabled); }
@@ -535,7 +535,7 @@ onBeforeUnmount(() => {
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 0 5px 4px;
+  padding: 0 5px var(--space-2);
   scrollbar-gutter: stable;
 }
 
@@ -544,15 +544,15 @@ onBeforeUnmount(() => {
 .ai-plus-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   width: 100%;
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-secondary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-align: left;
   cursor: pointer;
 }
@@ -569,21 +569,21 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-sm);
   background: var(--color-bg-active);
   color: var(--color-text-secondary);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
 }
 
 /* 目录与文件在 @ 候选里混排，给方块一点区分（描述里也带了「目录」字样） */
 .ai-plus-badge.is-dir {
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: var(--color-bg-hover);
   color: var(--color-accent);
 }
 
 /* 引用列表的分组标题：两组一样式的条目挨在一起时，不写清哪组是哪组会看串 */
 .ai-plus-group {
-  padding: 7px 8px 3px;
-  font-size: 10px;
+  padding: 7px var(--space-4) 3px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--color-text-disabled);
@@ -601,7 +601,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-primary);
 }
 
@@ -609,7 +609,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.4;
   color: var(--color-text-muted);
 }
@@ -622,13 +622,13 @@ onBeforeUnmount(() => {
    这里再放一个勾选框，就会出现两套「选了什么」要对账。 */
 .ai-plus-state {
   flex: none;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--color-accent);
 }
 
 .ai-plus-empty {
-  padding: 12px 10px;
-  font-size: 11px;
+  padding: var(--space-5) 10px;
+  font-size: var(--text-xs);
   line-height: 1.5;
   color: var(--color-text-disabled);
 }
@@ -636,14 +636,14 @@ onBeforeUnmount(() => {
 /* 底部操作：不参与列表滚动 */
 .ai-plus-actions {
   flex: none;
-  padding: 4px 5px 5px;
+  padding: var(--space-2) 5px 5px;
   border-top: 1px solid var(--color-border);
 }
 
 /* 「引用」这组没有可跳转的设置页，底部改成一句等价性说明 */
 .ai-plus-hint {
-  padding: 5px 8px;
-  font-size: 11px;
+  padding: 5px var(--space-4);
+  font-size: var(--text-xs);
   line-height: 1.4;
   color: var(--color-text-disabled);
 }
@@ -651,15 +651,15 @@ onBeforeUnmount(() => {
 .ai-plus-link {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   width: 100%;
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-secondary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 
@@ -691,5 +691,5 @@ onBeforeUnmount(() => {
 
 .ai-plus-switch.is-on { background: var(--color-accent); }
 
-.ai-plus-switch.is-on::after { transform: translateX(11px); background: #fff; }
+.ai-plus-switch.is-on::after { transform: translateX(11px); background: var(--color-accent-text); }
 </style>

@@ -467,7 +467,7 @@ async function importSshConfig() {
     <!-- 文件夹「+」菜单：用 Teleport 脱离 .ssh-side 的 overflow 裁剪 -->
     <Teleport to="body">
       <div v-if="folderMenu" class="tree-folder-backdrop" @click="closeFolderMenu" @contextmenu.prevent="closeFolderMenu" />
-      <div
+      <div v-key-click
         v-if="folderMenu"
         class="tree-folder-menu"
         :style="{ left: folderMenu.x + 'px', top: folderMenu.y + 'px' }"
@@ -532,7 +532,7 @@ async function importSshConfig() {
 .tree-import-result {
   margin-top: var(--space-2);
   padding: var(--space-3) var(--space-4);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-secondary);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
@@ -600,7 +600,7 @@ async function importSshConfig() {
 
 .tree-hint-text {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-align: center;
 }
 
@@ -609,7 +609,7 @@ async function importSshConfig() {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-5);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   color: var(--color-accent);
   background: var(--color-accent-bg);
@@ -651,7 +651,7 @@ async function importSshConfig() {
   left: var(--space-3);
   right: var(--space-3);
   height: 2px;
-  border-radius: 1px;
+  border-radius: var(--radius-xs);
   background: var(--color-accent);
 }
 
@@ -778,7 +778,7 @@ async function importSshConfig() {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -802,7 +802,7 @@ async function importSshConfig() {
   justify-content: center;
   width: 14px;
   height: 14px;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   color: var(--color-accent);
   background: var(--color-accent-bg);
@@ -814,7 +814,7 @@ async function importSshConfig() {
 .tree-tag {
   flex: 0 0 auto;
   padding: 0 var(--space-2);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   line-height: 1.6;
   color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
@@ -836,7 +836,7 @@ async function importSshConfig() {
 
 .tree-target {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -846,7 +846,7 @@ async function importSshConfig() {
 .tree-count {
   flex: 0 0 auto;
   padding: 0 var(--space-2);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
   border-radius: var(--radius-full);
@@ -855,7 +855,7 @@ async function importSshConfig() {
 .tree-env {
   flex: 0 0 auto;
   padding: 0 var(--space-2);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   border-radius: var(--radius-xs);
   border: 1px solid transparent;
 }
@@ -883,7 +883,7 @@ async function importSshConfig() {
   right: var(--space-3);
   top: 50%;
   display: flex;
-  gap: 2px;
+  gap: var(--space-1);
   opacity: 0;
   transform: translateY(-50%);
   transition: opacity var(--transition-fast);
@@ -940,7 +940,7 @@ async function importSshConfig() {
   display: block;
   width: 100%;
   padding: var(--space-3) var(--space-4);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   color: var(--color-text-primary);
   background: transparent;

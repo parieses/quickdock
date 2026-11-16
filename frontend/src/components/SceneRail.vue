@@ -165,7 +165,7 @@ function openCreate() {
     <nav class="qd-panel-body">
       <template v-if="displayScenes.length">
         <template v-for="grp in groupedScenes" :key="grp.name || 'ungrouped'">
-          <div
+          <div v-key-click
             v-if="hasGroups"
             class="qd-group-header"
             @click="toggleGroup(grp.name)"
@@ -175,7 +175,7 @@ function openCreate() {
             <span class="qd-group-count">{{ grp.scenes.length }}</span>
           </div>
           <ul v-show="!hasGroups || !collapsedGroups.has(grp.name)" class="qd-group-list">
-            <li
+            <li v-key-click
               v-for="(scene, i) in grp.scenes"
               :key="scene.id"
               class="qd-row"
@@ -194,7 +194,7 @@ function openCreate() {
                 <span class="qd-row-title">{{ scene.name }}</span>
                 <span class="qd-row-sub">{{ scene.type || t('sceneType') }}</span>
               </span>
-              <span class="qd-row-actions" @click.stop>
+              <span v-key-click class="qd-row-actions" @click.stop>
                 <button class="qd-row-btn" @click="editingScene = scene; showEditDialog = true" :title="t('edit')">
                   <Pencil :size="13" />
                 </button>
@@ -245,16 +245,25 @@ function openCreate() {
   border-right: 1px solid var(--color-border);
 }
 
+/* <900px：三栏 210+200+240 在 800 宽窗口里会把项目栏挤到只剩省略号。
+   按 DESIGN.md §9，集合栏改由 WorkspacePage 折叠成抽屉（默认收起、点常驻页头
+   按钮展开覆盖，见 CollectionList.vue / WorkspacePage.vue）；场景栏是切场景的主干，
+   这里仍只收窄到 140px 保留可见，项目栏自己有 min-width:0（WorkspacePage），
+   功能都不丢，也不会横向溢出。 */
+@media (max-width: 900px) {
+  .scene-rail { width: 140px; min-width: 140px; }
+}
+
 /* 分组头：可点击折叠；箭头旋转给出展开/收起信号 */
 .qd-group-header {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   padding: 5px 10px 3px;
   cursor: pointer;
   user-select: none;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.03em;
 }
@@ -270,7 +279,7 @@ function openCreate() {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.qd-group-count { font-size: 10px; opacity: 0.65; }
+.qd-group-count { font-size: var(--text-2xs); opacity: 0.65; }
 .qd-group-list { list-style: none; margin: 0; padding: 0; }
 
 </style>

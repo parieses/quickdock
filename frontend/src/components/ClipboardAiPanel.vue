@@ -256,7 +256,7 @@ function clearAll() {
 /* 三个动作按钮：排成一行，窄面板里也能放下。 */
 .clip-ai-actions {
   display: flex;
-  gap: 2px;
+  gap: var(--space-1);
   flex-wrap: wrap;
   /* 负偏移让按钮左缘对齐内容文本，与 SSH 面板的命令操作条同一处理 */
   margin-left: -5px;
@@ -272,8 +272,8 @@ function clearAll() {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  padding: 2px 6px;
-  font-size: 11px;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
   line-height: 1.5;
   font-family: inherit;
   color: var(--color-text-muted);
@@ -296,8 +296,8 @@ function clearAll() {
 /* 当前 AI 档案徽章：中性色，不与风险/状态色抢注意力。 */
 .clip-ai-profile {
   max-width: 76px;
-  padding: 0 4px;
-  font-size: 10px;
+  padding: 0 var(--space-2);
+  font-size: var(--text-2xs);
   line-height: 15px;
   border-radius: var(--radius-xs);
   color: var(--color-text-muted);
@@ -320,15 +320,15 @@ function clearAll() {
 .clip-ai-quote-head {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 11px;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
   color: var(--color-accent);
 }
 
 .clip-ai-quote-line {
-  margin-top: 2px;
+  margin-top: var(--space-1);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.45;
   color: var(--color-text-muted);
   white-space: pre;
@@ -340,7 +340,7 @@ function clearAll() {
    这里不是出错，只是"这段代码不会自动执行"。 */
 .clip-ai-cmd-hint {
   padding-left: 3px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-disabled);
 }
 </style>

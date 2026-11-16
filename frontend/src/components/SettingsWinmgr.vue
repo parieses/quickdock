@@ -318,39 +318,39 @@ async function saveAll() {
 </template>
 
 <style scoped>
-.wm-page { width: 100%; max-width: 720px; }
+.wm-page { width: 100%; max-width: var(--settings-max); }
 .wm-head { margin-bottom: 14px; }
-.wm-title { font-size: 15px; font-weight: 600; color: var(--color-text-primary); margin: 0 0 4px; }
-.wm-desc { font-size: 12px; color: var(--color-text-disabled); margin: 0; line-height: 1.5; }
+.wm-title { font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); margin: 0 0 var(--space-2); }
+.wm-desc { font-size: var(--text-sm); color: var(--color-text-disabled); margin: 0; line-height: 1.5; }
 
 .wm-card {
   background: var(--color-card-bg);
   border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
-  padding: 12px 14px;
-  margin-bottom: 12px;
+  padding: var(--space-5) 14px;
+  margin-bottom: var(--space-5);
 }
-.wm-card-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
-.wm-card-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
-.wm-card-sub { font-size: 11px; color: var(--color-text-disabled); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wm-card-head { display: flex; align-items: baseline; gap: var(--space-4); margin-bottom: 10px; }
+.wm-card-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
+.wm-card-sub { font-size: var(--text-xs); color: var(--color-text-disabled); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 2 列紧凑网格 */
 .wm-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px 14px;
+  gap: var(--space-2) 14px;
 }
 .wm-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   min-width: 0;
   padding: 3px 0;
 }
 .wm-item-label {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -368,7 +368,7 @@ async function saveAll() {
   align-items: center;
   justify-content: center;
   font-family: 'Consolas', ui-monospace, SFMono-Regular, monospace;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   line-height: 1;
   color: var(--color-text-primary);
@@ -389,7 +389,7 @@ async function saveAll() {
   animation: wm-pulse 1.1s ease-in-out infinite;
 }
 @keyframes wm-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.65 } }
-.wm-capturing { font-family: inherit; font-size: 11px; font-weight: 500; }
+.wm-capturing { font-family: inherit; font-size: var(--text-xs); font-weight: 500; }
 
 .wm-reset {
   flex-shrink: 0;
@@ -411,19 +411,19 @@ async function saveAll() {
 .wm-reset:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 
 .wm-row { display: flex; align-items: center; gap: 10px; }
-.wm-row-label { flex: 1; font-size: 12px; color: var(--color-text-muted); }
+.wm-row-label { flex: 1; font-size: var(--text-sm); color: var(--color-text-muted); }
 
-.wm-ratio { display: flex; align-items: center; gap: 12px; }
+.wm-ratio { display: flex; align-items: center; gap: var(--space-5); }
 .wm-slider { flex: 1; accent-color: var(--color-accent); }
-.wm-ratio-val { font-size: 13px; font-weight: 600; color: var(--color-accent); min-width: 44px; text-align: right; }
-.wm-hint { font-size: 11px; color: var(--color-text-disabled); margin: 8px 0 0; line-height: 1.5; }
+.wm-ratio-val { font-size: var(--text-md); font-weight: 600; color: var(--color-accent); min-width: 44px; text-align: right; }
+.wm-hint { font-size: var(--text-xs); color: var(--color-text-disabled); margin: var(--space-4) 0 0; line-height: 1.5; }
 
-.wm-actions { display: flex; gap: 8px; margin-top: 2px; }
-.wm-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
-  height: 32px; padding: 0 16px;
+.wm-actions { display: flex; gap: var(--space-4); margin-top: var(--space-1); }
+.wm-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
+  height: 32px; padding: 0 var(--space-6);
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-family: inherit;
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s, color 0.12s;
@@ -432,6 +432,6 @@ async function saveAll() {
 .wm-btn-primary:hover { background: var(--color-accent-hover); border-color: var(--color-accent-hover); }
 .wm-btn-ghost { background: transparent; color: var(--color-text-secondary); border-color: var(--color-border); }
 .wm-btn-ghost:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.wm-msg { font-size: 12px; color: var(--color-success); margin: 10px 0 0; }
-.wm-tip { font-size: 11px; color: var(--color-text-disabled); line-height: 1.6; margin: 10px 0 0; }
+.wm-msg { font-size: var(--text-sm); color: var(--color-success); margin: 10px 0 0; }
+.wm-tip { font-size: var(--text-xs); color: var(--color-text-disabled); line-height: 1.6; margin: 10px 0 0; }
 </style>

@@ -104,7 +104,7 @@ function onDragStart(e: DragEvent) {
 <template>
   <div>
     <!-- 缩进按层级运行时计算，只能走内联样式（R7 的计算值例外） -->
-    <div
+    <div v-key-click
       :draggable="!selectMode"
       :style="'padding-left:' + (12 + depth * 16) + 'px'"
       :class="['qd-row', 'tn-row', 'tn-' + (isFolder ? 'folder' : 'doc'), {
@@ -119,7 +119,7 @@ function onDragStart(e: DragEvent) {
       @dragleave="onDragLeave"
       @drop="onDrop"
     >
-      <span v-if="selectMode" class="tn-check" :class="{ on: isChecked }" @click.stop="emit('toggle-select', node.id)"></span>
+      <span v-key-click v-if="selectMode" class="tn-check" :class="{ on: isChecked }" @click.stop="emit('toggle-select', node.id)"></span>
       <button v-else-if="isFolder" class="tn-caret" @click.stop="emit('toggle', node.id)">
         <ChevronRight v-if="!isOpen" :size="12" /><ChevronDown v-else :size="12" />
       </button>
@@ -141,7 +141,7 @@ function onDragStart(e: DragEvent) {
         <span class="tn-name">{{ node.name || node.keyword }}</span>
       </template>
       <span v-if="isFolder && hasKids" class="tn-count">{{ node.children.length }}</span>
-      <span v-if="!selectMode" class="tn-actions" @click.stop>
+      <span v-key-click v-if="!selectMode" class="tn-actions" @click.stop>
         <button v-if="isFolder" class="tn-act" :title="'+ ' + t('notesNewFolder')" @click="emit('create-folder', node.id)"><FolderPlus :size="12" /></button>
         <button v-if="isFolder" class="tn-act" :title="'+ ' + t('notesNewDoc')" @click="emit('create-doc', node.id)"><Plus :size="12" /></button>
         <button class="tn-act" :title="t('rename')" @click="emit('rename-start', node)"><Pencil :size="12" /></button>
@@ -176,8 +176,8 @@ function onDragStart(e: DragEvent) {
    这里曾经另写 bg-tertiary + 文档文字变蓝，于是跟其它页面越走越远。 */
 .tn-row {
   display: flex; align-items: center; gap: 5px;
-  padding: 5px 6px; border-radius: var(--radius-sm); cursor: pointer;
-  font-size: 12px; min-height: 26px; box-sizing: border-box;
+  padding: 5px var(--space-3); border-radius: var(--radius-sm); cursor: pointer;
+  font-size: var(--text-sm); min-height: 26px; box-sizing: border-box;
   margin-bottom: 0; /* 抵消 .qd-row 的 2px 行距，树要更密 */
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
@@ -210,7 +210,7 @@ function onDragStart(e: DragEvent) {
 .tn-icon { flex-shrink: 0; color: var(--color-accent); }
 .tn-doc .tn-icon { color: var(--color-warning); }
 .tn-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tn-count { font-size: 10px; color: var(--color-text-muted); background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 6px; flex-shrink: 0; }
+.tn-count { font-size: var(--text-2xs); color: var(--color-text-muted); background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 var(--space-3); flex-shrink: 0; }
 
 /* hover 操作按钮：常在 hover 显示半透明，hover 变实 */
 .tn-actions { display: inline-flex; align-items: center; gap: 1px; flex-shrink: 0; opacity: 0; transition: opacity var(--transition-fast); }
@@ -224,6 +224,6 @@ function onDragStart(e: DragEvent) {
 .tn-act:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
 .tn-act.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 
-.tn-input { flex: 1; min-width: 0; padding: 2px 6px; border: 1px solid var(--color-accent); border-radius: var(--radius-xs); background: var(--color-bg-primary); color: var(--color-text-primary); font-size: 12px; outline: none; }
-.tn-children { margin-left: 12px; }
+.tn-input { flex: 1; min-width: 0; padding: var(--space-1) var(--space-3); border: 1px solid var(--color-accent); border-radius: var(--radius-xs); background: var(--color-bg-primary); color: var(--color-text-primary); font-size: var(--text-sm); outline: none; }
+.tn-children { margin-left: var(--space-5); }
 </style>

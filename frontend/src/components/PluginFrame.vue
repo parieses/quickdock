@@ -122,12 +122,12 @@ defineExpose({ reload })
   align-items: center;
   justify-content: center;
   color: var(--color-text-disabled);
-  font-size: 13px;
+  font-size: var(--text-md);
   user-select: none;
 }
 .pf-error {
   color: var(--color-danger);
-  padding: 0 24px;
+  padding: 0 var(--space-8);
   text-align: center;
   line-height: 1.6;
 }

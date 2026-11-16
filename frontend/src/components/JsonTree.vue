@@ -123,8 +123,8 @@ function copyNodeJson() {
 </template>
 
 <style scoped>
-.jt { font-family: 'Consolas', 'Monaco', monospace; font-size: 12px; line-height: 1.6; }
-.jt-row { display: flex; align-items: center; gap: 2px; min-height: 22px; padding-right: 6px; }
+.jt { font-family: 'Consolas', 'Monaco', monospace; font-size: var(--text-sm); line-height: 1.6; }
+.jt-row { display: flex; align-items: center; gap: var(--space-1); min-height: 22px; padding-right: var(--space-3); }
 .jt-row:hover { background: var(--color-bg-hover); }
 .jt-toggle {
   background: none; border: none; cursor: pointer; padding: 0; margin: 0;
@@ -138,7 +138,7 @@ function copyNodeJson() {
 .jt-key { color: var(--color-syntax-key); }
 .jt-colon { color: var(--color-text-disabled); }
 .jt-bracket { color: var(--color-text-disabled); }
-.jt-summary { color: var(--color-text-disabled); font-style: italic; margin: 0 4px; }
+.jt-summary { color: var(--color-text-disabled); font-style: italic; margin: 0 var(--space-2); }
 .jt-closing { color: var(--color-text-disabled); }
 .jt-comma { color: var(--color-text-disabled); }
 .jt-val.jt-string { color: var(--color-syntax-string); }
@@ -147,7 +147,7 @@ function copyNodeJson() {
 .jt-val.jt-null { color: var(--color-syntax-null); }
 .jt-val.jt-array { color: var(--color-text-muted); }
 .jt-copy {
-  background: none; border: none; cursor: pointer; padding: 2px; margin-left: 4px;
+  background: none; border: none; cursor: pointer; padding: var(--space-1); margin-left: var(--space-2);
   display: flex; align-items: center; justify-content: center;
   color: var(--color-text-disabled); border-radius: var(--radius-xs); flex-shrink: 0;
   opacity: 0; transition: color var(--transition-fast), opacity var(--transition-fast), background var(--transition-fast);

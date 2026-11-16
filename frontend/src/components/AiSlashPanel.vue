@@ -57,7 +57,7 @@ function isPicked(sk: AISkill): boolean {
   z-index: 30;
   max-height: 260px;
   overflow: auto;
-  padding: 4px;
+  padding: var(--space-2);
   background: var(--color-bg-primary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -67,15 +67,15 @@ function isPicked(sk: AISkill): boolean {
 .ai-slash-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   width: 100%;
-  padding: 5px 6px;
+  padding: 5px var(--space-3);
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-secondary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-align: left;
   cursor: pointer;
 }
@@ -89,7 +89,7 @@ function isPicked(sk: AISkill): boolean {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .ai-slash-row.is-picked .ai-slash-name { color: var(--color-accent); }
@@ -100,7 +100,7 @@ function isPicked(sk: AISkill): boolean {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 
@@ -108,15 +108,15 @@ function isPicked(sk: AISkill): boolean {
    而这里的选择就在输入框里，再点一次即取消。 */
 .ai-slash-state {
   flex: none;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--color-accent);
 }
 
 .ai-slash-foot {
-  padding: 4px 6px 2px;
-  font-size: 10px;
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  font-size: var(--text-2xs);
   color: var(--color-text-disabled);
   border-top: 1px solid var(--color-border);
-  margin-top: 2px;
+  margin-top: var(--space-1);
 }
 </style>

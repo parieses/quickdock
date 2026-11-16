@@ -423,10 +423,11 @@ async function dismissCode(id: string) {
   } catch (e) { toast.error(getErrorMessage(e)); logErr('dashboard.mailDismiss', e) }
 }
 
-// ---- 邮件原文查看（双击整行打开，不占操作列）----
+// ---- 邮件原文查看（单击整行打开，不占操作列）----
 // 只把 id 和卡片快照传给弹窗；正文由弹窗按需 FETCH，拉完即弃，
 // 不进 GetCodes 的内存快照（见 internal/mailbox 的包约定）。
-// 行内按钮自己带 @dblclick.stop，避免连点复制/忽略时冒泡把弹框一起打开。
+// 行内按钮用 @click.stop 挡住冒泡（点复制/忽略不会顺带打开弹框），
+// 另保留 @dblclick.stop 防连点时的第二次点击冒泡。
 const mailDetailId = ref('')
 const mailDetailFallback = ref<{ subject: string; from: string; account: string; received: number } | null>(null)
 function openMailDetail(m: MailCode) {
@@ -524,7 +525,7 @@ function mailAccountState(a: MailAccount) {
 }
 
 async function removeMailAccount(a: MailAccount) {
-  if (!window.confirm(t('mailRemoveConfirm', { email: a.email }))) return
+  if (!(await toast.confirm(t('mailRemoveConfirm', { email: a.email })))) return
   try {
     unwrap(await RemoveAccount(a.id))
     if (mailForm.id === a.id) resetMailForm()
@@ -2184,10 +2185,10 @@ onUnmounted(() => {
                   </span>
                 </p>
                 <ul v-else class="qc-list">
-                  <li v-for="m in mailCodes.slice(0, 3)" :key="m.id" class="qc-row"
+                  <li v-key-click v-for="m in mailCodes.slice(0, 3)" :key="m.id" class="qc-row"
                       :data-mail-id="m.id" :title="t('mailDetailOpen')"
                       :class="{ security: isSecurityMail(m), expired: !isSecurityMail(m) && isMailExpired(m.received), 'qc-flash': flashMailId === m.id }"
-                      @dblclick="openMailDetail(m)">
+                      @click="openMailDetail(m)">
                     <span v-if="isSecurityMail(m)" class="qc-alert" :title="mailKindText(m.kind)">
                       <ShieldAlert :size="13" /><span>{{ t('mailSecurityTag') }}</span>
                     </span>
@@ -2203,7 +2204,7 @@ onUnmounted(() => {
                     <!-- 安全行没有复制按钮：占位让各行的操作图标严格对齐 -->
                     <span v-else class="db-icon-btn qc-slot" aria-hidden="true"></span>
                     <button class="db-icon-btn" :title="t('mailDismiss')"
-                            @click="dismissCode(m.id)" @dblclick.stop><X :size="13" /></button>
+                            @click.stop="dismissCode(m.id)" @dblclick.stop><X :size="13" /></button>
                   </li>
                 </ul>
               </div>
@@ -2222,7 +2223,7 @@ onUnmounted(() => {
               <p v-if="failed.port" class="empty">{{ t('dash_load_failed') }}</p>
               <p v-else-if="!portList.length" class="empty">{{ t('dash_ports_empty') }}</p>
               <ul v-else class="rows">
-                <li v-for="p in portList" :key="`${p.protocol}-${p.port}`" class="row clickable"
+                <li v-key-click v-for="p in portList" :key="`${p.protocol}-${p.port}`" class="row clickable"
                     :title="p.path" @click="go('environments', 'ports')">
                   <span class="port">{{ p.port }}</span>
                   <span class="row-title mono" :title="p.path">{{ p.process || t('dash_unknown_proc') }}</span>
@@ -2247,7 +2248,7 @@ onUnmounted(() => {
                 {{ failed.env ? t('dash_load_failed') : t('dash_env_empty') }}
               </p>
               <ul v-else class="rows">
-                <li v-for="r in residentList" :key="r.id" class="row clickable" @click="go(r.page, r.target)">
+                <li v-key-click v-for="r in residentList" :key="r.id" class="row clickable" @click="go(r.page, r.target)">
                   <span class="dot up"></span>
                   <span class="row-title">{{ r.name }}</span>
                   <span class="row-target">{{ r.meta }}</span>
@@ -2269,7 +2270,7 @@ onUnmounted(() => {
               <p v-if="failed.git" class="empty">{{ t('dash_load_failed') }}</p>
               <p v-else-if="!gitList.length" class="empty">{{ t('dash_git_empty') }}</p>
               <ul v-else class="rows">
-                <li v-for="r in gitList" :key="r.path" class="row clickable" :title="r.error || r.path"
+                <li v-key-click v-for="r in gitList" :key="r.path" class="row clickable" :title="r.error || r.path"
                     @click="go('git', r.path)">
                   <FolderGit2 :size="12" class="row-icon" />
                   <span class="row-title">{{ r.name }}</span>
@@ -2309,7 +2310,7 @@ onUnmounted(() => {
                   </div>
                 </div>
                 <ul class="rows">
-                  <li v-for="m in monitorList" :key="m.id" class="row clickable" @click="go('monitor')"
+                  <li v-key-click v-for="m in monitorList" :key="m.id" class="row clickable" @click="go('monitor')"
                       :title="(m.kind === 'http' ? m.url : m.target) + (upPct(m.id) === '—' ? '' : ' · ' + upPct(m.id))">
                     <span :class="['dot', m.lastStatus || 'unknown']"></span>
                     <span class="row-title" >{{ m.name }}</span>
@@ -2400,7 +2401,7 @@ onUnmounted(() => {
 /* 内容最宽 1680：再宽的话六行清单会被拉成一整条，眼睛要横跨半屏才读完一行；
    1680 在 1920 的屏幕上只留 120 的边距，不会再出现「中间一条窄带、两边全是空白」。 */
 .dash {
-  max-width: 1680px; margin: 0 auto;
+  max-width: var(--content-max); margin: 0 auto;
   display: flex; flex-direction: column; gap: var(--space-5);
 }
 
@@ -2425,15 +2426,15 @@ onUnmounted(() => {
   border-radius: 50%; background: var(--color-success);
 }
 .band-head-dot.alert { background: var(--color-danger); }
-.band-head-title { font-size: 12px; font-weight: 600; color: var(--color-text-secondary); }
-.band-head-hint { font-size: 10px; color: var(--color-text-disabled); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.band-head-meta { margin-left: auto; flex-shrink: 0; font-size: 10px; color: var(--color-text-disabled); white-space: nowrap; }
+.band-head-title { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-secondary); }
+.band-head-hint { font-size: var(--text-2xs); color: var(--color-text-disabled); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.band-head-meta { margin-left: auto; flex-shrink: 0; font-size: var(--text-2xs); color: var(--color-text-disabled); white-space: nowrap; }
 .band-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .band-grid > * + * { border-left: 1px solid var(--color-border); }
 
 /* 读数三行全部左对齐：数字是主角，foot 只是注脚，右对齐的对角线留白反而显得散 */
 .readout {
-  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+  display: flex; flex-direction: column; gap: var(--space-1); min-width: 0;
   padding: var(--space-4) var(--space-5);
   background: none; border: 0; font: inherit; text-align: left; color: inherit;
   cursor: pointer; transition: background-color var(--transition-fast);
@@ -2443,16 +2444,16 @@ onUnmounted(() => {
 .readout.static:hover { background: none; }
 .r-label {
   display: flex; align-items: center; gap: 5px;
-  font-size: 11px; color: var(--color-text-muted); white-space: nowrap;
+  font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap;
 }
 /* 大号读数：mono 保证四位数字不跳宽，字距收一点让它更像"仪表读数"而不是代码 */
 .r-num {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-  font-size: 24px; font-weight: 600; letter-spacing: -0.02em;
+  font-size: var(--text-2xl); font-weight: 600; 
   line-height: 1.2; color: var(--color-text-primary);
 }
 .r-foot {
-  font-size: 11px; color: var(--color-text-disabled);
+  font-size: var(--text-xs); color: var(--color-text-disabled);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .r-foot.danger { color: var(--color-danger); }
@@ -2488,14 +2489,14 @@ onUnmounted(() => {
 .card-title { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); }
 .card-count {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-  font-size: 10px; line-height: 15px; padding: 0 6px; border-radius: var(--radius-full);
+  font-size: var(--text-2xs); line-height: 15px; padding: 0 var(--space-3); border-radius: var(--radius-full);
   color: var(--color-text-muted); background: var(--color-bg-tertiary);
 }
 .card-count.bad { color: var(--color-danger); background: var(--color-danger-bg); }
 .card-link {
   display: inline-flex; align-items: center; gap: 1px; margin-left: auto;
   background: none; border: 0; padding: 0; cursor: pointer;
-  font: inherit; font-size: 11px; color: var(--color-text-muted);
+  font: inherit; font-size: var(--text-xs); color: var(--color-text-muted);
   transition: color var(--transition-fast);
 }
 .card-link:hover { color: var(--color-accent); }
@@ -2513,17 +2514,17 @@ onUnmounted(() => {
 }
 .ribbon-meta {
   display: flex; align-items: baseline; gap: var(--space-3);
-  margin-bottom: 6px;
+  margin-bottom: var(--space-3);
 }
-.ribbon-label { font-size: 11px; color: var(--color-text-muted); }
+.ribbon-label { font-size: var(--text-xs); color: var(--color-text-muted); }
 .ribbon-pct {
-  margin-left: auto; font-size: 13px; font-weight: 600;
+  margin-left: auto; font-size: var(--text-md); font-weight: 600;
   font-variant-numeric: tabular-nums; color: var(--color-success);
 }
 .ribbon-pct.bad { color: var(--color-danger); }
 
-.ribbon { display: flex; gap: 2px; height: 16px; }
-.cell { flex: 1 1 0; min-width: 0; border-radius: 2px; background: var(--color-bg-tertiary); }
+.ribbon { display: flex; gap: var(--space-1); height: 16px; }
+.cell { flex: 1 1 0; min-width: 0; border-radius: var(--radius-2xs); background: var(--color-bg-tertiary); }
 /* 整条全绿会炸：up 用 55% 透明度压成「在线但不刺眼」，down 保持饱和 */
 .cell.up { background: var(--color-success); opacity: .5; }
 .cell.down { background: var(--color-danger); opacity: .85; }
@@ -2532,13 +2533,13 @@ onUnmounted(() => {
 .ribbon.mini { width: 132px; flex-shrink: 0; height: 12px; }
 .up-pct {
   width: 52px; flex-shrink: 0; text-align: right;
-  font-size: 11px; font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs); font-variant-numeric: tabular-nums;
   color: var(--color-text-secondary);
 }
 
 /* ---- 待办到期分布条：三段各按数量占比，颜色即语义 ---- */
-.todo-dist { display: flex; gap: 2px; height: 5px; margin: var(--space-3) 14px 0; }
-.seg { min-width: 6px; border-radius: 2px; }
+.todo-dist { display: flex; gap: var(--space-1); height: 5px; margin: var(--space-3) 14px 0; }
+.seg { min-width: 6px; border-radius: var(--radius-2xs); }
 .seg.danger { background: var(--color-danger); }
 .seg.warn { background: var(--color-warning); }
 .seg.ok { background: var(--color-accent); opacity: .55; }
@@ -2546,7 +2547,7 @@ onUnmounted(() => {
 /* ---- 验证码 / 置物架：两张 span-3 的「取用型」卡片 ----
  * 与上面的读数/清单卡共用 .card/.card-head/.empty/.db-icon-btn，
  * 这里只补它们独有的行内结构，不再造第二套页头或按钮。 */
-.qc-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.qc-actions { display: flex; align-items: center; gap: var(--space-1); margin-left: auto; }
 /* .card-link 自带 margin-left:auto（单个链接靠右），放进已经 auto 的容器里会多推一次 */
 .qc-actions .card-link { margin-left: 0; }
 
@@ -2554,7 +2555,7 @@ onUnmounted(() => {
  * Teleport 到 body + fixed，与设置浮层同一套定位（placeFloating）。
  * 只有两项且都是短词，所以不做分组、不做勾选，点完即关。 */
 .db-menu {
-  position: fixed; z-index: 660; min-width: 148px; padding: 4px;
+  position: fixed; z-index: 660; min-width: 148px; padding: var(--space-2);
   background: var(--color-surface-elevated);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -2563,10 +2564,10 @@ onUnmounted(() => {
 }
 .db-menu-item {
   display: flex; align-items: center; gap: var(--space-3);
-  width: 100%; padding: 6px 8px;
+  width: 100%; padding: var(--space-3) var(--space-4);
   background: none; border: none; border-radius: var(--radius-sm);
   color: var(--color-text-secondary);
-  font-size: 12px; text-align: left; cursor: pointer;
+  font-size: var(--text-sm); text-align: left; cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
 }
 .db-menu-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
@@ -2581,7 +2582,7 @@ onUnmounted(() => {
 }
 .qc-link:hover { text-decoration: underline; }
 .qc-error { color: var(--color-danger); }
-.qc-conn { display: block; margin-top: 6px; font-size: 10px; line-height: 1.4; }
+.qc-conn { display: block; margin-top: var(--space-3); font-size: var(--text-2xs); line-height: 1.4; }
 .qc-conn.ok { color: var(--color-text-disabled); }
 .qc-conn.bad { color: var(--color-danger); word-break: break-word; }
 .qc-ok { color: var(--color-success); }
@@ -2604,7 +2605,7 @@ onUnmounted(() => {
   100% { background: transparent; }
 }
 .qc-code {
-  flex-shrink: 0; min-width: 78px; font-size: 15px; font-weight: 600;
+  flex-shrink: 0; min-width: 78px; font-size: var(--text-lg); font-weight: 600;
   letter-spacing: .06em; color: var(--color-accent);
 }
 /* 安全提醒没有码：同一列只留「图标 + 文字」，不套橙色背景块。
@@ -2613,21 +2614,21 @@ onUnmounted(() => {
 .qc-alert {
   flex-shrink: 0; min-width: 78px;
   display: inline-flex; align-items: center; gap: 5px;
-  color: var(--color-warning); font-size: 11px; font-weight: 500;
+  color: var(--color-warning); font-size: var(--text-xs); font-weight: 500;
 }
-.qc-alert span { color: var(--color-text-secondary); font-size: 11px; font-weight: 400; }
+.qc-alert span { color: var(--color-text-secondary); font-size: var(--text-xs); font-weight: 400; }
 .qc-slot { pointer-events: none; }
 .qc-file-ic {
   display: grid; place-items: center; flex-shrink: 0;
   width: 24px; height: 24px; color: var(--color-text-muted);
 }
-.qc-meta { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.qc-meta { display: flex; flex-direction: column; gap: var(--space-1); flex: 1; min-width: 0; }
 .qc-name {
-  font-size: 12px; color: var(--color-text-primary);
+  font-size: var(--text-sm); color: var(--color-text-primary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .qc-sub {
-  font-size: 10px; color: var(--color-text-muted);
+  font-size: var(--text-2xs); color: var(--color-text-muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .qc-dot { width: 6px; height: 6px; border-radius: var(--radius-full); flex-shrink: 0; }
@@ -2640,34 +2641,34 @@ onUnmounted(() => {
 .qc-acct-head {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
 }
-.qc-acct-title { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); }
+.qc-acct-title { font-size: var(--text-xs); font-weight: 600; color: var(--color-text-secondary); }
 .qc-acct-title em {
   margin-left: 5px; font-style: normal; font-weight: 400; color: var(--color-text-disabled);
 }
 .qc-acct-add {
-  display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
-  padding: 3px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  background: none; font: inherit; font-size: 11px; color: var(--color-accent); cursor: pointer;
+  display: inline-flex; align-items: center; gap: var(--space-2); flex-shrink: 0;
+  padding: 3px var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: none; font: inherit; font-size: var(--text-xs); color: var(--color-accent); cursor: pointer;
 }
 .qc-acct-add:hover { background: var(--color-accent-bg); border-color: var(--color-accent); }
 .qc-acct-list {
-  display: flex; flex-direction: column; gap: 2px;
+  display: flex; flex-direction: column; gap: var(--space-1);
   max-height: 136px; overflow-y: auto; scrollbar-width: thin;
   padding: 3px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
 }
 .qc-acct-row {
   display: flex; align-items: center; gap: var(--space-2);
-  padding: 6px 7px; border: 1px solid transparent; border-radius: var(--radius-xs);
+  padding: var(--space-3) 7px; border: 1px solid transparent; border-radius: var(--radius-xs);
 }
 .qc-acct-row:hover { background: var(--color-bg-hover); }
 .qc-acct-row.active { background: var(--color-bg-hover); border-color: var(--color-border); }
 .qc-acct-name {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   background: none; border: 0; padding: 0; text-align: left;
-  font: inherit; font-size: 12px; color: var(--color-text-secondary); cursor: pointer;
+  font: inherit; font-size: var(--text-sm); color: var(--color-text-secondary); cursor: pointer;
 }
 .qc-acct-row.active .qc-acct-name { color: var(--color-text-primary); }
-.qc-acct-state { font-size: 10px; flex-shrink: 0; }
+.qc-acct-state { font-size: var(--text-2xs); flex-shrink: 0; }
 .qc-acct-state.ok { color: var(--color-success); }
 .qc-acct-state.bad { color: var(--color-danger); }
 .qc-acct-state.pending, .qc-acct-state.off { color: var(--color-text-disabled); }
@@ -2677,16 +2678,16 @@ onUnmounted(() => {
 .qc-acct-empty {
   margin: 0; padding: 9px 10px;
   border: 1px dashed var(--color-border); border-radius: var(--radius-sm);
-  font-size: 11px; color: var(--color-text-disabled);
+  font-size: var(--text-xs); color: var(--color-text-disabled);
 }
 .qc-acct-form-head {
-  display: flex; align-items: baseline; gap: 6px;
+  display: flex; align-items: baseline; gap: var(--space-3);
   padding-top: var(--space-2); border-top: 1px solid var(--color-border);
-  font-size: 11px; font-weight: 600; color: var(--color-text-secondary);
+  font-size: var(--text-xs); font-weight: 600; color: var(--color-text-secondary);
 }
 .qc-acct-form-target {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 10px; font-weight: 400; color: var(--color-text-disabled);
+  font-size: var(--text-2xs); font-weight: 400; color: var(--color-text-disabled);
 }
 /* 邮箱浮层比日期面板高，视口一矮内容就要滚；「测试连接 / 保存」是唯一出口，
    滚到看不见等于加不了邮箱。改成三段式：标题与操作栏固定，只有中间滚。
@@ -2697,7 +2698,7 @@ onUnmounted(() => {
   /* 面板只有 max-height、没有固定 height，flex-basis:0 会让它被算成 0 高。
      用 auto 撑内容 + 允许收缩：内容少时面板自然收拢，超高时压缩这一段并内部滚动。 */
   flex: 0 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin;
-  padding-right: 2px;
+  padding-right: var(--space-1);
 }
 /* 滚动区内部同样禁止收缩：否则 body 一被压缩，列表又会被挤成一条线。 */
 .qd-mail-body > * { flex-shrink: 0; }
@@ -2723,13 +2724,13 @@ onUnmounted(() => {
   padding-right: var(--space-5); border-right: 1px solid var(--color-border);
 }
 .ai-stat { display: flex; flex-direction: column; gap: 1px; min-width: 84px; }
-.ai-label { font-size: 10px; color: var(--color-text-muted); }
+.ai-label { font-size: var(--text-2xs); color: var(--color-text-muted); }
 .ai-num {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-  font-size: 24px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.25;
+  font-size: var(--text-2xl); font-weight: 600;  line-height: 1.25;
   color: var(--color-text-primary);
 }
-.ai-sub { font-size: 10px; color: var(--color-text-disabled); white-space: nowrap; }
+.ai-sub { font-size: var(--text-2xs); color: var(--color-text-disabled); white-space: nowrap; }
 .ai-chart { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-3); }
 /* 柱条基线：重写前由 .ai-bars 自己画，换成图形库后图表组件只管画布，
    基线留在外层，免得和图表内部的圆角/overflow 样式打架。 */
@@ -2740,7 +2741,7 @@ onUnmounted(() => {
  * flex:1 1 0 让每项等分、恰好铺满；名字给 min-width:0 + ellipsis 才不会撑破。 */
 .ai-models {
   list-style: none; margin: 0; padding: 0;
-  display: flex; flex-wrap: wrap; gap: 6px var(--space-3);
+  display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-3);
 }
 /* 基宽 130 起、可换行：半行卡里三个模型会折成两行，宽卡里仍是一行均分。
  * 底色用 bg-hover 而不是 bg-tertiary：卡片底 #171b22 与 tertiary #1b202a 只差
@@ -2748,9 +2749,9 @@ onUnmounted(() => {
  * 而不是和左边模型名一组。 */
 .ai-model {
   flex: 1 1 130px; min-width: 0;
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; gap: var(--space-3);
   padding: 3px 9px; border-radius: var(--radius-sm);
-  background: var(--color-bg-hover); font-size: 11px;
+  background: var(--color-bg-hover); font-size: var(--text-xs);
 }
 .ai-model-name {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -2770,7 +2771,7 @@ onUnmounted(() => {
 .tile {
   display: flex; align-items: center; gap: var(--space-3);
   min-width: 0;
-  padding: 8px 14px 8px 10px;
+  padding: var(--space-4) 14px var(--space-4) 10px;
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   font: inherit; cursor: pointer; text-align: left;
@@ -2785,15 +2786,15 @@ onUnmounted(() => {
 /* 真图标多半自己带底色（应用图标是圆角方块、favicon 是站点色），
    再垫一层浅色底会看起来像贴了两层皮，所以只留透明底。 */
 .tile-ic.has-icon { background: transparent; }
-.tile-ic-img { width: 20px; height: 20px; object-fit: contain; border-radius: 3px; }
+.tile-ic-img { width: 20px; height: 20px; object-fit: contain; border-radius: var(--radius-xs); }
 /* 名字吃掉中间的剩余宽度，把类型徽标顶到右端——磁贴变宽后两端对齐才不散 */
 .tile-name {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 12px; font-weight: 500; color: var(--color-text-primary);
+  font-size: var(--text-sm); font-weight: 500; color: var(--color-text-primary);
 }
 .tile-type {
-  flex-shrink: 0; font-size: 10px; color: var(--color-text-muted);
-  background: var(--color-bg-secondary); padding: 1px 6px; border-radius: var(--radius-full);
+  flex-shrink: 0; font-size: var(--text-2xs); color: var(--color-text-muted);
+  background: var(--color-bg-secondary); padding: 1px var(--space-3); border-radius: var(--radius-full);
 }
 
 /* ---- 行 ---- */
@@ -2801,7 +2802,7 @@ onUnmounted(() => {
 .row {
   display: flex; align-items: center; gap: var(--space-4);
   height: 32px; padding: 0 var(--space-4); border-radius: var(--radius-xs);
-  font-size: 12px; min-width: 0;
+  font-size: var(--text-sm); min-width: 0;
 }
 /* WebView2 不支持 :has()，所以「这行可点」只能靠显式 class，不能靠子元素推断 */
 .row.clickable { cursor: pointer; }
@@ -2813,7 +2814,7 @@ onUnmounted(() => {
 .row-icon { color: var(--color-text-muted); flex-shrink: 0; }
 .row-target {
   max-width: 46%; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted);
+  font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted);
 }
 .mono { font-family: var(--font-mono); }
 
@@ -2838,7 +2839,7 @@ onUnmounted(() => {
 .pri { width: 0; height: 0; flex-shrink: 0; border-left: 3px solid transparent; border-right: 3px solid transparent; border-bottom: 5px solid var(--color-danger); }
 
 .due {
-  flex-shrink: 0; font-size: 10px; line-height: 1.6; padding: 0 5px;
+  flex-shrink: 0; font-size: var(--text-2xs); line-height: 1.6; padding: 0 5px;
   border-radius: var(--radius-xs); color: var(--color-text-muted); background: var(--color-bg-tertiary);
 }
 .due.warn { color: var(--color-danger); background: var(--color-danger-bg); }
@@ -2846,12 +2847,12 @@ onUnmounted(() => {
 .port {
   width: 44px; flex-shrink: 0;
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-  font-size: 12px; color: var(--color-text-secondary);
+  font-size: var(--text-sm); color: var(--color-text-secondary);
 }
 .mono { font-family: var(--font-mono); }
 
 /* Git 行的 ↑↓ 与干净标记 */
-.git-ab { font-family: var(--font-mono); font-size: 11px; color: var(--color-warning); flex-shrink: 0; }
+.git-ab { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-warning); flex-shrink: 0; }
 .git-ab.down { color: var(--color-accent); }
 .git-ok { display: flex; color: var(--color-success); flex-shrink: 0; }
 
@@ -2904,12 +2905,12 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--color-border);
 }
 .db-greeting {
-  font-size: 18px; font-weight: 600; line-height: 1.3;
+  font-size: var(--text-xl); font-weight: 600; line-height: 1.3;
   color: var(--color-text-primary); white-space: nowrap; flex-shrink: 0;
 }
 .db-note {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 11px; color: var(--color-text-muted);
+  font-size: var(--text-xs); color: var(--color-text-muted);
 }
 .db-body {
   display: flex; align-items: center; gap: var(--space-6);
@@ -2918,12 +2919,12 @@ onUnmounted(() => {
 .db-date { display: flex; align-items: center; gap: var(--space-4); flex-shrink: 0; }
 .db-day {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-  font-size: 34px; font-weight: 600; line-height: 1; letter-spacing: -0.04em;
+  font-size: var(--text-4xl); font-weight: 600; line-height: 1; 
   color: var(--color-text-primary);
 }
-.db-date-meta { display: flex; flex-direction: column; gap: 2px; }
-.db-ym { font-size: 12px; color: var(--color-text-secondary); white-space: nowrap; }
-.db-week { font-size: 11px; color: var(--color-text-muted); white-space: nowrap; }
+.db-date-meta { display: flex; flex-direction: column; gap: var(--space-1); }
+.db-ym { font-size: var(--text-sm); color: var(--color-text-secondary); white-space: nowrap; }
+.db-week { font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap; }
 
 .db-lunar {
   display: flex; flex-direction: column; gap: 5px; flex: 1 1 auto; min-width: 0;
@@ -2931,13 +2932,13 @@ onUnmounted(() => {
 }
 .db-lunar-main {
   display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
-  font-size: 12px; color: var(--color-text-primary);
+  font-size: var(--text-sm); color: var(--color-text-primary);
 }
 .db-ic { color: var(--color-text-muted); flex-shrink: 0; }
 .db-title { font-weight: 600; }
 .db-lunar-sub { display: flex; gap: var(--space-3); flex-wrap: wrap; }
 .db-zodiac, .db-term, .db-festival {
-  font-size: 11px; line-height: 1.6; padding: 0 6px;
+  font-size: var(--text-xs); line-height: 1.6; padding: 0 var(--space-3);
   border-radius: var(--radius-full);
   color: var(--color-text-muted); background: var(--color-bg-tertiary);
 }
@@ -2945,19 +2946,19 @@ onUnmounted(() => {
 
 /* 宜忌摘要：一行到底、过长省略，只有点开的全量详情才允许长高（且自带高度上限）。
    宜绿忌红走语义 token，深浅两套主题都随变量走；不写死任何色值。 */
-.db-yiji { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.db-yiji { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
 .db-yiji-toggle {
   display: flex; align-items: center; gap: var(--space-2); flex-wrap: nowrap;
   width: 100%; min-width: 0; padding: 0;
   background: none; border: 0; border-radius: var(--radius-xs);
-  font: inherit; font-size: 11px; color: var(--color-text-secondary);
+  font: inherit; font-size: var(--text-xs); color: var(--color-text-secondary);
   text-align: left; cursor: pointer;
 }
 .db-yiji-toggle:hover { color: var(--color-text-primary); }
 .db-yiji-toggle:focus-visible { outline: 1px solid var(--color-accent-border-strong); outline-offset: 2px; }
 .yj-tag, .yj-label {
   flex-shrink: 0; padding: 0 5px; border-radius: var(--radius-xs);
-  background: var(--color-bg-tertiary); font-size: 10px; font-weight: 600; line-height: 16px;
+  background: var(--color-bg-tertiary); font-size: var(--text-2xs); font-weight: 600; line-height: 16px;
 }
 .yj-tag.yi, .yj-label.yi { color: var(--color-success); }
 .yj-tag.ji, .yj-label.ji { color: var(--color-danger); }
@@ -2971,49 +2972,49 @@ onUnmounted(() => {
   transition: transform var(--transition-fast);
 }
 .yj-chev.open { transform: rotate(180deg); }
-.yj-empty { font-size: 11px; color: var(--color-text-disabled); }
+.yj-empty { font-size: var(--text-xs); color: var(--color-text-disabled); }
 
 .db-yiji-detail {
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: var(--space-2);
   max-height: 172px; overflow-y: auto;
   padding: var(--space-3);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
 }
-.yj-row { display: flex; align-items: baseline; gap: var(--space-3); font-size: 11px; line-height: 1.7; }
+.yj-row { display: flex; align-items: baseline; gap: var(--space-3); font-size: var(--text-xs); line-height: 1.7; }
 .yj-full { min-width: 0; color: var(--color-text-secondary); }
 .yj-facts {
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px var(--space-4);
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-1) var(--space-4);
   padding-top: 5px; border-top: 1px solid var(--color-border);
-  font-size: 10px; line-height: 1.7; color: var(--color-text-muted);
+  font-size: var(--text-2xs); line-height: 1.7; color: var(--color-text-muted);
 }
 .yj-facts > span { min-width: 0; }
 .yj-facts b { margin-right: var(--space-2); font-weight: 500; color: var(--color-text-disabled); }
-.yj-disclaimer { font-size: 10px; color: var(--color-text-disabled); }
-.db-pref-hint { font-size: 10px; line-height: 1.5; color: var(--color-text-disabled); }
+.yj-disclaimer { font-size: var(--text-2xs); color: var(--color-text-disabled); }
+.db-pref-hint { font-size: var(--text-2xs); line-height: 1.5; color: var(--color-text-disabled); }
 /* 当前生效的数据源：单独一行，不然会和上面的说明挤成一条长句 */
-.db-src-now { display: block; margin-top: 2px; color: var(--color-text-secondary); }
+.db-src-now { display: block; margin-top: var(--space-1); color: var(--color-text-secondary); }
 /* 需要 key 的源：输入区与上面的下拉拉开一点，否则会被读成同一组控件 */
-.db-key-field { margin-top: 8px; }
-.db-key-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.db-key-field { margin-top: var(--space-4); }
+.db-key-row { display: flex; align-items: center; gap: var(--space-4); margin-top: var(--space-3); }
 .db-key-row .btn { flex-shrink: 0; }
 .db-key-row .db-pref-hint { margin: 0; }
-.db-key-warn { display: block; margin-top: 2px; color: var(--color-warning); }
+.db-key-warn { display: block; margin-top: var(--space-1); color: var(--color-warning); }
 
 /* 邮箱配置教程：链接用按钮 + openExternal，不用裸 <a>（WebView 会把应用界面导航走）。 */
-.mail-guide { margin-top: 6px; }
+.mail-guide { margin-top: var(--space-3); }
 .mail-guide-toggle, .mail-guide-link, .mail-guide-inline {
   padding: 0; border: 0; background: none; cursor: pointer;
-  color: var(--color-accent); font-family: inherit; font-size: 11px;
+  color: var(--color-accent); font-family: inherit; font-size: var(--text-xs);
 }
-.mail-guide-toggle { display: flex; align-items: center; gap: 4px; }
+.mail-guide-toggle { display: flex; align-items: center; gap: var(--space-2); }
 .mail-guide-toggle svg { transition: transform 120ms ease; }
 .mail-guide-toggle svg.collapsed { transform: rotate(-90deg); }
-.mail-guide-body { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.mail-guide-body { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-3); }
 .mail-guide-body p { margin: 0; }
 .mail-guide-link, .mail-guide-inline { text-decoration: underline; align-self: flex-start; }
-.mail-guide-inline { margin-left: 6px; }
+.mail-guide-inline { margin-left: var(--space-3); }
 
 .db-weather {
   display: flex; align-items: center; gap: var(--space-4); min-width: 0;
@@ -3021,7 +3022,7 @@ onUnmounted(() => {
   border-left: 1px solid var(--color-border);
 }
 .db-w-ic { color: var(--color-accent); flex-shrink: 0; }
-.db-w-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.db-w-main { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 .db-w-line { display: flex; align-items: baseline; gap: var(--space-3); }
 .db-w-temp {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
@@ -3029,25 +3030,25 @@ onUnmounted(() => {
      用 24px 数据档会把整条撑高。24 只给独立的大数字卡。 */
   font-size: var(--text-xl); font-weight: 600; line-height: 1.2; color: var(--color-text-primary);
 }
-.db-w-kind { font-size: 12px; color: var(--color-text-secondary); white-space: nowrap; }
+.db-w-kind { font-size: var(--text-sm); color: var(--color-text-secondary); white-space: nowrap; }
 .db-w-city {
-  font-size: 11px; color: var(--color-text-muted); white-space: nowrap;
+  font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
 }
 .db-w-meta {
   display: flex; flex-wrap: wrap; gap: var(--space-3);
-  font-size: 10px; color: var(--color-text-muted); white-space: nowrap;
+  font-size: var(--text-2xs); color: var(--color-text-muted); white-space: nowrap;
 }
 /* 更新时间只是详情行的最后一项，比其余读数更淡，用中点跟前面三个读数分开，
    不再单独挂成一列歪在刷新按钮下面 */
 .db-w-time { color: var(--color-text-disabled); }
 .db-w-time::before { content: '· '; }
-.db-weather-off { font-size: 12px; color: var(--color-text-muted); }
+.db-weather-off { font-size: var(--text-sm); color: var(--color-text-muted); }
 
 /* 操作按钮默认不画框：两个 1px 硬边框小方块压在文字流上太像表单控件，
    而且刷新按钮 hover / focus 后那圈亮蓝边框会常驻。改为幽灵图标按钮，
    hover 才给柔和底色，键盘 focus 用 outline（不占尺寸、不常驻）。 */
-.db-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; margin-left: auto; }
+.db-actions { display: flex; align-items: center; gap: var(--space-1); flex-shrink: 0; margin-left: auto; }
 .db-icon-btn {
   display: grid; place-items: center; flex-shrink: 0;
   width: 28px; height: 28px; padding: 0;
@@ -3061,7 +3062,7 @@ onUnmounted(() => {
 .db-icon-btn:disabled { cursor: default; opacity: .45; }
 .db-text-btn {
   background: none; border: 0; padding: 0; cursor: pointer;
-  font: inherit; font-size: 11px; color: var(--color-accent);
+  font: inherit; font-size: var(--text-xs); color: var(--color-accent);
   transition: color var(--transition-fast);
 }
 .db-text-btn:hover { color: var(--color-accent-hover); }
@@ -3074,8 +3075,8 @@ onUnmounted(() => {
   display: flex; flex-direction: column; gap: var(--space-3);
   width: 340px; padding: var(--space-5);
   overflow-y: auto;
-  background: var(--color-surface-elevated);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
 }
@@ -3085,16 +3086,16 @@ onUnmounted(() => {
 .db-settings > * { flex-shrink: 0; }
 .db-settings-head {
   display: flex; align-items: center; justify-content: space-between;
-  font-size: 13px; font-weight: 600; color: var(--color-text-primary);
+  font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary);
 }
 .db-city-row { display: flex; gap: var(--space-3); }
 .db-city-row .field-input { flex: 1; min-width: 0; }
-.db-city-hits { display: flex; flex-direction: column; gap: 2px; max-height: 168px; overflow-y: auto; }
+.db-city-hits { display: flex; flex-direction: column; gap: var(--space-1); max-height: 168px; overflow-y: auto; }
 .db-city-hit {
   display: flex; align-items: center; gap: var(--space-3);
-  padding: 6px var(--space-3); text-align: left;
+  padding: var(--space-3) var(--space-3); text-align: left;
   background: none; border: 0; border-radius: var(--radius-xs);
-  font: inherit; font-size: 12px; color: var(--color-text-primary); cursor: pointer;
+  font: inherit; font-size: var(--text-sm); color: var(--color-text-primary); cursor: pointer;
 }
 .db-city-hit:hover { background: var(--color-bg-hover); }
 /* 名字不能被长路径挤掉；路径超宽时省略，完整值在按钮 title 里。 */
@@ -3102,13 +3103,13 @@ onUnmounted(() => {
 .db-city-hit small {
   margin-left: auto; max-width: 62%; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 10px; color: var(--color-text-muted);
+  font-size: var(--text-2xs); color: var(--color-text-muted);
 }
 .db-settings-foot {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
   padding-top: var(--space-2); border-top: 1px solid var(--color-border);
 }
-.db-settings-foot > span { font-size: 10px; color: var(--color-text-disabled); }
+.db-settings-foot > span { font-size: var(--text-2xs); color: var(--color-text-disabled); }
 
 @media (max-width: 1080px) {
   .db-body { flex-wrap: wrap; gap: var(--space-4); }

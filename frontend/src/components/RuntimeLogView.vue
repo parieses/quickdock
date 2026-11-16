@@ -193,54 +193,54 @@ onMounted(() => nextTick(scrollBottom))
 </template>
 
 <style scoped>
-.rv { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.rv { display: flex; flex-direction: column; gap: var(--space-3); min-height: 0; }
 
-.rv-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rv-toolbar { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
 .rv-search {
   flex: 1 1 180px; min-width: 140px; height: 28px;
-  display: flex; align-items: center; gap: 5px; padding: 0 8px;
+  display: flex; align-items: center; gap: 5px; padding: 0 var(--space-4);
   background: var(--color-bg-primary); border: 1px solid var(--color-border);
   border-radius: var(--radius-sm); color: var(--color-text-disabled);
 }
 .rv-search:focus-within { border-color: var(--color-border-focus-soft); }
 .rv-input {
   flex: 1; min-width: 0; height: 100%; border: none; outline: none; background: transparent;
-  font-size: 12px; font-family: inherit; color: var(--color-text-primary);
+  font-size: var(--text-sm); font-family: inherit; color: var(--color-text-primary);
 }
-.rv-hits { font-size: 10px; color: var(--color-text-disabled); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.rv-hits { font-size: var(--text-2xs); color: var(--color-text-disabled); font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .rv-nav {
   flex-shrink: 0; width: 16px; height: 16px; line-height: 1; padding: 0; cursor: pointer;
   border: none; border-radius: var(--radius-xs); background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary); font-size: 10px;
+  color: var(--color-text-secondary); font-size: var(--text-2xs);
 }
 .rv-nav:hover { background: var(--color-accent-bg); color: var(--color-accent); }
 
 .rv-btn {
-  height: 28px; padding: 0 11px; font-size: 12px; cursor: pointer; white-space: nowrap;
-  display: inline-flex; align-items: center; gap: 4px; font-family: inherit;
+  height: 28px; padding: 0 11px; font-size: var(--text-sm); cursor: pointer; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: var(--space-2); font-family: inherit;
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
 }
 .rv-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
 .rv-btn.active { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
 .rv-badge {
-  min-width: 14px; padding: 0 3px; border-radius: var(--radius-sm); font-size: 10px; line-height: 14px;
-  text-align: center; background: var(--color-danger); color: #fff;
+  min-width: 14px; padding: 0 3px; border-radius: var(--radius-sm); font-size: var(--text-2xs); line-height: 14px;
+  text-align: center; background: var(--color-danger); color: var(--color-danger-text);
 }
 .rv-btn.active .rv-badge { background: var(--color-bg-primary); color: var(--color-danger); }
-.rv-count { font-size: 10px; color: var(--color-text-disabled); margin-left: auto; font-variant-numeric: tabular-nums; }
+.rv-count { font-size: var(--text-2xs); color: var(--color-text-disabled); margin-left: auto; font-variant-numeric: tabular-nums; }
 
 /* position: relative 是「上/下」按 offsetTop 定位的前提 */
 .rv-body {
   position: relative; max-height: 260px; overflow: auto;
   background: var(--color-bg-primary); border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm); padding: 4px 0;
+  border-radius: var(--radius-sm); padding: var(--space-2) 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px; line-height: 1.6;
+  font-size: var(--text-xs); line-height: 1.6;
 }
-.rv-empty { padding: 12px 10px; color: var(--color-text-muted); font-family: inherit; }
+.rv-empty { padding: var(--space-5) 10px; color: var(--color-text-muted); font-family: inherit; }
 
-.rv-line { display: flex; gap: 8px; padding: 0 10px; white-space: pre-wrap; word-break: break-all; color: var(--color-text-muted); }
+.rv-line { display: flex; gap: var(--space-4); padding: 0 10px; white-space: pre-wrap; word-break: break-all; color: var(--color-text-muted); }
 .rv-line:hover { background: var(--color-bg-hover); }
 /* 错误行整体染色 + 左侧色条：扫一眼就能定位，不依赖读文案 */
 .rv-line.error { color: var(--color-danger); box-shadow: inset 2px 0 0 var(--color-danger); background: var(--color-danger-bg); }
@@ -250,6 +250,6 @@ onMounted(() => nextTick(scrollBottom))
   user-select: none; font-variant-numeric: tabular-nums;
 }
 .rv-txt { flex: 1; min-width: 0; }
-.rv-hit { background: var(--color-accent); color: var(--color-accent-text); border-radius: 2px; }
-.rv-trunc { font-size: 10px; color: var(--color-text-disabled); }
+.rv-hit { background: var(--color-accent); color: var(--color-accent-text); border-radius: var(--radius-2xs); }
+.rv-trunc { font-size: var(--text-2xs); color: var(--color-text-disabled); }
 </style>

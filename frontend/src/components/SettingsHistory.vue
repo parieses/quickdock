@@ -62,6 +62,6 @@ const current = computed(() => (tab.value === 'activity' ? ActivityPage : Recycl
 .hist-tabs {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
 }
 </style>

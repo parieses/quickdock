@@ -160,15 +160,15 @@ async function askAI() {
   padding: 10px 14px; border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
-.note-title { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
+.note-title { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
 .note-actions { display: flex; align-items: center; gap: 10px; }
 .note-ask {
-  display: flex; align-items: center; gap: 4px;
-  font-size: 12px; padding: 3px 8px; border-radius: var(--radius-sm); cursor: pointer;
+  display: flex; align-items: center; gap: var(--space-2);
+  font-size: var(--text-sm); padding: 3px var(--space-4); border-radius: var(--radius-sm); cursor: pointer;
   background: var(--color-accent); color: var(--color-accent-text); border: none;
 }
 .note-ask:disabled { opacity: 0.4; cursor: not-allowed; }
-.note-status { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--color-text-disabled); }
+.note-status { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--color-text-disabled); }
 .note-status.saved { color: var(--color-success); }
 .spin { animation: note-spin 1s linear infinite; }
 @keyframes note-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

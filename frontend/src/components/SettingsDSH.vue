@@ -614,14 +614,14 @@ watch(() => props.visible, async (v) => {
 <template>
   <div :class="['section', { embedded: !!props.embedded }]">
     <!-- 非嵌入（设置页）时只保留标题；描述文案已去掉 -->
-    <h3 v-if="!props.embedded" class="section-title"><Terminal :size="16" style="vertical-align:-3px;margin-right:6px" />{{ t('navDsh') }}</h3>
+    <h3 v-if="!props.embedded" class="section-title"><Terminal :size="16" class="qd-icon-inline" />{{ t('navDsh') }}</h3>
 
     <!-- 状态卡（含检测到的安装位置） -->
     <div class="dsh-status">
       <div class="dsh-status-row">
         <div class="dsh-status-left">
           <span class="dsh-status-label">Node.js</span>
-          <span v-if="status?.nodePath" class="dsh-status-path clickable" :title="'在资源管理器中打开: ' + status.nodePath" @click="reveal(status.nodePath)">{{ status.nodePath }}</span>
+          <span v-key-click v-if="status?.nodePath" class="dsh-status-path clickable" :title="'在资源管理器中打开: ' + status.nodePath" @click="reveal(status.nodePath)">{{ status.nodePath }}</span>
         </div>
         <span :class="['dsh-badge', { ok: status?.nodeFound }]">
           <component :is="status?.nodeFound ? CheckCircle2 : AlertCircle" :size="13" />
@@ -641,8 +641,8 @@ watch(() => props.visible, async (v) => {
       <div class="dsh-status-row">
         <div class="dsh-status-left">
           <span class="dsh-status-label">DeepSeek Harness</span>
-          <span v-if="status?.dshPath" class="dsh-status-path clickable" :title="'在资源管理器中打开: ' + status.dshPath" @click="reveal(status.dshPath)">{{ status.dshPath }}</span>
-          <span v-if="status?.dshHome" class="dsh-status-path dsh-status-home clickable" :title="'在资源管理器中打开: ' + status.dshHome" @click="reveal(status.dshHome)">DSH_HOME: {{ status.dshHome }}</span>
+          <span v-key-click v-if="status?.dshPath" class="dsh-status-path clickable" :title="'在资源管理器中打开: ' + status.dshPath" @click="reveal(status.dshPath)">{{ status.dshPath }}</span>
+          <span v-key-click v-if="status?.dshHome" class="dsh-status-path dsh-status-home clickable" :title="'在资源管理器中打开: ' + status.dshHome" @click="reveal(status.dshHome)">DSH_HOME: {{ status.dshHome }}</span>
         </div>
         <span :class="['dsh-badge', { ok: status?.dshInstalled }]">
           <component :is="status?.dshInstalled ? CheckCircle2 : AlertCircle" :size="13" />
@@ -658,22 +658,22 @@ watch(() => props.visible, async (v) => {
     </p>
 
     <!-- 检测到的问题提示 -->
-    <p v-if="status?.message" class="result-hint" style="margin-top:8px">{{ status.message }}</p>
+    <p v-if="status?.message" class="result-hint qd-mt-2" >{{ status.message }}</p>
 
     <!-- WebView2 版本过低：打开 dsh 会卡在 connection lost，提前红字警示并拦截打开 -->
-    <p v-if="wvShowBanner" class="result-hint error" style="margin-top:8px; line-height:1.6">
+    <p v-if="wvShowBanner" class="result-hint error qd-mt-2 qd-lh-relaxed" >
       <template v-if="webview2?.version === 'unknown'">{{ t('dshWebView2Missing') }}</template>
       <template v-else>{{ t('dshWebView2TooOld', { version: webview2!.version, min: webview2!.minVersion }) }}</template>
     </p>
 
     <!-- dsh web 服务运行状态 / 开关 / 自动启动（dsh 已安装时显示） -->
-    <div v-if="status?.dshInstalled" class="dsh-status" style="margin-top:12px">
+    <div v-if="status?.dshInstalled" class="dsh-status qd-mt-3" >
       <div class="dsh-status-row">
         <div class="dsh-status-left">
           <span class="dsh-status-label">{{ t('dshLatestVersion') }}: {{ status?.latestDshVersion || '—' }}</span>
           <span
+            class="qd-strong"
             :class="['dsh-update-badge', { ok: dshSvc?.running }]"
-            style="font-weight:600"
           >
             <span class="dsh-dot" :class="{ on: dshSvc?.running }" />
             {{ dshSvc && dshSvc.running ? t('dshServiceRunning') : t('dshServiceStopped') }}
@@ -683,7 +683,7 @@ watch(() => props.visible, async (v) => {
             <button class="dsh-url-copy" :title="t('copy')" @click="copyServiceUrl"><Copy :size="11" /></button>
           </span>
         </div>
-        <div class="action-row" style="flex-shrink:0">
+        <div class="action-row qd-shrink-0" >
           <button
             v-if="dshSvc && dshSvc.running"
             class="btn btn-secondary"
@@ -713,7 +713,7 @@ watch(() => props.visible, async (v) => {
     </div>
 
     <!-- 版本更新（dsh 已安装时显示） -->
-    <div v-if="status?.dshInstalled" class="update-row" style="margin-top:12px">
+    <div v-if="status?.dshInstalled" class="update-row qd-mt-3" >
       <div class="action-row">
         <button class="btn btn-secondary" :disabled="checkingUpdate || updating || settingUp" @click="checkUpdate">
           {{ checkingUpdate ? t('dshCheckingUpdate') : t('dshCheckUpdate') }}
@@ -726,7 +726,7 @@ watch(() => props.visible, async (v) => {
     </div>
 
     <!-- 卸载（dsh 已安装时显示） -->
-    <div v-if="status?.dshInstalled" class="update-row" style="margin-top:12px">
+    <div v-if="status?.dshInstalled" class="update-row qd-mt-3" >
       <div class="action-row">
         <button
           class="btn btn-danger"
@@ -740,7 +740,7 @@ watch(() => props.visible, async (v) => {
     </div>
 
     <!-- 一键安装 / 打开 -->
-    <div class="action-row" style="margin-top:16px">
+    <div class="action-row qd-mt-4" >
       <button class="btn btn-primary" :disabled="settingUp || dshReady" @click="setup">
         <Download :size="14" />
         {{ settingUp ? (stageText || t('dshSettingUp')) : (dshReady ? t('dshInstalled') : t('dshInstall')) }}
@@ -752,7 +752,7 @@ watch(() => props.visible, async (v) => {
     </div>
 
     <!-- 安装插件：输入插件名 -->
-    <div class="plugin-row" style="margin-top:12px">
+    <div class="plugin-row qd-mt-3" >
       <input
         v-model="pluginName"
         class="plugin-input"
@@ -797,7 +797,7 @@ watch(() => props.visible, async (v) => {
     </div>
 
     <!-- 插件批量管理：检查更新 / 一键更新全部 / 回滚 -->
-    <div class="plugin-batch" style="margin-top:12px" v-if="status?.dshInstalled">
+    <div class="plugin-batch qd-mt-3" v-if="status?.dshInstalled">
       <div class="action-row">
         <button class="btn btn-secondary" :disabled="!dshReady || checkingPluginUpdates || updatingPlugins" @click="checkPluginUpdates">
           {{ checkingPluginUpdates ? t('dshCheckingPluginUpdates') : t('dshCheckPluginUpdates') }}
@@ -860,7 +860,7 @@ watch(() => props.visible, async (v) => {
 /* 嵌入环境管理页时：放开设置页 .section 的 600px 宽度限制，让内容铺满 detail 区 */
 .section.embedded { max-width: none; }
 /* 设置页形态：描述行已去掉，由标题自己补回原来 .section-desc 占的 20px 下间距 */
-.section:not(.embedded) .section-title { margin-bottom: 20px; }
+.section:not(.embedded) .section-title { margin-bottom: var(--space-7); }
 /* 嵌入时状态行改为卡片内的分区行：避免「detail-block 大卡片里再套一圈带框小卡片」 */
 .section.embedded .dsh-status { gap: 0; }
 .section.embedded .dsh-status-row {
@@ -874,15 +874,15 @@ watch(() => props.visible, async (v) => {
 .dsh-status {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 4px;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
 }
 .dsh-status-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
+  gap: var(--space-5);
+  padding: 10px var(--space-5);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
@@ -894,17 +894,17 @@ watch(() => props.visible, async (v) => {
   min-width: 0;
 }
 .dsh-status-label {
-  font-size: 13px;
+  font-size: var(--text-md);
   color: var(--color-text-primary);
 }
 .dsh-status-path {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-disabled);
   word-break: break-all;
   line-height: 1.4;
 }
 /* 服务地址：可点开 + 可复制 */
-.dsh-url { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.dsh-url { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .dsh-url-link {
   color: var(--color-accent);
   text-decoration: none;
@@ -932,14 +932,14 @@ watch(() => props.visible, async (v) => {
 }
 .dsh-node-hint {
   margin-top: 10px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-warning);
   line-height: 1.5;
 }
 .dsh-goto-link {
   color: var(--color-accent);
   text-decoration: none;
-  margin-left: 4px;
+  margin-left: var(--space-2);
   cursor: pointer;
 }
 .dsh-goto-link:hover {
@@ -949,7 +949,7 @@ watch(() => props.visible, async (v) => {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-disabled);
 }
 .dsh-badge.ok {
@@ -957,11 +957,11 @@ watch(() => props.visible, async (v) => {
 }
 .dsh-update-badge {
   display: inline-block;
-  margin-left: 6px;
-  padding: 1px 8px;
+  margin-left: var(--space-3);
+  padding: 1px var(--space-4);
   border-radius: var(--radius-md);
-  font-size: 11px;
-  background: rgba(255, 176, 32, 0.16);
+  font-size: var(--text-xs);
+  background: var(--color-warning-bg);
   color: var(--color-warning);
 }
 .dsh-update-badge.ok {
@@ -979,14 +979,14 @@ watch(() => props.visible, async (v) => {
 }
 .dsh-dot.on {
   background: var(--color-success);
-  box-shadow: 0 0 6px rgba(76, 175, 80, 0.8);
+  box-shadow: var(--shadow-success);
 }
 .dsh-auto-start {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-  font-size: 12px;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
   cursor: pointer;
   user-select: none;
@@ -995,7 +995,7 @@ watch(() => props.visible, async (v) => {
 .plugin-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
 }
 .plugin-input {
   flex: 1;
@@ -1005,7 +1005,7 @@ watch(() => props.visible, async (v) => {
   border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   outline: none;
 }
 .plugin-input:focus {
@@ -1021,15 +1021,15 @@ watch(() => props.visible, async (v) => {
 
 /* ---- 已装插件列表 ---- */
 .dsh-plugin-list {
-  margin-top: 12px;
+  margin-top: var(--space-5);
   padding-top: 10px;
   border-top: 1px dashed var(--color-border);
 }
 .dsh-plugin-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
   color: var(--color-text-secondary);
 }
 .dsh-plugin-title {
@@ -1040,7 +1040,7 @@ watch(() => props.visible, async (v) => {
   border-radius: var(--radius-xs);
   background: var(--color-bg-tertiary);
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--text-2xs);
 }
 .dsh-plugin-reload {
   display: flex;
@@ -1061,23 +1061,23 @@ watch(() => props.visible, async (v) => {
   cursor: default;
 }
 .dsh-plugin-empty {
-  margin: 8px 0 0;
-  font-size: 11px;
+  margin: var(--space-4) 0 0;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 .dsh-plugin-items {
-  margin: 8px 0 0;
+  margin: var(--space-4) 0 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
 }
 .dsh-plugin-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 8px;
+  gap: var(--space-4);
+  padding: 5px var(--space-4);
   border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
 }
@@ -1090,7 +1090,7 @@ watch(() => props.visible, async (v) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-primary);
 }
 .dsh-plugin-ver {
@@ -1099,7 +1099,7 @@ watch(() => props.visible, async (v) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
 }
@@ -1110,7 +1110,7 @@ watch(() => props.visible, async (v) => {
   border-radius: var(--radius-xs);
   background: var(--color-accent-bg);
   color: var(--color-accent);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   
 }
 .dsh-plugin-del {
@@ -1138,28 +1138,28 @@ watch(() => props.visible, async (v) => {
   to { transform: rotate(360deg); }
 }
 .dsh-update-hint {
-  margin: 8px 0 0;
-  font-size: 11px;
+  margin: var(--space-4) 0 0;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   line-height: 1.5;
 }
 .plugin-update-list {
-  margin: 8px 0 0;
+  margin: var(--space-4) 0 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-2);
 }
 .plugin-update-list li {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 5px 8px;
+  padding: 5px var(--space-4);
   border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 .pu-name {
   color: var(--color-text-primary);
@@ -1173,7 +1173,7 @@ watch(() => props.visible, async (v) => {
   color: var(--color-accent);
 }
 .dsh-progress {
-  margin-top: 12px;
+  margin-top: var(--space-5);
 }
 .dsh-progress-bar {
   height: 6px;
@@ -1188,19 +1188,19 @@ watch(() => props.visible, async (v) => {
 }
 .dsh-progress-text {
   display: block;
-  margin-top: 6px;
-  font-size: 12px;
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
 }
 .dsh-log-wrap {
-  margin-top: 12px;
+  margin-top: var(--space-5);
 }
 .dsh-log-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 6px;
-  font-size: 12px;
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
 }
 /* 标题居左、导出/复制成组靠右：原先两个按钮是 head 的直接子元素，被 space-between
@@ -1209,16 +1209,16 @@ watch(() => props.visible, async (v) => {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
 }
 .dsh-log-copy {
-  display: inline-flex; align-items: center; gap: 4px;
+  display: inline-flex; align-items: center; gap: var(--space-2);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text-primary);
-  font-size: 11px;
-  padding: 2px 10px;
+  font-size: var(--text-xs);
+  padding: var(--space-1) 10px;
   cursor: pointer;
 }
 .dsh-log-copy:hover {
@@ -1227,12 +1227,12 @@ watch(() => props.visible, async (v) => {
 .dsh-log {
   max-height: 200px;
   overflow-y: auto;
-  padding: 10px 12px;
+  padding: 10px var(--space-5);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-code-bg);
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.6;
   user-select: text;
   -webkit-user-select: text;

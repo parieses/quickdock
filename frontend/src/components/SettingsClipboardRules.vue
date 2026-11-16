@@ -445,25 +445,25 @@ function matchLabel(r: ClipboardRule): string {
 
 <style scoped>
 /* 与 settings.css 的 .section 对齐（同宽、同段间距），合并进「剪贴板」页后视觉连续 */
-.cr-page { width: 100%; max-width: 720px; margin-top: 28px; }
-.page-title { margin: 0 0 4px; font-size: 15px; font-weight: 600; color: var(--color-text-primary); }
-.cr-desc { margin: 0 0 16px; font-size: 12px; color: var(--color-text-disabled); line-height: 1.6; }
+.cr-page { width: 100%; max-width: var(--settings-max); margin-top: 28px; }
+.page-title { margin: 0 0 var(--space-2); font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
+.cr-desc { margin: 0 0 var(--space-6); font-size: var(--text-sm); color: var(--color-text-disabled); line-height: 1.6; }
 
 /* 总开关条：开着时用强调色底，一眼看出"规则现在就生效" */
 .cr-global {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: var(--space-5);
+  padding: var(--space-5) 14px;
   margin-bottom: 14px;
   background: var(--color-card-bg);
   border: 1px solid var(--card-border-color);
   border-radius: var(--radius-lg);
 }
 .cr-global.on { border-color: var(--color-accent-border); background: var(--color-accent-bg); }
-.cr-global-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.cr-global-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
-.cr-global-hint { font-size: 11px; color: var(--color-text-disabled); line-height: 1.5; }
+.cr-global-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.cr-global-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
+.cr-global-hint { font-size: var(--text-xs); color: var(--color-text-disabled); line-height: 1.5; }
 
 .cr-form {
   padding: 14px;
@@ -472,23 +472,23 @@ function matchLabel(r: ClipboardRule): string {
   border: 1px solid var(--card-border-color);
   border-radius: var(--radius-lg);
 }
-.cr-form-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.cr-form-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
+.cr-form-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-5); }
+.cr-form-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
 /* 两列栅格：匹配方式 + 表达式、动作 + 参数各占一半，字段少时不会拉成一条长线 */
-.cr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+.cr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5); margin-top: var(--space-5); }
 
-.cr-check { display: flex; align-items: flex-start; gap: 8px; margin-top: 14px; cursor: pointer; }
-.cr-check input { margin-top: 2px; }
-.cr-check span { display: flex; flex-direction: column; gap: 2px; }
-.cr-check-title { font-size: 13px; color: var(--color-text-secondary); }
-.cr-check-hint { font-size: 11px; color: var(--color-text-disabled); }
+.cr-check { display: flex; align-items: flex-start; gap: var(--space-4); margin-top: 14px; cursor: pointer; }
+.cr-check input { margin-top: var(--space-1); }
+.cr-check span { display: flex; flex-direction: column; gap: var(--space-1); }
+.cr-check-title { font-size: var(--text-md); color: var(--color-text-secondary); }
+.cr-check-hint { font-size: var(--text-xs); color: var(--color-text-disabled); }
 
 .cr-test { margin-top: 14px; }
 .cr-test-input {
   width: 100%;
-  padding: 8px 10px;
+  padding: var(--space-4) 10px;
   font-family: 'Consolas', ui-monospace, SFMono-Regular, monospace;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--color-text-primary);
   background: var(--color-bg-tertiary);
@@ -497,17 +497,17 @@ function matchLabel(r: ClipboardRule): string {
   resize: vertical;
 }
 .cr-test-input:focus { outline: none; border-color: var(--color-border-focus-soft); }
-.cr-test-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
-.cr-test-state { font-size: 12px; color: var(--color-text-disabled); }
+.cr-test-actions { display: flex; align-items: center; gap: 10px; margin-top: var(--space-4); }
+.cr-test-state { font-size: var(--text-sm); color: var(--color-text-disabled); }
 .cr-test-state.matched { color: var(--color-success); }
 .cr-test-state.nomatch { color: var(--color-warning); }
 .cr-test-out {
-  margin: 8px 0 0;
-  padding: 8px 10px;
+  margin: var(--space-4) 0 0;
+  padding: var(--space-4) 10px;
   max-height: 160px;
   overflow: auto;
   font-family: 'Consolas', ui-monospace, SFMono-Regular, monospace;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--color-text-secondary);
   background: var(--color-card-bg);
@@ -516,7 +516,7 @@ function matchLabel(r: ClipboardRule): string {
   white-space: pre-wrap;
   word-break: break-all;
 }
-.cr-form-actions { display: flex; gap: 8px; margin-top: 14px; }
+.cr-form-actions { display: flex; gap: var(--space-4); margin-top: 14px; }
 
 .cr-list {
   border: 1px solid var(--card-border-color);
@@ -528,30 +528,30 @@ function matchLabel(r: ClipboardRule): string {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 12px;
+  padding: 9px var(--space-5);
   transition: background-color var(--transition-fast);
 }
 .cr-row + .cr-row { border-top: 1px solid var(--color-border); }
 .cr-row:hover { background: var(--color-bg-hover); }
 /* 停用的规则整体压暗，避免和生效中的混在一起 */
 .cr-row.off .cr-row-main { opacity: 0.55; }
-.cr-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.cr-row-name { font-size: 13px; font-weight: 500; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cr-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.cr-row-name { font-size: var(--text-md); font-weight: 500; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 执行序号：与规则名同一行，弱化处理——它是说明顺序的，不是名字的一部分 */
 .cr-pri {
   display: inline-block;
   min-width: 18px;
-  margin-right: 4px;
+  margin-right: var(--space-2);
   padding: 0 3px;
   border-radius: var(--radius-xs);
   background: var(--color-bg-tertiary);
   color: var(--color-text-disabled);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 400;
   text-align: center;
 }
 .cr-row-meta {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-disabled);
   white-space: nowrap;
   overflow: hidden;
@@ -559,8 +559,8 @@ function matchLabel(r: ClipboardRule): string {
 }
 .cr-tag {
   flex-shrink: 0;
-  padding: 1px 6px;
-  font-size: 10px;
+  padding: 1px var(--space-3);
+  font-size: var(--text-2xs);
   border-radius: var(--radius-sm);
   color: var(--color-warning);
   background: var(--color-warning-bg);
@@ -568,8 +568,8 @@ function matchLabel(r: ClipboardRule): string {
 .cr-act {
   flex-shrink: 0;
   height: 22px;
-  padding: 0 8px;
-  font-size: 11px;
+  padding: 0 var(--space-4);
+  font-size: var(--text-xs);
   font-family: inherit;
   color: var(--color-text-disabled);
   background: transparent;
@@ -594,21 +594,21 @@ function matchLabel(r: ClipboardRule): string {
 }
 .cr-icon-btn:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
 .cr-icon-btn.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
-.cr-empty { margin: 0; padding: 18px 12px; text-align: center; font-size: 12px; color: var(--color-text-disabled); }
-.cr-add { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; }
+.cr-empty { margin: 0; padding: 18px var(--space-5); text-align: center; font-size: var(--text-sm); color: var(--color-text-disabled); }
+.cr-add { display: inline-flex; align-items: center; gap: var(--space-3); margin-top: var(--space-5); }
 
 /* 捕获设置：与规则区用一条分隔线隔开，宽度仍受 .cr-page 的 720px 约束。 */
 .cr-capture {
-  margin-top: 24px; padding-top: 18px;
+  margin-top: var(--space-8); padding-top: 18px;
   border-top: 1px solid var(--color-border);
 }
-.cr-capture-hint { margin: 0 0 12px; font-size: 11px; color: var(--color-text-disabled); line-height: 1.6; }
-.cr-ignore-add { display: flex; gap: 8px; }
+.cr-capture-hint { margin: 0 0 var(--space-5); font-size: var(--text-xs); color: var(--color-text-disabled); line-height: 1.6; }
+.cr-ignore-add { display: flex; gap: var(--space-4); }
 .cr-ignore-add .field-input { flex: 1; min-width: 0; }
-.cr-ignore-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.cr-ignore-list { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: 10px; }
 .cr-ignore-chip {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 3px 5px 3px 9px; font-size: 11px;
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: 3px 5px 3px 9px; font-size: var(--text-xs);
   color: var(--color-text-secondary); background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border); border-radius: var(--radius-lg);
 }
@@ -618,7 +618,7 @@ function matchLabel(r: ClipboardRule): string {
   background: transparent; color: var(--color-text-disabled); cursor: pointer;
 }
 .cr-ignore-del:hover { color: var(--color-danger); background: var(--color-danger-bg); }
-.cr-pause-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cr-pause-row { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
 .cr-pause-select { width: auto; min-width: 160px; }
-.cr-capture-state { font-size: 11px; color: var(--color-warning); }
+.cr-capture-state { font-size: var(--text-xs); color: var(--color-warning); }
 </style>

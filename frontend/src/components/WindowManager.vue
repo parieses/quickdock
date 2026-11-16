@@ -171,7 +171,7 @@ onUnmounted(() => {
 
       <!-- 9 种布局模板：每个小块都能直接点；点卡片本身 = 主位第 1 格 -->
       <div class="wm-tpl-grid">
-        <div v-for="tpl in templates" :key="tpl.id" class="wm-tpl" @click="place(tpl, 0)">
+        <div v-key-click v-for="tpl in templates" :key="tpl.id" class="wm-tpl" @click="place(tpl, 0)">
           <svg :viewBox="`0 0 ${SVG_W} ${svgH}`" class="wm-tpl-svg">
             <rect
               v-for="(c, ci) in tpl.cells" :key="ci"
@@ -194,17 +194,17 @@ onUnmounted(() => {
 .wm-root {
   height: 100vh; width: 100vw; display: flex; flex-direction: column;
   background: var(--color-bg-primary); color: var(--color-text-primary);
-  font-size: 12px; overflow: hidden;
+  font-size: var(--text-sm); overflow: hidden;
 }
 
 /* 顶部栏 */
 .wm-bar {
-  display: flex; align-items: center; gap: 8px;
-  padding: 9px 12px; border-bottom: 1px solid var(--color-border);
+  display: flex; align-items: center; gap: var(--space-4);
+  padding: 9px var(--space-5); border-bottom: 1px solid var(--color-border);
   --wails-draggable: drag;
 }
 .wm-bar-left { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
-.wm-bar-title { font-size: 13px; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+.wm-bar-title { font-size: var(--text-md); font-weight: 600; white-space: nowrap; flex-shrink: 0; }
 .wm-icon-btn {
   width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
   border: none; background: transparent; color: var(--color-text-muted);
@@ -214,9 +214,9 @@ onUnmounted(() => {
 
 /* 目标窗口提示 */
 .wm-target {
-  display: inline-flex; align-items: center; gap: 6px; min-width: 0;
-  max-width: 460px; padding: 2px 9px; border-radius: var(--radius-full);
-  background: var(--color-accent-bg); color: var(--color-accent); font-size: 11px;
+  display: inline-flex; align-items: center; gap: var(--space-3); min-width: 0;
+  max-width: 460px; padding: var(--space-1) 9px; border-radius: var(--radius-full);
+  background: var(--color-accent-bg); color: var(--color-accent); font-size: var(--text-xs);
 }
 .wm-target-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
 .wm-target-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -224,12 +224,12 @@ onUnmounted(() => {
 
 /* 本屏可参与排版的窗口数：让「有些格子空着」变得可解释 */
 .wm-peers {
-  font-size: 11px; color: var(--color-text-disabled); white-space: nowrap;
+  font-size: var(--text-xs); color: var(--color-text-disabled); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; flex-shrink: 0;
 }
 
-.wm-body { flex: 1; overflow-y: auto; padding: 10px 16px 14px; }
-.wm-hint { font-size: 11px; color: var(--color-text-disabled); margin: 0 0 10px; }
+.wm-body { flex: 1; overflow-y: auto; padding: 10px var(--space-6) 14px; }
+.wm-hint { font-size: var(--text-xs); color: var(--color-text-disabled); margin: 0 0 10px; }
 .wm-hint-warn { color: var(--color-warning); }
 .wm-hint-ok { color: var(--color-success); }
 
@@ -237,7 +237,7 @@ onUnmounted(() => {
 .wm-tpl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .wm-tpl {
   display: flex; flex-direction: column; align-items: center; gap: 5px;
-  padding: 8px; background: var(--color-card-bg);
+  padding: var(--space-4); background: var(--color-card-bg);
   border: 1px solid var(--card-border-color); border-radius: var(--radius-md);
   transition: border-color 0.15s, background 0.15s; cursor: pointer;
 }
@@ -248,5 +248,5 @@ onUnmounted(() => {
   cursor: pointer; transition: fill 0.12s, stroke 0.12s;
 }
 .wm-tpl-cell:hover { fill: var(--color-accent); stroke: var(--color-accent); }
-.wm-tpl-name { font-size: 11px; color: var(--color-text-secondary); white-space: nowrap; }
+.wm-tpl-name { font-size: var(--text-xs); color: var(--color-text-secondary); white-space: nowrap; }
 </style>

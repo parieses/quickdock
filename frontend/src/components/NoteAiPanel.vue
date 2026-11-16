@@ -259,7 +259,7 @@ function writeBack(mode: 'insert' | 'replace' | 'append') {
 /* 动作按钮沿用 SSH / 剪贴板的视觉语言：无边框 + hover 浮背景。 */
 .note-ai-actions {
   display: flex;
-  gap: 2px;
+  gap: var(--space-1);
   flex-wrap: wrap;
   margin-left: -5px;
 }
@@ -268,8 +268,8 @@ function writeBack(mode: 'insert' | 'replace' | 'append') {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  padding: 2px 6px;
-  font-size: 11px;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
   line-height: 1.5;
   font-family: inherit;
   color: var(--color-text-muted);
@@ -292,8 +292,8 @@ function writeBack(mode: 'insert' | 'replace' | 'append') {
 /* 当前 AI 档案徽章：中性色，不与其它状态色抢注意力。 */
 .note-ai-profile {
   max-width: 76px;
-  padding: 0 4px;
-  font-size: 10px;
+  padding: 0 var(--space-2);
+  font-size: var(--text-2xs);
   line-height: 15px;
   border-radius: var(--radius-xs);
   color: var(--color-text-muted);
@@ -316,14 +316,14 @@ function writeBack(mode: 'insert' | 'replace' | 'append') {
 .note-ai-quote-head {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 11px;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
   color: var(--color-accent);
 }
 
 .note-ai-quote-line {
-  margin-top: 2px;
-  font-size: 11px;
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
   line-height: 1.45;
   color: var(--color-text-muted);
   white-space: pre;
@@ -333,7 +333,7 @@ function writeBack(mode: 'insert' | 'replace' | 'append') {
 
 .note-ai-cmd-hint {
   padding-left: 3px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-disabled);
 }
 </style>

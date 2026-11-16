@@ -10,8 +10,8 @@
  * 三条安全约束在这里落地（与 SSH 一键执行同一套底线）：
  *  1. 风险说明排在执行按钮之前——把「这条命令会删库」放在按钮下面，
  *     等于让用户先点了再看到，那时命令已经发出去了。
- *  2. 生产环境 / 高风险要按两次——第一次只把按钮换成「再点一次确认」，
- *     不发任何字节。批量执行影响的是 N 台机器，误触的成本是线性的。
+ *  2. 生产环境 / 高风险要过一次 toast.confirm——确认前不发任何字节。
+ *     批量执行影响的是 N 台机器，误触的成本是线性的。
  *  3. 风险等级由后端判定（SshBatchPlan），前端不自己匹配关键词。
  *     规则表只有一份（services/sshx/ai.go 的 sshDangerRule），复制到前端
  *     必然漂移，届时界面说「低风险」而实际命中 high。
@@ -82,8 +82,6 @@ const concurrency = ref(6)
 const plan = ref<BatchPlan | null>(null)
 const planErr = ref('')
 const running = ref(false)
-/** 二次确认已武装：按钮文案变成「再点一次确认」，几秒内没点就自动撤回 */
-const armed = ref(false)
 const batchId = ref('')
 const results = ref<Record<string, SshBatchHostResult>>({})
 /** 结果行的顺序（开跑那一刻确定的快照，不随勾选变化） */
@@ -99,7 +97,6 @@ const pickedCmdId = ref('')
 const savingCmd = ref(false)
 const newCmdName = ref('')
 /** 删除片段的组件内二次确认态，不用 confirm() */
-const deletingCmd = ref(false)
 
 /** 按 category 分组供 <optgroup> 用；空分类的不套组，避免出现一个空标签的组。 */
 const cmdGrouped = computed(() => {
@@ -155,7 +152,6 @@ interface LastBatch {
 let offHost: (() => void) | null = null
 let offDone: (() => void) | null = null
 let planTimer: ReturnType<typeof setTimeout> | null = null
-let armTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 勾选面板：复用主树的建树/展平逻辑，缩进与分组顺序和左树完全一致。 */
 const allNodes = computed(() => flattenSshTree(buildSshTree(props.hosts), new Set()))
@@ -203,7 +199,6 @@ function selectAll() {
 
 function clearAll() {
   if (running.value) return
-  disarm()
   selected.value = new Set()
   plan.value = null
 }
@@ -215,12 +210,8 @@ function clearAll() {
  * 但不能省掉这次请求：风险等级与生产机数量都必须由后端算。
  */
 function schedulePlan() {
-  // 目标或命令一变，之前的「已确认」立刻作废。
-  //
-  // 不做这一步会留下一个真实的安全缺口：用户先确认了 `systemctl status nginx`，
-  // 回来把命令改成 `restart`，然后再点一次——按钮还是「确认」状态，
-  // 于是一次点击就把没被确认过的命令发了出去。二次确认必须绑到具体内容上。
-  disarm()
+  // 确认走点击那一刻的 toast.confirm，不存在跨命令残留的「已确认」状态：
+  // 目标或命令一变，重算风险预演即可，下一次点击会重新问一遍。
   if (planTimer) clearTimeout(planTimer)
   if (selected.value.size === 0) {
     plan.value = null
@@ -261,21 +252,18 @@ async function loadCommands() {
 }
 
 /**
- * 选中片段：填命令后必须走 schedulePlan()。
- * 直接赋值会绕过风险预演——schedulePlan() 开头就 disarm()，确认态必须绑在
- * 具体命令上；否则会拿着上一条命令的风险判定放行这条新命令。
+ * 选中片段：填命令后必须走 schedulePlan() 重新做风险预演，
+ * 否则会拿着上一条命令的风险判定放行这条新命令。
  */
 function onPickCmd() {
   const c = commands.value.find(x => x.id === pickedCmdId.value)
   if (!c) return
   command.value = c.command
-  disarm()
   schedulePlan()
 }
 
 function startSaveCmd() {
   savingCmd.value = true
-  deletingCmd.value = false
   newCmdName.value = ''
 }
 
@@ -310,13 +298,19 @@ async function confirmSaveCmd() {
   }
 }
 
+// 删除片段是不可逆操作：确认统一走全局 toast.confirm，不再用行内「点两次」。
+async function requestDeleteCmd() {
+  if (!pickedCmdId.value) return
+  if (!(await confirm(t('sshBatchDeleteCmdConfirm')))) return
+  await confirmDeleteCmd()
+}
+
 async function confirmDeleteCmd() {
   const id = pickedCmdId.value
   if (!id) return
   try {
     unwrap(await DeleteSshCommand(id))
     pickedCmdId.value = ''
-    deletingCmd.value = false
     await loadCommands()
   } catch (e) {
     toastError(getErrorMessage(e))
@@ -332,11 +326,11 @@ const canRun = computed(() =>
 )
 
 /**
- * 是否需要二次确认。
+ * 是否需要执行前确认（toast.confirm）。
  *
  * 判定条件是「生产机」或「高风险命令」——普通测试机上跑 uptime 不值得
- * 让用户点两次，次数多了用户会养成无脑连点的习惯，那时二次确认就失效了。
- * 反过来，只要沾上生产机或命中 high 规则，就必须点两次。
+ * 打断用户，次数多了用户会养成无脑确认的习惯，那时确认就失效了。
+ * 反过来，只要沾上生产机或命中 high 规则，就必须问一次。
  */
 const needsConfirm = computed(() =>
   !!plan.value && (plan.value.prodCount > 0 || plan.value.riskLevel === 'high'),
@@ -350,25 +344,10 @@ const runHint = computed(() => {
   return ''
 })
 
-function disarm() {
-  armed.value = false
-  if (armTimer) {
-    clearTimeout(armTimer)
-    armTimer = null
-  }
-}
-
 async function onRunClick() {
   if (!canRun.value) return
-  if (needsConfirm.value && !armed.value) {
-    armed.value = true
-    if (armTimer) clearTimeout(armTimer)
-    // 5 秒后自动撤回：留着不撤的「再点一次确认」会在用户改完命令、
-    // 过一会儿回来随手一点时直接放行，等于二次确认被时间稀释没了。
-    armTimer = setTimeout(disarm, 5000)
-    return
-  }
-  disarm()
+  // 生产机 / 高风险命令：执行前过一次 toast.confirm，确认前不发任何字节。
+  if (needsConfirm.value && !(await confirm(t('sshBatchRunConfirm')))) return
   await startRun()
 }
 
@@ -449,7 +428,6 @@ async function requestClose() {
   // 关窗前再存一次：最后一台的 host 事件可能排在 summary 之后到，
   // 只靠 done 里存会漏掉它（漏掉的恰好是最新的一条）。
   if (summary.value) saveLastBatch()
-  disarm()
   visible.value = false
 }
 
@@ -529,7 +507,6 @@ function batchDuration(ms: number): string {
 
 /** 首次打开（或有新的预选）时重置状态。 */
 function reset() {
-  disarm()
   selected.value = new Set((props.preselect || []).filter(id => {
     const h = props.hosts.find(x => x.id === id)
     return !!h && !h.isFolder
@@ -550,7 +527,6 @@ function reset() {
   pickedCmdId.value = ''
   savingCmd.value = false
   newCmdName.value = ''
-  deletingCmd.value = false
   void loadCommands()
   // 先把上一次的结果接回来，必要时再补预演：预演会按（可能已被上次命令填充的）
   // 命令重新算风险等级，顺序反了就会拿空命令算一次再算第二次。
@@ -634,7 +610,6 @@ onMounted(() => {
     if (!sum || sum.batchId !== batchId.value) return
     summary.value = sum
     running.value = false
-    disarm()
     const msg = t(sum.aborted ? 'sshBatchDoneAborted' : 'sshBatchDone', {
       ok: sum.succeeded,
       fail: sum.failed,
@@ -654,7 +629,6 @@ onBeforeUnmount(() => {
   offDone?.()
   offDone = null
   if (planTimer) clearTimeout(planTimer)
-  if (armTimer) clearTimeout(armTimer)
 })
 </script>
 
@@ -749,23 +723,10 @@ onBeforeUnmount(() => {
                   @click="startSaveCmd"
                 >{{ t('sshCmdSave') }}</button>
                 <button
-                  v-if="!deletingCmd"
                   class="batch-snip-btn"
                   :disabled="running || !pickedCmdId || savingCmd"
-                  @click="deletingCmd = true"
+                  @click="requestDeleteCmd"
                 >{{ t('sshCmdDelete') }}</button>
-                <button
-                  v-if="deletingCmd"
-                  class="batch-snip-btn danger"
-                  :disabled="running"
-                  @click="confirmDeleteCmd"
-                >{{ t('sshCmdDeleteConfirm') }}</button>
-                <button
-                  v-if="deletingCmd"
-                  class="batch-snip-btn"
-                  :disabled="running"
-                  @click="deletingCmd = false"
-                >{{ t('sshCmdCancel') }}</button>
               </div>
 
               <div v-if="savingCmd" class="batch-snip-save">
@@ -855,12 +816,12 @@ onBeforeUnmount(() => {
                 <button
                   v-else
                   class="batch-btn batch-run"
-                  :class="{ armed, danger: needsConfirm }"
+                  :class="{ danger: needsConfirm }"
                   :disabled="!canRun"
                   @click="onRunClick"
                 >
                   <Play :size="12" />
-                  <span>{{ armed ? t('sshBatchRunConfirm') : t('sshBatchRun') }}</span>
+                  <span>{{ t('sshBatchRun') }}</span>
                 </button>
               </div>
             </section>
@@ -951,7 +912,7 @@ onBeforeUnmount(() => {
 .batch-head-text {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
   min-width: 0;
 }
 
@@ -962,7 +923,7 @@ onBeforeUnmount(() => {
 }
 
 .batch-sub {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 
@@ -1006,13 +967,13 @@ onBeforeUnmount(() => {
 }
 
 .batch-pick-title {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--color-text-primary);
 }
 
 .batch-pick-count {
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-style: normal;
   color: var(--color-text-muted);
 }
@@ -1024,8 +985,8 @@ onBeforeUnmount(() => {
 }
 
 .batch-mini {
-  padding: 2px 7px;
-  font-size: 11px;
+  padding: var(--space-1) 7px;
+  font-size: var(--text-xs);
   color: var(--color-text-secondary);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
@@ -1055,8 +1016,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  padding: 5px 8px 5px 8px;
-  font-size: 12px;
+  padding: 5px var(--space-4) 5px var(--space-4);
+  font-size: var(--text-sm);
   font-family: inherit;
   text-align: left;
   color: var(--color-text-secondary);
@@ -1095,7 +1056,7 @@ onBeforeUnmount(() => {
   color: var(--color-accent-text);
   background: var(--color-bg-primary);
   border: 1px solid var(--color-border);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .batch-box.on {
@@ -1119,7 +1080,7 @@ onBeforeUnmount(() => {
 .batch-pick-empty {
   margin: 0;
   padding: var(--space-4);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 
@@ -1127,7 +1088,7 @@ onBeforeUnmount(() => {
 .batch-env {
   flex: 0 0 auto;
   padding: 0 5px;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   line-height: 1.6;
   border-radius: var(--radius-full);
   border: 1px solid transparent;
@@ -1164,7 +1125,7 @@ onBeforeUnmount(() => {
 }
 
 .batch-label {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -1172,8 +1133,8 @@ onBeforeUnmount(() => {
 .batch-textarea {
   width: 100%;
   padding: var(--space-3);
-  font-family: var(--font-mono, monospace);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
   line-height: 1.6;
   color: var(--color-text-primary);
   background: var(--color-bg-secondary);
@@ -1196,14 +1157,14 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 
 .batch-opt input {
   width: 76px;
-  padding: 3px 6px;
-  font-size: 12px;
+  padding: 3px var(--space-3);
+  font-size: var(--text-sm);
   font-family: inherit;
   color: var(--color-text-primary);
   background: var(--color-bg-secondary);
@@ -1224,7 +1185,7 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   gap: var(--space-2);
   padding: var(--space-3);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.6;
   border-radius: var(--radius-xs);
   border: 1px solid transparent;
@@ -1251,7 +1212,7 @@ onBeforeUnmount(() => {
 .batch-risk-text {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
   min-width: 0;
 }
 
@@ -1316,7 +1277,7 @@ onBeforeUnmount(() => {
 
 .batch-run-hint {
   margin-right: auto;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 
@@ -1325,7 +1286,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: var(--space-2);
   height: 28px; padding: 0 11px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
@@ -1347,14 +1308,6 @@ onBeforeUnmount(() => {
   color: var(--color-danger-text);
   background: var(--color-danger-bg);
   border-color: var(--color-danger-border);
-}
-
-.batch-run.armed {
-  font-weight: 600;
-  color: var(--color-danger-text);
-  background: var(--color-danger-bg);
-  border-color: var(--color-danger);
-  box-shadow: 0 0 0 1px var(--color-danger);
 }
 
 .batch-run:disabled {
@@ -1392,7 +1345,7 @@ onBeforeUnmount(() => {
 }
 
 .batch-results-title {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -1400,14 +1353,14 @@ onBeforeUnmount(() => {
 .batch-results-sum {
   display: inline-flex;
   gap: var(--space-2);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 
 /* 「上次执行」标记：用提示色而不是正文色，一眼能看出这不是本次跑出来的 */
 .batch-results-last {
   padding: 1px var(--space-2);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--color-warning);
   background: var(--color-bg-secondary);
   border-radius: var(--radius-xs);
@@ -1425,8 +1378,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  padding: 4px var(--space-6);
-  font-size: 11px;
+  padding: var(--space-2) var(--space-6);
+  font-size: var(--text-xs);
   font-family: inherit;
   text-align: left;
   color: var(--color-text-secondary);
@@ -1450,7 +1403,7 @@ onBeforeUnmount(() => {
 
 .batch-result-addr {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--color-text-muted);
 }
 
@@ -1461,7 +1414,7 @@ onBeforeUnmount(() => {
   flex: 1 1 auto;
   min-width: 0;
   justify-content: flex-end;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--color-text-muted);
 }
 
@@ -1480,8 +1433,8 @@ onBeforeUnmount(() => {
 .batch-badge {
   flex: 0 0 auto;
   min-width: 44px;
-  padding: 1px 6px;
-  font-size: 10px;
+  padding: 1px var(--space-3);
+  font-size: var(--text-2xs);
   text-align: center;
   border-radius: var(--radius-full);
   border: 1px solid transparent;
@@ -1528,8 +1481,8 @@ onBeforeUnmount(() => {
   padding: var(--space-3);
   max-height: 180px;
   overflow: auto;
-  font-family: var(--font-mono, monospace);
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   line-height: 1.55;
   color: var(--color-text-primary);
   background: var(--color-card-bg);
@@ -1544,8 +1497,8 @@ onBeforeUnmount(() => {
 .batch-snip-select {
   flex: 1 1 auto;
   min-width: 120px;
-  padding: 3px 6px;
-  font-size: 11px;
+  padding: 3px var(--space-3);
+  font-size: var(--text-xs);
   font-family: inherit;
   color: var(--color-text-primary);
   background: var(--color-bg-secondary);
@@ -1555,11 +1508,11 @@ onBeforeUnmount(() => {
 }
 .batch-snip-select:focus { border-color: var(--color-border-focus-soft); }
 .batch-snip-select:disabled { opacity: 0.45; cursor: default; }
-.batch-snip-empty { font-size: 11px; color: var(--color-text-muted); }
+.batch-snip-empty { font-size: var(--text-xs); color: var(--color-text-muted); }
 .batch-snip-btn {
   flex: 0 0 auto;
-  padding: 3px 8px;
-  font-size: 11px;
+  padding: 3px var(--space-4);
+  font-size: var(--text-xs);
   font-family: inherit;
   color: var(--color-text-secondary);
   background: var(--color-bg-tertiary);
@@ -1578,8 +1531,8 @@ onBeforeUnmount(() => {
 .batch-snip-input {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 3px 6px;
-  font-size: 11px;
+  padding: 3px var(--space-3);
+  font-size: var(--text-xs);
   font-family: inherit;
   color: var(--color-text-primary);
   background: var(--color-bg-secondary);

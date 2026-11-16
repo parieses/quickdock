@@ -119,14 +119,14 @@ watch(
 
 .paste-title {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--color-text-primary);
 }
 
 .paste-desc {
   margin: 0 0 var(--space-4);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.7;
   color: var(--color-text-secondary);
 }
@@ -140,7 +140,7 @@ watch(
 
 .paste-preview-label {
   margin-bottom: var(--space-2);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 
@@ -149,7 +149,7 @@ watch(
   max-height: 130px;
   overflow-y: auto;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--color-text-primary);
   white-space: pre-wrap;
@@ -159,13 +159,13 @@ watch(
 
 .paste-more {
   margin: var(--space-2) 0 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 
 .paste-hint {
   margin: var(--space-4) 0 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--color-warning);
 }
@@ -177,9 +177,9 @@ watch(
   margin-top: var(--space-6);
 }
 
-.paste-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+.paste-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
   height: 28px; padding: 0 11px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   color: var(--color-text-secondary);
   background: transparent;

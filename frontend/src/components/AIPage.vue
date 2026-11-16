@@ -274,7 +274,11 @@ async function approveHooks(on: boolean) {
   try {
     unwrap(await AISetHooksApproved(dir, on))
     aiHooks.value = null
-  } catch { /* 批准失败不弹错：下一次改文件时钩子还是不生效，用户会来问 */ }
+  } catch (e) {
+    // 静默会让「钩子明明点了批准却仍不生效」变成一个没有出口的困惑，必须给可见反馈。
+    logErr('ai.approveHooks', e)
+    toast.error(getErrorMessage(e))
+  }
 }
 
 // —— 当前目录的 git 分支探测（gitRepo / gitBranch / effectiveDir / loadGitBranch /
@@ -1467,7 +1471,7 @@ function reshuffleHeroTips() {
   const idxs = [...pool.keys()]
   for (let i = idxs.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1))
-    ;[idxs[i], idxs[j]] = [idxs[j], idxs[i]]
+ ;[idxs[i], idxs[j]] = [idxs[j], idxs[i]]
   }
   heroTips.value = idxs.slice(0, n).map(i => pool[i])
 }
@@ -2739,11 +2743,16 @@ async function saveAsNote(content: string) {
 }
 
 function onDocMouseDown(e: MouseEvent) {
-  // 右键菜单自己吞掉 mousedown（@mousedown.stop），落到这里的点击都在菜单之外
-  if (ctxTarget.value) closeCtxMenu()
+  // 这个监听挂在 document 的捕获阶段（见 onMounted），会先于目标元素执行：
+  // 菜单上的 @mousedown.stop 只挡冒泡，挡不住这里。所以必须自己判断命中区域，
+  // 否则点菜单项时 closeCtxMenu() 先把菜单卸载，click 就派发不到了。
+  const target = e.target as Node | null
+  const menu = document.querySelector('.ai-ctx')
+  const inMenu = !!(menu && target && menu.contains(target))
   const pop = document.querySelector('.ai-sel-copy')
-  if (pop && pop.contains(e.target as Node)) return
-  hideSelPop()
+  const inPop = !!(pop && target && pop.contains(target))
+  if (ctxTarget.value && !inMenu) closeCtxMenu()
+  if (!inPop) hideSelPop()
 }
 
 // 图片全屏查看器：缩略图点击放大。放组件级状态而非每条消息各自持有，
@@ -2921,7 +2930,7 @@ onMounted(async () => {
     // 「有步骤在推」本身就是真在跑的证据：空间行按钮先切过去，不必等 RPC 回包
     markSpaceRunning(tid)
   })
-  // 点击消息区之外时隐藏划词复制浮层
+  // 点击浮层之外时收起右键菜单 / 划词复制浮层；命中区域判断在 onDocMouseDown 内
   document.addEventListener('mousedown', onDocMouseDown, true)
   // 图片查看器的 Esc 关闭（capture 不必要，普通冒泡即可；避免干扰输入框内 Esc 行为的判断）
   document.addEventListener('keydown', onGlobalKeydown)
@@ -3434,7 +3443,7 @@ onUnmounted(() => {
     <input ref="fileInputEl" type="file" accept="image/*" multiple hidden @change="onPickFiles" />
     <Teleport to="body">
       <div v-if="imgViewer" class="ai-img-viewer" @click="closeImgViewer">
-        <img :src="imgViewer.dataUrl || imgViewer.url || ''" :alt="imgViewer.name" @click.stop />
+        <img v-key-click :src="imgViewer.dataUrl || imgViewer.url || ''" :alt="imgViewer.name" @click.stop />
       </div>
     </Teleport>
   </div>
@@ -3473,10 +3482,10 @@ onUnmounted(() => {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   flex-wrap: wrap;
-  padding: 6px var(--space-6);
-  font-size: 11px;
+  padding: var(--space-3) var(--space-6);
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   border-top: 1px solid var(--color-border);
   user-select: none;
@@ -3484,7 +3493,7 @@ onUnmounted(() => {
 }
 .ai-su-total { color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
 .ai-su-sep { color: var(--color-text-disabled); }
-.ai-su-models { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ai-su-models { display: inline-flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
 .ai-su-model { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .ai-su-calls { font-style: normal; color: var(--color-text-secondary); font-weight: 500; }
 
@@ -3500,17 +3509,17 @@ onUnmounted(() => {
    收起后只剩一行标题，不再占着输入区上方的固定高度。 */
 .ai-plan-card {
   width: 100%;
-  padding: 8px 12px 10px;
+  padding: var(--space-4) var(--space-5) 10px;
   border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
   background: var(--color-card-bg);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .ai-plan-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   list-style: none;
   cursor: pointer;
   user-select: none;
@@ -3539,7 +3548,7 @@ onUnmounted(() => {
 .ai-plan-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-2);
   margin: 9px 0 0;
   padding: 0;
   list-style: none;
@@ -3548,7 +3557,7 @@ onUnmounted(() => {
 .ai-plan-item {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
+  gap: var(--space-3);
   min-width: 0;
   color: var(--color-text-secondary);
 }
@@ -3562,7 +3571,7 @@ onUnmounted(() => {
   justify-content: center;
   width: 14px;
   height: 14px;
-  margin-top: 2px;
+  margin-top: var(--space-1);
   border: 1px solid var(--color-border);
   border-radius: 50%;
   color: var(--color-accent-text);
@@ -3587,7 +3596,7 @@ onUnmounted(() => {
 
 .ai-plan-text { min-width: 0; overflow-wrap: anywhere; }
 
-.ai-plan-note { margin-top: 7px; color: var(--color-text-muted); font-size: 12px; }
+.ai-plan-note { margin-top: 7px; color: var(--color-text-muted); font-size: var(--text-sm); }
 
 /* 等待插入的消息：贴在输入框正上方，宽度与输入框同口径（--ai-column-w + margin auto），
    否则它会从窗口左边一直拉到右边，比输入框宽一截，看起来像另一块区域。
@@ -3597,7 +3606,7 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 3px;
   width: var(--ai-column-w);
-  margin: 0 auto 6px;
+  margin: 0 auto var(--space-3);
 }
 
 .ai-inject-item {
@@ -3605,10 +3614,10 @@ onUnmounted(() => {
   align-items: center;
   gap: 7px;
   min-width: 0;
-  padding: 4px 10px;
+  padding: var(--space-2) 10px;
   border-radius: var(--radius-sm);
   background: var(--color-card-bg);
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-secondary);
 }
 
@@ -3636,7 +3645,7 @@ onUnmounted(() => {
   color: var(--color-text-primary);
 }
 
-.ai-inject-hint { flex: 0 0 auto; color: var(--color-text-secondary); font-size: 11px; }
+.ai-inject-hint { flex: 0 0 auto; color: var(--color-text-secondary); font-size: var(--text-xs); }
 
 /* 「立即发送」：一条轻量文字按钮，不抢「等待插入」那句状态提示的注意力。
    它是可选动作（默认会自己接走），所以不做成 primary 按钮。 */
@@ -3648,7 +3657,7 @@ onUnmounted(() => {
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-accent);
-  font-size: 11px;
+  font-size: var(--text-xs);
   cursor: pointer;
 }
 
@@ -3668,13 +3677,13 @@ onUnmounted(() => {
 /* 划词复制浮层（position/left/top 由 floating-ui 注入） */
 .ai-sel-copy {
   z-index: 50;
-  display: flex; align-items: center; gap: 4px;
+  display: flex; align-items: center; gap: var(--space-2);
   padding: 5px 10px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
-  font-size: 12px; cursor: pointer; font-family: inherit;
+  font-size: var(--text-sm); cursor: pointer; font-family: inherit;
   box-shadow: 0 4px 16px var(--color-bg-overlay);
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
@@ -3685,7 +3694,7 @@ onUnmounted(() => {
 .ai-ctx {
   z-index: 700;
   display: flex; flex-direction: column;
-  min-width: 132px; padding: 4px;
+  min-width: 132px; padding: var(--space-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
@@ -3697,7 +3706,7 @@ onUnmounted(() => {
   height: 28px; padding: 0 9px;
   border: none; border-radius: var(--radius-sm);
   background: transparent; color: var(--color-text-primary);
-  font-family: inherit; font-size: 12px; text-align: left; cursor: pointer;
+  font-family: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
@@ -3710,14 +3719,14 @@ onUnmounted(() => {
 .ai-html-preview {
   position: fixed; inset: 0; z-index: 800;
   display: flex; align-items: center; justify-content: center;
-  padding: 24px;
+  padding: var(--space-8);
   background: var(--color-bg-overlay);
 }
 
 .ai-html-preview-box {
   display: flex; flex-direction: column;
   width: 100%; height: 100%;
-  max-width: 1080px;
+  max-width: var(--reading-max);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-bg-primary);
@@ -3726,21 +3735,22 @@ onUnmounted(() => {
 }
 
 .ai-html-preview-bar {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 8px 6px 14px;
+  display: flex; align-items: center; gap: var(--space-4);
+  padding: var(--space-3) var(--space-4) var(--space-3) 14px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
 }
 
 .ai-html-preview-title {
   margin-right: auto;
-  font-size: 11px; letter-spacing: 0.04em; 
+  font-size: var(--text-xs); letter-spacing: 0.04em; 
   color: var(--color-text-muted);
 }
 
 .ai-html-preview-frame {
   flex: 1; width: 100%; min-height: 0;
-  border: none; background: #fff;
+  /* srcdoc 里的 HTML 预览按亮色文档渲染：--color-content-bg 深浅两套同值。 */
+  border: none; background: var(--color-content-bg);
 }
 
 /* 图片查看器（点消息里的缩略图） */
@@ -3766,133 +3776,3 @@ onUnmounted(() => {
 
 </style>
 
-<style>
-/* 跨子组件的共享类：必须非 scoped。
-   这些 class 同时出现在消息区（回答下方产物条）与 AiSidePanel（面板首页产物列表），
-   而 scoped 样式只作用于本组件自己的元素——放在 scoped 块里会有一半命不中。 */
-/* 回答产物：横向排的 chip，一行放不下自动换行。
-   宽度给满而不是 fit-content——fit-content 会先按 max-content 撑开，
-   只有一个短文件名时整块缩成一小截，多文件换行时的收缩点也不好判断 */
-.ai-artifacts { margin-top: 8px; width: 100%; max-width: 100%; }
-.ai-artifacts-sum {
-  display: flex; align-items: center; gap: 4px; width: fit-content;
-  padding: 3px 0; font-size: 12px; color: var(--color-text-muted);
-  cursor: pointer; user-select: none; list-style: none;
-}
-.ai-artifacts-sum::-webkit-details-marker { display: none; }
-.ai-artifacts-chev { transition: transform 0.15s; }
-.ai-artifacts[open] > .ai-artifacts-sum .ai-artifacts-chev { transform: rotate(180deg); }
-.ai-artifacts-list { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 0; }
-/* 产物 chip 同样无框：透明描边只是为了让 hover 底色和文字保持原有内缩，
-   在深色底上透明边框与去掉边框视觉一致，但不必再调一次 padding。 */
-.ai-artifact {
-  display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 260px;
-  padding: 3px 8px; border: 1px solid transparent; border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-primary); font-size: 11px; cursor: pointer;
-  text-align: left; font-family: inherit;
-  transition: background-color var(--transition-fast), color var(--transition-fast);
-}
-.ai-artifact:hover { background: var(--color-bg-hover); color: var(--color-accent); }
-.ai-artifact-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ai-artifact-op { color: var(--color-text-secondary); flex-shrink: 0; }
-/* 右侧面板首页的产物合集：面板窄，仍是竖列、op 贴行右，chip 去掉描边融进列表 */
-.ai-side-home .ai-artifacts-list { flex-direction: column; align-items: stretch; gap: 2px; }
-.ai-side-home .ai-artifact {
-  width: 100%; max-width: none; gap: 8px; padding: 5px 8px;
-  font-size: 12px; border-color: transparent; background: transparent;
-}
-.ai-side-home .ai-artifact:hover { background: var(--color-bg-tertiary); }
-.ai-side-home .ai-artifact-op { margin-left: auto; padding-left: 12px; }
-
-/* 输入相关控件：落地页 hero（AiHero）与输入区（AiComposer）共用同一套
-   缩略图 / 链接输入 / 图标按钮；.ai-go-settings 还被消息区的「没配 key」空态用。
-   放非 scoped 块是因为两个子组件各有一份 scoped 作用域，写在哪一边另一半都命不中。 */
-/* 技能胶囊：**行内**嵌在文字里（由 AiRichInput 用 DOM API 创建），所以样式必须写在
-   非 scoped 块——动态创建的节点没有 data-v 属性，写进组件的 scoped 里一条都不命中。
-   胶囊是 contenteditable=false 的原子节点：像个字符一样参与换行，退格整颗删掉。 */
-.ai-rich-chip {
-  display: inline-flex; align-items: center; gap: 3px;
-  max-width: 240px; margin: 0 1px;
-  padding: 1px 3px 1px 6px;
-  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  background: var(--color-bg-active); color: var(--color-text-secondary);
-  font-size: 12px; line-height: 1.6;
-  vertical-align: baseline;
-  user-select: none;
-  white-space: nowrap;
-}
-
-.ai-rich-chip-icon { flex-shrink: 0; color: var(--color-accent); font-size: 10px; }
-
-.ai-rich-chip-name { overflow: hidden; text-overflow: ellipsis; }
-
-.ai-rich-chip-x {
-  flex-shrink: 0; padding: 0 2px; border: none; background: transparent;
-  color: var(--color-text-muted); font-size: 12px; line-height: 1;
-  cursor: pointer; opacity: 0.55; transition: opacity var(--transition-fast), color var(--transition-fast);
-}
-
-.ai-rich-chip:hover .ai-rich-chip-x { opacity: 1; }
-
-.ai-rich-chip-x:hover { color: var(--color-danger); }
-
-.ai-go-settings {
-  padding: 7px 16px; border: none; border-radius: var(--radius-md);
-  background: var(--color-accent); color: var(--color-accent-text);
-  font-size: var(--text-md); font-weight: 600; cursor: pointer; font-family: inherit;
-  box-shadow: inset 0 1px 0 var(--color-hairline);
-  transition: background-color var(--transition-fast), transform var(--transition-fast);
-}
-.ai-go-settings:hover { background: var(--color-accent-hover); }
-.ai-go-settings:active { transform: translateY(0.5px); }
-
-.ai-tool-btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 40px; height: 32px; border: 1px solid var(--color-border);
-  background: var(--color-bg-tertiary); color: var(--color-text-muted);
-  border-radius: var(--radius-md); cursor: pointer; font-family: inherit;
-  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
-}
-
-.ai-tool-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
-
-/* 运行中不让加图：图片要过一次闸门 + 落盘，插不进已经开始跑的那一轮。
-   灰掉而不是藏起来——藏起来会让人以为功能坏了。 */
-.ai-tool-btn:disabled { opacity: 0.4; cursor: default; }
-.ai-tool-btn:disabled:hover { color: var(--color-text-muted); border-color: var(--color-border); }
-
-.ai-attach-preview { display: flex; flex-wrap: wrap; gap: 8px; }
-
-.ai-attach-thumb {
-  position: relative; width: 56px; height: 56px; border-radius: var(--radius-sm);
-  overflow: hidden; border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
-}
-
-.ai-attach-img { width: 100%; height: 100%; object-fit: cover; display: block; }
-
-.ai-attach-del {
-  position: absolute; top: 1px; right: 1px; width: 16px; height: 16px;
-  display: flex; align-items: center; justify-content: center; line-height: 1;
-  border: none; border-radius: 50%; background: rgba(0,0,0,0.55); color: #fff;
-  font-size: 12px; cursor: pointer; padding: 0;
-}
-
-.ai-attach-del:hover { background: var(--color-danger); }
-
-.ai-url-row { display: flex; gap: 6px; }
-
-.ai-url-input {
-  flex: 1; height: 32px; padding: 0 10px; border: 1px solid var(--color-border);
-  border-radius: var(--radius-md); background: var(--color-bg-tertiary);
-  color: var(--color-text-primary); font-size: 12px; font-family: inherit; outline: none;
-}
-
-.ai-url-input:focus { border-color: var(--color-border-focus-soft); }
-
-.ai-url-ok {
-  padding: 0 14px; height: 32px; border: none; border-radius: var(--radius-md);
-  background: var(--color-accent); color: var(--color-accent-text);
-  font-size: 12px; cursor: pointer; font-family: inherit;
-}
-</style>

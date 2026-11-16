@@ -325,16 +325,16 @@ onUnmounted(() => {
 /* 嵌入设置面板：背景交给外层，内边距收紧一档 */
 .activity-page.embedded { background: transparent; }
 .activity-page.embedded .qd-page-header { padding: 0 14px; min-height: 40px; box-shadow: none; }
-.activity-page.embedded .activity-body { padding: 12px 16px 16px; }
-.activity-page.embedded .activity-error { margin: 8px 16px 0; }
+.activity-page.embedded .activity-body { padding: var(--space-5) var(--space-6) var(--space-6); }
+.activity-page.embedded .activity-error { margin: var(--space-4) var(--space-6) 0; }
 .activity-error {
-  margin: 10px 20px 0; padding: 8px 12px; border-radius: var(--radius-sm); font-size: 12px;
+  margin: 10px var(--space-7) 0; padding: var(--space-4) var(--space-5); border-radius: var(--radius-sm); font-size: var(--text-sm);
   color: var(--color-danger-text); background: var(--color-danger-bg); border: 1px solid var(--color-danger-border);
 }
 
 .activity-body {
   flex: 1; display: grid; grid-template-columns: minmax(240px, 340px) 1fr;
-  gap: 14px; padding: 14px 20px 20px; overflow: hidden;
+  gap: 14px; padding: 14px var(--space-7) var(--space-7); overflow: hidden;
 }
 .pane {
   display: flex; flex-direction: column; overflow: hidden;
@@ -342,32 +342,32 @@ onUnmounted(() => {
   background: var(--color-card-bg);
 }
 .pane-head {
-  display: flex; align-items: center; gap: 6px; padding: 9px 12px; flex-shrink: 0;
-  font-size: 12px; font-weight: 600; color: var(--color-text-primary);
+  display: flex; align-items: center; gap: var(--space-3); padding: 9px var(--space-5); flex-shrink: 0;
+  font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary);
   border-bottom: 1px solid var(--color-border);
 }
 .pane-count {
-  margin-left: auto; font-weight: 400; font-size: 11px; padding: 0 6px;
+  margin-left: auto; font-weight: 400; font-size: var(--text-xs); padding: 0 var(--space-3);
   border-radius: var(--radius-md); background: var(--color-bg-tertiary); color: var(--color-text-secondary);
 }
 .pane-head-btn {
   display: flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; margin-left: 2px;
+  width: 22px; height: 22px; margin-left: var(--space-1);
   border: none; border-radius: var(--radius-sm);
   background: transparent; color: var(--color-text-disabled); cursor: pointer;
 }
 .pane-head-btn:hover { color: var(--color-accent); background: var(--color-bg-active); }
 /* ---- 时间线筛选（来源 + 时间）---- */
 .tl-filters {
-  display: flex; flex-direction: column; gap: 4px;
-  padding: 8px 10px; flex-shrink: 0;
+  display: flex; flex-direction: column; gap: var(--space-2);
+  padding: var(--space-4) 10px; flex-shrink: 0;
   border-bottom: 1px solid var(--color-border);
 }
-.tl-filter-row { display: flex; gap: 4px; flex-wrap: wrap; }
+.tl-filter-row { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 .tl-chip {
-  padding: 2px 9px; border-radius: var(--radius-md);
+  padding: var(--space-1) 9px; border-radius: var(--radius-md);
   border: 1px solid var(--color-border); background: transparent;
-  color: var(--color-text-secondary); font-size: 11px; font-family: inherit;
+  color: var(--color-text-secondary); font-size: var(--text-xs); font-family: inherit;
   cursor: pointer; white-space: nowrap;
   transition: background-color 0.1s, color 0.1s, border-color 0.1s;
 }
@@ -375,17 +375,17 @@ onUnmounted(() => {
 .tl-chip.active {
   background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent);
 }
-.pane-body { flex: 1; overflow-y: auto; padding: 6px; }
-.pane-empty { margin: 0; padding: 24px 12px; font-size: 12px; line-height: 1.6; color: var(--color-text-disabled); }
+.pane-body { flex: 1; overflow-y: auto; padding: var(--space-3); }
+.pane-empty { margin: 0; padding: var(--space-8) var(--space-5); font-size: var(--text-sm); line-height: 1.6; color: var(--color-text-disabled); }
 
 .used-list { list-style: none; margin: 0; padding: 0; }
 .used-row {
-  display: flex; align-items: center; gap: 8px; padding: 6px 8px;
-  border-radius: var(--radius-sm); font-size: 12px; color: var(--color-text-primary);
+  display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm); font-size: var(--text-sm); color: var(--color-text-primary);
 }
 .used-row:hover { background: var(--color-bg-hover); }
 .used-rank {
-  width: 18px; flex-shrink: 0; text-align: center; font-size: 11px;
+  width: 18px; flex-shrink: 0; text-align: center; font-size: var(--text-xs);
   color: var(--color-text-disabled); font-variant-numeric: tabular-nums;
 }
 .used-rank.top { color: var(--color-accent); font-weight: 600; }
@@ -393,12 +393,12 @@ onUnmounted(() => {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .used-count {
-  flex-shrink: 0; font-size: 11px; color: var(--color-text-secondary);
+  flex-shrink: 0; font-size: var(--text-xs); color: var(--color-text-secondary);
   font-variant-numeric: tabular-nums;
 }
 
 .tl-list { display: flex; flex-direction: column; }
-.tl-item { display: flex; gap: 10px; padding: 6px 8px; border-radius: var(--radius-sm); }
+.tl-item { display: flex; gap: 10px; padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); }
 .tl-item:hover { background: var(--color-bg-hover); }
 .tl-dot {
   width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%;
@@ -412,21 +412,21 @@ onUnmounted(() => {
 .tl-dot[data-kind='schedule'] { color: var(--color-log-info); }
 .tl-dot[data-kind='ssh_batch'] { color: var(--color-danger); border-color: var(--color-danger-border); }
 .tl-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.tl-line { font-size: 12px; color: var(--color-text-primary); display: flex; gap: 4px; align-items: baseline; }
+.tl-line { font-size: var(--text-sm); color: var(--color-text-primary); display: flex; gap: var(--space-2); align-items: baseline; }
 .tl-verb { color: var(--color-text-secondary); flex-shrink: 0; }
 .tl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 来源标签：靠右固定，不参与名字的收缩（名字再长也只截名字） */
 .tl-src {
   flex-shrink: 0;
   margin-left: auto;
-  padding: 0 4px;
+  padding: 0 var(--space-2);
   border-radius: var(--radius-xs);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   line-height: 1.5;
   color: var(--color-text-disabled);
   background: var(--color-bg-tertiary);
 }
 /* AI 触发的动作用强调色：一眼能扫出「哪些不是我干的」 */
 .tl-src.is-mcp { color: var(--color-accent); background: var(--color-accent-bg); }
-.tl-time { font-size: 11px; color: var(--color-text-disabled); }
+.tl-time { font-size: var(--text-xs); color: var(--color-text-disabled); }
 </style>

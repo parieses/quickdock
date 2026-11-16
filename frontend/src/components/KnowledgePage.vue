@@ -420,17 +420,25 @@ async function removeOne(src: KBSource, ev: Event) {
       previewOpen.value = false
     }
     await refreshAll()
+    toast.success(t('deleted'))
   } catch (e) {
     toast.error(getErrorMessage(e))
     logErr('kb', e)
   }
 }
 
+const indexStopping = ref(false)
 async function stopIndex() {
+  if (indexStopping.value) return
+  indexStopping.value = true
   try {
-    await CancelKBIndex()
+    unwrap(await CancelKBIndex())
+    toast.success(t('kbStopDone'))
   } catch (e) {
-    logErr('kb', e)
+    logErr('kb.stopIndex', e)
+    toast.error(getErrorMessage(e))
+  } finally {
+    indexStopping.value = false
   }
 }
 
@@ -732,7 +740,7 @@ onScopeDispose(() => {
         <p class="qd-page-sub">{{ subtitle }}</p>
       </template>
       <div class="qd-page-actions">
-        <button v-if="status?.running" class="qd-btn qd-btn-danger" @click="stopIndex">
+        <button v-if="status?.running" class="qd-btn qd-btn-danger" :disabled="indexStopping" @click="stopIndex">
           <Square :size="12" />
           {{ t('kbStop') }}
         </button>
@@ -841,10 +849,10 @@ onScopeDispose(() => {
               <span class="kb-doc-meta" :class="{ bad: s.status === 'failed' }">{{ docMeta(s) }}</span>
             </span>
             <span class="kb-doc-actions">
-              <span class="kb-doc-reindex" :title="t('kbReindex')" @click="reindexOne(s, $event)">
+              <span v-key-click class="kb-doc-reindex" :title="t('kbReindex')" :aria-label="t('kbReindex')" @click="reindexOne(s, $event)">
                 <RefreshCw :size="12" />
               </span>
-              <span class="kb-doc-remove" :title="t('kbRemove')" @click="removeOne(s, $event)">
+              <span v-key-click class="kb-doc-remove" :title="t('kbRemove')" :aria-label="t('kbRemove')" @click="removeOne(s, $event)">
                 <Trash2 :size="12" />
               </span>
             </span>
@@ -1131,9 +1139,9 @@ onScopeDispose(() => {
 .kb-progress {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   flex-shrink: 0;
-  padding: 5px 16px;
+  padding: 5px var(--space-6);
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
   background: var(--color-bg-tertiary);
@@ -1191,9 +1199,9 @@ onScopeDispose(() => {
 .kb-libs {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   flex-shrink: 0;
-  padding: 8px 10px 7px;
+  padding: var(--space-4) 10px 7px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -1209,9 +1217,9 @@ onScopeDispose(() => {
 .kb-side-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   flex-shrink: 0;
-  padding: 5px 6px 5px 12px;
+  padding: 5px var(--space-3) 5px var(--space-5);
   font-size: var(--text-xs);
   color: var(--color-text-muted);
   border-bottom: 1px solid var(--color-hairline);
@@ -1231,7 +1239,7 @@ onScopeDispose(() => {
 .kb-side-list {
   flex: 1;
   overflow-y: auto;
-  padding: 6px;
+  padding: var(--space-3);
 }
 
 /* 左栏文档筛选：文档多了才出现（见 showDocFilter）。
@@ -1239,9 +1247,9 @@ onScopeDispose(() => {
 .kb-doc-filter {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   flex-shrink: 0;
-  margin: 6px 8px 0;
+  margin: var(--space-3) var(--space-4) 0;
   padding: 3px 7px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -1272,9 +1280,9 @@ onScopeDispose(() => {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   width: 100%;
-  padding: 7px 8px;
+  padding: 7px var(--space-4);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   background: transparent;
@@ -1344,7 +1352,7 @@ onScopeDispose(() => {
 .kb-doc-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-1);
   flex-shrink: 0;
   opacity: 0;
   transition: opacity var(--transition-fast);
@@ -1401,7 +1409,7 @@ onScopeDispose(() => {
 .kb-tabs {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   flex-shrink: 0;
   min-height: 38px;
   padding: 0 10px;
@@ -1478,14 +1486,14 @@ onScopeDispose(() => {
 
 .kb-pane-top {
   flex-shrink: 0;
-  padding: 10px 16px 4px;
+  padding: 10px var(--space-6) var(--space-2);
 }
 
 .kb-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 8px 16px 18px;
+  padding: var(--space-4) var(--space-6) 18px;
 }
 
 /* ---- 检索 ---- */
@@ -1525,7 +1533,7 @@ onScopeDispose(() => {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  padding: 2px;
+  padding: var(--space-1);
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -1539,7 +1547,7 @@ onScopeDispose(() => {
 }
 
 .kb-result-count {
-  margin: 0 0 6px 2px;
+  margin: 0 0 var(--space-3) var(--space-1);
   font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
@@ -1548,7 +1556,7 @@ onScopeDispose(() => {
    眼睛要在框线之间反复跳，反而找不到内容。留白 + hover 底色更安静。 */
 .kb-hit {
   padding: 9px 10px;
-  margin-bottom: 2px;
+  margin-bottom: var(--space-1);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   cursor: pointer;
@@ -1567,7 +1575,7 @@ onScopeDispose(() => {
 .kb-hit-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   margin-bottom: 5px;
   font-size: var(--text-xs);
   color: var(--color-text-muted);
@@ -1594,7 +1602,7 @@ onScopeDispose(() => {
 
 .kb-hit-tags {
   display: inline-flex;
-  gap: 4px;
+  gap: var(--space-2);
   margin-left: auto;
   flex-shrink: 0;
 }
@@ -1602,7 +1610,7 @@ onScopeDispose(() => {
 .kb-tag {
   padding: 0 5px;
   border-radius: var(--radius-sm);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   line-height: 16px;
   white-space: nowrap;
 }
@@ -1637,7 +1645,7 @@ onScopeDispose(() => {
 
 .kb-mark {
   padding: 0 1px;
-  border-radius: 2px;
+  border-radius: var(--radius-2xs);
   background: var(--color-search-hit-bg);
   color: var(--color-text-primary);
 }
@@ -1646,8 +1654,8 @@ onScopeDispose(() => {
 .kb-ask-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 14px 16px 10px;
+  gap: var(--space-5);
+  padding: 14px var(--space-6) 10px;
 }
 
 .kb-msg {
@@ -1667,7 +1675,7 @@ onScopeDispose(() => {
 }
 
 .kb-msg-body {
-  padding: 9px 12px;
+  padding: 9px var(--space-5);
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
   line-height: 1.65;
@@ -1705,13 +1713,13 @@ onScopeDispose(() => {
 }
 
 .kb-cite {
-  padding: 2px 7px;
+  padding: var(--space-1) 7px;
   border: 1px solid var(--card-border-color);
   border-radius: var(--radius-sm);
   background: var(--color-card-bg);
   color: var(--color-text-secondary);
   font-family: inherit;
-  font-size: 11px;
+  font-size: var(--text-xs);
   cursor: pointer;
   transition: border-color var(--transition-fast), color var(--transition-fast);
 }
@@ -1723,21 +1731,21 @@ onScopeDispose(() => {
 
 .kb-ask-box {
   flex-shrink: 0;
-  padding: 8px 16px 14px;
+  padding: var(--space-4) var(--space-6) 14px;
   border-top: 1px solid var(--color-hairline);
 }
 
 .kb-ask-inner {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .kb-ask-input {
   flex: 1;
   min-width: 0;
   resize: none;
-  padding: 8px 11px;
+  padding: var(--space-4) 11px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg-secondary);
@@ -1776,7 +1784,7 @@ onScopeDispose(() => {
   align-items: center;
   gap: 7px;
   flex-shrink: 0;
-  padding: 6px 6px 6px 12px;
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-5);
   border-bottom: 1px solid var(--color-hairline);
 }
 
@@ -1806,21 +1814,21 @@ onScopeDispose(() => {
 .kb-preview-tools {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   flex-shrink: 0;
-  padding: 6px 12px;
+  padding: var(--space-3) var(--space-5);
   font-size: var(--text-xs);
   color: var(--color-text-muted);
   border-bottom: 1px solid var(--color-hairline);
 }
 
 .kb-chunk-list {
-  padding: 8px 10px 16px;
+  padding: var(--space-4) 10px var(--space-6);
 }
 
 .kb-chunk {
-  padding: 8px 10px;
-  margin-bottom: 6px;
+  padding: var(--space-4) 10px;
+  margin-bottom: var(--space-3);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
@@ -1837,7 +1845,7 @@ onScopeDispose(() => {
   display: flex;
   align-items: center;
   gap: 7px;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-2);
   font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
@@ -1905,8 +1913,8 @@ onScopeDispose(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 40px 18px;
+  gap: var(--space-3);
+  padding: var(--space-10) 18px;
   color: var(--color-text-disabled);
   text-align: center;
 }
@@ -1935,7 +1943,7 @@ onScopeDispose(() => {
   display: flex;
   align-items: center;
   gap: 5px;
-  margin: 6px 0 0;
+  margin: var(--space-3) 0 0;
   font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
@@ -1948,7 +1956,7 @@ onScopeDispose(() => {
    给个实心按钮会把「保存」抢成次要操作。 */
 .kb-hint-link {
   padding: 0;
-  margin-left: 2px;
+  margin-left: var(--space-1);
   border: 0;
   background: none;
   font-size: inherit;
@@ -1985,16 +1993,16 @@ onScopeDispose(() => {
 .kb-modal {
   width: 420px;
   max-width: calc(100% - 48px);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg);
-  background: var(--color-surface-elevated);
-  box-shadow: var(--shadow-lg, 0 12px 32px rgba(0, 0, 0, 0.4));
+  background: var(--color-popover-bg);
+  box-shadow: var(--shadow-pop);
 }
 
 .kb-modal-head {
   display: flex;
   align-items: center;
-  padding: 12px 14px 8px;
+  padding: var(--space-5) 14px var(--space-4);
 }
 
 /* 设置浮层用 absolute 定位，锚点必须是页面根容器（项目禁用 position:fixed）。 */
@@ -2028,21 +2036,21 @@ onScopeDispose(() => {
 .kb-modal-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 4px 14px 12px;
+  gap: var(--space-5);
+  padding: var(--space-2) 14px var(--space-5);
 }
 
 .kb-modal-foot {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-4);
   padding: 0 14px 14px;
 }
 
 .kb-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
 .kb-field-label {
@@ -2056,7 +2064,7 @@ onScopeDispose(() => {
 }
 
 .kb-input {
-  padding: 6px 9px;
+  padding: var(--space-3) 9px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg-secondary);
@@ -2088,10 +2096,10 @@ onScopeDispose(() => {
 .kb-lib-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   flex-shrink: 0;
   max-width: 170px;
-  padding: 3px 8px;
+  padding: 3px var(--space-4);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
   background: transparent;
@@ -2116,7 +2124,7 @@ onScopeDispose(() => {
 }
 
 .kb-lib-icon {
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1;
 }
 
@@ -2165,7 +2173,7 @@ onScopeDispose(() => {
 }
 
 .kb-hit-lib {
-  padding: 0 4px;
+  padding: 0 var(--space-2);
   border-radius: var(--radius-xs);
   background: var(--color-bg-tertiary);
   color: var(--color-text-muted);
@@ -2174,7 +2182,7 @@ onScopeDispose(() => {
 }
 
 .kb-select {
-  padding: 2px 6px;
+  padding: var(--space-1) var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--color-bg-secondary);
@@ -2196,7 +2204,7 @@ onScopeDispose(() => {
 .kb-icon-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
 .kb-icon-pick {

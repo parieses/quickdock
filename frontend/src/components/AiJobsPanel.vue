@@ -13,6 +13,7 @@ import { useI18n } from 'vue-i18n'
 import { X } from '@lucide/vue'
 import { AIJobKill, AIJobLog, AIJobsList } from '../../bindings/quickdock/services/ai/aiservice'
 import { unwrap } from '../utils/api'
+import { useToast } from '../composables/useToast'
 
 /** 后端返回的一行（services/ai/ai_jobs.go 的 AIJobView）。 */
 interface AIJobView {
@@ -46,6 +47,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const { confirm: toastConfirm } = useToast()
 
 const jobs = ref<AIJobView[]>([])
 const loading = ref(false)
@@ -114,6 +116,8 @@ async function load(fromPoll = false) {
 
 async function kill(j: AIJobView) {
   if (killingId.value) return
+  // 运行中的任务终止后进度不可恢复，执行前问一次（killingId 仍负责防连点）。
+  if (!(await toastConfirm(t('aiJobKillConfirm')))) return
   killingId.value = j.id
   try {
     const res = unwrap<{ killed: boolean; status?: string }>(await AIJobKill(j.id))
@@ -289,7 +293,7 @@ onUnmounted(stopPoll)
   background: var(--color-bg-primary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg, 0 12px 32px rgba(0, 0, 0, 0.28));
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
 }
 
@@ -297,9 +301,9 @@ onUnmounted(stopPoll)
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px;
+  padding: var(--space-4) 10px;
   border-bottom: 1px solid var(--color-border);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--color-text-secondary);
 }
@@ -307,7 +311,7 @@ onUnmounted(stopPoll)
 .ai-jobs-title {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 /* 运行中数量做成小圆点而不是「(N)」：一眼看到「还有东西在跑」就够，不用读数字 */
@@ -317,11 +321,11 @@ onUnmounted(stopPoll)
   justify-content: center;
   min-width: 15px;
   height: 15px;
-  padding: 0 4px;
+  padding: 0 var(--space-2);
   border-radius: var(--radius-full);
   background: var(--color-accent-bg);
   color: var(--color-accent);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -331,7 +335,7 @@ onUnmounted(stopPoll)
   color: var(--color-text-muted);
   cursor: pointer;
   display: flex;
-  padding: 2px;
+  padding: var(--space-1);
   border-radius: var(--radius-sm);
 }
 
@@ -344,11 +348,11 @@ onUnmounted(stopPoll)
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 4px;
+  padding: var(--space-2);
 }
 
 .ai-job {
-  padding: 6px 6px 7px;
+  padding: var(--space-3) var(--space-3) 7px;
   border-radius: var(--radius-sm);
 }
 
@@ -412,7 +416,7 @@ onUnmounted(stopPoll)
 
 .ai-job-cmd {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--color-text-primary);
   overflow: hidden;
@@ -423,9 +427,9 @@ onUnmounted(stopPoll)
 .ai-job-meta {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 2px;
-  font-size: 11px;
+  gap: var(--space-3);
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
 }
@@ -446,17 +450,17 @@ onUnmounted(stopPoll)
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-1);
   margin-top: -1px;
 }
 
 .ai-job-act {
-  padding: 1px 6px;
+  padding: 1px var(--space-3);
   border: none;
   border-radius: var(--radius-xs);
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
   white-space: nowrap;
@@ -478,8 +482,8 @@ onUnmounted(stopPoll)
 }
 
 .ai-job-err {
-  margin: 4px 0 0 13px;
-  font-size: 11px;
+  margin: var(--space-2) 0 0 13px;
+  font-size: var(--text-xs);
   color: var(--color-danger);
   word-break: break-word;
 }
@@ -487,13 +491,13 @@ onUnmounted(stopPoll)
 /* 日志贴在行下、与命令文字对齐（缩进 = 点 6 + gap 7） */
 .ai-job-log {
   margin: 5px 0 0 13px;
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
   max-height: 220px;
   overflow: auto;
   border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.5;
   color: var(--color-text-secondary);
   white-space: pre-wrap;
@@ -502,14 +506,14 @@ onUnmounted(stopPoll)
 
 .ai-job-trunc {
   margin: 3px 0 0 13px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-disabled);
 }
 
 .ai-jobs-empty {
-  padding: 14px 8px;
+  padding: 14px var(--space-4);
   text-align: center;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-disabled);
 }
 
@@ -521,7 +525,7 @@ onUnmounted(stopPoll)
   margin: 0;
   padding: 7px 10px;
   border-top: 1px solid var(--color-border);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.45;
   color: var(--color-text-disabled);
 }

@@ -336,9 +336,11 @@ function buildSnapshotHtml(): string {
     return `<section><h2>${esc(g.name)}</h2><div class="grid">${cards}</div></section>`
   }).join('')
 
-  // 快照是独立文档，离开应用就没有 CSS 变量了，故色值、圆角一律写具体值。
-  // 别在这里用 var(--radius-*)：独立文档里变量未定义，border-radius 会静默
-  // 退化成 0，导出的卡片和横幅全是直角，和界面里看到的完全不是一回事。
+  // 快照是独立文档，离开应用就没有 CSS 变量了，故色值、圆角、字号一律写具体值。
+  // 别在这里用 var(--radius-*) / var(--text-*)：独立文档里变量未定义，
+  // border-radius 会静默退化成 0、字号退回浏览器默认，导出的卡片和横幅
+  // 跟界面里看到的完全不是一回事。
+  // 【防呆】下面是字符串常量而非组件样式，全仓 CSS 收敛脚本必须跳过这一段。
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>${esc(t('statusTitle'))}</title>
@@ -354,7 +356,7 @@ function buildSnapshotHtml(): string {
   .banner.statusPartial .bdot{background:#f59e0b}
   .banner.statusAllDown .bdot{background:#ef4444}
   .bmeta{display:flex;flex-wrap:wrap;gap:20px;margin-top:14px;font-size:13px;color:#525b68}
-  .bmeta b{font-size: 15px;color:#1a1f27;margin-right:4px}
+  .bmeta b{font-size:15px;color:#1a1f27;margin-right:4px}
   h2{font-size:14px;margin:22px 0 10px;color:#525b68}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
   .card{background:#fff;border:1px solid #dde1e8;border-radius:8px;padding:14px}
@@ -398,14 +400,15 @@ function exportSnapshot() {
 
 <template>
   <div :class="['st-page', { embedded: props.embedded }]">
-    <!-- 嵌入时父页已有标题与汇总条，这里降级成内容区的一行工具；
-         再摆一层 qd-page-header 看着像第二个页头，会把上方统计顶掉。 -->
-    <div :class="props.embedded ? 'st-toolbar' : 'qd-page-header'">
+    <!-- 页头骨架全站只用 qd-page-header 一套：嵌入态挂 is-embedded 修饰类，
+         由本文件 scoped 样式降级成一行工具（无底色 / 无分隔 / 低高度、无标题行），
+         既不出现第二层页头，也不用 st-toolbar / st-toolbar-actions 另起一套类名。 -->
+    <div :class="['qd-page-header', { 'is-embedded': props.embedded }]">
       <div v-if="!props.embedded" class="qd-page-titles">
         <h2 class="qd-page-title">{{ t('statusTitle') }}</h2>
         <span class="qd-page-sub">{{ t('statusSubtitle') }}</span>
       </div>
-      <div :class="props.embedded ? 'st-toolbar-actions' : 'qd-page-actions'">
+      <div class="qd-page-actions">
         <label class="st-refresh">
           <input v-model="autoRefresh" type="checkbox" />
           <span>{{ t('statusAutoRefresh') }}</span>
@@ -484,17 +487,30 @@ function exportSnapshot() {
 .st-page { display: flex; flex-direction: column; gap: var(--space-5); padding: var(--space-6); }
 /* 嵌进监控页后由父页提供标题与外边距，这里只留工具条，避免两层页头叠在一起。 */
 .st-page.embedded { padding: 0; gap: var(--space-4); }
-.st-toolbar { display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; }
-.st-toolbar-actions { display: inline-flex; align-items: center; gap: var(--space-3); }
-.st-refresh { display: inline-flex; align-items: center; gap: var(--space-2); font-size: 12px; color: var(--color-text-secondary); cursor: pointer; }
-.st-note { margin: 0; font-size: 11px; line-height: 1.6; color: var(--color-text-disabled); }
+/* 嵌入态页头降级：复用 .st-toolbar 原来「一行、靠右、无通栏底色」的几何结果，
+   但不再另起类名 —— 直接把 .qd-page-header 的 46px 通栏底色 / 下缘线 / 阴影去掉。
+   数值一律取 style.css token，不留裸 px。 */
+.qd-page-header.is-embedded {
+  min-height: 0;
+  padding: 0;
+  background: none;
+  border-bottom: none;
+  box-shadow: none;
+}
+.qd-page-header.is-embedded .qd-page-titles { display: none; }
+.qd-page-header.is-embedded .qd-page-actions {
+  gap: var(--space-3);
+  margin-left: auto;
+}
+.st-refresh { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--color-text-secondary); cursor: pointer; }
+.st-note { margin: 0; font-size: var(--text-xs); line-height: 1.6; color: var(--color-text-disabled); }
 
 .st-state {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: var(--space-3); min-height: 160px; font-size: 13px; color: var(--color-text-muted);
+  gap: var(--space-3); min-height: 160px; font-size: var(--text-md); color: var(--color-text-muted);
 }
 .st-state-error { color: var(--color-danger); }
-.st-state-hint { margin: 0; font-size: 12px; color: var(--color-text-disabled); }
+.st-state-hint { margin: 0; font-size: var(--text-sm); color: var(--color-text-disabled); }
 
 .st-banner {
   padding: var(--space-6); border-radius: var(--radius-lg);
@@ -502,7 +518,7 @@ function exportSnapshot() {
 }
 .st-banner.statusPartial { border-color: var(--color-warning-border); background: var(--color-warning-bg); }
 .st-banner.statusAllDown { border-color: var(--color-danger-border); background: var(--color-danger-bg); }
-.st-banner-head { display: flex; align-items: center; gap: var(--space-3); font-size: 18px; font-weight: 600; color: var(--color-text-primary); }
+.st-banner-head { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-xl); font-weight: 600; color: var(--color-text-primary); }
 .st-banner-dot {
   width: 12px; height: 12px; border-radius: var(--radius-full);
   background: var(--color-success); flex-shrink: 0;
@@ -511,12 +527,12 @@ function exportSnapshot() {
 .st-banner.statusAllDown .st-banner-dot { background: var(--color-danger); }
 .st-banner-metrics {
   display: flex; flex-wrap: wrap; gap: var(--space-7); margin-top: var(--space-4);
-  font-size: 12px; color: var(--color-text-secondary);
+  font-size: var(--text-sm); color: var(--color-text-secondary);
 }
-.st-banner-metrics b { font-size: 15px; color: var(--color-text-primary); margin-right: var(--space-2); }
+.st-banner-metrics b { font-size: var(--text-lg); color: var(--color-text-primary); margin-right: var(--space-2); }
 .st-updated { color: var(--color-text-muted); }
 
-.st-group-title { margin: var(--space-2) 0 var(--space-3); font-size: 13px; font-weight: 600; color: var(--color-text-secondary); }
+.st-group-title { margin: var(--space-2) 0 var(--space-3); font-size: var(--text-md); font-weight: 600; color: var(--color-text-secondary); }
 .st-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--space-4); }
 .st-card {
   padding: var(--space-4); border-radius: var(--radius-md);
@@ -528,28 +544,28 @@ function exportSnapshot() {
 .st-dot.down { background: var(--color-danger); }
 .st-dot.unknown { background: var(--color-warning); }
 .st-card-name {
-  flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--color-text-primary);
+  flex: 1; min-width: 0; font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.st-card-status { font-size: 11px; color: var(--color-text-muted); flex-shrink: 0; }
+.st-card-status { font-size: var(--text-xs); color: var(--color-text-muted); flex-shrink: 0; }
 .st-card-target {
-  margin-top: var(--space-2); font-size: 11px; color: var(--color-text-secondary);
+  margin-top: var(--space-2); font-size: var(--text-xs); color: var(--color-text-secondary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .st-kind {
   display: inline-block; padding: 0 var(--space-2); border-radius: var(--radius-xs);
-  background: var(--color-accent-bg); color: var(--color-accent); font-size: 10px;
+  background: var(--color-accent-bg); color: var(--color-accent); font-size: var(--text-2xs);
 }
 .st-metrics {
   display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-2) var(--space-4);
   margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--color-border);
 }
-.st-metric { display: flex; justify-content: space-between; gap: var(--space-2); font-size: 11px; }
+.st-metric { display: flex; justify-content: space-between; gap: var(--space-2); font-size: var(--text-xs); }
 .st-metric-lbl { color: var(--color-text-muted); }
 .st-metric-val { color: var(--color-text-primary); font-weight: 600; }
 .st-cells { display: flex; flex-wrap: wrap; gap: 3px; margin-top: var(--space-4); }
 .st-cell { width: 10px; height: 16px; border-radius: var(--radius-xs); background: var(--color-border-light); }
 .st-cell.up { background: var(--color-success); }
 .st-cell.down { background: var(--color-danger); }
-.st-cells-empty { font-size: 11px; color: var(--color-text-disabled); }
+.st-cells-empty { font-size: var(--text-xs); color: var(--color-text-disabled); }
 </style>

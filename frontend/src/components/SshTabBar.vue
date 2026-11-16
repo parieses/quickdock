@@ -212,7 +212,7 @@ function clearDrag() {
 
     <!-- 右键菜单：复制会话到新标签 -->
     <div v-if="menu" class="tab-menu-backdrop" @click="closeMenu" @contextmenu.prevent="closeMenu">
-      <div class="tab-menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @click.stop>
+      <div v-key-click class="tab-menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @click.stop>
         <button class="tab-menu-item" @click="duplicate(menu.id)">
           {{ t('sshDuplicateTab') }}
         </button>
@@ -246,7 +246,7 @@ function clearDrag() {
   max-width: 190px;
   padding: 0 var(--space-3) 0 var(--space-4);
   height: 30px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   color: var(--color-text-secondary);
   background: transparent;
@@ -340,7 +340,7 @@ function clearDrag() {
 .tab-x {
   display: flex;
   flex: 0 0 auto;
-  padding: 2px;
+  padding: var(--space-1);
   border-radius: var(--radius-xs);
   color: var(--color-text-muted);
   opacity: 0;
@@ -414,7 +414,7 @@ function clearDrag() {
 .tabs-font-val {
   min-width: 16px;
   text-align: center;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
   color: var(--color-text-muted);
   user-select: none;
@@ -422,8 +422,8 @@ function clearDrag() {
 
 /* 同一主机的多个标签：右上角小序号，便于区分「哪个是跑更新的、哪个是看日志的」 */
 .tab-ord {
-  margin-left: 2px;
-  font-size: 10px;
+  margin-left: var(--space-1);
+  font-size: var(--text-2xs);
   font-weight: 500;
   color: var(--color-text-muted);
   font-family: var(--font-family);
@@ -450,7 +450,7 @@ function clearDrag() {
   display: block;
   width: 100%;
   padding: var(--space-2) var(--space-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   text-align: left;
   color: var(--color-text-primary);

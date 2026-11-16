@@ -19,6 +19,7 @@ import type { CollectionItem, EnvRuntimeInfo, EnvServiceStatus } from '../../typ
 import type { PluginCmdIndex, PluginScore } from '../usePluginIndex'
 import { ENV_GROUP_ALIASES, ENV_RUNTIME_ALIASES, todoSubtitle } from './types'
 import type { CmdNote, CmdTodo, LcIndex, NavSearchItem, ResultGroup, SearchResult } from './types'
+import { ITEM_TYPE, APP_CATEGORY_OTHER, APP_CATEGORY_SYSTEM } from '../../constants/itemTypes'
 
 export interface MatchCtx {
   q: string
@@ -210,8 +211,8 @@ export function matchItems(ctx: MatchCtx): MatchOutcome | null {
 
   // 应用类型条目优先；同权重时按相关度与频次排序
   itemResults.sort((a, b) => {
-    const wa = (a.item?.type === '应用' ? 1000 : 0) + (a.score || 0) + Math.min(30, a.frecencyScore || 0)
-    const wb = (b.item?.type === '应用' ? 1000 : 0) + (b.score || 0) + Math.min(30, b.frecencyScore || 0)
+    const wa = (a.item?.type === ITEM_TYPE.APP ? 1000 : 0) + (a.score || 0) + Math.min(30, a.frecencyScore || 0)
+    const wb = (b.item?.type === ITEM_TYPE.APP ? 1000 : 0) + (b.score || 0) + Math.min(30, b.frecencyScore || 0)
     return wb - wa
   })
   if (itemResults.length === 0) return null
@@ -338,7 +339,7 @@ export function matchApps(ctx: MatchCtx): MatchOutcome | null {
     appResults.push({
       type: 'app',
       label: app.name,
-      desc: app.category !== '其他' && app.category !== '系统工具' ? app.category : app.path,
+      desc: app.category !== APP_CATEGORY_OTHER && app.category !== APP_CATEGORY_SYSTEM ? app.category : app.path,
       icon: ctx.appIcon(app.name),
       iconBase64: app.iconBase64,
       appPath: app.path,

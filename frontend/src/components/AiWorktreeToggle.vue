@@ -119,7 +119,7 @@ function onToggle() {
 .ai-wt {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   position: relative;
 }
 
@@ -127,14 +127,14 @@ function onToggle() {
 .ai-wt-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   height: 22px;
   padding: 0 7px;
   border: 1px dashed var(--color-border);
   border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
   transition: color var(--transition-fast), border-color var(--transition-fast),
@@ -166,7 +166,7 @@ function onToggle() {
   border-radius: var(--radius-full);
   background: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
   max-width: 160px;
@@ -202,7 +202,7 @@ function onToggle() {
   min-width: 160px;
   max-height: 240px;
   overflow: auto;
-  padding: 4px;
+  padding: var(--space-2);
   background: var(--color-bg-primary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -213,12 +213,12 @@ function onToggle() {
 .ai-wt-item {
   display: block;
   width: 100%;
-  padding: 5px 8px;
+  padding: 5px var(--space-4);
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   text-align: left;
   cursor: pointer;
@@ -231,8 +231,8 @@ function onToggle() {
 .ai-wt-item.is-sel { color: var(--color-accent); }
 
 .ai-wt-empty {
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
   color: var(--color-text-disabled);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 </style>

@@ -85,7 +85,7 @@ const aiTabs = computed<{ value: AiSettingsTab; label: string }[]>(() => [
 //   2) '{' '}' 在 vue-i18n 里是插值定界符、'@' 是 linked-message 前缀，放进 messages
 //      会被当语法解析 —— 开发环境只打一条警告，生产构建直接抛 SyntaxError，
 //      整个页面渲染失败（表现为「新建任务页白屏 / 输入框消失」）。
-const EXT_IMPORT_PH = '{\n  "filesystem": {\n    "command": "npx",\n    "args": ["-y", "@modelcontextprotocol/server-filesystem", "D:/proj"]\n  },\n  "remote": { "url": "http://127.0.0.1:9000/mcp",\n    "headers": { "Authorization": "Bearer sk-xxx" } }\n}'
+const EXT_IMPORT_PH = '{\n  "filesystem": {\n    "command": "npx",\n    "args": ["-y", "@modelcontextprotocol/server-filesystem", "D:/proj"]\n },\n  "remote": { "url": "http://127.0.0.1:9000/mcp",\n    "headers": { "Authorization": "Bearer sk-xxx" } }\n}'
 const EXT_ARGS_PH = '-y\n@modelcontextprotocol/server-filesystem\nD:/proj'
 const EXT_HEADERS_PH = 'X-API-Key: sk-xxx\nX-Tenant: acme'
 
@@ -1243,7 +1243,7 @@ function saveAIModal() {
         :key="p.id"
         :class="['ai-profile-item', { active: p.id === aiActive }]"
       >
-        <div class="ai-profile-info" @click="selectAIProfile(p.id)">
+        <div v-key-click class="ai-profile-info" @click="selectAIProfile(p.id)">
           <span class="ai-profile-name">{{ p.name || t('aiProfileDefault') }}</span>
           <span class="ai-profile-model">{{ p.model || '—' }}</span>
         </div>
@@ -1910,8 +1910,8 @@ function saveAIModal() {
 
 <style scoped>
 .ai-field-hint {
-  margin: 2px 0 0;
-  font-size: 11px;
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs);
   line-height: 1.5;
   color: var(--color-text-muted);
 }
@@ -1920,7 +1920,7 @@ function saveAIModal() {
 .ai-ext-expand {
   display: inline-flex;
   align-items: center;
-  padding: 4px;
+  padding: var(--space-2);
 }
 .ai-ext-expand svg {
   transition: transform 0.15s ease;
@@ -1929,22 +1929,22 @@ function saveAIModal() {
   transform: rotate(180deg);
 }
 .ai-ext-tools {
-  margin-top: 8px;
-  padding-top: 8px;
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
   border-top: 1px solid var(--color-border);
 }
 .ai-ext-tools-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-3);
   max-height: 220px;
   overflow-y: auto;
 }
 .ai-ext-tool {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
 }
@@ -1953,19 +1953,19 @@ function saveAIModal() {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
 }
 .ai-ext-tool-name {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-primary);
   word-break: break-all;
 }
 .ai-ext-tool-off {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--color-warning);
 }
 .ai-ext-tool-desc {
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.5;
   color: var(--color-text-muted);
   word-break: break-word;
@@ -1994,7 +1994,7 @@ function saveAIModal() {
   border-radius: var(--radius-sm);
   background: var(--color-danger-bg);
   color: var(--color-danger);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1;
 }
 

@@ -146,19 +146,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
 <style scoped>
 .ap-root { position: relative; }
-.ap-row { display: flex; gap: 6px; }
+.ap-row { display: flex; gap: var(--space-3); }
 .ap-input {
   flex: 1; min-width: 0;
-  padding: 8px 12px;
+  padding: var(--space-4) var(--space-5);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-primary);
-  font-size: 13px; font-family: inherit; outline: none;
+  font-size: var(--text-md); font-family: inherit; outline: none;
   transition: border-color 0.12s;
 }
 .ap-input:focus { border-color: var(--color-border-focus-soft); }
 .ap-input::placeholder { color: var(--color-text-disabled); }
 .ap-btn {
-  display: flex; align-items: center; gap: 2px;
+  display: flex; align-items: center; gap: var(--space-1);
   height: 28px; padding: 0 11px;
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-muted);
@@ -177,8 +177,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   overflow: hidden;
 }
 .ap-search {
-  display: flex; align-items: center; gap: 6px;
-  padding: 8px 10px;
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-4) 10px;
   border-bottom: 1px solid var(--color-border);
   color: var(--color-text-disabled);
 }
@@ -186,20 +186,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   flex: 1; min-width: 0;
   border: none; outline: none;
   background: transparent; color: var(--color-text-primary);
-  font-size: 12px; font-family: inherit;
+  font-size: var(--text-sm); font-family: inherit;
 }
 .ap-list { max-height: 240px; overflow-y: auto; }
 .ap-hint {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: var(--space-3);
   padding: 14px 10px; margin: 0;
-  font-size: 12px; color: var(--color-text-disabled);
+  font-size: var(--text-sm); color: var(--color-text-disabled);
 }
 .ap-item {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: var(--space-4);
   width: 100%; padding: 7px 10px;
   border: none; background: none;
   color: var(--color-text-primary);
-  font-size: 12px; font-family: inherit;
+  font-size: var(--text-sm); font-family: inherit;
   text-align: left; cursor: pointer;
 }
 .ap-item:hover { background: var(--color-bg-hover); }
@@ -209,7 +209,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 .ap-path {
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: var(--color-text-disabled); font-size: 11px;
+  color: var(--color-text-disabled); font-size: var(--text-xs);
 }
 .ap-spin { animation: ap-spin 1s linear infinite; }
 @keyframes ap-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

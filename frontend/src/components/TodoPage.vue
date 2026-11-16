@@ -353,6 +353,7 @@ function hasTime(todo: Todo): boolean {
 }
 
 // ---- 4.2 标签 ----
+// 脏 JSON 属历史数据，解析失败退回空标签即可；弹错会把每次打开编辑框都变成报错。
 function parseTags(jsonStr: string): string[] {
   if (!jsonStr) return []
   try {
@@ -372,6 +373,7 @@ function tagsJSONToText(jsonStr: string): string {
 
 // ---- 4.4 重复 ----
 const RECUR_KINDS = ['none', 'daily', 'weekly', 'monthly']
+// 同上：重复规则的脏 JSON 退回默认值，静默降级。
 function parseRecurrence(jsonStr: string): RecurrenceForm {
   const def: RecurrenceForm = { kind: 'none', timeOfDay: '09:00', weekdays: '' }
   if (!jsonStr) return def
@@ -1067,7 +1069,7 @@ onUnmounted(() => {
             :title="t('focusStatsTitle')" @click.stop="toggleFocusStats">
             <BarChart3 :size="15" />
           </button>
-          <div v-if="showFocusHist" class="focus-hist-pop" @click.stop>
+          <div v-key-click v-if="showFocusHist" class="focus-hist-pop" @click.stop>
             <div class="fh-head">{{ t('todoFocusTodayStat', { count: todayFocusStats.count, min: todayFocusStats.minutes }) }}</div>
             <div v-if="!focusHistory.length" class="fh-empty">{{ t('todoFocusNoHistory') }}</div>
             <div v-else class="fh-list">
@@ -1079,7 +1081,7 @@ onUnmounted(() => {
               </div>
             </div>
           </div>
-          <div v-if="showFocusStats" class="focus-stats-pop" @click.stop>
+          <div v-key-click v-if="showFocusStats" class="focus-stats-pop" @click.stop>
             <FocusStatsPanel :refresh-token="focusStatsRefresh" />
           </div>
         </div>
@@ -1194,7 +1196,7 @@ onUnmounted(() => {
                     <RefreshCw :size="11" /> {{ recurrenceLabel(todo) }}
                   </span>
                   <template v-for="tg in parseTags(todo.tags)" :key="tg">
-                    <span class="tag-chip" @click.stop="activeTag = tg">{{ tg }}</span>
+                    <span v-key-click class="tag-chip" @click.stop="activeTag = tg">{{ tg }}</span>
                   </template>
                   <button class="status-pill" :class="'st-' + (todo.status || 'todo')" @click.stop="cycleStatus(todo)">
                     {{ statusLabel(todo.status) }}
@@ -1239,7 +1241,7 @@ onUnmounted(() => {
                     @keyup.esc="renamingSubId = ''"
                     @blur="commitRenameSub(st)"
                   />
-                  <span v-else class="sub-name" :title="t('todoSubRenameHint')" @dblclick="startRenameSub(st)">{{ st.title }}</span>
+                  <span v-else v-key-click class="sub-name" :title="t('todoSubRenameHint')" @dblclick="startRenameSub(st)" @keydown.f2.stop.prevent="startRenameSub(st)">{{ st.title }}</span>
                   <!-- 单独设截止日：子任务默认跟着父任务的日期，这里可单独覆盖 -->
                   <button class="act sub-act sub-due" :class="{ active: !!st.dueDate }"
                           :title="st.dueDate ? t('todoSubDueSet', { d: st.dueDate }) : t('todoSubDue')"
@@ -1298,7 +1300,7 @@ onUnmounted(() => {
                   <button class="status-pill" :class="'st-' + (card.status || 'todo')" @click.stop="cycleStatus(card)">{{ statusLabel(card.status) }}</button>
                   <i :class="['pri-dot', 'p-' + card.priority]"></i>
                   <template v-for="tg in parseTags(card.tags)" :key="tg">
-                    <span class="tag-chip" @click.stop="activeTag = tg">{{ tg }}</span>
+                    <span v-key-click class="tag-chip" @click.stop="activeTag = tg">{{ tg }}</span>
                   </template>
                   <span v-if="subtasksOf(card.id).length" class="sub-badge">▸{{ subProgress(card.id).done }}/{{ subProgress(card.id).total }}</span>
                 </div>
@@ -1493,19 +1495,19 @@ onUnmounted(() => {
 .todo-search { width: 220px; flex-shrink: 1; min-width: 120px; margin-right: var(--space-3); }
 .ts-input { padding-left: 28px; padding-right: 26px; }
 .ts-clear { position: absolute; right: 6px; border: none; background: none; color: var(--color-text-muted); cursor: pointer; display: flex; align-items: center; }
-.focus-dur { display: flex; align-items: center; gap: 2px; }
+.focus-dur { display: flex; align-items: center; gap: var(--space-1); }
 .focus-dur-btn {
   min-width: 28px; height: 24px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
-  color: var(--color-text-muted); border-radius: var(--radius-sm); font-size: 11px; cursor: pointer; font-family: inherit;
+  color: var(--color-text-muted); border-radius: var(--radius-sm); font-size: var(--text-xs); cursor: pointer; font-family: inherit;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 .focus-dur-btn:hover { color: var(--color-text-primary); }
 .focus-dur-btn.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
 .focus-dur-custom {
-  width: 52px; height: 24px; padding: 0 4px; text-align: center;
+  width: 52px; height: 24px; padding: 0 var(--space-2); text-align: center;
   border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
   color: var(--color-text-primary); border-radius: var(--radius-sm);
-  font-size: 11px; font-family: inherit; outline: none; -moz-appearance: textfield;
+  font-size: var(--text-xs); font-family: inherit; outline: none; -moz-appearance: textfield;
   transition: border-color var(--transition-fast);
 }
 .focus-dur-custom::-webkit-outer-spin-button,
@@ -1525,7 +1527,7 @@ onUnmounted(() => {
 .focus-hist-badge {
   position: absolute; top: -4px; right: -4px; min-width: 14px; height: 14px;
   padding: 0 3px; border-radius: var(--radius-full); background: var(--color-accent);
-  color: var(--color-accent-text); font-size: 10px; line-height: 14px; text-align: center; font-weight: 600;
+  color: var(--color-accent-text); font-size: var(--text-2xs); line-height: 14px; text-align: center; font-weight: 600;
 }
 .focus-hist-pop {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: 264px;
@@ -1534,26 +1536,26 @@ onUnmounted(() => {
   border-radius: var(--radius-md); box-shadow: var(--shadow-pop);
 }
 .fh-head {
-  font-size: 12px; font-weight: 600; color: var(--color-text-primary);
+  font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary);
   padding-bottom: var(--space-2); margin-bottom: var(--space-2);
   border-bottom: 1px solid var(--color-border);
 }
-.fh-empty { font-size: 11px; color: var(--color-text-disabled); text-align: center; padding: var(--space-3) 0; }
-.fh-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 11px; }
+.fh-empty { font-size: var(--text-xs); color: var(--color-text-disabled); text-align: center; padding: var(--space-3) 0; }
+.fh-row { display: flex; align-items: center; gap: var(--space-3); padding: 3px 0; font-size: var(--text-xs); }
 .fh-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-text-disabled); flex-shrink: 0; }
 .fh-dot.ok { background: var(--color-accent); }
 .fh-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-primary); }
 .fh-min { color: var(--color-text-muted); flex-shrink: 0; }
 .fh-time { color: var(--color-text-disabled); flex-shrink: 0; font-variant-numeric: tabular-nums; }
-.cal-month { font-size: 13px; font-weight: 600; color: var(--color-text-primary); min-width: 84px; text-align: center; }
+.cal-month { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); min-width: 84px; text-align: center; }
 
 .todo-error {
-  margin: 12px 20px 0; padding: 8px 12px; font-size: 12px;
+  margin: var(--space-5) var(--space-7) 0; padding: var(--space-4) var(--space-5); font-size: var(--text-sm);
   color: var(--color-danger); background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); flex-shrink: 0;
 }
 
-.todo-body { display: flex; gap: var(--space-6); flex: 1; min-height: 0; padding: 14px 20px 16px; }
+.todo-body { display: flex; gap: var(--space-6); flex: 1; min-height: 0; padding: 14px var(--space-7) var(--space-6); }
 
 /* 日历卡片 */
 /* 日历是页面里唯一的大卡片：圆角与全站统一到 md，并给它一道内高光——
@@ -1568,11 +1570,11 @@ onUnmounted(() => {
   align-self: flex-start;
 }
 .cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); margin-bottom: var(--space-1); }
-.cal-weekday { text-align: center; font-size: 11px; color: var(--color-text-disabled); font-weight: 500; padding-bottom: var(--space-1); }
+.cal-weekday { text-align: center; font-size: var(--text-xs); color: var(--color-text-disabled); font-weight: 500; padding-bottom: var(--space-1); }
 /* 日期格高度钉死在 46：原来用 1fr 且卡片被 flex 拉伸，空月份时日历会撑到
    500px 高，六行数字之间各空出一大段，整块看起来像没加载完。
    日历高度跟着内容走（日历卡自身 align-self: flex-start），右侧列表该占多高占多高。 */
-.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: minmax(46px, auto); gap: 2px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: minmax(46px, auto); gap: var(--space-1); }
 .cal-cell {
   position: relative;
   display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 3px;
@@ -1590,7 +1592,7 @@ onUnmounted(() => {
 .cal-day {
   display: flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border-radius: 50%;
-  font-size: 12px; font-weight: 500; color: var(--color-text-primary);
+  font-size: var(--text-sm); font-weight: 500; color: var(--color-text-primary);
   transition: color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
 }
 .cal-cell.out-month .cal-day { color: var(--color-text-disabled); }
@@ -1601,31 +1603,31 @@ onUnmounted(() => {
 .dot { width: 4px; height: 4px; border-radius: 50%; display: inline-block; }
 .dot.done { opacity: 0.3; }
 .cal-bell { color: var(--color-accent); }
-.cal-more { font-size: 10px; color: var(--color-text-disabled); font-style: normal; }
+.cal-more { font-size: var(--text-2xs); color: var(--color-text-disabled); font-style: normal; }
 
 .unscheduled-chip {
-  display: flex; align-items: center; gap: 6px; margin-top: var(--space-3);
-  padding: 8px 10px; border: 1px solid var(--color-border); background: var(--color-bg-primary);
-  color: var(--color-text-secondary); border-radius: var(--radius-md); font-size: 12px;
+  display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-3);
+  padding: var(--space-4) 10px; border: 1px solid var(--color-border); background: var(--color-bg-primary);
+  color: var(--color-text-secondary); border-radius: var(--radius-md); font-size: var(--text-sm);
   cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .unscheduled-chip:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .unscheduled-chip.active { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-accent-border); }
-.chip-count { margin-left: auto; font-style: normal; background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 6px; font-size: 11px; }
+.chip-count { margin-left: auto; font-style: normal; background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 var(--space-3); font-size: var(--text-xs); }
 
 /* 右侧面板 */
 .todo-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-4); }
-.panel-date { font-size: 15px; font-weight: 600; color: var(--color-text-primary); }
-.panel-remaining { font-size: 12px; color: var(--color-text-disabled); }
+.panel-date { font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
+.panel-remaining { font-size: var(--text-sm); color: var(--color-text-disabled); }
 
 .panel-head-right { display: flex; align-items: center; gap: var(--space-3); }
 
 /* 视图切换（列表 / 看板）*/
 .view-toggle { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
-.vt-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+.vt-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
   height: 22px; padding: 0 9px; border: none; background: var(--color-bg-tertiary);
-  color: var(--color-text-muted); font-size: 11px; cursor: pointer; font-family: inherit;
+  color: var(--color-text-muted); font-size: var(--text-xs); cursor: pointer; font-family: inherit;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .vt-btn + .vt-btn { border-left: 1px solid var(--color-border); }
@@ -1639,7 +1641,7 @@ onUnmounted(() => {
 
 /* 状态徽章（4.3）*/
 .status-pill {
-  font-size: 10px; padding: 0 7px; line-height: 16px; border-radius: var(--radius-md); cursor: pointer;
+  font-size: var(--text-2xs); padding: 0 7px; line-height: 16px; border-radius: var(--radius-md); cursor: pointer;
   border: 1px solid transparent; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .status-pill.st-todo { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
@@ -1648,15 +1650,15 @@ onUnmounted(() => {
 
 /* 子任务（4.1）*/
 .todo-item { flex-wrap: wrap; }
-.sub-progress { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.sub-progress { display: flex; align-items: center; gap: var(--space-4); margin-bottom: var(--space-2); }
 .sub-progress-bar { flex: 1; height: 4px; border-radius: var(--radius-xs); background: var(--color-bg-tertiary); overflow: hidden; }
 .sub-progress-fill { height: 100%; background: var(--color-accent); border-radius: var(--radius-xs); transition: width var(--transition-fast); }
-.sub-progress-text { font-size: 11px; color: var(--color-text-disabled); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.subtasks { flex-basis: 100%; margin: 6px 0 2px 26px; display: flex; flex-direction: column; gap: 3px; }
+.sub-progress-text { font-size: var(--text-xs); color: var(--color-text-disabled); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.subtasks { flex-basis: 100%; margin: var(--space-3) 0 var(--space-1) 26px; display: flex; flex-direction: column; gap: 3px; }
 .sub-item { display: flex; align-items: center; gap: 7px; padding: 3px 0; }
 .sub-item.done .sub-name { text-decoration: line-through; color: var(--color-text-disabled); }
 .sub-check { width: 15px; height: 15px; border-radius: var(--radius-xs); }
-.sub-name { flex: 1; font-size: 12px; color: var(--color-text-secondary); min-width: 0; }
+.sub-name { flex: 1; font-size: var(--text-sm); color: var(--color-text-secondary); min-width: 0; }
 .sub-del { opacity: 0; width: 22px; height: 22px; }
 .sub-item:hover .sub-del { opacity: 1; }
 /* 行内改名：与 .sub-name 同字号，去掉输入框边框只留底色，避免行高跳动 */
@@ -1664,24 +1666,24 @@ onUnmounted(() => {
   flex: 1; min-width: 0; height: 20px; padding: 0 5px;
   border: 1px solid var(--color-accent); border-radius: var(--radius-xs);
   background: var(--color-bg-tertiary); color: var(--color-text-primary);
-  font-size: 12px; font-family: inherit; outline: none;
+  font-size: var(--text-sm); font-family: inherit; outline: none;
 }
 /* 上下移：hover 才出现，和删除按钮同一套作息 */
 .sub-move { display: flex; align-items: center; gap: 1px; opacity: 0; }
 .sub-item:hover .sub-move { opacity: 1; }
 .sub-act { width: 18px; height: 18px; }
 .sub-act:disabled { opacity: 0.25; cursor: default; }
-.sub-add { margin-top: 2px; }
-.sub-input { height: 28px; font-size: 12px; }
+.sub-add { margin-top: var(--space-1); }
+.sub-input { height: 28px; font-size: var(--text-sm); }
 
 /* 单独设截止日：日期按钮与上下移同一套 hover 作息；已设日期的常显一个小色点提示 */
 .sub-due { opacity: 0; }
 .sub-item:hover .sub-due { opacity: 1; }
 .sub-due.active { opacity: 1; color: var(--color-accent); }
 .sub-date {
-  height: 20px; padding: 0 4px; border: 1px solid var(--color-accent);
+  height: 20px; padding: 0 var(--space-2); border: 1px solid var(--color-accent);
   border-radius: var(--radius-xs); background: var(--color-bg-tertiary);
-  color: var(--color-text-primary); font-size: 11px; font-family: inherit; outline: none;
+  color: var(--color-text-primary); font-size: var(--text-xs); font-family: inherit; outline: none;
 }
 
 /* 看板视图（4.3）*/
@@ -1691,13 +1693,13 @@ onUnmounted(() => {
   background: var(--color-card-bg); border-radius: var(--radius-lg);
   border: 1px solid var(--card-border-color); padding: var(--space-3);
 }
-.kanban-col-head { display: flex; align-items: center; gap: 6px; margin-bottom: var(--space-2); flex-shrink: 0; }
+.kanban-col-head { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-2); flex-shrink: 0; }
 .kanban-dot { width: 8px; height: 8px; border-radius: 50%; }
 .kanban-dot.st-todo { background: var(--color-text-disabled); }
 .kanban-dot.st-doing { background: var(--color-warning); }
 .kanban-dot.st-done { background: var(--color-accent); }
-.kanban-col-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
-.kanban-count { margin-left: auto; font-size: 11px; color: var(--color-text-disabled); background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 7px; }
+.kanban-col-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
+.kanban-count { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-disabled); background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 7px; }
 .kanban-cards { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); }
 .kanban-card {
   padding: 9px 11px; background: var(--color-bg-primary); border: 1px solid var(--color-border);
@@ -1706,21 +1708,21 @@ onUnmounted(() => {
 }
 .kanban-card:hover { background: var(--color-bg-hover); }
 .kanban-card:active { cursor: grabbing; }
-.kanban-card-name { font-size: 13px; color: var(--color-text-primary); }
-.kanban-card-meta { margin-top: 5px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.kanban-card-name { font-size: var(--text-md); color: var(--color-text-primary); }
+.kanban-card-meta { margin-top: 5px; display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center; }
 /* 卡片上的截止日：逾期改用警示色，扫一眼就知道哪张拖后腿了 */
-.kanban-due { font-size: 10px; color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
+.kanban-due { font-size: var(--text-2xs); color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
 .kanban-due.overdue { color: var(--color-danger); font-weight: 500; }
 /* 拖拽落点：整列描边提示，比只高亮卡片更容易判断"会落到哪一列" */
 .kanban-col.drag-over { border-color: var(--color-accent); background: var(--color-accent-bg); }
 .kanban-empty {
   flex: 1; display: flex; align-items: center; justify-content: center;
-  text-align: center; font-size: 11px; color: var(--color-text-disabled); padding: var(--space-5) 0;
+  text-align: center; font-size: var(--text-xs); color: var(--color-text-disabled); padding: var(--space-5) 0;
 }
 
-.tag-filter { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-3); }
-.tag-fbtn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
-  font-size: 11px; height: 22px; padding: 0 9px; border-radius: var(--radius-full); cursor: pointer;
+.tag-filter { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+.tag-fbtn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
+  font-size: var(--text-xs); height: 22px; padding: 0 9px; border-radius: var(--radius-full); cursor: pointer;
   border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
   color: var(--color-text-muted); font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
@@ -1736,10 +1738,10 @@ onUnmounted(() => {
 .todo-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); }
 .todo-empty { text-align: center; padding: var(--space-9) var(--space-4); color: var(--color-text-disabled); }
 .empty-icon { opacity: 0.4; margin-bottom: var(--space-2); }
-.empty-hint { font-size: 11px; color: var(--color-text-muted); margin-top: var(--space-2); }
+.empty-hint { font-size: var(--text-xs); color: var(--color-text-muted); margin-top: var(--space-2); }
 
 .todo-item {
-  display: flex; align-items: center; gap: var(--space-3); padding: 10px 12px;
+  display: flex; align-items: center; gap: var(--space-3); padding: 10px var(--space-5);
   background: var(--color-card-bg); border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md); transition: background var(--transition-fast);
 }
@@ -1764,21 +1766,21 @@ onUnmounted(() => {
 .check.checked { background: var(--color-accent); border-color: var(--color-accent); }
 .pri-dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; }
 .todo-main { flex: 1; min-width: 0; }
-.todo-name { font-size: 13px; color: var(--color-text-primary); }
-.todo-meta { font-size: 11px; color: var(--color-text-disabled); margin-top: 3px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.todo-name { font-size: var(--text-md); color: var(--color-text-primary); }
+.todo-meta { font-size: var(--text-xs); color: var(--color-text-disabled); margin-top: 3px; display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center; }
 .overdue-text { color: var(--color-danger); }
 .meta-pill { display: inline-flex; align-items: center; gap: 3px; color: var(--color-text-muted); }
 .meta-pill.sent { color: var(--color-text-disabled); }
 .done-pill { color: var(--color-accent); }
 .todo-note { color: var(--color-text-muted); }
 .tag-chip {
-  font-size: 10px; padding: 0 7px; line-height: 16px; border-radius: var(--radius-md);
+  font-size: var(--text-2xs); padding: 0 7px; line-height: 16px; border-radius: var(--radius-md);
   background: var(--color-accent-bg); color: var(--color-accent);
   cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .tag-chip:hover { filter: brightness(1.15); }
 .rec-pill { color: var(--color-text-secondary); }
-.todo-actions { display: flex; gap: 2px; opacity: 0; transition: opacity var(--transition-fast); }
+.todo-actions { display: flex; gap: var(--space-1); opacity: 0; transition: opacity var(--transition-fast); }
 .todo-item:hover .todo-actions { opacity: 1; }
 .act {
   width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
@@ -1787,25 +1789,25 @@ onUnmounted(() => {
 }
 .act:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
 .act.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
-.focus-act { font-size: 11px; font-weight: 600; color: var(--color-accent); min-width: 34px; }
+.focus-act { font-size: var(--text-xs); font-weight: 600; color: var(--color-accent); min-width: 34px; }
 .focus-act.running { background: var(--color-accent-bg); color: var(--color-accent); }
 
 .panel-foot { margin-top: var(--space-3); flex-shrink: 0; display: flex; align-items: center; gap: var(--space-3); }
-.clear-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+.clear-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
   height: 28px; padding: 0 11px; border: 1px solid var(--color-border); background: transparent;
-  color: var(--color-text-disabled); border-radius: var(--radius-sm); font-size: 12px;
+  color: var(--color-text-disabled); border-radius: var(--radius-sm); font-size: var(--text-sm);
   cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .clear-btn:hover { color: var(--color-danger); border-color: var(--color-danger-border); }
 .test-btn {
   display: inline-flex; align-items: center; gap: 5px; margin-left: auto;
   height: 28px; padding: 0 11px; border: 1px solid var(--color-border); background: transparent;
-  color: var(--color-text-secondary); border-radius: var(--radius-sm); font-size: 12px;
+  color: var(--color-text-secondary); border-radius: var(--radius-sm); font-size: var(--text-sm);
   cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .test-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent-border); }
 .test-btn:disabled { opacity: 0.5; cursor: default; }
-.reminder-hint { margin: var(--space-2) 0 0; font-size: 11px; color: var(--color-text-disabled); }
+.reminder-hint { margin: var(--space-2) 0 0; font-size: var(--text-xs); color: var(--color-text-disabled); }
 
 /* 优先级配色 */
 .p-none { background: var(--color-text-disabled); }

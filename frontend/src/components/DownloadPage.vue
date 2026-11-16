@@ -614,6 +614,7 @@ async function bulkResume() {
 async function bulkRemove() {
   const items = selectedTasks().map((x) => ({ gid: x.gid, force: forceFor(x) }))
   if (!items.length) { toast.error(t('dlNoAction')); return }
+  if (!(await toast.confirm(t('dlBulkRemoveConfirm', { count: items.length })))) return
   const ok = await removeMany(items)
   if (ok < items.length) toast.error(t('dlBulkPartial', { ok, failed: items.length - ok }))
   else toast.success(t('dlBulkRemoved', { count: ok }))
@@ -952,10 +953,18 @@ function ctxRetry() {
   if (task) void retryTask(task)
   closeCtx()
 }
-function ctxRemove() {
+async function ctxRemove() {
   const task = ctxTask.value
-  if (task) void remove(task.gid, forceFor(task))
   closeCtx()
+  if (!task) return
+  if (!(await toast.confirm(t('dlRemoveConfirm')))) return
+  await remove(task.gid, forceFor(task))
+}
+
+// 列表行内的单条移除：与批量 / 右键菜单走同一套确认文案，避免「有的删要确认、有的不要」。
+async function confirmRemove(task: DlTask) {
+  if (!(await toast.confirm(t('dlRemoveConfirm')))) return
+  await remove(task.gid, forceFor(task))
 }
 function ctxMove(delta: number) {
   const task = ctxTask.value
@@ -987,7 +996,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="qd-page dl-page" @click="closeCtx">
+  <div v-key-click class="qd-page dl-page" @click="closeCtx">
     <PageHeader>
       <template #titles>
         <h2 class="qd-page-title"><Download :size="16" />{{ t('dlTitle') }}</h2>
@@ -1144,7 +1153,7 @@ onUnmounted(() => {
             </div>
 
             <div v-else class="dl-list">
-              <div
+              <div v-key-click
                 v-for="task in visible" :key="task.gid" class="qd-card dl-item"
                 :class="{ 'is-current': selectedId === task.gid, 'is-checked': selectedIds.has(task.gid) }"
                 @click="selectedId = task.gid" @contextmenu.prevent="openCtx($event, task)"
@@ -1175,7 +1184,7 @@ onUnmounted(() => {
                   <button class="qd-icon-btn" :title="t('dlMoveDown')" @click.stop="moveTask(task, 1)"><ArrowDown :size="14" /></button>
                   <button class="qd-icon-btn" :title="t('dlOpenFolder')" @click.stop="openFolder(task)"><Folder :size="14" /></button>
                   <button v-if="task.status === 'error'" class="qd-btn qd-btn-sm" @click.stop="retryTask(task)"><RotateCcw :size="14" />{{ t('dlRetry') }}</button>
-                  <button class="qd-btn qd-btn-sm qd-btn-danger" @click.stop="remove(task.gid, forceFor(task))">{{ t('dlRemove') }}</button>
+                  <button class="qd-btn qd-btn-sm qd-btn-danger" @click.stop="confirmRemove(task)">{{ t('dlRemove') }}</button>
                   <button class="qd-icon-btn" :title="t('dlDetail')" @click.stop="selectedId = task.gid"><Info :size="14" /></button>
                 </div>
               </div>
@@ -1186,7 +1195,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 右键菜单坐标是运行时算出来的，按 R7 例外就近说明 -->
-    <div v-if="ctx" class="dl-ctx" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }" @click.stop>
+    <div v-key-click v-if="ctx" class="dl-ctx" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }" @click.stop>
       <button class="dl-ctx-item" @click="ctxShowDetail"><Info :size="14" />{{ t('dlCtxDetail') }}</button>
       <button class="dl-ctx-item" @click="ctxCopy(false)"><Link :size="14" />{{ t('dlCtxCopyLink') }}</button>
       <button class="dl-ctx-item" @click="ctxCopy(true)"><Folder :size="14" />{{ t('dlCtxCopyPath') }}</button>
@@ -1959,11 +1968,11 @@ onUnmounted(() => {
 .dl-item-head { display: flex; align-items: center; gap: var(--space-3); }
 .dl-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-md); color: var(--color-text-primary); }
 .dl-badge {
-  flex: none; display: inline-flex; align-items: center; gap: 2px; padding: 1px var(--space-2);
+  flex: none; display: inline-flex; align-items: center; gap: var(--space-1); padding: 1px var(--space-2);
   border-radius: var(--radius-sm); background: var(--color-accent-bg); color: var(--color-accent);
   font-size: var(--text-2xs);
 }
-.dl-tag { flex: none; padding: 2px var(--space-4); border-radius: var(--radius-full); font-size: var(--text-xs); color: var(--color-text-secondary); background: var(--color-bg-tertiary); }
+.dl-tag { flex: none; padding: var(--space-1) var(--space-4); border-radius: var(--radius-full); font-size: var(--text-xs); color: var(--color-text-secondary); background: var(--color-bg-tertiary); }
 .dl-tag.is-active { color: var(--color-accent); background: var(--color-accent-border-strong); }
 .dl-tag.is-complete { color: var(--color-success); background: var(--color-success-bg); }
 .dl-tag.is-error { color: var(--color-danger); background: var(--color-danger-bg); }
@@ -1983,8 +1992,10 @@ onUnmounted(() => {
   border: 1px solid var(--popover-border-color); border-radius: var(--radius-md);
   background: var(--color-popover-bg); box-shadow: var(--shadow-pop);
 }
-.dl-modal-wide { width: 720px; }
-.dl-modal-import { width: 980px; max-height: calc(100vh - 60px); }
+/* 变体与 .dl-modal 叠加使用，但显式写一遍 max-width：800px 最小窗口下
+   980 定宽若单独使用会横向溢出被裁，别指望「一定同时带基础类」。 */
+.dl-modal-wide { width: 720px; max-width: calc(100vw - 40px); }
+.dl-modal-import { width: 980px; max-width: calc(100vw - 40px); max-height: calc(100vh - 60px); }
 /* 导入表：列宽固定，长 URL / 长路径靠输入框内部横向滚动，不把弹框撑爆 */
 .dl-import-scroll { max-height: 320px; overflow: auto; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
 .dl-import-table { table-layout: fixed; min-width: 880px; }
@@ -1997,7 +2008,7 @@ onUnmounted(() => {
 .dl-import-table td.is-nowrap { white-space: nowrap; }
 .dl-import-table tr.is-off { opacity: 0.55; }
 .dl-import-input { width: 100%; min-width: 0; font-size: var(--text-2xs); }
-.dl-import-note { margin-top: 2px; font-size: var(--text-2xs); line-height: 1.4; color: var(--color-text-disabled); }
+.dl-import-note { margin-top: var(--space-1); font-size: var(--text-2xs); line-height: 1.4; color: var(--color-text-disabled); }
 .dl-import-state {
   display: inline-block; padding: 1px var(--space-2); border-radius: var(--radius-full);
   font-size: var(--text-2xs); white-space: nowrap;
@@ -2025,7 +2036,7 @@ onUnmounted(() => {
 .dl-modal-section { display: flex; flex-direction: column; gap: var(--space-3); }
 .dl-modal-section h4 { margin: 0; padding-bottom: var(--space-2); border-bottom: 1px solid var(--color-border); font-size: var(--text-xs); font-weight: 600; color: var(--color-text-secondary); }
 .dl-kv { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3) var(--space-5); }
-.dl-kv-row { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: var(--text-xs); }
+.dl-kv-row { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; font-size: var(--text-xs); }
 .dl-kv-row span { color: var(--color-text-muted); }
 .dl-kv-row b { font-weight: 500; color: var(--color-text-secondary); word-break: break-all; }
 .dl-kv-raw { margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
@@ -2046,13 +2057,13 @@ onUnmounted(() => {
 .dl-table td.is-wrap { word-break: break-all; max-width: 320px; }
 .dl-table-empty { padding: var(--space-8); text-align: center; font-size: var(--text-xs); color: var(--color-text-muted); }
 .dl-sub-title { display: inline-flex; align-items: center; gap: var(--space-2); margin: var(--space-2) 0 0; font-size: var(--text-xs); font-weight: 600; color: var(--color-text-secondary); }
-.dl-tracker-tier { display: flex; flex-direction: column; gap: 2px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--color-bg-secondary); }
+.dl-tracker-tier { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--color-bg-secondary); }
 .dl-tracker { font-size: var(--text-2xs); color: var(--color-text-muted); word-break: break-all; }
 
 /* 浮层：必须比卡片亮 */
 .dl-ctx {
   position: absolute; z-index: 50; min-width: 190px; padding: var(--space-2);
-  display: flex; flex-direction: column; gap: 2px;
+  display: flex; flex-direction: column; gap: var(--space-1);
   border-radius: var(--radius-md); background: var(--color-popover-bg);
   border: 1px solid var(--popover-border-color); box-shadow: var(--shadow-pop);
 }
