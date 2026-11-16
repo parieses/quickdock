@@ -42,7 +42,7 @@ async function openMain() {
 .notice-root {
   position: fixed;
   inset: 0;
-  z-index: 30000;
+  z-index: var(--z-lock);
   display: flex;
   align-items: center;
   justify-content: center;

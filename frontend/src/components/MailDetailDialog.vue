@@ -171,7 +171,7 @@ onUnmounted(() => { if (copyTimer) clearTimeout(copyTimer) })
 
 <style scoped>
 .md-overlay {
-  position: fixed; inset: 0; z-index: 20000;
+  position: fixed; inset: 0; z-index: var(--z-confirm);
   background: var(--color-bg-overlay);
   backdrop-filter: blur(2px);
   display: flex; align-items: center; justify-content: center;

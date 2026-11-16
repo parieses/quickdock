@@ -274,7 +274,7 @@ onUnmounted(() => {
   inset: 0;
   /* 必须压过设置页(10000/10001)、Toast(10001) 与确认框(20000)：
      锁定时这些浮层若还在上面，等于给了一条读取数据的缝。 */
-  z-index: 30000;
+  z-index: var(--z-lock);
   display: flex;
   align-items: center;
   justify-content: center;

@@ -602,7 +602,8 @@
 .context-overlay {
   position: fixed;
   inset: 0;
-  z-index: 9999;
+  /* 右键菜单要能盖住弹窗（弹窗里也能右键），所以排在 --z-modal 之上。 */
+  z-index: var(--z-context);
   background: transparent;
 }
 

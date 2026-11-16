@@ -348,7 +348,7 @@ watch(() => props.visible, (v) => {
 .prompt-dialog-overlay {
   position: fixed;
   inset: 0;
-  z-index: 10002;
+  z-index: calc(var(--z-settings) + 2);
   display: flex;
   align-items: center;
   justify-content: center;

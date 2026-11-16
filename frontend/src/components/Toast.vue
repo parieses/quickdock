@@ -40,7 +40,7 @@ defineEmits<{
 <style scoped>
 .toast-container {
   position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
-  z-index: 10001; display: flex; flex-direction: column; gap: var(--space-4);
+  z-index: var(--z-toast); display: flex; flex-direction: column; gap: var(--space-4);
   pointer-events: none;
 }
 .toast-item {

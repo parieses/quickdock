@@ -316,6 +316,25 @@
   --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
+  /* ==== 浮层层级（唯一出处）====
+     层级散着写是这类 bug 的温床：设置面板是 z-index 10000/10001 的全屏外壳，
+     而 QdModal 原来写 3000，于是「设置里点编辑」弹的东西全被设置页盖住——
+     看起来就是点了没反应。这里按「谁必须压住谁」排成一条梯子，新浮层取对应
+     档，不要再写裸数字：
+       dropdown 页面内局部浮层（版本列表、行内下拉）
+       modal    常规弹窗（QdModal 的全部实例，含设置面板里的）
+       context  右键菜单（要能盖住弹窗，弹窗里也能右键）
+       settings 设置全屏外壳（10000/10001 见 styles/settings.css）
+       confirm  全局确认框 / 更新提示（阻塞型，必须压过一切普通弹窗）
+       toast    轻提示（不能因为开着弹窗就看不见）
+       lock     启动锁屏（唯一不该被任何东西盖住的） */
+  --z-dropdown: 1000;
+  --z-modal: 12000;
+  --z-context: 13000;
+  --z-settings: 10000;
+  --z-confirm: 20000;
+  --z-toast: 25000;
+  --z-lock: 30000;
   --color-toast-error-bg: #2d1818;
   --color-toast-error-text: #fca5a5;
   --color-toast-error-border: #5c1a1a;

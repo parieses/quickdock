@@ -5,13 +5,13 @@
  */
 /* === 全屏覆盖层 === */
 .settings-overlay {
-  position: fixed; inset: 0; z-index: 10000;
+  position: fixed; inset: 0; z-index: var(--z-settings);
   background: var(--color-bg-overlay);
 }
 
 /* === 全屏面板 === */
 .settings-panel {
-  position: fixed; inset: 0; z-index: 10001;
+  position: fixed; inset: 0; z-index: calc(var(--z-settings) + 1);
   display: flex;
   background: var(--color-bg-primary);
 }

@@ -75,7 +75,10 @@ function onMask() {
 .qd-modal-mask {
   position: fixed;
   inset: 0;
-  z-index: 3000;
+  /* 走 --z-modal（12000）而不是裸数字：设置面板是 10000/10001 的全屏外壳，
+     这里原来写 3000，于是「设置里点编辑」弹出来的东西全被设置页盖住，
+     表现就是点了没反应。层级梯子见 style.css 的 --z-* 定义处。 */
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;

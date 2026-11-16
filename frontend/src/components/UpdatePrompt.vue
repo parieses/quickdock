@@ -75,7 +75,7 @@ const noteItems = computed(() => parseReleaseNotes(props.releaseNotes))
 .up-overlay {
   position: fixed;
   inset: 0;
-  z-index: 10002;
+  z-index: var(--z-confirm);
   display: flex;
   align-items: center;
   justify-content: center;
