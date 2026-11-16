@@ -450,6 +450,30 @@ func (a *AIService) AIGetConfig() *services.ApiResult {
 	})
 }
 
+// AIRevealProfileKey 返回某档案解密后的 API Key 明文，供编辑弹窗里「查看 / 复制」。
+//
+// 与 credentials 的 Reveal 同一套取舍：列表与配置接口一律只给掩码，只有用户
+// 在那一屏显式点一次才解密一份明文出来；本层不缓存、不写日志、不发事件，
+// 用完即弃。解密失败必须报错而不是回退成空串——否则界面会把「解不开」显示成
+// 「没有 Key」，用户会以为是自己填漏了。
+func (a *AIService) AIRevealProfileKey(profileID string) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	s, ok := a.findStoredProfile(profileID)
+	if !ok {
+		return services.Fail(fmt.Errorf("档案不存在: %s", profileID))
+	}
+	if s.APIKey == "" {
+		return services.Ok(map[string]string{"apiKey": ""})
+	}
+	dec, err := platform.DecryptSecret(s.APIKey)
+	if err != nil {
+		return services.Fail(fmt.Errorf("API Key 解密失败，请重新输入: %w", err))
+	}
+	return services.Ok(map[string]string{"apiKey": dec})
+}
+
 // maskAPIKey 将 API Key 掩码为 "前4***后4"（短 Key 全掩码）。
 func maskAPIKey(key string) string {
 	if key == "" {

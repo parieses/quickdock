@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Pen, Trash2, Plus, RefreshCw, ChevronDown } from '@lucide/vue'
+import { Pen, Trash2, Plus, RefreshCw, ChevronDown, Copy, Eye, EyeOff } from '@lucide/vue'
 import SettingsPrompts from './SettingsPrompts.vue'
 import SettingsSkills from './SettingsSkills.vue'
 import QdBarChart from './charts/QdBarChart.vue'
@@ -10,6 +10,7 @@ import QdSwitch from './QdSwitch.vue'
 import QdModal from './QdModal.vue'
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
+import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { localISO } from '../utils/lunar'
@@ -21,6 +22,7 @@ import {
   AIGetMemoryAuto,
   AIListApprovalRules,
   AIListProfiles,
+  AIRevealProfileKey,
   AISaveProfiles,
   AISetApprovalRule,
   AISetMemoryAuto,
@@ -116,6 +118,16 @@ const aiMsg = ref('')
 const aiMsgError = ref(false)
 const aiTesting = ref(false)
 const aiEditDraft = ref<AIProfile | null>(null)
+
+// ---- API Key 的查看 / 复制 ----
+// 列表与配置接口给的一律是掩码（sk-1***abcd），所以「看一眼」和「复制一份」
+// 都不能靠输入框里那串字符——必须向 Go 侧要一次明文。只在用户显式点按钮时取，
+// 取到的明文只活在这一个编辑草稿里，关窗即丢（见 closeAIEditor）。
+const keyVisible = ref(false)
+const keyPlain = ref('')
+const keyBusy = ref(false)
+let keyMasked = ''
+
 let aiMsgTimer: ReturnType<typeof setTimeout> | null = null
 
 // modelOptions 模型候选列表，来源有两类：
@@ -1188,10 +1200,73 @@ async function testAIConnection() {
     showAIMsg(t('testFailed') + ': ' + (e?.message || String(e)), true)
   } finally { aiTesting.value = false }
 }
+
+/**
+ * 拿「要给人看 / 要复制」的那份 Key。
+ *
+ * 三种情况分开处理，判断顺序不能换：
+ *   1. 用户在本次编辑里已经敲过新 Key（不含 ***）：还没落库，输入框里那份就是最新的；
+ *   2. 之前已经取过一次明文：直接复用，别为点眼睛 / 点复制各解一次密；
+ *   3. 剩下才是「回填的掩码」——找后端要一次。
+ * 取不到（解密失败 / 没填）返回空串，由调用方给提示，不在这里静默当成功。
+ */
+async function ensurePlainKey(): Promise<string> {
+  const d = aiEditDraft.value
+  if (!d) return ''
+  if (d.apiKey && !d.apiKey.includes('***')) return d.apiKey
+  if (keyPlain.value) return keyPlain.value
+  if (keyBusy.value) return ''
+  keyBusy.value = true
+  try {
+    const res = unwrap<{ apiKey?: string }>(await AIRevealProfileKey(d.id))
+    keyPlain.value = res?.apiKey || ''
+    return keyPlain.value
+  } catch (e) {
+    toast.error(getErrorMessage(e) || t('aiKeyRevealFailed'))
+    return ''
+  } finally {
+    keyBusy.value = false
+  }
+}
+
+/** 眼睛：显示明文 / 还原掩码。隐藏时一定要把掩码写回去，否则明文字符串会一直留在输入框里。 */
+async function toggleKeyVisible() {
+  const d = aiEditDraft.value
+  if (!d) return
+  if (keyVisible.value) {
+    keyVisible.value = false
+    // 只有「还是刚取出来那份明文」时才还原掩码：用户若在显示状态下改了内容，
+    // 那是他要保存的新 Key，藏起来不能把它一起吞掉。
+    if (keyMasked && d.apiKey === keyPlain.value) d.apiKey = keyMasked
+    return
+  }
+  const plain = await ensurePlainKey()
+  if (!plain) return
+  keyVisible.value = true
+  d.apiKey = plain
+}
+
+/** 复制：不要求先点眼睛，隐藏状态下也能把这个 Key 复制走。 */
+async function copyKey() {
+  const d = aiEditDraft.value
+  if (!d) return
+  const text = await ensurePlainKey()
+  if (!text) {
+    toast.error(t('aiKeyEmpty'))
+    return
+  }
+  if (await copyToClipboard(text)) toast.success(t('aiKeyCopied'))
+  else toast.error(t('copyFailed'))
+}
+
 function openAIEditor() {
   const cur = aiCurrent.value
   if (!cur) return
   aiEditDraft.value = { ...cur }
+  // 记住回填时那份掩码：点「隐藏」要还原成它，而不是把明文留在输入框里。
+  keyMasked = cur.apiKey || ''
+  keyVisible.value = false
+  keyPlain.value = ''
   resetModelOptions()
   if (cur.provider === 'ollama') loadOllamaLocalModels()
 }
@@ -1204,7 +1279,13 @@ function onAIProviderChangeDraft() {
   resetModelOptions()
   if (d.provider === 'ollama') loadOllamaLocalModels()
 }
-function closeAIEditor() { aiEditDraft.value = null; resetModelOptions() }
+function closeAIEditor() {
+  aiEditDraft.value = null
+  resetModelOptions()
+  // 明文凭据不跟着弹窗一起留在内存里：关掉就把这份副本丢掉。
+  keyPlain.value = ''
+  keyVisible.value = false
+}
 function saveAIModal() {
   const draft = aiEditDraft.value
   if (!draft) return
@@ -1745,15 +1826,42 @@ function saveAIModal() {
           <span class="field-label">{{ t('aiBaseURL') }}</span>
           <input v-model="aiEditDraft.baseURL" type="text" class="field-input" placeholder="https://api.openai.com/v1" />
         </label>
-        <label class="field">
+        <!-- 这一行用 div 而不是 label：里面多了两个按钮，label 会把点击顺带
+             转给输入框，点「复制」时焦点乱跳。语义靠 field-label 文案保留。 -->
+        <div class="field">
           <span class="field-label">{{ t('aiAPIKey') }}</span>
-          <input
-            v-model="aiEditDraft.apiKey"
-            type="password"
-            class="field-input"
-            :placeholder="aiEditDraft.provider === 'ollama' ? t('aiAPIKeyOptional') : 'sk-...'"
-          />
-        </label>
+          <div class="key-input-wrap">
+            <input
+              v-model="aiEditDraft.apiKey"
+              :type="keyVisible ? 'text' : 'password'"
+              class="field-input"
+              :placeholder="aiEditDraft.provider === 'ollama' ? t('aiAPIKeyOptional') : 'sk-...'"
+            />
+            <div class="key-input-actions">
+              <button
+                type="button"
+                class="qd-icon-btn"
+                :title="keyVisible ? t('aiKeyHide') : t('aiKeyShow')"
+                :aria-label="keyVisible ? t('aiKeyHide') : t('aiKeyShow')"
+                :disabled="keyBusy"
+                @click="toggleKeyVisible"
+              >
+                <EyeOff v-if="keyVisible" :size="13" />
+                <Eye v-else :size="13" />
+              </button>
+              <button
+                type="button"
+                class="qd-icon-btn"
+                :title="t('aiKeyCopy')"
+                :aria-label="t('aiKeyCopy')"
+                :disabled="keyBusy"
+                @click="copyKey"
+              >
+                <Copy :size="13" />
+              </button>
+            </div>
+          </div>
+        </div>
         <label class="field">
           <span class="field-label">{{ t('aiModel') }}</span>
           <!-- 输入框 + 显式下拉。原生 datalist 必须聚焦后输入才过滤，
@@ -1900,6 +2008,33 @@ function saveAIModal() {
 </template>
 
 <style scoped>
+/* API Key 行：输入框右侧内嵌「显示 / 复制」两个图标按钮。
+   沿用 .model-input-wrap 的思路（相对容器 + 输入框留出右侧内边距），
+   区别只是这里有俩按钮，所以内边距给到 62px。 */
+.key-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.key-input-wrap .field-input {
+  flex: 1;
+  padding-right: 62px;
+}
+.key-input-actions {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+/* .qd-icon-btn 默认 26×26，塞进 36px 高的输入框里会顶到边框，这里缩一档 */
+.key-input-actions .qd-icon-btn {
+  width: 24px;
+  height: 24px;
+}
+
 .ai-field-hint {
   margin: var(--space-1) 0 0;
   font-size: var(--text-xs);
