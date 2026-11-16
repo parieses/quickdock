@@ -203,10 +203,13 @@ function onToggle() {
   max-height: 240px;
   overflow: auto;
   padding: var(--space-2);
-  background: var(--color-bg-primary);
+  /* 与同排的空间下拉、权限下拉同一套浮层面层：用 popover-bg 而不是 bg-primary。
+     bg-primary 是最底层，浮层盖在卡片上会比卡片还暗，像挖了个洞。 */
+  background: var(--color-popover-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
+  /* md 而不是 lg：贴着底栏的小下拉，lg 的 40px 大扩散会把旁边的胶囊和输入框边缘一起压暗。 */
+  box-shadow: var(--shadow-md);
   z-index: 40;
 }
 

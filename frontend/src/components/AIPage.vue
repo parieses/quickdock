@@ -54,6 +54,7 @@ import { logErr } from '../utils/logger'
 import { useFloatMenu } from '../composables/useFloatMenu'
 import { aiGenerating, aiFinishedUnread, pendingTarget } from '../composables/bridge'
 import { resolveConvDir } from '../utils/aiConvDir'
+import { profileNeedsKey } from '../utils/aiKey'
 import { pickActiveRun } from '../utils/aiRuns'
 import type { AIRun } from '../utils/aiRuns'
 import { CreateNoteDoc } from '../../bindings/quickdock/services/note/noteservice'
@@ -90,7 +91,6 @@ import {
   AISetConversationMode,
   AISetConversationPermission,
   AISetConversationProfile,
-  AISetConversationScene,
   AIGetHooks,
   AISetHooksApproved,
   AIGetGitBranch,
@@ -521,7 +521,10 @@ const aiProfiles = ref<AIProfile[]>([])
 const aiActive = ref('')
 const hasKey = computed(() => {
   const p = aiProfiles.value.find((x) => x.id === aiActive.value)
-  return !!(p && p.apiKey)
+  if (!p) return false
+  // 本地 Ollama / 回环网关不需要 Key：模型配好就该能发，
+  // 不要拿「有没有 Key」当对话开关（否则本地模型永远提示去配 Key）。
+  return !!p.apiKey || !profileNeedsKey(p)
 })
 // 任务的五种类型。icon/desc 跟着类型走，落地页那一排 pill 与侧栏的任务图标都读这一份——
 // 两处各写一遍的话，加一个类型就要在两个地方各补一次，漏一处就是「类型选不了」。
@@ -944,11 +947,8 @@ async function selectConv(id: string, msgId?: string) {
   // 模式是这个任务创建时选定的属性，切回来要还原——否则「这条是用来翻译的」
   // 在切走再回来之后就丢了。
   mode.value = (conv?.mode || 'chat').trim() || 'chat'
-  // 权限跟着任务走：这条对话开过完全访问，切回来要还原成它自己的档位。
-  permissionFull.value = (conv?.permission || '').trim() === 'full'
-  // 能力档同理。老会话没有 scene 列（空）时按 mode 推导：当年的 plan 会话是
-  // 只读的，升级后不该突然变成能改文件——它就这一次推断，用户切过一次就以库为准。
-  convScene.value = restoreScene(conv?.scene, conv?.mode)
+  // 权限跟着任务走：这条对话开过完全访问、或设成只读，切回来要还原成它自己的档位。
+  permLevel.value = restorePermLevel(conv)
   // 模型也是任务属性，不是全局开关：A 任务用 flash、B 任务用 reasoning，
   // 两边切来切去不该互相串。老会话没存过，或存的档案已被删掉，就回落到
   // 全局「最后选择」——否则 <select> 的 value 匹配不到任何 option，会显示空白。
@@ -1106,11 +1106,18 @@ const effectiveDir = computed(() => {
     const sp = spaces.value.find((s) => s.id === newTaskSpace.value)
     return (sp?.cwd || '').trim()
   }
-  return ''
+  // 普通任务也能指定目录（见 resolveNewTaskTarget）；没选就是空 = 后端自动分配。
+  return newTaskDir.value.trim()
 })
 // 这条 watch 必须在 newTaskSpace 等声明之后建立（本块位置即保证）；首次探测由
 // onMounted 里的 loadGitBranch() 负责，这里只响应后续 cwd / 空间变化。
 watch(effectiveDir, loadGitBranch)
+
+// 切到「已有空间」时把普通任务挑的目录清掉：空间自带目录，留着那个值会让
+// 「产物去哪」的两个来源互相打架（下游按空间目录走，界面上却还显示前一个路径）。
+watch(newTaskSpace, (v) => {
+  if (v && v !== NEW_SPACE) newTaskDir.value = ''
+})
 
 // ---- 「+ 技能和连接器」----
 //
@@ -1125,66 +1132,57 @@ const connectors = ref<AIConnector[]>([])
 
 // ---- 执行权限（输入框右下角）----
 //
-// 只有两档：false = 默认权限（敏感操作逐个确认），true = 完全访问（不再问）。
+// 三档，一条从紧到松的轴：readonly（只读，写类工具不挂）/ ''（默认，敏感操作
+// 逐个确认）/ 'full'（完全访问，不再问）。
+//
+// 合并前这里是两个开关：权限（问不问）+ 能力档（有没有这只手）。它们都在回答
+// 「AI 这次能动多少」，却要用户自己组合，实际结果是没人切只读、想「别动手」只能关工具。
+//
 // 不同「只对这条消息生效」的临时开关混着用：权限一旦临时化，用户就无法回答
 // 「刚那条 rm 到底批准过没有」。它跟着会话走（ai_conversations.permission），
 // 切换即落库，切回来看到的就是上次真正生效的那个。
-const permissionFull = ref(false)
-
-// 能力档：'assistant'（工具全开）/ 'readonly'（只挂读类工具）。
-// 与 permissionFull 正交——一个管「有没有这只手」，一个管「动手前问不问」。
-// 跟着会话走（ai_conversations.scene），切走再回来要还原，所以 selectConv 里会读库。
-const convScene = ref('assistant')
-
-/** 切换能力档：有会话就立刻落库（界面标记必须和库一致），落地页则随第一句带上。 */
-async function onChangeScene(scene: string) {
-  const next = scene === 'readonly' ? 'readonly' : 'assistant'
-  const prev = convScene.value
-  convScene.value = next
-  const id = activeId.value
-  if (!id) return
-  try {
-    unwrap(await AISetConversationScene(id, next))
-  } catch (e) {
-    // 落库失败退回原状：界面写着「只读档」而库里是全开，比切不成功更危险。
-    convScene.value = prev
-    toast.error(getErrorMessage(e))
-  }
-}
+const permLevel = ref('')
 
 /**
- * restoreScene 从库里存的值推出这条会话的能力档。
+ * restorePermLevel 从库里存的值推出这条会话的权限档。
  *
- * 老会话的 scene 是空串（列是本次升级才加的）：这时按 mode 推断——当年的
- * 「计划模式」是只读的，升级后不该突然让它能改文件。推断只在库值为空时发生，
+ * 老会话只有 scene 列（合并前的能力档）：里面的 readonly 要平移成新的只读档，
+ * 否则升级后那些任务会突然长出写操作的手。推断只在权限为空时发生，
  * 用户切过一次之后就以库为准。
  */
-function restoreScene(scene?: string, mode?: string): string {
-  const s = (scene || '').trim()
-  if (s === 'readonly') return 'readonly'
-  if (s === 'assistant') return 'assistant'
-  return (mode || '').trim() === 'plan' ? 'readonly' : 'assistant'
+function restorePermLevel(conv?: { permission?: string; scene?: string; mode?: string }): string {
+  const p = (conv?.permission || '').trim().toLowerCase()
+  if (p === 'full' || p === 'readonly') return p
+  const legacy = (conv?.scene || '').trim().toLowerCase()
+  if (legacy === 'readonly') return 'readonly'
+  // 遗留的计划模式当年是隐式只读。
+  if ((conv?.mode || '').trim() === 'plan') return 'readonly'
+  return ''
 }
 
-// 每次切换递增。回滚只认最新一次的结果——连点两次（false→true→false）时，
-// 先发的请求失败后按「!full」回滚，会把界面写成与用户最新意图相反的值。
+// 每次切换递增。回滚只认最新一次的结果——连点两次（默认→完全→默认）时，
+// 先发的请求失败后按旧值回滚，会把界面写成与用户最新意图相反的值。
 // 这是安全开关：界面写着「完全访问」而库里是默认档（或反之）比切不动更危险。
 let permissionSeq = 0
 
 /** 切换权限：有会话就立刻落库（界面标记必须和库一致），落地页则等第一句随请求带上。 */
-async function onChangePermission(full: boolean) {
-  permissionFull.value = full
+async function onChangePermission(level: string) {
+  const next = level === 'full' ? 'full' : level === 'readonly' ? 'readonly' : ''
+  const prev = permLevel.value
+  permLevel.value = next
   const id = activeId.value
   if (!id) return
   const seq = ++permissionSeq
   try {
-    unwrap(await AISetConversationPermission(id, full ? 'full' : 'default'))
+    // 默认档送 'default' 这个显式值（后端归一成空串）：送空串等于「没表态」，
+    // 后端会回落到会话上存的档位，从完全访问切回默认就切不动了。
+    unwrap(await AISetConversationPermission(id, next === '' ? 'default' : next))
   } catch (e) {
     // 已经有更新的一次切换在飞：它的结果才代表用户最后的意图，这次失败不要插手。
     if (seq !== permissionSeq) return
     // 落库失败就退回原状：留在「界面写着完全访问、实际每条都在问」的状态里，
     // 比切不成功更让人困惑。
-    permissionFull.value = !full
+    permLevel.value = prev
     toast.error(getErrorMessage(e))
   }
 }
@@ -1610,6 +1608,8 @@ const newTaskOutHint = computed(() => {
     const sp = spaces.value.find((s) => s.id === newTaskSpace.value)
     return sp?.cwd ? t('aiNewTaskOutDir', { dir: sp.cwd }) : t('aiNewTaskOutDirPending')
   }
+  // 普通任务选了目录：产物就落在那里；没选才走 ai_tasks 自动分配。
+  if (newTaskDir.value.trim()) return t('aiNewTaskOutDir', { dir: newTaskDir.value.trim() })
   return t('aiNewTaskOutPlain')
 })
 
@@ -1619,7 +1619,7 @@ function normDir(p: string): string {
   return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
 }
 
-async function pickNewTaskDir() {
+async function pickNewTaskDir(mode: 'new' | 'plain' = 'new') {
   // unwrap 在 code≠0 时是抛异常，不是返回带 ok 的结果：不包 try 的话，
   // 原生对话框出错会变成一条未处理的 Promise 拒绝，界面上什么都不会发生。
   let dir: string | null = null
@@ -1630,9 +1630,10 @@ async function pickNewTaskDir() {
     return
   }
   if (!dir) {
-    // 取消选择：把下拉退回「不挂空间」。否则它会停在「新建空间…」上却没有目录，
-    // 用户看着是选中态，直到发送才被告知「请先选择目录」。
-    if (newTaskSpace.value === NEW_SPACE) newTaskSpace.value = ''
+    // 取消选择：新建空间那条要把下拉退回「不挂空间」，否则它会停在「新建空间…」
+    // 上却没有目录，用户看着是选中态，直到发送才被告知「请先选择目录」。
+    // 普通任务取消则保持原样（本来就没有目录，不需要回退什么）。
+    if (mode === 'new' && newTaskSpace.value === NEW_SPACE) newTaskSpace.value = ''
     return
   }
   // 选到的目录已经是某个空间：直接切到那个空间。后端同名幂等也能兜住，
@@ -1643,6 +1644,10 @@ async function pickNewTaskDir() {
     newTaskDir.value = ''
     toast.success(t('aiSpaceAlreadyExists', { name: hit.name }))
     return
+  }
+  if (mode === 'plain') {
+    // 普通任务 + 指定目录：不建空间，只把这一条任务的工作目录定在这里。
+    newTaskSpace.value = ''
   }
   newTaskDir.value = dir
 }
@@ -1667,7 +1672,9 @@ async function resolveNewTaskTarget(): Promise<{ spaceId: string; dir: string }>
     if (!sp) throw new Error(t('aiSpaceGone'))
     return { spaceId: sp.id, dir: (sp.cwd || '').trim() }
   }
-  return { spaceId: '', dir: '' }
+  // 普通任务：目录可选。选了就用它当这条任务的工作目录（不建空间）；
+  // 没选则空串，由后端在 ai_tasks 下建专属目录。
+  return { spaceId: '', dir: newTaskDir.value.trim() }
 }
 
 // 任务落进某个空间时把它在侧栏展开，好让用户看到新任务排到哪了；
@@ -1747,12 +1754,9 @@ function beginBlankTask() {
   worktreeEnabled.value = false
   worktreeBranch.value = ''
   worktreeBranchOpen.value = false
-  // 权限同理：上一条对话开了完全访问，新建任务不该继承——「刚开始是默认权限」
-  // 是这条功能的默认承诺，忘了切回来正是它最危险的失效方式。
-  permissionFull.value = false
-  // 能力档同理：新任务从助手档开始。上一条被绑成只读是那条任务的处境
-  // （比如当年在计划模式里），不该让下一条也开不了工。
-  convScene.value = 'assistant'
+  // 权限同理：上一条对话开了完全访问（或设了只读），新建任务不该继承——
+  // 「刚开始是默认权限」是这条功能的默认承诺，忘了切回来正是它最危险的失效方式。
+  permLevel.value = ''
 }
 
 // ---- 空间行上的「立即运行一次」----
@@ -2519,7 +2523,7 @@ const {
 } = useAiRuns({
   activeId, conversations, messages, runs, draftRunId,
   input, attachments, mentions, lastMentions, pickedSkills, lastSkills, stripSkillTokens,
-  hasKey, mode, permissionFull, scene: convScene, worktreeEnabled, worktreeActive, worktreeBranch,
+  hasKey, mode, permissionLevel: permLevel, worktreeEnabled, worktreeActive, worktreeBranch,
   pendingSpaceId, convCwd,
   streamModelOf: () => aiProfiles.value.find((x) => x.id === aiActive.value)?.model || '',
   // 发给后端的是档案 id 而不是模型名：两个档案可以指向同一个 model 却配不同
@@ -3124,6 +3128,7 @@ onUnmounted(() => {
         :has-key="hasKey"
         :spaces="spaces"
         :new-space="NEW_SPACE"
+        :new-task-dir="newTaskDir"
         :ai-profiles="aiProfiles"
         :allow-file-image="allowFileImage"
         :allow-url-image="allowUrlImage"
@@ -3143,8 +3148,7 @@ onUnmounted(() => {
         :slash-items="slashItems"
         :slash-idx="slashIdx"
         :can-send="canSendText"
-        :permission-full="permissionFull"
-        :scene="convScene"
+        :permission-level="permLevel"
         :worktree-active="worktreeActive"
         :worktree-path="worktreePath"
         :worktree-branch="worktreeBranch || gitBranch"
@@ -3157,7 +3161,6 @@ onUnmounted(() => {
         @remove-worktree="removeWorktree"
         @model-change="onModelChange"
         @change-permission="onChangePermission"
-        @change-scene="onChangeScene"
         @key="onHeroKey"
         @send="heroSend"
         @paste="onInputPaste"
@@ -3268,6 +3271,7 @@ onUnmounted(() => {
                 <span class="ai-plan-box">
                   <Check v-if="it.status === 'done'" :size="10" />
                   <span v-else-if="it.status === 'doing'" class="ai-plan-doing" />
+                  <span v-else-if="it.status === 'stopped'" class="ai-plan-stopped" />
                 </span>
                 <span class="ai-plan-text">{{ it.text }}</span>
               </li>
@@ -3435,8 +3439,7 @@ onUnmounted(() => {
         :slash-items="slashItems"
         :slash-idx="slashIdx"
         :can-send="canSendText"
-        :permission-full="permissionFull"
-        :scene="convScene"
+        :permission-level="permLevel"
         :worktree-active="worktreeActive"
         :worktree-path="worktreePath"
         :worktree-branch="worktreeBranch || gitBranch"
@@ -3448,7 +3451,6 @@ onUnmounted(() => {
         @pick-worktree-branch="pickWorktreeBranch"
         @remove-worktree="removeWorktree"
         @change-permission="onChangePermission"
-        @change-scene="onChangeScene"
         @model-change="onModelChange"
         @approve-hooks="approveHooks"
         @remove-attachment="removeAttachment"
@@ -3472,6 +3474,11 @@ onUnmounted(() => {
         @install-skill="installSkill"
         @manage-connectors="manageConnectors"
         />
+
+        <!-- 固定免责声明：贴在整个输入停靠区的最下方，不随消息滚动。
+             放在 Composer 之后而非其圆角框内——框内是输入区，塞一行静态文字会
+             挤占输入空间、看起来也像可编辑内容的一部分。与输入框同宽居中。 -->
+        <div class="ai-disclaimer">{{ t('aiDisclaimer') }}</div>
       </div>
       </template>
     </section>
@@ -3551,6 +3558,20 @@ onUnmounted(() => {
 .ai-su-models { display: inline-flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
 .ai-su-model { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .ai-su-calls { font-style: normal; color: var(--color-text-secondary); font-weight: 500; }
+
+/* 输入区最下方的固定免责声明：与输入框同宽居中、次级文字色、比正文小一号。
+   只占一行且 flex-shrink:0，不随消息滚动、不挤占输入区高度。 */
+.ai-disclaimer {
+  flex-shrink: 0;
+  width: var(--ai-column-w);
+  margin: 0 auto;
+  padding: 0 var(--space-5) var(--space-3);
+  text-align: center;
+  font-size: var(--text-xs);
+  color: var(--color-text-disabled);
+  user-select: none;
+  -webkit-user-select: none;
+}
 
 /* 与输入框同宽同底边：输入框是 width: var(--ai-column-w) + margin auto。
    绝对定位元素的 100% 是父级的 padding box，比 content box 多左右各一份 padding，
@@ -3647,6 +3668,17 @@ onUnmounted(() => {
   border-radius: 50%;
   background: var(--color-accent);
   animation: ai-inject-pulse 1.2s ease-in-out infinite;
+}
+
+/* 这一轮结束时还挂在「正在做」的那一条：停掉呼吸动画，改成一根静止的短横。
+   留一个还在动的圈最误导——任务已经结束了，界面上不该有东西看起来还在跑。 */
+.ai-plan-item.is-stopped .ai-plan-box { border-color: var(--color-warning-border); }
+
+.ai-plan-stopped {
+  width: 6px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--color-warning);
 }
 
 .ai-plan-text { min-width: 0; overflow-wrap: anywhere; }

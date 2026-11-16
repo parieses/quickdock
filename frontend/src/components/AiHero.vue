@@ -9,7 +9,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlarmClock, ArrowUp, ChevronDown, Folder, GitBranch, Image as ImageIcon, Link2, Plus } from '@lucide/vue'
+import { AlarmClock, ArrowUp, ChevronDown, Folder, FolderOpen, GitBranch, Image as ImageIcon, Link2, Plus } from '@lucide/vue'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { AIConnector, AIMentionItem, AIPrompt, AISkill, AISpace } from '../types/ai'
 import type { PendingImage } from '../types'
@@ -42,6 +42,8 @@ const props = defineProps<{
   mentionIdx: number
   hasKey: boolean
   newTaskSpace: string
+  /** 普通任务选定的工作目录（空 = 由后端自动分配 ai_tasks/<id>） */
+  newTaskDir: string
   spaces: AISpace[]
   /** 「新建空间」的哨兵值；选中它时父组件会立刻弹目录选择器 */
   newSpace: string
@@ -73,8 +75,8 @@ const props = defineProps<{
   slashIdx: number
   /** 正文非空：只挂了技能胶囊、正文空着时发送按钮该是灰的 */
   canSend: boolean
-  /** 执行权限：true = 完全访问。新建任务默认是「默认权限」，在这里切的第一句就生效 */
-  permissionFull: boolean
+  /** 执行权限三档：'' 默认 / 'readonly' 只读 / 'full' 完全访问。新建任务默认档，在这里切的第一句就生效 */
+  permissionLevel: string
   /** 隔离工作区（见 AiWorktreeToggle）：只在 git 仓库里显示 */
   worktreeActive: boolean
   worktreePath: string
@@ -97,7 +99,7 @@ const emit = defineEmits<{
   (e: 'drop', ev: DragEvent): void
   (e: 'confirm-url'): void
   (e: 'remove-attachment', i: number): void
-  (e: 'pick-dir'): void
+  (e: 'pick-dir', mode: 'new' | 'plain'): void
   (e: 'open-file-picker'): void
   (e: 'toggle-url'): void
   (e: 'fill-tip', key: string): void
@@ -114,7 +116,7 @@ const emit = defineEmits<{
   (e: 'toggle-connector', c: AIConnector): void
   (e: 'install-skill'): void
   (e: 'manage-connectors'): void
-  (e: 'change-permission', full: boolean): void
+  (e: 'change-permission', level: string): void
   (e: 'update:worktreeEnabled', v: boolean): void
   (e: 'toggle-worktree-branch'): void
   (e: 'pick-worktree-branch', name: string): void
@@ -156,7 +158,14 @@ function pickSpace(v: string) {
   emit('update:newTaskSpace', v)
   // 「新建空间…」= 选一个目录（空间按目录唯一）：选中就当场上目录选择器，
   // 而不是让下拉先停在「新建空间…」等用户再点一次右边的按钮。
-  if (v === props.newSpace) emit('pick-dir')
+  if (v === props.newSpace) emit('pick-dir', 'new')
+}
+
+/** 普通任务也能指定工作目录：不选就仍由后端在 ai_tasks 下建专属目录。 */
+function pickPlainDir() {
+  spacePickOpen.value = false
+  emit('update:newTaskSpace', '')
+  emit('pick-dir', 'plain')
 }
 
 function onSpaceDocDown(e: MouseEvent) {
@@ -327,6 +336,20 @@ function onModelSelect(e: Event) {
                   <span class="ai-space-pick-name">{{ s.name }}</span>
                 </button>
                 <div class="ai-space-pick-sep"></div>
+                <!-- 普通任务也能指定工作目录：以前选「普通任务」之后没有任何入口，
+                     任务只能落在后端自动建的 ai_tasks/<id> 里，用户想让它改哪个项目
+                     都得等发完第一句再切。 -->
+                <button
+                  type="button"
+                  class="ai-space-pick-item"
+                  :class="{ 'is-sel': !props.newTaskSpace && !!props.newTaskDir }"
+                  :title="props.newTaskDir || t('aiNewTaskPickDirHint')"
+                  @click="pickPlainDir"
+                >
+                  <span class="ai-space-pick-ico"><FolderOpen :size="12" /></span>
+                  <span class="ai-space-pick-name">{{ t('aiNewTaskPickDir') }}</span>
+                  <span v-if="props.newTaskDir" class="ai-space-pick-cwd">{{ t('aiNewTaskDirPicked') }}</span>
+                </button>
                 <button
                   type="button"
                   class="ai-space-pick-item"
@@ -352,7 +375,7 @@ function onModelSelect(e: Event) {
           </div>
           <div class="ai-hero-bar-right">
             <!-- 当前权限：落地页也能切，第一句就按这个口径执行 -->
-            <AiPermissionBadge :full="props.permissionFull" @change="emit('change-permission', $event)" />
+            <AiPermissionBadge :level="props.permissionLevel" @change="emit('change-permission', $event)" />
             <button v-if="props.allowFileImage" class="ai-tool-btn" :title="t('aiAttachImage')" @click="emit('open-file-picker')">
               <ImageIcon :size="16" />
             </button>
@@ -530,14 +553,17 @@ function onModelSelect(e: Event) {
   flex: 0 1 auto;
 }
 
-/* 中组（归属空间 / 模型）：允许收缩到 0，两个下拉才不会把右组挤走。 */
+/* 中组（归属空间 / 模型）：允许收缩到 0，两个下拉才不会把右组挤走。
+   不能加 overflow: hidden——空间下拉是向上弹的绝对定位菜单，父级一裁
+   整块菜单就看不见：点了「普通任务」胶囊，界面上像是什么都没发生，
+   「选择目录 / 新建空间…」两个入口全被吞掉。和左组同理：不溢出靠
+   两个子项自己的 min-width:0 + flex:0 1 auto 收缩，文字超长由 ellipsis 收尾。 */
 .ai-hero-bar-mid {
   display: flex;
   align-items: center;
   gap: var(--space-3);
   min-width: 0;
   flex: 1 1 auto;
-  overflow: hidden;
 }
 
 /* 分隔线：左边是上下文（分支 / 工作区），右边是任务属性（空间 / 模型）。
@@ -666,7 +692,9 @@ select.ai-hero-select:focus-visible {
   background: var(--color-popover-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
+  /* 用 md 而不是 lg：这是贴着输入框的小下拉，lg 的 40px 大扩散会把旁边那排
+     按钮和输入框边缘一起压暗，看着像浮层把底下挖了个洞。 */
+  box-shadow: var(--shadow-md);
   z-index: 40;
 }
 
@@ -689,6 +717,8 @@ select.ai-hero-select:focus-visible {
 .ai-space-pick-item.is-sel { color: var(--color-accent); }
 .ai-space-pick-ico { display: inline-flex; flex-shrink: 0; width: 12px; opacity: 0.8; }
 .ai-space-pick-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 「已选目录」小标记：不写全路径（下拉窄），路径在 title 里 */
+.ai-space-pick-cwd { margin-left: auto; flex: none; font-size: var(--text-2xs); color: var(--color-accent); }
 .ai-space-pick-sep { height: 1px; margin: var(--space-2) var(--space-3); background: var(--color-border); }
 
 .ai-hero-send {

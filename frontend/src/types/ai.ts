@@ -138,12 +138,11 @@ export interface AIConversation {
   // 存原样而不是解析成数组：前端要区分「没选过」和「选过但全取消」，
   // 那两种在 JSON 里是 "" 和 "[]"，解析后都成了空数组。
   skills?: string
-  // 执行权限：空 = 默认（敏感操作逐个确认），'full' = 完全访问。
-  // 只认 'full' 一个真值——不认识的取值一律按默认权限显示，与后端同一个口径。
+  // 执行权限三档：'' = 默认（敏感操作逐个确认）、'readonly' = 只读（写类工具不挂）、
+  // 'full' = 完全访问（不再逐条确认）。不认识的取值一律按默认档显示，与后端同口径。
   permission?: string
-  // 能力档：'assistant' = 工具全开（默认），'readonly' = 只挂读类工具。
-  // 空 = 老会话（列是后加的），按 mode 推导——plan 当年是只读的（见 restoreScene）。
-  // 与 permission 正交：一个管「有没有这只手」，一个管「动手前问不问」。
+  // 合并前的「能力档」列：新数据不再写它，只在读老会话时把 readonly 平移成只读档
+  // （见 AIPage 的 restorePermLevel）。
   scene?: string
   // 这条任务选中的模型档案 id（ai_profiles.id）。空 = 从未单独选过 →
   // 显示全局「最后选择」；老数据升级后也是空，不能当成「没配模型」。
@@ -219,6 +218,9 @@ export interface AIMsgImage { kind: 'file' | 'url'; url?: string; path?: string;
 export interface AIMessage {
   id: string; conv_id: string; role: string; content: string; created_at: string
   reasoning_content?: string; images?: string; imgList?: AIMsgImage[]
+  // 这条用户消息发出时挂上的技能名（JSON 数组字符串，空 = 没挂）。
+  // 只用于在聊天里标出「这条用到了哪个技能」——技能本身只活在提示词里。
+  skills?: string
   // 该条回复自己那一次调用的用量（assistant 才有值，老消息为 0/undefined）
   model?: string; prompt_tokens?: number; completion_tokens?: number; cached_tokens?: number
   // 这条回复的估算费用（元）。后端按当前价目表现算，未收录的模型没有这个字段。

@@ -11,6 +11,7 @@ import QdSwitch from './QdSwitch.vue'
 import QdModal from './QdModal.vue'
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
+import { profileNeedsKey } from '../utils/aiKey'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
@@ -185,7 +186,7 @@ async function loadOllamaLocalModels() {
 async function fetchApiModels() {
   const d = aiEditDraft.value
   if (!d || modelOptionsLoading.value) return
-  const needKey = d.provider !== 'ollama'
+  const needKey = profileNeedsKey(d)
   if (!d.baseURL || (needKey && !d.apiKey)) {
     modelOptionsError.value = t('aiFetchNeedBaseKey')
     return
@@ -1187,8 +1188,8 @@ async function saveAIProfiles() {
 async function testAIConnection() {
   const cur = aiCurrent.value
   if (!cur) return
-  // Ollama 本地服务无需 API Key，只校 Base URL 与 Model。
-  const needKey = cur.provider !== 'ollama'
+  // 本地推理服务（Ollama / LM Studio / vLLM…）无需 API Key，只校 Base URL 与 Model。
+  const needKey = profileNeedsKey(cur)
   if (!cur.baseURL || !cur.model || (needKey && !cur.apiKey)) {
     showAIMsg(t(needKey ? 'aiFillRequired' : 'aiFillRequiredNoKey'), true); return
   }
@@ -1841,7 +1842,7 @@ function saveAIModal() {
               v-model="aiEditDraft.apiKey"
               :type="keyVisible ? 'text' : 'password'"
               class="field-input"
-              :placeholder="aiEditDraft.provider === 'ollama' ? t('aiAPIKeyOptional') : 'sk-...'"
+              :placeholder="!profileNeedsKey(aiEditDraft) ? t('aiAPIKeyOptional') : 'sk-...'"
             />
             <div class="key-input-actions">
               <button

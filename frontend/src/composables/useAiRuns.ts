@@ -70,12 +70,13 @@ export interface AiRunsDeps {
   // —— 这一轮的执行口径（每次都显式带，不做「沿用上次」） ——
   hasKey: ComputedRef<boolean>
   mode: Ref<string>
-  permissionFull: Ref<boolean>
   /**
-   * 能力档：'assistant'（工具全开）/ 'readonly'（只挂读类工具）。
-   * 与 permissionFull 是两个维度，别合并——一个管「问了没有」，一个管「有没有这只手」。
+   * 执行权限三档：'readonly' / ''（默认）/ 'full'。
+   *
+   * 合并前这里是 permissionFull + scene 两个开关；它们回答的是同一个问题
+   * （AI 这次能动多少），只是拆成了「有没有这只手」×「动手前问不问」两维。
    */
-  scene: Ref<string>
+  permissionLevel: Ref<string>
   worktreeEnabled: Ref<boolean>
   worktreeActive: ComputedRef<boolean>
   worktreeBranch: Ref<string>
@@ -128,7 +129,7 @@ export function useAiRuns(deps: AiRunsDeps) {
   const {
     activeId, conversations, messages, runs, draftRunId,
     input, attachments, mentions, lastMentions, pickedSkills, lastSkills, stripSkillTokens,
-    hasKey, mode, permissionFull, scene, worktreeEnabled, worktreeActive, worktreeBranch,
+    hasKey, mode, permissionLevel, worktreeEnabled, worktreeActive, worktreeBranch,
     pendingSpaceId, convCwd, streamModelOf, profileIdOf,
     planCards, statMap, setConvError, markConvRunning, markConvFinished,
     loadConversations, loadCheckpoints, refreshJobBadge,
@@ -502,6 +503,9 @@ export function useAiRuns(deps: AiRunsDeps) {
     const msg: AIMessage = {
       id: 'usr-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), conv_id: convId, role: 'user', content: text,
       created_at: new Date().toISOString(), imgList,
+      // 本地气泡立刻标出技能，别等刷新才出现——「我选的技能到底生效了没有」
+      // 正是用户在发出这一句时最想知道的事。
+      skills: skillPayload.length ? JSON.stringify(skillPayload) : '',
     }
     // 重试：那条 user 消息本来就在列表里，别再插一个重复气泡。
     // （后端 saveUserTurn 对「同内容 + 同图片」幂等，DB 里也不会多出一行）
@@ -547,11 +551,10 @@ export function useAiRuns(deps: AiRunsDeps) {
           skills: skillPayload,
           // 权限：每次都显式带。「缺省 = 沿用上次」在这里不成立——权限是每一条消息
           // 的执行口径，少带一次就可能按上一轮的完全访问静默执行。
-          permission: permissionFull.value ? 'full' : 'default',
-          // 能力档：同样每次显式带。落地页还没建会话时，这是唯一能把这个选择
-          // 传到后端的路径；建会话那一步会把它写进 ai_conversations.scene。
-          // 后端只认 assistant / readonly，其余一律归一（见 aiSceneFor）。
-          scene: scene.value || 'assistant',
+          //
+          // 默认档送 'default' 这个显式值（后端归一成空串）：送空串等于「没表态」，
+          // 后端会回落到会话上存的档位，用户从「完全访问」切回「默认」就切不动了。
+          permission: permissionLevel.value === 'full' ? 'full' : permissionLevel.value === 'readonly' ? 'readonly' : 'default',
           // 模型档案：每次都带输入框里选中的那个。用户在发送前刚切过模型时，
           // 库里还是上一轮的值，后端必须以这次请求为准。
           profileId,
@@ -987,11 +990,37 @@ export function useAiRuns(deps: AiRunsDeps) {
       // run.error 也要算进失败：错误发生在当前会话时只画横幅、不置 runFailed，
       // 若用户在那之后、收尾之前切走，就会留下一个绿点，而点进去是报错。
       markConvFinished(runID, runFailed || !!run.error)
+      // 清单收口：模型只在主动调 plan_update 时才改状态，最后一步常常直接给答案、
+      // 忘了把正在做的那条打勾。不收口的话那张卡会一直转圈——表现就是「任务明明
+      // 跑完了，清单还卡在第 2 步」，直到下一条消息触发下一次 plan_update 才动。
+      settlePlanCard(runID)
       // 流式结束后尾块不再是「进行中」：补一次扫描，把最后一张图（可能就在结尾）画出来
       if (here) scheduleMermaidScan()
       // 在别的页面期间回答跑完了：给侧栏一个未读点，否则用户不知道已经能看
       if (!pageActive.value) aiFinishedUnread.value = true
     }
+  }
+
+  /**
+   * settlePlanCard 一轮结束后，把清单里还挂着「正在做」的条目收口成「未完成」。
+   *
+   * 为什么必须做：status 只有模型主动调 plan_update 才会变，而它最后一步常常
+   * 直接给答案就结束，那条 doing 于是永远停在那里转圈。用户看到的是「任务跑完了、
+   * 清单还在动」，而且在下一条消息触发下一次 plan_update 之前都不会变。
+   *
+   * 收成 stopped 而不是 done：那一步确实没被确认完成，标成已完成是在骗人。
+   */
+  function settlePlanCard(convId: string) {
+    if (!convId) return
+    const card = planCards.get(convId)
+    if (!card) return
+    let changed = false
+    const items = card.items.map((it) => {
+      if (it.status !== 'doing') return it
+      changed = true
+      return { ...it, status: 'stopped' }
+    })
+    if (changed) planCards.set(convId, { items, note: card.note })
   }
 
   /**

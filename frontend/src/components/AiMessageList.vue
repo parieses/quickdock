@@ -13,7 +13,7 @@ import { computed, nextTick, ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAiCostPreference } from '../composables/useAiCostPreference'
 import {
-  ArrowDown, Bot, Check, ChevronDown, ChevronRight, Copy, FileText, Loader2, Pencil, Play, RotateCcw, StickyNote, Undo2, Wrench,
+  ArrowDown, Bot, Check, ChevronDown, ChevronRight, Copy, FileText, Loader2, Pencil, Play, RotateCcw, Sparkles, StickyNote, Undo2, Wrench,
 } from '@lucide/vue'
 import AgentRunTree from './AgentRunTree.vue'
 import AiDiffView from './AiDiffView.vue'
@@ -97,6 +97,16 @@ const activeRun = computed<AIRun | null>(
   () => pickActiveRun(props.runs, props.activeId, props.draftRunId) ?? null,
 )
 const streaming = computed(() => !!activeRun.value)
+// 最后一条用户消息：重新生成挂在它身上（见下面模板），因为「重答哪一句」
+// 就是「我最后问的那一句」。放在消息流最底部的居中按钮会被误点到下面
+// 的输入区/其他操作上，长会话里还要滚到底才能按。
+const lastUserId = computed(() => {
+  const list = props.messages
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (list[i].role === 'user') return list[i].id
+  }
+  return ''
+})
 const reasoningText = computed(() => activeRun.value?.reasoning ?? '')
 const streamTools = computed<AIToolCall[]>(() => activeRun.value?.tools ?? NO_TOOLS)
 const streamBlocks = computed<LiveBlock[]>(() => activeRun.value?.blocks ?? NO_BLOCKS)
@@ -286,7 +296,27 @@ function toolsOf(m: AIMessage): AIToolCall[] {
   return list
 }
 
+// 这条用户消息发出时挂上的技能名。落库的是 JSON 数组字符串，坏数据一律当空，
+// 不让一条脏记录把整条消息渲染打断。
+const skillCache = new Map<string, { sig: string; list: string[] }>()
+function skillsOf(m: AIMessage): string[] {
+  const raw = m.skills || ''
+  if (!raw) return []
+  const hit = skillCache.get(m.id)
+  if (hit && hit.sig === raw) return hit.list
+  let list: string[] = []
+  try {
+    const v = JSON.parse(raw)
+    if (Array.isArray(v)) list = v.filter((x): x is string => typeof x === 'string' && !!x.trim())
+  } catch {
+    list = []
+  }
+  skillCache.set(m.id, { sig: raw, list })
+  return list
+}
+
 const artCache = new Map<string, { sig: string; list: AIArtifact[] }>()
+
 function artsOf(m: AIMessage): AIArtifact[] {
   const sig = `${m.id}:${m.role}:${(m.tool_calls || '').length}`
   const hit = artCache.get(m.id)
@@ -623,7 +653,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
           v-for="m in shownMessages"
           :key="m.id"
           :data-msg-id="m.id"
-          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), costLines.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id, expandedInMessage(m), editingId === m.id, schedTimes, m.created_at]"
+          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), costLines.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, m.skills, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id, expandedInMessage(m), editingId === m.id, schedTimes, m.created_at]"
           :class="['ai-msg', m.role]"
         >
           <div class="ai-msg-role">
@@ -632,6 +662,14 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
             <span v-if="schedTimes && m.role === 'user' && msgClock(m.created_at)" class="ai-msg-clock">{{ msgClock(m.created_at) }}</span>
             <!-- 多档案（不同模型/档案）混着聊时，不写模型名就分不清这句是谁答的 -->
             <span v-if="m.role === 'assistant' && m.model" class="ai-msg-model">{{ m.model }}</span>
+          </div>
+          <!-- 这条消息挂上的技能。技能只活在提示词里（名字 + SKILL.md 路径），
+               模型读了也只留一条工具行，不标出来用户就看不出「我选的技能生效了没有」。 -->
+          <div v-if="m.role === 'user' && skillsOf(m).length" class="ai-msg-skills">
+            <span v-for="n in skillsOf(m)" :key="n" class="ai-msg-skill">
+              <Sparkles :size="10" />
+              {{ n }}
+            </span>
           </div>
           <!-- 图片缩略图：url 类直发链接，file 类用已加载的 dataUrl；历史 file 图由 loadMessages 懒加载填回 -->
           <div v-if="m.imgList && m.imgList.length" class="ai-msg-imgs">
@@ -776,6 +814,16 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
               @click="beginEdit(m)"
             >
               <Pencil :size="12" /> {{ t('aiEdit') }}
+            </button>
+            <!-- 重新生成：挂在我最后发的那句问上。只在「最后一条用户消息 + 有可重答的
+                 回答 + 当前没有流在跑」时出现，避免在长会话里堆出一排按钮。 -->
+            <button
+              v-if="!streaming && canRegenerate && m.role === 'user' && m.id === lastUserId"
+              class="ai-copy"
+              :title="t('aiRegenerateHint')"
+              @click="emit('regenerate')"
+            >
+              <RotateCcw :size="12" /> {{ t('aiRegenerate') }}
             </button>
             <button v-if="m.role === 'assistant' && m.content" class="ai-copy" @click="emit('save-note', m.content)" :title="t('aiSaveToNote')">
               <StickyNote :size="12" /> {{ t('aiSaveToNote') }}
@@ -924,17 +972,12 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
           </details>
         </div>
 
-        <!-- 重新生成上一条回答。放在消息流末尾而不是每条回复的按钮组里：
-             只有最后一条重答才有意义（前面的重答会与后面已有的回答矛盾），
-             而每条都挂一个按钮等于给长会话再添 200 个可点区域。
+        <!-- 重新生成上一条回答。放在「我发的那句」的操作行里，而不是消息流末尾：
+             末尾那个居中按钮紧贴输入区，最容易点错；而且它离「重答的是哪一句」
+             隔着一整段回答。挂在最后一条用户消息上，语义和位置都对得上。
+             只有最后一条重答才有意义（前面的重答会与后面已有的回答矛盾）。
              后端按 targetId 截断旧回答并重算会话 token（ai_usage 明细保留：
              那是一次真实花过钱的调用），所以刷新后不会冒出重复的提问气泡。 -->
-        <div v-if="canRegenerate && !streaming" class="ai-regen">
-          <button class="ai-regen-btn" :title="t('aiRegenerateHint')" @click="emit('regenerate')">
-            <RotateCcw :size="12" /> {{ t('aiRegenerate') }}
-          </button>
-        </div>
-
         <div v-if="errorMsg" class="ai-error">
           <span class="ai-error-text">{{ errorMsg }}</span>
           <!-- 失败时用户消息已落库，重试就是把它再发一次（图片一起带回去） -->
@@ -1404,6 +1447,27 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   font-variant-numeric: tabular-nums;
 }
 
+/* 这条消息挂上的技能：一枚小胶囊，跟角色行一起读作「用户 + 用了什么」。
+   用 accent 的淡底而不是灰底——这是「技能生效了」的正面信息，不该和
+   「几点发的」这种元数据长得一样。 */
+.ai-msg-skills { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 2px 0 var(--space-2); }
+
+.ai-msg.user .ai-msg-skills { justify-content: flex-end; }
+
+.ai-msg-skill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  height: 18px;
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-full);
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+  font-size: var(--text-2xs);
+  line-height: 1;
+}
+
 .ai-msg-content {
   padding: 0;
   /* 与 app.css 的 .ai-md 保持同一个值：scoped 选择器带 [data-v] 优先级更高，
@@ -1498,31 +1562,8 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-retry:hover { background: var(--color-danger-bg); }
 
-/* 重新生成：整行居中的软按钮，不抢正文的注意力（它是一次可选的重复操作） */
-.ai-regen {
-  align-self: center;
-  display: flex;
-  justify-content: center;
-  margin: var(--space-1) 0 var(--space-4);
-}
-
-.ai-regen-btn {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: var(--space-2) var(--space-5);
-  font-size: var(--text-xs); font-family: inherit;
-  color: var(--color-text-secondary);
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  cursor: pointer;
-  transition: color var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast);
-}
-
-.ai-regen-btn:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-secondary);
-  border-color: var(--color-border-light);
-}
+/* 重新生成已经挂到「最后一条提问」的操作行里（见模板），这里的居中软按钮
+   样式随之删除：留着只会让人以为底部还有一个按钮。 */
 
 /* 搜索命中跳转后的落点高亮：只闪一次，不做常驻状态。
    同时闪底色与一圈光晕——用户消息的底色画在气泡上，单靠容器的 background
