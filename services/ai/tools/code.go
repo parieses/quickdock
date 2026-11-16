@@ -71,7 +71,7 @@ var codeAgentDangerRules = []struct {
 }
 
 func registerCode(d Deps) {
-	r := registrar{d: d, category: mcpsrv.CategoryCode}
+	r := registrar{d: d, domain: mcpsrv.CategoryCode}
 	str := mcpsrv.Str
 	intp := mcpsrv.Int
 	boolp := mcpsrv.Bool
@@ -135,7 +135,30 @@ func registerCode(d Deps) {
 			"background": boolp("可选。true = 立刻返回 jobId，进程在后台继续跑，输出写到日志文件。" +
 				"跑脚本与长驻命令用它，不要同步阻塞等：结束时会主动通知你，不用轮询。" +
 				"任务是会话级的：关闭 QuickDock 会终止它，长驻服务本来就该这样收场"),
-		})
+		},
+		// 审批元数据跟着工具走（以前散在 ai_approval.go 的 if name == "run_command" 里）：
+		// 记住的粒度是命令族，批准 npm install 之后 npm 一族不再问，rm 换了首词照问；
+		// 多段命令（含 && / |）与解释器（cmd / bash / python）不给记住按钮。
+		withGrantKey(func(args map[string]any) (string, bool) {
+			head := aiutil.CommandFamily(mcpsrv.Arg(args, "command"))
+			if head == "" {
+				return "", false
+			}
+			return "run_command:" + head, true
+		}),
+		withRiskNote(func(args map[string]any) string {
+			cmd := mcpsrv.Arg(args, "command")
+			if lv, note := aiutil.LocalCmdDangerRules.Eval(cmd); note != "" {
+				if lv == "high" {
+					// 说明必须自洽：run_command 对 high 风险一律不执行。不写这半句，
+					// 用户点完「允许」却收到一个失败，会觉得审批是个假按钮。
+					return "高危：" + note + "。这类命令宿主一律不执行，允许了也不会跑"
+				}
+				return note
+			}
+			return "在本机执行一条命令，输出会回给模型"
+		}),
+		withArgBrief(func(args map[string]any) string { return mcpsrv.Arg(args, "command") }))
 
 	r.add(checkWorkdir, mcpsrv.LevelRead, "check_workdir",
 		"探测一个目录是什么项目：识别语言与包管理器、依赖装了没、有哪些可运行脚本、是不是 git 仓库、"+

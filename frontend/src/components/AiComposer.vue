@@ -18,6 +18,7 @@ import AiSlashPanel from './AiSlashPanel.vue'
 import AiRichInput from './AiRichInput.vue'
 import AiMentionBox from './AiMentionBox.vue'
 import AiPermissionBadge from './AiPermissionBadge.vue'
+import AiSceneBadge from './AiSceneBadge.vue'
 import AiWorktreeToggle from './AiWorktreeToggle.vue'
 
 const props = defineProps<{
@@ -60,6 +61,8 @@ const props = defineProps<{
   canSend: boolean
   // 这条对话的执行权限：true = 完全访问（不再逐条确认）
   permissionFull: boolean
+  // 这条对话的能力档：'assistant' = 工具全开，'readonly' = 只挂读类工具
+  scene: string
   // 隔离工作区（见 AiWorktreeToggle）：只在 git 仓库里显示
   worktreeActive: boolean
   worktreePath: string
@@ -96,6 +99,7 @@ const emit = defineEmits<{
   (e: 'install-skill'): void
   (e: 'manage-connectors'): void
   (e: 'change-permission', full: boolean): void
+  (e: 'change-scene', scene: string): void
   (e: 'update:worktreeEnabled', v: boolean): void
   (e: 'toggle-worktree-branch'): void
   (e: 'pick-worktree-branch', name: string): void
@@ -234,8 +238,14 @@ defineExpose({
         />
       </div>
       <div class="ai-input-bar-right">
-        <!-- 当前权限：默认权限会逐个问，完全访问直接做。生成中不给切——
-             这一轮已经按旧口径在跑，切了也不生效，只会让人以为切了。 -->
+        <!-- 能力档在前、权限在后：先看「它有没有这只手」，再看「动手前问不问」。
+             生成中两个都不给切——这一轮已经按旧口径在跑，切了也不生效。 -->
+        <AiSceneBadge
+          :scene="props.scene"
+          :disabled="props.streaming"
+          @change="emit('change-scene', $event)"
+        />
+        <!-- 当前权限：默认权限会逐个问，完全访问直接做。 -->
         <AiPermissionBadge
           :full="props.permissionFull"
           :disabled="props.streaming"

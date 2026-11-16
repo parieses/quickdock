@@ -20,7 +20,7 @@ import (
 )
 
 func registerMemory(d Deps) {
-	r := registrar{d: d, category: mcpsrv.CategoryCode}
+	r := registrar{d: d, domain: mcpsrv.CategoryCode}
 	str := mcpsrv.Str
 	r.add(projectMemory, mcpsrv.LevelRead, "project_memory",
 		"读写当前任务所在工作区的长期记忆，避免反复重读整个项目或让用户重复交代背景而浪费 token。"+

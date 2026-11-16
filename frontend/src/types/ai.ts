@@ -141,6 +141,10 @@ export interface AIConversation {
   // 执行权限：空 = 默认（敏感操作逐个确认），'full' = 完全访问。
   // 只认 'full' 一个真值——不认识的取值一律按默认权限显示，与后端同一个口径。
   permission?: string
+  // 能力档：'assistant' = 工具全开（默认），'readonly' = 只挂读类工具。
+  // 空 = 老会话（列是后加的），按 mode 推导——plan 当年是只读的（见 restoreScene）。
+  // 与 permission 正交：一个管「有没有这只手」，一个管「动手前问不问」。
+  scene?: string
   // 这条任务选中的模型档案 id（ai_profiles.id）。空 = 从未单独选过 →
   // 显示全局「最后选择」；老数据升级后也是空，不能当成「没配模型」。
   profile_id?: string

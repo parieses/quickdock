@@ -627,7 +627,7 @@ func PurgeOldJobs(database *db.Database) {
 // 都是 LevelRead：查状态与读日志不改任何东西，纳入审批只会让「刚起完就查一下」
 // 也弹一次确认，而那个频率高得离谱。
 func registerJob(d Deps) {
-	r := registrar{d: d, category: mcpsrv.CategoryCode}
+	r := registrar{d: d, domain: mcpsrv.CategoryCode}
 	str := mcpsrv.Str
 	boolp := mcpsrv.Bool
 

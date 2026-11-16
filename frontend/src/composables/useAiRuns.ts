@@ -71,6 +71,11 @@ export interface AiRunsDeps {
   hasKey: ComputedRef<boolean>
   mode: Ref<string>
   permissionFull: Ref<boolean>
+  /**
+   * 能力档：'assistant'（工具全开）/ 'readonly'（只挂读类工具）。
+   * 与 permissionFull 是两个维度，别合并——一个管「问了没有」，一个管「有没有这只手」。
+   */
+  scene: Ref<string>
   worktreeEnabled: Ref<boolean>
   worktreeActive: ComputedRef<boolean>
   worktreeBranch: Ref<string>
@@ -123,7 +128,7 @@ export function useAiRuns(deps: AiRunsDeps) {
   const {
     activeId, conversations, messages, runs, draftRunId,
     input, attachments, mentions, lastMentions, pickedSkills, lastSkills, stripSkillTokens,
-    hasKey, mode, permissionFull, worktreeEnabled, worktreeActive, worktreeBranch,
+    hasKey, mode, permissionFull, scene, worktreeEnabled, worktreeActive, worktreeBranch,
     pendingSpaceId, convCwd, streamModelOf, profileIdOf,
     planCards, statMap, setConvError, markConvRunning, markConvFinished,
     loadConversations, loadCheckpoints, refreshJobBadge,
@@ -543,6 +548,10 @@ export function useAiRuns(deps: AiRunsDeps) {
           // 权限：每次都显式带。「缺省 = 沿用上次」在这里不成立——权限是每一条消息
           // 的执行口径，少带一次就可能按上一轮的完全访问静默执行。
           permission: permissionFull.value ? 'full' : 'default',
+          // 能力档：同样每次显式带。落地页还没建会话时，这是唯一能把这个选择
+          // 传到后端的路径；建会话那一步会把它写进 ai_conversations.scene。
+          // 后端只认 assistant / readonly，其余一律归一（见 aiSceneFor）。
+          scene: scene.value || 'assistant',
           // 模型档案：每次都带输入框里选中的那个。用户在发送前刚切过模型时，
           // 库里还是上一轮的值，后端必须以这次请求为准。
           profileId,

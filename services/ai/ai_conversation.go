@@ -10,6 +10,7 @@ import (
 
 	"quickdock/internal/db"
 	"quickdock/internal/logger"
+	mcpsrv "quickdock/internal/mcp"
 	"quickdock/services"
 )
 
@@ -155,6 +156,33 @@ func (a *AIService) AICreateConversation(title, mode, spaceID string) *services.
 		Mode:    mode,
 		SpaceID: spaceID,
 	})
+	if err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(c)
+}
+
+// AISetConversationScene 切换一条对话的能力档：assistant（全开，写操作审批）/ readonly（只读）。
+//
+// 为什么单独一个入口而不是塞进「改模式」：mode 是任务模板（换它会连提示词一起换），
+// scene 是「准这条对话用多大能力」。用户常见动作是「这条我盯着它干活」→ 助手档，
+// 或者「这条只让它看别动手」→ 只读档，任务类型不变。
+func (a *AIService) AISetConversationScene(convID, scene string) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	convID = strings.TrimSpace(convID)
+	if convID == "" {
+		return services.FailMsg("缺少会话 ID")
+	}
+	scene = strings.TrimSpace(scene)
+	if scene != mcpsrv.SceneAssistant && scene != mcpsrv.SceneReadOnly {
+		return services.FailMsg("能力档只能是 assistant 或 readonly")
+	}
+	if err := a.App.DB.SetAIConversationScene(convID, scene); err != nil {
+		return services.Fail(err)
+	}
+	c, err := a.App.DB.GetAIConversation(convID)
 	if err != nil {
 		return services.Fail(err)
 	}

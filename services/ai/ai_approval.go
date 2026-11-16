@@ -29,7 +29,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"quickdock/internal/aiutil"
 	"quickdock/internal/db"
 	"quickdock/internal/logger"
 	mcpsrv "quickdock/internal/mcp"
@@ -142,110 +141,29 @@ func aiApprovalPolicyFor(name string, level int, rules map[string]approvalMode) 
 	}
 }
 
-// approvalShellWords 「执行壳」：它们本身不是干活的那个程序，跳过再取首词。
-//
-// 必须跳过 sudo：否则 `sudo rm -rf /` 会被记成「sudo 一族」，之后任意一条
-// sudo 命令都放行——那比不记更糟。
-var approvalShellWords = map[string]bool{
-	"sudo": true, "doas": true, "command": true, "exec": true,
-	"time": true, "nohup": true, "env": true, "nice": true, "start": true,
-}
-
-// approvalInterpreterWords 能执行任意命令的解释器。
-//
-// 与 approvalShellWords 的区别：那批是「一层壳」，跳过它取下一个词还是同一个程序
-// （`sudo rm` 记成 rm 是对的）；而这批的下一词是它自己的开关（`cmd /c …`、`bash -lc …`），
-// 取到的不是被执行的程序，按它记族毫无意义。
-//
-// 也不能像 sudo 那样跳过：跳过 `cmd` 会取到 `/c`，跳过 `bash` 会取到 `-lc`。
-// 唯一安全的做法是命中就不给「记住」——批准一次 `cmd` 等于放行之后任意
-// `cmd /c del /s /q …`，那比每次多点一次确认糟得多。
-var approvalInterpreterWords = map[string]bool{
-	// shell
-	"cmd": true, "powershell": true, "pwsh": true, "wsl": true,
-	"bash": true, "sh": true, "zsh": true, "fish": true,
-	"ksh": true, "csh": true, "tcsh": true, "dash": true,
-	// 脚本宿主：参数就是代码
-	"python": true, "python3": true, "py": true, "node": true, "deno": true,
-	"bun": true, "perl": true, "ruby": true, "php": true, "lua": true,
-	"osascript": true, "expect": true,
-	// 任意 jar / 类
-	"java": true, "javaw": true,
-}
-
-// approvalCommandHead 取一条命令的「首词」，用作命令族的标识。
-//
-// 返回空字符串表示「这条不该给记住按钮」——多段命令（含 && || ; | &）一律如此。
-// 理由：`cd repo && rm -rf build` 若按首词记成 cd，下次 `cd x && rm -rf y`
-// 就再也不问了，而用户当初批准的是「切个目录」。
-func approvalCommandHead(cmd string) string {
-	s := strings.TrimSpace(cmd)
-	if s == "" {
-		return ""
-	}
-	// 一次只批准一条命令：连接符说明这里其实有多条。
-	if strings.ContainsAny(s, "&|;\n") {
-		return ""
-	}
-	fields := strings.Fields(s)
-	for len(fields) > 0 {
-		w := fields[0]
-		// 跳过前置环境变量赋值 FOO=bar（只认「前面不像路径」的形态，
-		// 避免把 C:\a=b\npm 这种路径里的等号当成赋值）。
-		if i := strings.IndexByte(w, '='); i > 0 && !strings.ContainsAny(w[:i], `/\`) {
-			fields = fields[1:]
-			continue
-		}
-		if approvalShellWords[strings.ToLower(w)] {
-			fields = fields[1:]
-			continue
-		}
-		break
-	}
-	if len(fields) == 0 {
-		return ""
-	}
-	// 去掉路径与扩展名：C:\Program Files\nodejs\npm.cmd → npm
-	base := fields[0]
-	if i := strings.LastIndexAny(base, `/\`); i >= 0 {
-		base = base[i+1:]
-	}
-	base = strings.ToLower(base)
-	for _, ext := range []string{".exe", ".cmd", ".bat", ".ps1", ".com"} {
-		base = strings.TrimSuffix(base, ext)
-	}
-	if base == "" {
-		return ""
-	}
-	if approvalInterpreterWords[base] {
-		return ""
-	}
-	return base
-}
-
 // approvalGrantKey 「本次会话都允许」记在哪个 key 上。
 //
-// 第二个返回值为 false 表示这次不给记住按钮。除了高危等级，还有一类情况：
-// run_command 拿不到可归纳的命令族（空命令、多段命令）。此时只让用户点单次——
-// 记不住比记错安全。
+// 第二个返回值为 false 表示这次不给记住按钮。粒度由工具自己声明（Tool.GrantKey）：
+// run_command 按命令族、schedule_create 按任务名、其余默认按工具名。
+// 声明写在注册处（见 services/mcp 与 services/ai/tools 的 withGrantKey），
+// 这里只负责取——按工具名 switch 的老写法每加一个工具就要回来改一次，
+// 而且改的地方离工具定义很远，容易漏。
 func approvalGrantKey(name string, args map[string]any) (string, bool) {
-	if name != "run_command" {
+	t, ok := mcpsrv.ToolByName(name)
+	if !ok {
 		return name, true
 	}
-	head := approvalCommandHead(mcpsrv.Arg(args, "command"))
-	if head == "" {
-		return "", false
-	}
-	return "run_command:" + head, true
+	return mcpsrv.GrantKeyOf(t, args)
 }
 
 // aiApprovalGrantScope 描述「这次记住的是什么范围」，给前端写在按钮旁边。
 //
-// 按命令族记住必须让用户看见范围：他点的是「本次会话都允许」，如果他以为是
-// 「这一条」，后来发现 npm 之外也被静默放行（或反过来），这个按钮就再没人信了。
+// 按命令族 / 按任务名记住必须让用户看见范围：他点的是「本次会话都允许」，
+// 如果他以为是「这一条」，后来发现别的也被静默放行（或反过来），这个按钮就再没人信了。
 func aiApprovalGrantScope(grantKey string) string {
-	if head, ok := strings.CutPrefix(grantKey, "run_command:"); ok && head != "" {
-		return head
+	// 形如 run_command:npm、schedule_create:系统占用巡检 —— 取冒号后的部分。
+	if i := strings.IndexByte(grantKey, ':'); i >= 0 && i+1 < len(grantKey) {
+		return grantKey[i+1:]
 	}
 	return ""
 }
@@ -580,15 +498,15 @@ func aiApprovalLevelName(level int) string {
 // 只挑用户判断所需的键，不做全量展示：run_command 的整条命令必须给人看（那是他
 // 判断的唯一依据），而 file_edit 的 old_string / new_string 可能很长——给路径就够
 // 知道改的是哪个文件。全量塞进事件会让一条 SSE 帧大到几 MB。
+//
+// 挑哪个键由工具自己声明（Tool.ArgBrief），这里只做默认兜底。
 func aiApprovalArgsBrief(name string, args map[string]any) string {
-	if name == "run_command" {
-		return mcpsrv.Arg(args, "command")
+	if t, ok := mcpsrv.ToolByName(name); ok {
+		if brief := mcpsrv.ArgBriefOf(t, args); brief != "" {
+			return brief
+		}
 	}
-	if p := mcpsrv.Arg(args, "path"); p != "" {
-		return p
-	}
-	// 其余工具尽量给一句能看懂的。
-	for _, k := range []string{"task", "query", "url", "pattern", "note"} {
+	for _, k := range []string{"task", "query", "url", "pattern", "note", "title"} {
 		if v := mcpsrv.Arg(args, k); v != "" {
 			return v
 		}
@@ -598,35 +516,14 @@ func aiApprovalArgsBrief(name string, args map[string]any) string {
 
 // aiApprovalRiskNote 风险说明。
 //
-// run_command 复用 aiutil.LocalCmdDangerRules：那张表的判定前提是「在本机跑」，
-// 与本机执行一致；SSH 那张表的前提是远程生产机，混用会给出不准确的警告
-// （`systemctl restart` 在那边是线上中断，在这边可能只是重启自己的服务）。
-// 其余工具按等级给一句通用说明——编造更具体的风险描述反而会让人不再读它。
+// 具体文案由工具声明（Tool.RiskNote）：run_command 复用 aiutil.LocalCmdDangerRules，
+// spawn_agent 要讲清「子 agent 中途不再逐条确认」。没有声明时按等级给一句通用的——
+// 编造更具体的风险描述反而会让人不再读它。
 func aiApprovalRiskNote(name string, level int, args map[string]any) string {
-	if name == "run_command" {
-		cmd := mcpsrv.Arg(args, "command")
-		if lv, note := aiutil.LocalCmdDangerRules.Eval(cmd); note != "" {
-			if lv == "high" {
-				// 说明必须自洽：run_command 对 high 风险是一律不执行的（见
-				// tools/code.go）。不写这半句，用户点完「允许」却收到一个失败，
-				// 会觉得审批是个假按钮。
-				return "高危：" + note + "。这类命令宿主一律不执行，允许了也不会跑"
-			}
+	if t, ok := mcpsrv.ToolByName(name); ok && t.RiskNote != nil {
+		if note := strings.TrimSpace(t.RiskNote(args)); note != "" {
 			return note
 		}
-		return "在本机执行一条命令，输出会回给模型"
-	}
-	if name == spawnAgentToolName {
-		// 这张卡要挡住的是「派活」这个动作，但用户很容易把它理解成「改几个文件」。
-		// 差别在于点完之后：子 agent 在自己的循环里跑，非高危命令不再逐次弹确认，
-		// 用户要到结果交回主对话才看得到发生了什么。不写这半句，
-		// 用户是在完全不知情的情况下批准了一个无人值守的执行者。
-		role := strings.ToLower(strings.TrimSpace(mcpsrv.Arg(args, "role")))
-		if spec, ok := agentRoleSpecs[role]; ok {
-			return "派一个子 agent 独立执行：" + spec.summary +
-				"。批准后它在自己的循环里连续动手，中途不会再逐条向你确认（高危命令仍被拒），结果交回本对话"
-		}
-		return "派一个子 agent 独立执行，中途不会再逐条向你确认（高危命令仍被拒）"
 	}
 	switch level {
 	case mcpsrv.LevelWrite:

@@ -158,6 +158,10 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 		// Permission 这条对话的执行权限："full" = 完全访问，其余/缺省 = 默认。
 		// 缺这个字段的老前端一律按默认权限处理——安全开关断线时要倒向「问」。
 		Permission string `json:"permission"`
+		// Scene 这条对话的能力档："assistant"（默认，工具全开）或 "readonly"（只挂读类工具）。
+		// 与 Permission 是两个维度：Permission 管「问了没有」，Scene 管「有没有这只手」。
+		// 缺这个字段的老前端一律按 assistant 处理——升级不该让 AI 突然不会干活。
+		Scene string `json:"scene"`
 		// ProfileID 输入框里当前选中的模型档案。前端每次都带；老前端不带 → 空串，
 		// 后端按「会话上存过的 → 全局激活项」回落，升级不会丢已有对话的模型。
 		ProfileID string `json:"profileId"`
@@ -267,6 +271,7 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 		Mentions:       req.Mentions,
 		Skills:         req.Skills,
 		Permission:     req.Permission,
+		Scene:          req.Scene,
 		ProfileID:      req.ProfileID,
 		Worktree:       req.Worktree,
 		WorktreeBranch: req.WorktreeBranch,

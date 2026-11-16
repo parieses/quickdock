@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -121,13 +122,72 @@ func (s *MCPService) MCPTools() *services.ApiResult {
 			"name":        t.Name,
 			"description": t.Description,
 			"level":       t.Level,
-			"category":    t.Category,
-			"exposed":     t.Exposed,
-			"disabled":    t.Disabled,
-			"agentOnly":   t.AgentOnly,
+			// domain 是新的单一来源；category 保留给还没迁移的读取方（同值）。
+			"domain":    t.Domain,
+			"category":  t.Domain,
+			"exposed":   t.Exposed,
+			"disabled":  t.Disabled,
+			"agentOnly": t.AgentOnly,
 		})
 	}
 	return services.Ok(out)
+}
+
+// MCPDomains 返回能力域清单（面板分组顺序与标题的唯一来源）。
+//
+// 以前这份顺序写在前端 MCP_CATEGORY_ORDER 里，后端加一个域、前端没补就整组
+// 显示成 id；两边各维护一份迟早漂。现在前端只按 order 排、按 label 取 i18n key。
+func (s *MCPService) MCPDomains() *services.ApiResult {
+	out := make([]map[string]any, 0, 20)
+	for _, d := range mcpsrv.Domains() {
+		out = append(out, map[string]any{
+			"id":     d.ID,
+			"label":  d.LabelKey,
+			"order":  d.Order,
+			"desc":   d.Summary,
+			"public": d.External,
+		})
+	}
+	return services.Ok(out)
+}
+
+// MCPDoctor 自检：每个工具一行，说明它在外部 MCP 侧到底开没开、没开为什么。
+//
+// 存在的理由是「排查为什么它调不到」不该靠读代码。三个面板（MCP / AI 设置 / 审批策略）
+// 各显示一部分状态，用户看到「关着」时最常问的是「谁关的、哪一层关的」——
+// 这里给一句话答案：超出等级上限 / 已单独关闭 / 不对外部客户端开放。
+//
+// AI 侧的开关不在这里：那是另一份策略（ai_tool_policy），由 AIToolPolicy 报。
+func (s *MCPService) MCPDoctor() *services.ApiResult {
+	sf := mcpsrv.Resolve(mcpsrv.ToolScope{Caller: mcpsrv.CallerMCP, Policy: mcpsrv.MCPPolicy()})
+	reason := make(map[string]string, len(sf.Dropped))
+	for _, d := range sf.Dropped {
+		reason[d.Name] = d.Reason
+	}
+	open := make(map[string]bool, len(sf.Tools))
+	for _, t := range sf.Tools {
+		open[t.Name] = true
+	}
+	out := make([]map[string]any, 0, len(sf.Tools)+len(sf.Dropped))
+	for _, t := range mcpsrv.Catalog() {
+		out = append(out, map[string]any{
+			"name":      t.Name,
+			"domain":    t.Domain,
+			"level":     t.Level,
+			"public":    t.Exposed,
+			"open":      open[t.Name],
+			"reason":    reason[t.Name],
+			"agentOnly": t.AgentOnly,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i]["name"].(string) < out[j]["name"].(string)
+	})
+	return services.Ok(map[string]any{
+		"maxLevel": mcpsrv.MaxLevel(),
+		"disabled": mcpsrv.Disabled(),
+		"tools":    out,
+	})
 }
 
 // MCPStart 启动 MCP 服务（等同环境管理页点「启动」），返回监听地址。
@@ -467,15 +527,35 @@ type toolRegistrar struct {
 	category string
 }
 
-func (r *toolRegistrar) add(run func(args map[string]any) (any, error), level int, name, desc string, required []string, props map[string]any) {
-	r.addTool(mcpsrv.Tool{
+func (r *toolRegistrar) add(run func(args map[string]any) (any, error), level int, name, desc string, required []string, props map[string]any, opts ...toolOption) {
+	t := mcpsrv.Tool{
 		Name:        name,
 		Description: desc,
 		InputSchema: mcpsrv.Schema("", required, props),
 		Level:       level,
 		Category:    r.category,
 		Handler:     run,
-	})
+	}
+	for _, o := range opts {
+		o(&t)
+	}
+	r.addTool(t)
+}
+
+// toolOption 给 add 附加审批元数据。
+//
+// 用可变参数而不是加一个 hooks 结构体：66 个既有注册点一行都不用动，
+// 只有真正需要细粒度审批的那几个工具在末尾多写一行。审批元数据跟着工具走，
+// 而不是堆在 ai_approval.go 里按名字 switch——后者每加一个工具就要回去改一次，
+// 而且改的地方离工具定义很远，容易漏。
+type toolOption func(*mcpsrv.Tool)
+
+func withGrantKey(fn func(args map[string]any) (key string, rememberable bool)) toolOption {
+	return func(t *mcpsrv.Tool) { t.GrantKey = fn }
+}
+
+func withRiskNote(fn func(args map[string]any) string) toolOption {
+	return func(t *mcpsrv.Tool) { t.RiskNote = fn }
 }
 
 func (r *toolRegistrar) addTool(t mcpsrv.Tool) {
@@ -513,7 +593,11 @@ func toolProviders() []toolProvider {
 }
 
 // registerTools 按装配清单注册全部工具。
+//
+// 先注册域再注册工具：装配（Resolve）要用域声明判断场景开放程度，
+// 域缺席时工具会退化成「未分类且全开」，界面上完全看不出问题。
 func (s *MCPService) registerTools() {
+	registerDomains()
 	for _, p := range toolProviders() {
 		p.Register(s, &toolRegistrar{reg: mcpsrv.Global, category: p.Category})
 	}

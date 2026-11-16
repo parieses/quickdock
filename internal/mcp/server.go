@@ -300,6 +300,12 @@ func callToolSafe(name string, args map[string]interface{}) (res interface{}, er
 			err = fmt.Errorf("工具 %s 执行异常: %v", name, r)
 		}
 	}()
+	// 审计：外部客户端没有交互确认这道闸，写类与高危调用至少留痕。
+	// 只记工具名与等级，不记参数——参数里可能是用户数据或密钥，
+	// 而「谁在什么时候动了哪类能力」已经够用于事后追查。
+	if lvl := ToolLevel(name); lvl >= LevelWrite {
+		logger.I("[mcp-audit] 外部客户端调用 %s level=%d", name, lvl)
+	}
 	return Call(name, args)
 }
 

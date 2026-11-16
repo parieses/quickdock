@@ -4,6 +4,8 @@ import {
   MCPStatus,
   MCPTools,
   MCPClientConfig,
+  MCPDomains,
+  MCPDoctor,
   MCPSetLevel,
   MCPSetToolEnabled,
   MCPStart,
@@ -14,6 +16,7 @@ import {
   MCPSetTokenEnabled,
   MCPRotateToken,
 } from '../../bindings/quickdock/services/mcp/mcpservice'
+import { AIToolPolicy } from '../../bindings/quickdock/services/ai/aiservice'
 import { unwrap } from '../utils/api'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
@@ -22,46 +25,37 @@ export interface MCPToolInfo {
   name: string
   description: string
   level: number
-  category: string // 所属域（app/env/note…），面板据此分组
+  domain: string // 所属域（app/env/note…），面板据此分组
   exposed: boolean // 等级门 + 单工具开关都通过，**外部 MCP 客户端**实际能看到
   disabled: boolean // 被单独关掉：与「没资格」区分，前者可重新开启
   // agentOnly 只给内置 AI 用（改文件、跑命令、抓网页那批）：
   // 外部客户端看不到它，所以 exposed 为 false 是正常的，不是「被挡住」。
   agentOnly?: boolean
+  // aiOff 内置 AI 侧是否关掉了这个工具。**只读展示**：面板上改不了，
+  // 也不能由这里的开关推导——两边是两份独立策略，见 ai_tool_scope.go。
+  aiOff?: boolean
+  // reason 它没进外部客户端工具面的原因（超出等级上限 / 已单独关闭 / 不对外）。
+  // 来自 MCPDoctor：面板上「关着」的行悬停就能看到是哪一层关的，不用猜。
+  reason?: string
 }
 
 // MCPToolGroup 面板里的一个工具分组。
 export interface MCPToolGroup {
   category: string
   label: string
+  desc: string
   tools: MCPToolInfo[]
 }
 
-// MCP_CATEGORY_ORDER 分组固定顺序：与后端 toolProviders 的装配顺序对齐，
-// 让区块位置稳定（不会因为工具名首字母变化而上下跳）。
-// 前面两个（web/code）是 agent 专属域，由 services/ai/tools 注册；其余是 MCP 对外工具。
-// 顺序把 agent 域放前面：它们在面板上带「仅内置 AI」徽章，聚在一起比夹在宿主工具中间好读。
-const MCP_CATEGORY_ORDER = ['web', 'code', 'app', 'env', 'file', 'item', 'note', 'knowledge', 'download', 'todo', 'clipboard', 'diag', 'schedule', 'monitor', 'plugin', 'risk']
-
-// MCP_CATEGORY_I18N 分类 id → i18n key。后端只给 id、文案留在前端：
-// 否则英文界面会顶着一排中文分组名。
-const MCP_CATEGORY_I18N: Record<string, string> = {
-  app: 'mcpCatApp',
-  web: 'mcpCatWeb',
-  code: 'mcpCatCode',
-  env: 'mcpCatEnv',
-  file: 'mcpCatFile',
-  item: 'mcpCatItem',
-  note: 'mcpCatNote',
-  knowledge: 'mcpCatKnowledge',
-  download: 'mcpCatDownload',
-  todo: 'mcpCatTodo',
-  clipboard: 'mcpCatClipboard',
-  diag: 'mcpCatDiag',
-  schedule: 'mcpCatSchedule',
-  monitor: 'mcpCatMonitor',
-  plugin: 'mcpCatPlugin',
-  risk: 'mcpCatRisk',
+// MCPDomainMeta 后端登记的一个能力域。
+// 分组顺序、标题、说明、对外可见性全部来自这里，前端不再维护第二份顺序表——
+// 以前 MCP_CATEGORY_ORDER + MCP_CATEGORY_I18N 两处硬编码，加一个域必漏一处。
+interface MCPDomainMeta {
+  id: string
+  label: string // i18n key（如 mcpCatEnv），不是文案本身
+  order: number
+  desc: string
+  public: boolean
 }
 
 // MCPClientSnippet 一种客户端的接入片段：config 可直接粘贴/执行，path 是它该写到哪。
@@ -85,6 +79,8 @@ export function useMCPPanel(selectedId: Ref<string>) {
   const mcpInfo = reactive({ running: false, endpoint: '', port: 0, maxLevel: 1, tools: 0, total: 0, blocked: 0, agent: 0 })
   const mcpTools = ref<MCPToolInfo[]>([])
   const mcpClients = ref<MCPClientSnippet[]>([])
+  // mcpDomains 后端登记的能力域：分组顺序、标题 i18n key、说明、对外可见性。
+  const mcpDomains = ref<MCPDomainMeta[]>([])
   const mcpLoading = ref(false)
   const mcpBusy = ref(false)
   // mcpLevelHint 等级改动后的提示：客户端要重新握手才看得到新工具集。
@@ -108,10 +104,28 @@ export function useMCPPanel(selectedId: Ref<string>) {
   async function loadMCP() {
     mcpLoading.value = true
     try {
-      const [st, tools, cfg, tk] = await Promise.all([MCPStatus(), MCPTools(), MCPClientConfig(), MCPToken()])
+      const [st, tools, cfg, tk, dm, aiPol, doc] = await Promise.all([
+        MCPStatus(), MCPTools(), MCPClientConfig(), MCPToken(), MCPDomains(), AIToolPolicy(), MCPDoctor(),
+      ])
       const s = unwrap<{ running: boolean; endpoint: string; port: number; maxLevel: number; tools: number; total: number; blocked: number; agent: number }>(st)
       if (s) Object.assign(mcpInfo, s)
       mcpTools.value = unwrap<MCPToolInfo[]>(tools) || []
+      mcpDomains.value = unwrap<MCPDomainMeta[]>(dm) || []
+      // AI 侧只要一份「被关掉的名字」：AI 的策略对象整份很大（含全量工具表），
+      // 这里不把它存下来，免得两份数据混在一个 ref 里被误当成同一份状态。
+      // 注意语义：tool.aiOff 只是给用户看的提示，不参与下面任何开关判断。
+      const ai = unwrap<{ disabled: string[] }>(aiPol)
+      const off = new Set(ai?.disabled || [])
+      for (const tool of mcpTools.value) tool.aiOff = off.has(tool.name)
+      // 「为什么调不到」：自检给出的是逐工具的一句话原因，挂到行上做悬停提示。
+      // 单独拉一次而不是让 MCPTools 返回来：这段判断要用 Resolve 跑一遍装配，
+      // 而 MCPTools 是纯清单——把它并进去等于每次刷新都多算一份面。
+      const dr = unwrap<{ tools: { name: string; reason: string }[] }>(doc)
+      const reason = new Map((dr?.tools || []).map((x) => [x.name, x.reason]))
+      for (const tool of mcpTools.value) {
+        const why = reason.get(tool.name)
+        if (why) tool.reason = why
+      }
       const t0 = unwrap<{ token: string; requireToken: boolean }>(tk)
       if (t0) {
         mcpToken.value = t0.token || ''
@@ -271,23 +285,39 @@ export function useMCPPanel(selectedId: Ref<string>) {
     }
   }
 
-  // mcpToolGroups 按域分组。未登记的分类排到末尾并直接用 id 当标题：
-  // 后端加了新域而前端还没补文案时，工具仍然可见，只是标题朴素一点。
+  // domainLabel 把后端给的 i18n key 翻成文案。key 缺失时退回域 id：
+  // vue-i18n 查不到会原样返回 key，直接显示 "mcpCatFoo" 比显示 "foo" 更像 bug。
+  function domainLabel(d: MCPDomainMeta): string {
+    if (!d.label) return d.id
+    const s = t(d.label)
+    return s === d.label ? d.id : s
+  }
+
+  // mcpToolGroups 按域分组。顺序、标题、说明全部取自后端目录，前端不再维护第二份
+  // 顺序表——以前 MCP_CATEGORY_ORDER / MCP_CATEGORY_I18N 两处硬编码，加一个域必漏一处。
+  // 后端没登记的域（理论上不会有）排到末尾并直接用 id 当标题。
   const mcpToolGroups = computed<MCPToolGroup[]>(() => {
     const buckets = new Map<string, MCPToolInfo[]>()
     for (const tool of mcpTools.value) {
-      const key = tool.category || 'other'
+      const key = tool.domain || 'other'
       const list = buckets.get(key)
       if (list) list.push(tool)
       else buckets.set(key, [tool])
     }
-    const rest = [...buckets.keys()].filter((k) => !MCP_CATEGORY_ORDER.includes(k))
+    const meta = new Map(mcpDomains.value.map((d) => [d.id, d]))
+    const ordered = [...mcpDomains.value].sort((a, b) => a.order - b.order).map((d) => d.id)
+    const rest = [...buckets.keys()].filter((k) => !meta.has(k))
     const groups: MCPToolGroup[] = []
-    for (const category of [...MCP_CATEGORY_ORDER, ...rest]) {
+    for (const category of [...ordered, ...rest]) {
       const tools = buckets.get(category)
       if (!tools?.length) continue
-      const key = MCP_CATEGORY_I18N[category]
-      groups.push({ category, label: key ? t(key) : category, tools })
+      const d = meta.get(category)
+      groups.push({
+        category,
+        label: d ? domainLabel(d) : category,
+        desc: d?.desc || '',
+        tools,
+      })
     }
     return groups
   })

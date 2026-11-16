@@ -69,7 +69,7 @@ func PlanHookFrom(ctx context.Context) PlanHookFn {
 }
 
 func registerPlan(d Deps) {
-	r := registrar{d: d, category: mcpsrv.CategoryCode}
+	r := registrar{d: d, domain: mcpsrv.CategoryCode}
 	str := mcpsrv.Str
 
 	r.addCtx(updatePlan, mcpsrv.LevelRead, "plan_update",

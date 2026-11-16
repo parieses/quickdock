@@ -63,7 +63,7 @@ const webFetchUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 	"(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 QuickDock-AI"
 
 func registerWeb(_ Deps) {
-	r := registrar{category: mcpsrv.CategoryWeb}
+	r := registrar{domain: mcpsrv.CategoryWeb}
 	str := mcpsrv.Str
 	intp := mcpsrv.Int
 	boolp := mcpsrv.Bool

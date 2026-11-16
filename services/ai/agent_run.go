@@ -82,6 +82,11 @@ type AgentRunReq struct {
 	// 用户在点发送前刚切过，读库会拿到上一轮的值——而这两者的差别正是
 	// 「要不要停下来问」。库里那份只用于「切走再切回来时把开关显示回去」。
 	Permission string
+	// Scene 这条对话的能力档："assistant" = 工具全开（默认），"readonly" = 只挂读类工具。
+	//
+	// 与 Permission 是两个正交维度，别合并：Permission 决定「写操作问不问」，
+	// Scene 决定「有没有写操作这只手」。空 = 没表态，按会话上存过的值回落。
+	Scene string
 	// ProfileID 这一轮用哪个模型档案（ai_profiles.id）。前端每次发消息都带输入框里
 	// 选中的那个；空 = 没表态，后端按「会话上存过的 → 全局激活项」回落。
 	//
@@ -293,6 +298,10 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 				Skills: encodeConvSkills(req.Skills),
 				// 权限同理：落地页就能把权限切成完全访问再发第一句。
 				Permission: permission,
+				// 能力档同理：落地页选了「只读」再发第一句，这个值必须落库，
+				// 否则第二句又变成全开的助手档。存的是归一后的值（不是原始字符串）：
+				// 库里只该出现 assistant / readonly 两种。
+				Scene: aiSceneFor(mode, req.Scene),
 				// 落地页输入框里选好的模型随建会话落库：少了这一步，第一句用的
 				// 是请求带来的值、第二句却会回落到全局，出现「越聊越换了模型」。
 				ProfileID: cfg.ID,
@@ -422,6 +431,18 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		}
 	}
 
+	// 能力档的回写。只在请求**明确**带了 scene 时写：定时任务、子 agent、老前端
+	// 都不带这个字段，跟着写会把「没表态」误存成一个具体档位，而它下一次就该
+	// 按 mode 重新推导（比如老的 plan 会话切回 chat）。
+	if want := strings.TrimSpace(req.Scene); !req.Fresh && want != "" {
+		if s := aiSceneFor(mode, want); s != strings.TrimSpace(conv.Scene) {
+			if err := a.App.DB.SetAIConversationScene(res.ConvID, s); err != nil {
+				logger.W("[ai] 保存会话能力档失败 conv=%s: %v", res.ConvID, err)
+			}
+			conv.Scene = s
+		}
+	}
+
 	// 模型的回写：用 cfg.ID 而不是 req.ProfileID——请求里那个 id 可能已被删掉，
 	// aiProfileForRun 会回落到别的档案，把无效 id 存进库只会让下次选择显示空白。
 	//
@@ -540,14 +561,15 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		sink.Event("conv", map[string]any{"id": res.ConvID, "title": title})
 	}
 
-	// 工具集：与外部 MCP 客户端同一份（等级门与单工具开关都已应用过）。
-	// 用户在内置 AI 页关掉某个工具的方式就是去 MCP 面板关它——不另设一套开关。
+	// 工具集：能力定义与外部 MCP 客户端同一份，但**暴露策略是两份**。
+	// 这里用的是内置 AI 自己的开关（settings 里的 ai_tool_policy）——
+	// 用户在 MCP 面板关掉某个工具，不会影响 AI；反过来也一样（见 ai_tool_scope.go）。
 	//
-	// 但「同一份」不等于「每个模式都给」：系统工具只在教程模式挂（见 ai_tools.go
-	// 的 aiGeneralCategories），普通对话只拿得到 web_fetch。
-	//
-	// 第三层过滤是 role（阶段 2）：子 agent 的工具面由 agentRoleSpec 收窄，
-	// 并且一旦不能再派活就把 spawn_agent 撤下——让它根本不知道有这个能力。
+	// 过滤链从上到下共四层，缺哪一层都会说出「你有这个能力」却不给：
+	//   1. 策略（等级上限 + 单工具/域开关）；
+	//   2. 场景（scene）：只读档只挂 LevelRead，写类工具连名字都不出现；
+	//   3. 角色（agentRoleSpec）：子 agent 的工具面按角色收窄；
+	//   4. 编排（spawnFilterFor）：不能再派活时把 spawn_agent 撤下——让它根本不知道有这个能力。
 	filter := spawnFilterFor(req.ToolFilter, sc.CanSpawn())
 	// 定时任务的只读档：MaxLevel=0 即只留 LevelRead 工具。改的是 spawnFilterFor
 	// 返回的副本，不会污染编排传进来的 base。
@@ -559,11 +581,17 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			filter.NoSpawn = true
 		}
 	}
-	tools, extTrimmed := aiToolsPayloadFor(mode, filter)
+	// 装配一次，后续执行复用同一个 Surface（见 withToolSurface）：
+	// 模型看到的工具面与「能调什么」必须是同一份对象。
+	sf := a.aiSurface(mode, aiConversationScene(conv), filter)
+	tools, extTrimmed := aiToolsPayload(sf)
 	// 纯问答档：工具一个都不挂，模型看不到自然不会调，审批闸门也就无从触发。
 	if req.ScheduledNoTools {
 		tools = nil
 	}
+	// 提示词按「这次真的挂上了哪些域」生成，不再有三份手写常量跟着代码漂。
+	toolHint := buildToolHint(sf)
+	ctx = withToolSurface(ctx, sf)
 	// 原型副本：收尾轮会把 tools 置 nil（模型只该收尾），但用户中途插话时
 	// 工具得能挂回去——他新提的那句可能要读文件、跑命令（见循环里的插入接入点）。
 	baseTools := tools
@@ -589,7 +617,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		// 「未知工具」时会一遍遍重试同一个名字。
 		baseSystem += extToolsOverflowHint
 	}
-	applySystemHints(messages, baseSystem, mode, cwd, modeHasTools, false)
+	applySystemHints(messages, baseSystem, toolHint, cwd, modeHasTools, false)
 	// 让用户看见「这次用上了哪些规则」：改了不生效又没有任何提示，
 	// 是这类功能最常见的抱怨，而用户没法自己看出 AI 到底读没读到。
 	if len(rules.Files) > 0 {
@@ -650,7 +678,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			// 而这三样只存在于内存里（与下面超窗兜底里那段是同一份处理）。
 			baseSystem = firstSystem(newMsgs)
 			baseSystem = withRules(baseSystem, rules)
-			applySystemHints(newMsgs, baseSystem, mode, cwd, len(tools) > 0, modeHasTools && len(tools) == 0)
+			applySystemHints(newMsgs, baseSystem, toolHint, cwd, len(tools) > 0, modeHasTools && len(tools) == 0)
 			applyMentionBlock(newMsgs, mentionBlock)
 			messages = newMsgs
 		}
@@ -773,7 +801,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		}
 		// 每轮按「本轮到底有没有工具」重建 system（覆盖式，见 applySystemHints）。
 		// 这一句和上面撤 tools 是一对：只撤 tools 不撤提示，模型会把调用写成正文。
-		applySystemHints(messages, baseSystem, mode, cwd, len(tools) > 0, modeHasTools && len(tools) == 0)
+		applySystemHints(messages, baseSystem, toolHint, cwd, len(tools) > 0, modeHasTools && len(tools) == 0)
 
 		// 每轮开头压一次上下文：工具结果是在循环中间长出来的，
 		// buildAIMessages 里那次摘要压缩管不到这里。
@@ -810,7 +838,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 				// 挂回去还要重贴一次 system：本轮开头那次提示说的是「你已经没有工具了」。
 				if tools == nil && len(baseTools) > 0 {
 					tools = baseTools
-					applySystemHints(messages, baseSystem, mode, cwd, true, false)
+					applySystemHints(messages, baseSystem, toolHint, cwd, true, false)
 				}
 				// 轮次预算同理补一批：上一问跑满的是上一问的事，不该卡住新提的这句。
 				if turnIdx > limit {
@@ -911,7 +939,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			// 规则跟着一起贴回去：buildAIMessagesWithin 组出来的 system 是干净的。
 			// 漏了这一句的症状是「长对话聊到一半突然不认项目约定」，极难复现。
 			baseSystem = withRules(baseSystem, rules)
-			applySystemHints(newMsgs, baseSystem, mode, cwd, len(tools) > 0, modeHasTools && len(tools) == 0)
+			applySystemHints(newMsgs, baseSystem, toolHint, cwd, len(tools) > 0, modeHasTools && len(tools) == 0)
 			// 引用材料同样要贴回去：重建出来的 messages 里那条 user 消息是库里的原文，
 			// @ 的内容只存在于内存。漏了这步，超窗重试之后 AI 会对着「照这个改」发愣。
 			applyMentionBlock(newMsgs, mentionBlock)

@@ -405,6 +405,11 @@ var baseTables = []string{
 		cwd TEXT NOT NULL DEFAULT '',
 		space_id TEXT NOT NULL DEFAULT '',
 		mode TEXT NOT NULL DEFAULT 'chat',
+		-- scene 能力档（assistant / readonly），与 mode 正交：
+		-- mode 是「这条任务要 AI 干什么」（任务模板），scene 是「这条任务准它用多大能力」。
+		-- 以前两者挤在 mode 一个字段里，于是「翻译一条」和「能不能停服务」被绑在一起。
+		-- 老库由 columnMigrations 补成空串，读取时按 mode 推导，行为不变。
+		scene TEXT NOT NULL DEFAULT '',
 		skills TEXT NOT NULL DEFAULT '',
 		permission TEXT NOT NULL DEFAULT '',
 		profile_id TEXT NOT NULL DEFAULT '',
@@ -1186,6 +1191,9 @@ func (d *Database) migrate() error {
 		// 定时跑出来的 AI 会话：未读标记 + 来源任务 id。
 		{"ai_conversations", "unread", "INTEGER NOT NULL DEFAULT 0"},
 		{"ai_conversations", "schedule_id", "TEXT NOT NULL DEFAULT ''"},
+		// AI 能力档：老库补成空串 → 读取时按 mode 推导（tutorial 走 assistant、
+		// plan 走只读），升级后工具面与升级前一致，不需要一次全表回填。
+		{"ai_conversations", "scene", "TEXT NOT NULL DEFAULT ''"},
 		// 定时任务专属空间：kind/task_id 两列。老库补成空串，已有空间一律是普通空间，
 		// 升级后不会凭空冒出闹钟图标；第一个 AI 任务保存时才建带标记的新空间。
 		{"ai_spaces", "kind", "TEXT NOT NULL DEFAULT ''"},

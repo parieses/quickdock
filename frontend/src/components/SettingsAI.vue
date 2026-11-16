@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { Pen, Trash2, Plus, RefreshCw, ChevronDown, Copy, Eye, EyeOff } from '@lucide/vue'
 import SettingsPrompts from './SettingsPrompts.vue'
 import SettingsSkills from './SettingsSkills.vue'
+import AiToolSwitchList from './AiToolSwitchList.vue'
 import QdBarChart from './charts/QdBarChart.vue'
 import QdTabs from './QdTabs.vue'
 import QdSwitch from './QdSwitch.vue'
@@ -33,8 +34,8 @@ import {
   AISetExtServerEnabled,
   AIReloadExtServers,
   AIListExtTools,
+  AISetToolEnabled,
 } from '../../bindings/quickdock/services/ai/aiservice'
-import { MCPSetToolEnabled } from '../../bindings/quickdock/services/mcp/mcpservice'
 import { EnvOllamaModels } from '../../bindings/quickdock/services/env/environmentservice'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type {
@@ -437,11 +438,12 @@ async function toggleExtTool(tool: ExtToolInfo) {
   extToolsBusy.value = tool.name
   try {
     // 参数取反：tool.disabled 为 true 表示当前被关掉、这次要重新开启。
-    // 与「环境管理 → MCP 服务」面板走的是同一个注册表开关，立即生效。
-    unwrap(await MCPSetToolEnabled(tool.name, tool.disabled))
+    // 走 AISetToolEnabled（内置 AI 自己的那份策略），不是 MCP 面板的全局开关——
+    // 在这里关掉一个外部工具，只让 AI 用不了，外部客户端照旧。
+    unwrap(await AISetToolEnabled(tool.name, tool.disabled))
     tool.disabled = !tool.disabled
   } catch (e) {
-    logErr('[SettingsAI] MCPSetToolEnabled:', e)
+    logErr('[SettingsAI] AISetToolEnabled:', e)
     toast.error(getErrorMessage(e))
   } finally {
     extToolsBusy.value = ''
@@ -1509,6 +1511,10 @@ function saveAIModal() {
     </div>
 
     <div v-show="activeTab === 'permission'" class="ai-tab-panel" role="tabpanel">
+    <!-- AI 可用工具：域级总开关 + 单工具 + 等级上限。放在审批策略上面，因为
+         「能不能用」在「用了要不要问」之前——先关掉工具，就不用再给它配审批规则了。 -->
+    <AiToolSwitchList />
+
     <!-- 工具审批策略：先列会改东西的工具，只读的在下面折叠起来（只展示、
          恒放行）。全过滤掉会让「git 相关的一个都没有」看起来像漏了。 -->
     <div class="ai-usage">

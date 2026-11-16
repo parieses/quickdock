@@ -440,10 +440,14 @@ func (a *AIService) AISetExtServerEnabled(name string, enabled bool) *services.A
 }
 
 // AIListExtTools 一个 server 当前挂载的工具详情（bound，展开行用）。
+//
+// disabled 取**内置 AI 自己的策略**：这里列的是「AI 能不能用这个工具」，
+// 不是「外部客户端能不能用」。用全局 MCP 策略会让这里的开关一改就串到 MCP 面板。
 func (a *AIService) AIListExtTools(server string) *services.ApiResult {
 	prefix := extToolPrefix(strings.TrimSpace(server))
+	pol := a.aiToolPolicy()
 	out := make([]map[string]any, 0, 8)
-	for _, t := range mcp.Catalog() {
+	for _, t := range mcp.CatalogWith(pol) {
 		if !strings.HasPrefix(t.Name, prefix) {
 			continue
 		}

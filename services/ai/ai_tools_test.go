@@ -55,38 +55,84 @@ func TestFlushToolCallsOrderAndCleanup(t *testing.T) {
 	}
 }
 
-// aiToolVisibleInMode：宿主工具只在教程模式挂给模型，agent 工具在所有模式都挂。
-// 这条规则弄错的后果不是「少个功能」，而是「普通对话顺手翻用户的笔记」——
-// 所以用测试钉住，而不是靠读代码时记得。
-func TestAIToolVisibleInMode(t *testing.T) {
-	cases := []struct {
-		mode, category string
-		agentOnly      bool
-		want           bool
-	}{
-		{"chat", mcpsrv.CategoryNote, false, false},
-		{"chat", mcpsrv.CategoryEnv, false, false},
-		{"chat", mcpsrv.CategorySchedule, false, false},
-		// 文件只读在普通对话也挂：没有 file_read，file_edit 就成了闭眼改代码。
-		// 写能力本身另有闸（fsguard 的写白名单要求用户先绑定工作目录），不靠模式挡。
-		{"chat", mcpsrv.CategoryFile, false, true},
-		{"tutorial", mcpsrv.CategoryNote, false, true},
-		{"tutorial", mcpsrv.CategoryFile, false, true},
-		// agent 工具（web/code）不看模式：它们不读写宿主状态，
-		// 「这个模式该不该有」这个问题的答案永远是「该」。
-		{"chat", mcpsrv.CategoryWeb, true, true},
-		{"tutorial", mcpsrv.CategoryWeb, true, true},
-		{"chat", mcpsrv.CategoryCode, true, true},
-		// 未知模式按「普通对话」处理：将来加新模式却忘了在这里登记，只会少工具，
-		// 不会意外拿到全部系统权限。
-		{"some-new-mode", mcpsrv.CategoryNote, false, false},
-		{"some-new-mode", mcpsrv.CategoryWeb, true, true},
+// 场景与角色：装配结果决定模型「知不知道」有这个能力。
+//
+// 以前这里是 aiToolVisibleInMode（模式门 + 硬编码白名单），后果是每来一个新需求
+// 就要回来改一次常量。现在场景写在域声明里（services/mcp/catalog.go），
+// 这里只验证装配真的按声明收窄，而不是漏掉某一层。
+func TestAISurfaceSceneAndRole(t *testing.T) {
+	mcpsrv.DefineDomain(mcpsrv.Domain{
+		ID: "testscene",
+		Scenes: map[string]mcpsrv.Access{
+			mcpsrv.SceneAssistant: mcpsrv.AccessFull,
+			mcpsrv.SceneReadOnly:  mcpsrv.AccessRead,
+		},
+	})
+	mcpsrv.Register(mcpsrv.Tool{
+		Name: "testscene_read", Level: mcpsrv.LevelRead, Domain: "testscene",
+		Handler: func(map[string]any) (any, error) { return "ok", nil },
+	})
+	mcpsrv.Register(mcpsrv.Tool{
+		Name: "testscene_write", Level: mcpsrv.LevelWrite, Domain: "testscene",
+		Handler: func(map[string]any) (any, error) { return "ok", nil },
+	})
+
+	pol := mcpsrv.NewPolicy(mcpsrv.LevelWrite, nil)
+	assistant := mcpsrv.Resolve(mcpsrv.ToolScope{
+		Caller: mcpsrv.CallerAI, Policy: pol, Scene: mcpsrv.SceneAssistant,
+	})
+	if !assistant.Has("testscene_read") || !assistant.Has("testscene_write") {
+		t.Fatalf("助手档应同时挂读与写，实际 %v", assistant.Names())
 	}
-	for _, c := range cases {
-		if got := aiToolVisibleInMode(c.mode, c.category, c.agentOnly); got != c.want {
-			t.Fatalf("mode=%s category=%s agentOnly=%v: got %v want %v", c.mode, c.category, c.agentOnly, got, c.want)
+
+	readonly := mcpsrv.Resolve(mcpsrv.ToolScope{
+		Caller: mcpsrv.CallerAI, Policy: pol, Scene: mcpsrv.SceneReadOnly,
+	})
+	if readonly.Has("testscene_write") {
+		t.Fatalf("只读档不该挂写工具，实际 %v", readonly.Names())
+	}
+	if !readonly.Has("testscene_read") {
+		t.Fatal("只读档至少要挂读工具，否则 AI 什么也干不了")
+	}
+
+	// 角色收窄：子 agent 的 MaxLevel=0 必须把写工具摘掉。
+	roleFilter := &ToolFilter{MaxLevel: mcpsrv.LevelRead}
+	explore := mcpsrv.Resolve(mcpsrv.ToolScope{
+		Caller: mcpsrv.CallerAI, Policy: pol, Scene: mcpsrv.SceneAssistant, Keep: roleFilter.keep,
+	})
+	if explore.Has("testscene_write") {
+		t.Fatal("explore 角色不该拿得到写工具")
+	}
+
+	// 提示词纪律：hint 里提到的工具必须真的挂在这一面上。
+	// 这条是本轮改造的防漂移闸——以前三份手写常量，门放开了文案还写着「去教程模式」。
+	for _, sf := range []mcpsrv.Surface{assistant, readonly} {
+		hint := buildToolHint(sf)
+		for _, name := range toolNamesInText(hint) {
+			if !sf.Has(name) {
+				t.Fatalf("提示词提到了没挂上的工具 %q（场景 %s）", name, sf.Scene)
+			}
 		}
 	}
+}
+
+// toolNamesInText 从提示词里挑出形如 file_write / env_stop 的工具名。
+//
+// 只认「全小写 + 下划线」且带一个下划线的形态：中文正文里不会出现这种串，
+// 而 _cwd / _scope 这类宿主注入键在提示词里也不会出现。
+func toolNamesInText(s string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, w := range strings.FieldsFunc(s, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z') && r != '_'
+	}) {
+		if !strings.Contains(w, "_") || strings.HasPrefix(w, "_") || seen[w] {
+			continue
+		}
+		seen[w] = true
+		out = append(out, w)
+	}
+	return out
 }
 
 // toolCallKey：等价参数必须归一成同一个键。

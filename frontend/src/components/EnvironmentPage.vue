@@ -2698,11 +2698,13 @@ const dialogCtx = reactive({
           <div class="mcp-tools">
             <template v-for="g in mcpToolGroups" :key="g.category">
               <div class="mcp-tool-group">{{ g.label }}</div>
+              <div v-if="g.desc" class="mcp-tool-group-desc">{{ g.desc }}</div>
               <div
                 v-for="tool in g.tools"
                 :key="tool.name"
                 class="mcp-tool-row"
                 :class="{ 'is-blocked': !tool.exposed && !tool.agentOnly, 'is-off': tool.disabled }"
+                :title="tool.reason || undefined"
               >
                 <span class="mcp-tool-name">{{ tool.name }}</span>
                 <span class="badge" :class="tool.level > 0 ? 'warn' : 'plat'">
@@ -2711,6 +2713,9 @@ const dialogCtx = reactive({
                 <!-- agent 专用工具对外部客户端不可见（exposed=false），但那是设计而不是被挡住，
                      所以单独标出来：否则用户会以为它「没资格」，去调等级也调不出来。 -->
                 <span v-if="tool.agentOnly" class="badge plat">{{ t('mcpToolAgentOnly') }}</span>
+                <!-- AI 侧状态：只读徽标。两个开关是两份策略，这里显示出来是为了
+                     让「为什么 AI 用不了但客户端能用」一眼可见，而不是让用户去猜。 -->
+                <span v-if="tool.aiOff" class="badge plat mcp-ai-off" :title="t('mcpAiSideHint')">{{ t('mcpAiSideOff') }}</span>
                 <span class="mcp-tool-desc">{{ tool.description }}</span>
                 <button
                   v-if="tool.level <= mcpInfo.maxLevel"
@@ -3382,6 +3387,8 @@ const dialogCtx = reactive({
 .mcp-tool-row { display: flex; align-items: center; gap: var(--space-4); font-size: var(--text-sm); padding: 3px 0; }
 .mcp-tool-row.is-off .mcp-tool-name { text-decoration: line-through; }
 .mcp-tool-group { margin: 10px 0 var(--space-1); font-size: var(--text-xs); color: var(--color-text-muted); }
+.mcp-tool-group-desc { margin: 0 0 var(--space-2); font-size: var(--text-xs); color: var(--color-text-muted); opacity: .8; }
+.mcp-ai-off { cursor: help; }
 .mcp-tool-toggle { flex: none; margin-left: auto; }
 .mcp-tool-name { font-family: var(--font-mono); color: var(--color-text-primary); flex: none; min-width: 140px; }
 .mcp-tool-desc { flex: 1; min-width: 0; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

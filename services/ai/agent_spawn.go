@@ -94,6 +94,18 @@ func (a *AIService) registerSpawnTool() {
 		),
 		Level:    mcpsrv.LevelWrite,
 		Category: mcpsrv.CategoryCode,
+		// 风险说明跟着工具走：这张卡要挡住的是「派活」这个动作，但用户很容易
+		// 把它理解成「改几个文件」。差别在点完之后——子 agent 在自己的循环里跑，
+		// 非高危命令不再逐次弹确认，用户要到结果交回主对话才看得到发生了什么。
+		// 不写这半句，用户就是在完全不知情的情况下批准了一个无人值守的执行者。
+		RiskNote: func(args map[string]any) string {
+			role := strings.ToLower(strings.TrimSpace(mcpsrv.Arg(args, "role")))
+			if spec, ok := agentRoleSpecs[role]; ok {
+				return "派一个子 agent 独立执行：" + spec.summary +
+					"。批准后它在自己的循环里连续动手，中途不会再逐条向你确认（高危命令仍被拒），结果交回本对话"
+			}
+			return "派一个子 agent 独立执行，中途不会再逐条向你确认（高危命令仍被拒）"
+		},
 		HandlerCtx: func(ctx context.Context, args map[string]any) (any, error) {
 			return a.handleSpawnAgent(ctx, args)
 		},

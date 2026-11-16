@@ -90,6 +90,7 @@ import {
   AISetConversationMode,
   AISetConversationPermission,
   AISetConversationProfile,
+  AISetConversationScene,
   AIGetHooks,
   AISetHooksApproved,
   AIGetGitBranch,
@@ -945,6 +946,9 @@ async function selectConv(id: string, msgId?: string) {
   mode.value = (conv?.mode || 'chat').trim() || 'chat'
   // 权限跟着任务走：这条对话开过完全访问，切回来要还原成它自己的档位。
   permissionFull.value = (conv?.permission || '').trim() === 'full'
+  // 能力档同理。老会话没有 scene 列（空）时按 mode 推导：当年的 plan 会话是
+  // 只读的，升级后不该突然变成能改文件——它就这一次推断，用户切过一次就以库为准。
+  convScene.value = restoreScene(conv?.scene, conv?.mode)
   // 模型也是任务属性，不是全局开关：A 任务用 flash、B 任务用 reasoning，
   // 两边切来切去不该互相串。老会话没存过，或存的档案已被删掉，就回落到
   // 全局「最后选择」——否则 <select> 的 value 匹配不到任何 option，会显示空白。
@@ -1126,6 +1130,41 @@ const connectors = ref<AIConnector[]>([])
 // 「刚那条 rm 到底批准过没有」。它跟着会话走（ai_conversations.permission），
 // 切换即落库，切回来看到的就是上次真正生效的那个。
 const permissionFull = ref(false)
+
+// 能力档：'assistant'（工具全开）/ 'readonly'（只挂读类工具）。
+// 与 permissionFull 正交——一个管「有没有这只手」，一个管「动手前问不问」。
+// 跟着会话走（ai_conversations.scene），切走再回来要还原，所以 selectConv 里会读库。
+const convScene = ref('assistant')
+
+/** 切换能力档：有会话就立刻落库（界面标记必须和库一致），落地页则随第一句带上。 */
+async function onChangeScene(scene: string) {
+  const next = scene === 'readonly' ? 'readonly' : 'assistant'
+  const prev = convScene.value
+  convScene.value = next
+  const id = activeId.value
+  if (!id) return
+  try {
+    unwrap(await AISetConversationScene(id, next))
+  } catch (e) {
+    // 落库失败退回原状：界面写着「只读档」而库里是全开，比切不成功更危险。
+    convScene.value = prev
+    toast.error(getErrorMessage(e))
+  }
+}
+
+/**
+ * restoreScene 从库里存的值推出这条会话的能力档。
+ *
+ * 老会话的 scene 是空串（列是本次升级才加的）：这时按 mode 推断——当年的
+ * 「计划模式」是只读的，升级后不该突然让它能改文件。推断只在库值为空时发生，
+ * 用户切过一次之后就以库为准。
+ */
+function restoreScene(scene?: string, mode?: string): string {
+  const s = (scene || '').trim()
+  if (s === 'readonly') return 'readonly'
+  if (s === 'assistant') return 'assistant'
+  return (mode || '').trim() === 'plan' ? 'readonly' : 'assistant'
+}
 
 // 每次切换递增。回滚只认最新一次的结果——连点两次（false→true→false）时，
 // 先发的请求失败后按「!full」回滚，会把界面写成与用户最新意图相反的值。
@@ -1711,6 +1750,9 @@ function beginBlankTask() {
   // 权限同理：上一条对话开了完全访问，新建任务不该继承——「刚开始是默认权限」
   // 是这条功能的默认承诺，忘了切回来正是它最危险的失效方式。
   permissionFull.value = false
+  // 能力档同理：新任务从助手档开始。上一条被绑成只读是那条任务的处境
+  // （比如当年在计划模式里），不该让下一条也开不了工。
+  convScene.value = 'assistant'
 }
 
 // ---- 空间行上的「立即运行一次」----
@@ -2477,7 +2519,7 @@ const {
 } = useAiRuns({
   activeId, conversations, messages, runs, draftRunId,
   input, attachments, mentions, lastMentions, pickedSkills, lastSkills, stripSkillTokens,
-  hasKey, mode, permissionFull, worktreeEnabled, worktreeActive, worktreeBranch,
+  hasKey, mode, permissionFull, scene: convScene, worktreeEnabled, worktreeActive, worktreeBranch,
   pendingSpaceId, convCwd,
   streamModelOf: () => aiProfiles.value.find((x) => x.id === aiActive.value)?.model || '',
   // 发给后端的是档案 id 而不是模型名：两个档案可以指向同一个 model 却配不同
@@ -3102,6 +3144,7 @@ onUnmounted(() => {
         :slash-idx="slashIdx"
         :can-send="canSendText"
         :permission-full="permissionFull"
+        :scene="convScene"
         :worktree-active="worktreeActive"
         :worktree-path="worktreePath"
         :worktree-branch="worktreeBranch || gitBranch"
@@ -3114,6 +3157,7 @@ onUnmounted(() => {
         @remove-worktree="removeWorktree"
         @model-change="onModelChange"
         @change-permission="onChangePermission"
+        @change-scene="onChangeScene"
         @key="onHeroKey"
         @send="heroSend"
         @paste="onInputPaste"
@@ -3392,6 +3436,7 @@ onUnmounted(() => {
         :slash-idx="slashIdx"
         :can-send="canSendText"
         :permission-full="permissionFull"
+        :scene="convScene"
         :worktree-active="worktreeActive"
         :worktree-path="worktreePath"
         :worktree-branch="worktreeBranch || gitBranch"
@@ -3403,6 +3448,7 @@ onUnmounted(() => {
         @pick-worktree-branch="pickWorktreeBranch"
         @remove-worktree="removeWorktree"
         @change-permission="onChangePermission"
+        @change-scene="onChangeScene"
         @model-change="onModelChange"
         @approve-hooks="approveHooks"
         @remove-attachment="removeAttachment"

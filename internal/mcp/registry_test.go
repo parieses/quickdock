@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -94,7 +95,9 @@ func TestCallRespectsMaxLevel(t *testing.T) {
 	if highRiskCalled {
 		t.Fatal("高危工具的 Handler 被执行了——等级门失效")
 	}
-	if !strings.Contains(err.Error(), "高危") {
+	// 文案已经从「高危」改成「超出等级上限」：现在挡住它的东西叫策略等级，
+	// 而「高危」只是等级 2 的别名。排查时要说清是哪一层关的，不是它危不危险。
+	if !strings.Contains(err.Error(), "等级上限") {
 		t.Errorf("拒绝原因应说明是等级限制，便于插件侧排查: %v", err)
 	}
 
@@ -229,16 +232,8 @@ func TestAgentRegistrySeparatedFromMCP(t *testing.T) {
 		}
 	}
 
-	var inAI bool
-	for _, f := range ExposedFunctions() {
-		if f.Name == "agent_probe" {
-			inAI = true
-			if !f.AgentOnly {
-				t.Error("ExposedFunctions 要标出 AgentOnly，否则模式门会把它当宿主工具")
-			}
-		}
-	}
-	if !inAI {
+	ai := Resolve(ToolScope{Caller: CallerAI, Policy: NewPolicy(LevelRisk, nil), Scene: SceneAssistant})
+	if !ai.Has("agent_probe") {
 		t.Fatal("内置 AI 应该看得到 agent 工具")
 	}
 
@@ -262,33 +257,66 @@ func TestAgentRegistrySeparatedFromMCP(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "仅内置 AI") {
 		t.Fatalf("错误信息应说明原因，实际: %v", err)
 	}
-	if v, err := CallAgent("agent_probe", nil); err != nil || v != "agent-ok" {
-		t.Fatalf("CallAgent 应能执行 agent 工具，实际 v=%v err=%v", v, err)
+	if v, err := Invoke(context.Background(), ai, "agent_probe", nil, nil); err != nil || v != "agent-ok" {
+		t.Fatalf("内置 AI 路径应能执行 agent 工具，实际 v=%v err=%v", v, err)
 	}
 }
 
-// TestAgentToolHonorsPerToolSwitch 单工具开关对两套注册表一样生效。
+// TestPolicyScopesAreIndependent 锁定本轮改造的核心：两份策略互不影响。
 //
-// 用户在内置 AI 的定位上比对外暴露更在意「别让它碰我的文件」，
-// 所以面板里关掉 file_edit 必须真的挡住 AI，而不是只挡住 MCP 客户端。
-func TestAgentToolHonorsPerToolSwitch(t *testing.T) {
-	prevMax, prevOff := MaxLevel(), Disabled()
-	defer func() { SetMaxLevel(prevMax); SetDisabled(prevOff) }()
-	SetMaxLevel(LevelWrite)
-
+// 用户明确要求「关掉 MCP 的某个工具不影响 AI」，而在此之前 maxLvl / disabled
+// 是全局各一份，MCP 面板关一条，内置 AI 立刻也用不了。
+// 现在策略是两份：MCP 一份（mcpPolicy，落 config.json），AI 一份（Scope.Policy，
+// 落 ai_tool_policy）。这个测试同时锁住两个方向，防止有人为了「省事」又合回去。
+func TestPolicyScopesAreIndependent(t *testing.T) {
 	Agent.Add(Tool{
-		Name:    "agent_switch_probe",
+		Name:     "agent_policy_probe",
+		Level:    LevelRead,
+		Category: CategoryCode,
+		Handler:  func(map[string]any) (any, error) { return "ok", nil },
+	})
+	Register(Tool{
+		Name:    "policy_probe",
 		Level:   LevelRead,
 		Handler: func(map[string]any) (any, error) { return "ok", nil },
 	})
-	SetDisabled([]string{"agent_switch_probe"})
 
-	if _, err := CallAgent("agent_switch_probe", nil); err == nil {
-		t.Fatal("关掉的工具内置 AI 也不该能调")
+	mcpSurface := func() Surface {
+		return Resolve(ToolScope{Caller: CallerMCP, Policy: MCPPolicy()})
 	}
-	for _, f := range ExposedFunctions() {
-		if f.Name == "agent_switch_probe" {
-			t.Fatal("关掉的工具不该出现在 tools[] 里——模型看到就会去调，然后收到一串拒绝")
-		}
+	aiSurfaceWith := func(p Policy) Surface {
+		return Resolve(ToolScope{Caller: CallerAI, Policy: p, Scene: SceneAssistant})
+	}
+
+	// 方向一：AI 侧关掉，不影响 MCP。
+	SetMCPPolicy(NewPolicy(LevelWrite, nil))
+	aiOff := NewPolicy(LevelWrite, []string{"policy_probe"})
+	if !mcpSurface().Has("policy_probe") {
+		t.Fatal("AI 设置里关掉工具，不该影响外部 MCP 客户端")
+	}
+	if aiSurfaceWith(aiOff).Has("policy_probe") {
+		t.Fatal("AI 设置里关掉的工具，内置 AI 自己应该看不到")
+	}
+
+	// 方向二：MCP 侧关掉，不影响 AI。
+	SetMCPPolicy(NewPolicy(LevelWrite, []string{"policy_probe"}))
+	aiOn := NewPolicy(LevelWrite, nil)
+	if mcpSurface().Has("policy_probe") {
+		t.Fatal("MCP 面板关掉的工具，不该出现在 tools/list")
+	}
+	if !aiSurfaceWith(aiOn).Has("policy_probe") {
+		t.Fatal("MCP 面板关掉的工具，内置 AI 仍然应该能用——两份策略互不读取")
+	}
+
+	// agent 工具只在 AI 面里出现，且执行路径也认这份面。
+	ai := aiSurfaceWith(aiOn)
+	if !ai.Has("agent_policy_probe") {
+		t.Fatal("内置 AI 面应包含 agent 注册表的工具")
+	}
+	if mcpSurface().Has("agent_policy_probe") {
+		t.Fatal("agent 工具不该进外部 MCP 面")
+	}
+	if _, err := Invoke(context.Background(), mcpSurface(), "agent_policy_probe", nil, nil); err == nil {
+		t.Fatal("外部路径执行 agent 工具应被拒绝")
 	}
 }

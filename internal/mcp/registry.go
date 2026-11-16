@@ -8,8 +8,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-
-	"quickdock/internal/lock"
 )
 
 // Level 工具危险等级，用于按用户配置裁剪暴露面。
@@ -60,7 +58,12 @@ type Tool struct {
 	Description string
 	InputSchema map[string]any
 	Level       int
-	// Category 所属域（见 Category* 常量），供面板分组；未填则视为未分类。
+	// Domain 所属域（见 services/mcp/catalog.go 的域定义），决定面板分组、
+	// 场景开放程度与提示词段落。未填时 Add 会用 Category 补。
+	Domain string
+	// Category 历史字段：与 Domain 同值，保留给还没迁移的读取方。
+	// 新代码一律读 Domain——一个字段背「分组 + 可见性开关」两份语义，
+	// 正是上一轮每加一个域要改五处的根源。
 	Category string
 	// Handler 执行工具。返回 string 直接作为文本结果，其它类型经 JSON 序列化。
 	Handler func(args map[string]any) (any, error)
@@ -73,6 +76,27 @@ type Tool struct {
 	// 不用「把 ctx 塞进 args」代替：args 是模型可见/可伪造的 JSON，取消信号
 	// 混在里面既不合协议，也会被工具卡片序列化显示出来。
 	HandlerCtx func(ctx context.Context, args map[string]any) (any, error)
+	// GrantKey 可选：「本次会话都允许」记在哪个 key 上、给不给记住按钮。
+	//
+	// 默认按工具名记忆。声明它让「记住」不越界：run_command 按命令族、
+	// schedule_create 按任务名——否则用户批准一次「建这个巡检任务」，
+	// 之后任意任务都能在无人过问的情况下被建出来。
+	GrantKey func(args map[string]any) (key string, rememberable bool)
+	// RiskNote 可选：审批卡上的风险说明。默认按等级给一句通用的。
+	RiskNote func(args map[string]any) string
+	// ArgBrief 可选：审批卡上的参数摘要。默认取 path / query 之类。
+	ArgBrief func(args map[string]any) string
+}
+
+// normalize 补齐域字段。放在注册处而不是各个读取方：
+// 读取方有三个（面板、装配、协议层），补三遍迟早漏一处。
+func (t *Tool) normalize() {
+	if t.Domain == "" {
+		t.Domain = t.Category
+	}
+	if t.Category == "" {
+		t.Category = t.Domain
+	}
 }
 
 // annotations 生成 MCP 规范的 tool annotations：让客户端在弹确认框时知道
@@ -107,22 +131,31 @@ var Global Registrar = globalRegistrar{}
 // 能力顺手注册进对外清单；分成两个注册表后，注册处写 Global 还是 Agent 这件事本身
 // 就说明了归属。
 //
-// 等级门与单工具开关是共用的（maxLvl / disabled 只有一份）：面板里关掉
-// file_edit，内置 AI 也就改不了文件，不存在「关了但 AI 还能用」的第二套权限。
+// 两个注册表共用同一份**定义**（名字、等级、schema、Handler），但暴露策略分开：
+// 外部 MCP 客户端一份（mcpPolicy，存在 MCP 配置里），内置 AI 一份（ai_tool_policy，
+// 存在 AI 设置里）。面板里关掉 file_edit 只影响外部客户端，不会连带把 AI 的手也绑上——
+// 这是用户明确要求的边界，别再改回「一处开关管两边」。
 var Agent Registrar = agentRegistrar{}
 
 var (
-	regMu    sync.RWMutex
-	tools    = map[string]Tool{}
-	agents   = map[string]Tool{}
-	maxLvl   = LevelWrite // 默认暴露「只读 + 低危写」
-	disabled = map[string]bool{}
+	regMu  sync.RWMutex
+	tools  = map[string]Tool{}
+	agents = map[string]Tool{}
+	// mcpPolicy 外部 MCP 客户端的暴露策略（等级上限 + 单工具开关）。
+	//
+	// 只是**其中一份**：内置 AI 那份由 services/ai 读设置后通过 Scope.Policy 传进
+	// Resolve，从不读写这里。两份策略各自落盘、各自界面，互不影响。
+	mcpPolicy = NewPolicy(LevelWrite, nil)
 )
 
 type globalRegistrar struct{}
 
 // Add 写入对外注册表（同名覆盖）。应在服务初始化期调用。
 func (globalRegistrar) Add(t Tool) {
+	if strings.TrimSpace(t.Name) == "" {
+		return
+	}
+	t.normalize()
 	regMu.Lock()
 	defer regMu.Unlock()
 	tools[t.Name] = t
@@ -132,6 +165,10 @@ type agentRegistrar struct{}
 
 // Add 写入 agent 注册表（同名覆盖）。
 func (agentRegistrar) Add(t Tool) {
+	if strings.TrimSpace(t.Name) == "" {
+		return
+	}
+	t.normalize()
 	regMu.Lock()
 	defer regMu.Unlock()
 	agents[t.Name] = t
@@ -156,31 +193,44 @@ func RemoveExternal(prefix string) int {
 	for name := range tools {
 		if strings.HasPrefix(name, prefix) {
 			delete(tools, name)
-			delete(disabled, name)
 			n++
 		}
 	}
 	return n
 }
 
-// SetMaxLevel 设置可暴露的最高危险等级（默认 LevelWrite）。
+// SetMaxLevel 设置外部 MCP 客户端的等级上限（不影响内置 AI）。
 func SetMaxLevel(level int) {
 	regMu.Lock()
 	defer regMu.Unlock()
-	maxLvl = level
+	mcpPolicy = NewPolicy(level, mcpPolicy.DisabledNames())
 }
 
-// MaxLevel 返回当前可暴露的最高危险等级。
+// MaxLevel 返回外部 MCP 客户端的等级上限。
 func MaxLevel() int {
 	regMu.RLock()
 	defer regMu.RUnlock()
-	return maxLvl
+	return mcpPolicy.MaxLevel
+}
+
+// SetMCPPolicy 整份替换外部 MCP 策略（启动时从 config.json 读回）。
+func SetMCPPolicy(p Policy) {
+	regMu.Lock()
+	defer regMu.Unlock()
+	mcpPolicy = NewPolicy(p.MaxLevel, p.DisabledNames())
+}
+
+// MCPPolicy 当前外部 MCP 策略的拷贝（装配时传进 Scope.Policy）。
+func MCPPolicy() Policy {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	return NewPolicy(mcpPolicy.MaxLevel, mcpPolicy.DisabledNames())
 }
 
 // ToolLevel 按名字取工具的危险等级（agent 注册表优先）。
 //
-// 存在的理由只有一个：审批闸门在 execOneToolCall 里只看得到工具名，而「要不要
-// 停下来问用户」完全由等级决定。
+// 存在的理由只有一个：审批闸门与去重逻辑只看得到工具名，而「要不要停下来问用户」
+// 完全由等级决定。
 //
 // 查不到时返回 LevelRisk 而不是 LevelRead：说明名字写错或工具刚被移除，按最保守的
 // 算——少问一次的代价（一条没被拦下的写操作）与多问一次的代价（多点一下）不对称。
@@ -196,53 +246,58 @@ func ToolLevel(name string) int {
 	return LevelRisk
 }
 
-// SetDisabled 全量替换「被单独关掉的工具」名单，并立即生效。
+// ToolDomain 按名字取工具所属域（找不到返回空串）。
+func ToolDomain(name string) string {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	if t, ok := agents[name]; ok {
+		return t.Domain
+	}
+	if t, ok := tools[name]; ok {
+		return t.Domain
+	}
+	return ""
+}
+
+// ToolByName 按名字取工具定义（agent 注册表优先）。
+//
+// 审批链路只有工具名，而「记住的粒度」「卡片上写什么风险」都声明在工具上——
+// 没有这个入口，审批代码就只能继续按名字 switch，新增工具时又要回来改一次。
+func ToolByName(name string) (Tool, bool) {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	if t, ok := agents[name]; ok {
+		return t, true
+	}
+	t, ok := tools[name]
+	return t, ok
+}
+
+// SetDisabled 全量替换「被外部 MCP 单独关掉的工具」名单（不影响内置 AI）。
 //
 // 与等级门是两道独立闸：等级门按危险度批量裁剪（一档一刀），这里是对单个
-// 工具的显式选择（「这条我就是不想让 AI 碰」）。两者都与工具是否注册无关——
-// 注册表里始终是全量，裁剪只发生在 List/Call。
+// 工具的显式选择（「这条我就是不想让外部客户端碰」）。
 func SetDisabled(names []string) {
 	regMu.Lock()
 	defer regMu.Unlock()
-	disabled = make(map[string]bool, len(names))
-	for _, n := range names {
-		if n != "" {
-			disabled[n] = true
-		}
-	}
+	mcpPolicy = NewPolicy(mcpPolicy.MaxLevel, names)
 }
 
-// Disabled 返回当前被单独关掉的工具名（拷贝，按名称排序，便于落盘稳定与展示）。
+// Disabled 返回当前被外部 MCP 单独关掉的工具名（拷贝，按名称排序，便于落盘稳定与展示）。
 func Disabled() []string {
 	regMu.RLock()
 	defer regMu.RUnlock()
-	out := make([]string, 0, len(disabled))
-	for name := range disabled {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
+	return mcpPolicy.DisabledNames()
 }
 
 // List 返回当前允许暴露给 MCP 客户端的工具（按名称排序，保证 tools/list 稳定）。
 //
-// 只读 Global：agent 注册表里的东西（抓网页、改文件、跑命令、看 git）不属于
-// 软件自身能力，外部客户端本来就有自己的文件与终端工具，再暴露一遍只会让模型
-// 在两套同名能力之间反复挑。
+// 可见性由 Resolve 一处决定：策略（等级/开关）+ 域的 External 声明。以前这里是
+// 「遍历 tools 再判一次等级」，与 AI 侧各有一套过滤，加一个域要记住改两处。
 func List() []toolDefinition {
-	regMu.RLock()
-	defer regMu.RUnlock()
-	out := make([]toolDefinition, 0, len(tools))
-	names := make([]string, 0, len(tools))
-	for name, t := range tools {
-		if t.Level > maxLvl || disabled[name] {
-			continue
-		}
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		t := tools[name]
+	sf := Resolve(ToolScope{Caller: CallerMCP, Policy: MCPPolicy()})
+	out := make([]toolDefinition, 0, len(sf.Tools))
+	for _, t := range sf.Tools {
 		out = append(out, toolDefinition{
 			Name:        t.Name,
 			Description: t.Description,
@@ -253,68 +308,7 @@ func List() []toolDefinition {
 	return out
 }
 
-// AIFunction 一条给模型 function calling 用的工具规格。
-//
-// 只带 OpenAI tools[] 需要的三样：等级与开关在 ExposedFunctions 里已经应用过，
-// 模型不该看到「有个工具但你没资格」——那只会让它反复尝试并浪费一轮 token。
-// 与 toolDefinition 的区别：这个类型是导出的，供 services/ai 跨包使用。
-type AIFunction struct {
-	Name        string
-	Description string
-	Parameters  map[string]any
-	// Category 所属域。tools[] 本身用不到它，但内置 AI 要按域决定
-	// 「这个模式该不该看到这批工具」（宿主工具只在教程模式开放），
-	// 否则只能按工具名硬编码白名单，加一个工具就要改一次。
-	Category string
-	// Level 危险等级。同样不进 tools[]，但子 agent 要按 role 再收窄一次
-	// （explore 只读、code 可写）。等级门已经按用户配置裁过一遍，
-	// 这里暴露的是「裁剪之后还剩下的工具各自多重」，供编排层二次过滤。
-	Level int
-	// AgentOnly 来自 agent 注册表。这类工具在所有模式下都可用——
-	// 它们不描述宿主状态，不涉及「AI 会不会把我的环境改坏」，因此不需要
-	// 用「只在教程模式挂」来兜底。
-	AgentOnly bool
-}
-
-// ExposedFunctions 返回当前允许内置 AI 使用的工具规格，按名称排序。
-//
-// 两个注册表合并：Global（宿主能力）+ Agent（在目录里干活的工具）。
-// 等级门与单工具开关对两边一样生效，所以用户在面板里关掉 file_edit，
-// 内置 AI 也就改不了文件——权限只有一处真相。
-//
-// 排序是为了让 tools[] 的序列化结果稳定：它在每轮请求里都作为前缀出现，
-// 顺序一变，上游的前缀缓存就全部落空。
-func ExposedFunctions() []AIFunction {
-	regMu.RLock()
-	defer regMu.RUnlock()
-	out := make([]AIFunction, 0, len(tools)+len(agents))
-	out = append(out, exposedFrom(tools, false)...)
-	out = append(out, exposedFrom(agents, true)...)
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
-}
-
-// exposedFrom 把一个注册表里通过等级门与开关的工具转成 AIFunction。
-// 调用方持锁。
-func exposedFrom(set map[string]Tool, agent bool) []AIFunction {
-	out := make([]AIFunction, 0, len(set))
-	for name, t := range set {
-		if t.Level > maxLvl || disabled[name] {
-			continue
-		}
-		out = append(out, AIFunction{
-			Name:        t.Name,
-			Description: t.Description,
-			Parameters:  t.InputSchema,
-			Category:    t.Category,
-			Level:       t.Level,
-			AgentOnly:   agent,
-		})
-	}
-	return out
-}
-
-// ToolInfo 工具元信息，含危险等级、分类与「在当前配置下是否开放」。
+// ToolInfo 工具元信息，含危险等级、所属域与「在当前配置下是否开放」。
 //
 // 管理界面需要看到全量工具而不是 List()：注册在高危档的工具确实存在，
 // 只是被等级门挡住。只展示 List() 会让用户以为「能力就这么多」，
@@ -323,21 +317,32 @@ type ToolInfo struct {
 	Name        string
 	Description string
 	Level       int
-	Category    string
-	// Disabled 用户是否单独关掉了它：面板要能区分「关掉了」和「没资格」，
+	// Domain 所属域（面板分组与场景策略的依据）。
+	Domain string
+	// Disabled 是否被外部 MCP 策略单独关掉。面板要能区分「关掉了」和「没资格」，
 	// 这两者的补救动作不同（重新开启 vs 调等级）。
 	Disabled bool
-	// Exposed 等级与单工具开关都通过，且属于 Global 注册表——
-	// 也就是 MCP 客户端实际能看到。agent 工具恒为 false。
+	// Exposed 等级与单工具开关都通过，且该域对外——也就是 MCP 客户端实际能看到。
+	// agent 工具恒为 false。
 	Exposed bool
 	// AgentOnly 只给内置 AI 用。面板要把这类工具标出来，
 	// 否则用户会以为「我在面板里关掉的东西，外部客户端也在用」。
 	AgentOnly bool
 }
 
-// Catalog 返回全部已注册工具（两个注册表合并，含被等级挡住/被单独关掉的），
-// 按等级升序、同级按名称排序，保证管理界面的展示顺序稳定。
+// Catalog 返回全部已注册工具的清单，Disabled/Exposed 按**外部 MCP 侧**策略算。
+//
+// 内置 AI 的开关是另一份策略：那边的界面用 CatalogWith(aiToolPolicy)，
+// 两份策略互不影响，不能在这里合成一个字段。
 func Catalog() []ToolInfo {
+	return CatalogWith(MCPPolicy())
+}
+
+// CatalogWith 用给定策略计算 Disabled/Exposed，供 AI 侧面板复用同一份清单。
+//
+// 之所以要参数而不是读全局：AI 设置页要显示「AI 侧这个工具开没开」，
+// 读 MCP 全局策略会答错——那正是这次要修掉的串台。
+func CatalogWith(pol Policy) []ToolInfo {
 	regMu.RLock()
 	defer regMu.RUnlock()
 	out := make([]ToolInfo, 0, len(tools)+len(agents))
@@ -345,15 +350,15 @@ func Catalog() []ToolInfo {
 		m     map[string]Tool
 		agent bool
 	}{{tools, false}, {agents, true}} {
-		for name, t := range set.m {
-			off := disabled[name]
+		for _, t := range set.m {
+			off := pol.Disabled[t.Name]
 			out = append(out, ToolInfo{
 				Name:        t.Name,
 				Description: t.Description,
 				Level:       t.Level,
-				Category:    t.Category,
+				Domain:      t.Domain,
 				Disabled:    off,
-				Exposed:     t.Level <= maxLvl && !off && !set.agent,
+				Exposed:     t.Level <= pol.MaxLevel && !off && !set.agent && DomainExposed(t.Domain),
 				AgentOnly:   set.agent,
 			})
 		}
@@ -367,76 +372,13 @@ func Catalog() []ToolInfo {
 	return out
 }
 
-// Call 执行工具（MCP 客户端路径）。只看 Global 注册表。
+// Call 执行工具（外部 MCP 客户端路径）。
+//
+// 装配与执行都走统一入口：Resolve 用 MCP 自己的策略决定看得到什么，Invoke 用同一份
+// Surface 判成员，再执行。内置 AI 不经过这里——它用自己那套策略，见 services/ai。
 func Call(name string, args map[string]any) (any, error) {
-	return callTool(context.Background(), name, args, false)
-}
-
-// CallAgent 执行工具（内置 AI 路径）。先查 agent 注册表，再查 Global。
-//
-// 等级门与单工具开关照样生效；两条路径的差别只有「能看到哪些工具」。
-func CallAgent(name string, args map[string]any) (any, error) {
-	return callTool(context.Background(), name, args, true)
-}
-
-// CallAgentContext 同 CallAgent，但把 ctx 交给实现了 HandlerCtx 的工具。
-//
-// 只有「会跑长活儿且需要被取消」的工具才在乎它（当前是 spawn_agent）。
-// 不使用 HandlerCtx 的工具行为完全不变——这正是保留两条执行路径的原因：
-// 让 ctx 变成可选能力，而不是逼每个工具都改签名。
-func CallAgentContext(ctx context.Context, name string, args map[string]any) (any, error) {
-	return callTool(ctx, name, args, true)
-}
-
-func callTool(ctx context.Context, name string, args map[string]any, fromAgent bool) (any, error) {
-	// 启动锁生效时对外部 MCP 客户端一律拒绝，只读也不例外：
-	// note_list / file_read / clipboard_list 返回的就是用户数据本身，
-	// 「只读放行」等于把整库交给本机任意进程（WorkBuddy 默认连着 9230）。
-	//
-	// 内置 AI（fromAgent）不拦：它属于后台任务。锁的语义是「不让人看界面」，
-	// 不是「掐掉正在跑的活」——这与「后台监控、定时任务照常」是同一条原则。
-	if !fromAgent && lock.IsLocked() {
-		return nil, fmt.Errorf("QuickDock 已锁定：请先在主窗口解锁后再调用工具 %s", name)
-	}
-
-	regMu.RLock()
-	t, ok := tools[name]
-	_, inAgent := agents[name]
-	if fromAgent && !ok {
-		t, ok = agents[name]
-	}
-	allowed := ok && t.Level <= maxLvl
-	off := disabled[name]
-	regMu.RUnlock()
-	if !ok {
-		// 名字在另一个注册表里时给一条能看懂的话：外部客户端猜 file_edit
-		// 是很容易的事，回「未知工具」会让人以为是版本不对。
-		if inAgent {
-			return nil, fmt.Errorf("工具 %s 仅内置 AI 可用，不对外部 MCP 客户端开放", name)
-		}
-		return nil, fmt.Errorf("未知工具: %s", name)
-	}
-	if off {
-		return nil, fmt.Errorf("工具 %s 已被关闭（可在环境管理 → MCP 面板重新开启）", name)
-	}
-	if !allowed {
-		return nil, fmt.Errorf("工具 %s 属于高危操作，当前未开放（请在环境管理页开启）", name)
-	}
-	if args == nil {
-		args = map[string]any{}
-	}
-	if t.HandlerCtx != nil {
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		return t.HandlerCtx(ctx, args)
-	}
-	if t.Handler == nil {
-		// 注册了名称与 schema 却没有实现：返回明确错误而不是 panic，
-		// 否则一次误注册会让整个对话流跟着崩。
-		return nil, fmt.Errorf("工具 %s 没有实现", name)
-	}
-	return t.Handler(args)
+	sf := Resolve(ToolScope{Caller: CallerMCP, Policy: MCPPolicy()})
+	return Invoke(context.Background(), sf, name, args, nil)
 }
 
 // -------- JSON Schema 快捷构造 --------

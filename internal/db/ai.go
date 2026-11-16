@@ -55,6 +55,12 @@ type AIConversation struct {
 	// 存库而不是每次从前端带：模式是这个任务的属性（「这条对话是用来翻译的」），
 	// 跟着任务走才不会切走再回来就变了。
 	Mode string `json:"mode"`
+	// Scene 这条对话的能力档：assistant（全开，写操作审批）/ readonly（只读）。
+	//
+	// 与 Mode 分成两个字段是有意的：Mode 回答「这条任务要 AI 干什么」，
+	// Scene 回答「准它用多大能力」。挤在一个字段里的后果是「切到翻译模式」
+	// 顺手把能不能停服务也改了。空串 = 老数据，读取时按 Mode 推导。
+	Scene string `json:"scene"`
 	// Skills 这条对话选中的技能名，JSON 数组字符串（`["translate"]`）。
 	// 空串 = 从未选过 → 后端回落到 skills.json 的全局默认；`[]` = 明确「这条不用技能」。
 	// 两者必须分得开，否则「我明明取消勾选了」和「我没动过」在库里长一个样子。
@@ -152,6 +158,7 @@ func mapToAIConversation(m map[string]interface{}) AIConversation {
 		Cwd:              str(m["cwd"]),
 		SpaceID:          str(m["space_id"]),
 		Mode:             str(m["mode"]),
+		Scene:            str(m["scene"]),
 		Skills:           str(m["skills"]),
 		Permission:       str(m["permission"]),
 		ProfileID:        str(m["profile_id"]),
@@ -634,8 +641,11 @@ func (d *Database) ListAIConversationsInSpace(spaceID string) ([]AIConversation,
 // 之后已经有四个 string 了，调用点会变成一长串难以核对的实参，而它们的类型
 // 全都相同 —— 传错顺序编译器一声不响，出错的表现只是「这条对话的模式不对」。
 type NewAIConversation struct {
-	Title   string
-	Mode    string // 空 = chat
+	Title string
+	Mode  string // 空 = chat
+	// Scene 能力档（空 = 按 mode 推导）。落地页可以先把「只读」选好再发第一句，
+	// 那条路径只有建会话能记录。
+	Scene   string
 	SpaceID string // 空 = 普通任务
 	Cwd     string // 空 = 未绑定（空间任务会回退到空间目录）
 	// Skills 创建时就选中的技能名（JSON 数组字符串，空 = 没选过 → 全局默认）。
@@ -665,6 +675,7 @@ func (d *Database) CreateAIConversation(in NewAIConversation) (*AIConversation, 
 		ID:             newID(),
 		Title:          strings.TrimSpace(in.Title),
 		Mode:           mode,
+		Scene:          strings.TrimSpace(in.Scene),
 		SpaceID:        strings.TrimSpace(in.SpaceID),
 		Cwd:            strings.TrimSpace(in.Cwd),
 		Skills:         strings.TrimSpace(in.Skills),
@@ -689,6 +700,21 @@ func (d *Database) SetAIConversationMode(id, mode string) error {
 	return d.ExecuteParams(
 		`UPDATE ai_conversations SET mode = ?, updated_at = ? WHERE id = ?`,
 		[]interface{}{strings.TrimSpace(mode), now(), strings.TrimSpace(id)},
+	)
+}
+
+// SetAIConversationScene 改一条对话的能力档（assistant / readonly）。
+//
+// 与 Mode 分开的写入通道：用户可能在对话中途才决定「这条只让它看、别动手」，
+// 而 mode 是任务模板，改它会把提示词也一起换掉。
+func (d *Database) SetAIConversationScene(id, scene string) error {
+	scene = strings.TrimSpace(scene)
+	if scene != "assistant" && scene != "readonly" {
+		scene = ""
+	}
+	return d.ExecuteParams(
+		`UPDATE ai_conversations SET scene = ?, updated_at = ? WHERE id = ?`,
+		[]interface{}{scene, now(), strings.TrimSpace(id)},
 	)
 }
 

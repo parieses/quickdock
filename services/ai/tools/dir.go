@@ -27,7 +27,7 @@ const (
 )
 
 func registerDir(d Deps) {
-	r := registrar{d: d, category: mcpsrv.CategoryCode}
+	r := registrar{d: d, domain: mcpsrv.CategoryCode}
 	str := mcpsrv.Str
 	intp := mcpsrv.Int
 

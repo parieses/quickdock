@@ -8,7 +8,10 @@
 // 之间反复挑。
 //
 // 因此这里注册进 mcpsrv.Agent（另一个注册表），而不是 mcpsrv.Global。
-// 两个注册表共用等级门与单工具开关：面板里关掉 file_edit，内置 AI 也就改不了文件。
+//
+// 注意**两个注册表各自的暴露策略也是两份**：外部 MCP 那份存在 MCP 配置里，
+// 内置 AI 这份存在 settings 的 ai_tool_policy 里。面板上在这里关掉 file_edit
+// 只影响 AI；想影响外部客户端得去 MCP 面板关另一份（见 internal/mcp/policy.go）。
 //
 // 目录里的文件分工：register.go 装配、web.go 抓网页、dir.go 列目录、
 // git.go 看仓库状态、code.go 改文件与跑命令。
@@ -90,24 +93,28 @@ func Register(d Deps) {
 	registerPlan(d)
 }
 
-// registrar 单个域的注册入口：把域写进每个 Tool.Category，并统一补 InputSchema。
+// registrar 单个域的注册入口：把域写进每个 Tool.Domain，并统一补 InputSchema。
 //
 // Handler 收的是 (Deps, args) 而不是闭包里直接捕获 Deps：注册处与实现处之间
 // 只靠这一个签名对接，实现函数因此都是可单测的纯函数（传一个空 Deps 就能跑）。
 type registrar struct {
-	d        Deps
-	category string
+	d      Deps
+	domain string
 }
 
-func (r registrar) add(run func(Deps, map[string]any) (any, error), level int, name, desc string, required []string, props map[string]any) {
-	mcpsrv.Agent.Add(mcpsrv.Tool{
+func (r registrar) add(run func(Deps, map[string]any) (any, error), level int, name, desc string, required []string, props map[string]any, opts ...toolOption) {
+	t := mcpsrv.Tool{
 		Name:        name,
 		Description: desc,
 		InputSchema: mcpsrv.Schema("", required, props),
 		Level:       level,
-		Category:    r.category,
+		Domain:      r.domain,
 		Handler:     func(args map[string]any) (any, error) { return run(r.d, args) },
-	})
+	}
+	for _, o := range opts {
+		o(&t)
+	}
+	mcpsrv.Agent.Add(t)
 }
 
 // addCtx 注册一个需要 ctx 的工具（走 Tool.HandlerCtx，CallAgentContext 会自动优先用它）。
@@ -115,13 +122,35 @@ func (r registrar) add(run func(Deps, map[string]any) (any, error), level int, n
 // 只有写类工具用它：快照（A3）要知道「哪个会话的哪一次调用在改这个文件」，
 // 这个信息只能在 ctx 里。其余工具继续用 add——给一个不需要 ctx 的函数加参数，
 // 只会让 10 个实现里 7 个写着 `_ context.Context`。
-func (r registrar) addCtx(run func(context.Context, Deps, map[string]any) (any, error), level int, name, desc string, required []string, props map[string]any) {
-	mcpsrv.Agent.Add(mcpsrv.Tool{
+func (r registrar) addCtx(run func(context.Context, Deps, map[string]any) (any, error), level int, name, desc string, required []string, props map[string]any, opts ...toolOption) {
+	t := mcpsrv.Tool{
 		Name:        name,
 		Description: desc,
 		InputSchema: mcpsrv.Schema("", required, props),
 		Level:       level,
-		Category:    r.category,
+		Domain:      r.domain,
 		HandlerCtx:  func(ctx context.Context, args map[string]any) (any, error) { return run(ctx, r.d, args) },
-	})
+	}
+	for _, o := range opts {
+		o(&t)
+	}
+	mcpsrv.Agent.Add(t)
+}
+
+// toolOption 给 add / addCtx 附加审批元数据（可变参数：既有注册点零改动）。
+//
+// 审批的「记住粒度」「风险说明」「参数摘要」跟着工具走，而不是堆在审批代码里
+// 按工具名 switch——后者每加一个工具都要回去改一次，而且离工具定义很远。
+type toolOption func(*mcpsrv.Tool)
+
+func withGrantKey(fn func(args map[string]any) (key string, rememberable bool)) toolOption {
+	return func(t *mcpsrv.Tool) { t.GrantKey = fn }
+}
+
+func withRiskNote(fn func(args map[string]any) string) toolOption {
+	return func(t *mcpsrv.Tool) { t.RiskNote = fn }
+}
+
+func withArgBrief(fn func(args map[string]any) string) toolOption {
+	return func(t *mcpsrv.Tool) { t.ArgBrief = fn }
 }
