@@ -58,16 +58,30 @@ const (
 	approvalDeny approvalMode = "deny" // 一律拒绝
 )
 
-// aiPermissionFull 「完全访问」的落库取值。空串表示默认权限，不另设 'default'。
-const aiPermissionFull = "full"
-
-// aiNormalizePermission 归一请求里的权限取值：只认 "full"，其余一律默认权限。
+// 执行权限三档。空串表示默认档，不另设 'default'。
 //
-// 拼错、传空、传 "default" 都落到默认这一侧——权限是安全开关，
-// 不认识的取值必须往「更严」的方向倒，绝不能因为解析失败反而全放行。
+// 原先「能力档」（assistant/readonly）与「执行权限」（默认/full）是两个正交维度，
+// 分别是输入框上的两个标记，用户要在脑子里组合「有没有这只手」×「动手前问不问」。
+// 三档合并后只留一个开关，一条轴上从紧到松：
+//
+//	readonly 只读：不挂写类工具，模型连调都调不到
+//	""       默认：工具全开，敏感/高危操作逐个确认
+//	full     完全访问：工具全开，不再逐条确认（高危仍由硬规则拦）
+const (
+	aiPermissionReadOnly = "readonly"
+	aiPermissionFull     = "full"
+)
+
+// aiNormalizePermission 归一请求里的权限取值：只认 readonly / full，其余一律默认档。
+//
+// 拼错、传空、传 "default" 都落到默认这一档——权限是安全开关，不认识的取值
+// 必须往「更严」的方向倒（默认档会问、full 不会），绝不能因为解析失败反而全放行。
 func aiNormalizePermission(raw string) string {
-	if strings.EqualFold(strings.TrimSpace(raw), aiPermissionFull) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case aiPermissionFull:
 		return aiPermissionFull
+	case aiPermissionReadOnly:
+		return aiPermissionReadOnly
 	}
 	return ""
 }

@@ -373,6 +373,31 @@ var pathReadTools = map[string]bool{
 	"check_workdir": true,
 }
 
+// skillReadPath 判断本次读工具的目标是否落在 skills 根目录下，是则返回清理后的绝对路径。
+//
+// 技能由宿主安装到数据目录的 skills/ 下，提示词明确要求模型「先用 file_read 读
+// <路径> 再照做」（见 skills.go 的 renderSkillsPrompt）。它因此天然不在会话工作目录
+// ai_tasks/<id> 内，但属于宿主自己安装的可信内容：既不该弹「越界读取」确认卡，
+// 也不该被 scoped 读取拒绝——技能本来就是让 AI 读的。
+//
+// 判定复用 fsguard.Outside，与执行层 ResolveReadScopedExtra 是同一套 clean/within，
+// 保证「跳过弹卡」和「执行层放行」口径一致；否则会出现不弹卡却静默读取失败的错配。
+// 只认绝对路径：相对路径在工具执行时按 scope 解析，拿 skills 根当基准会误判。
+func skillReadPath(args map[string]any) string {
+	p := mcpsrv.Arg(args, "path")
+	if p == "" || !filepath.IsAbs(p) {
+		return ""
+	}
+	root := skillsRoot()
+	if root == "" {
+		return ""
+	}
+	if _, outside := fsguard.Outside(p, root); outside {
+		return ""
+	}
+	return filepath.Clean(p)
+}
+
 // parallelSafeTools 允许在同一轮里并行执行的工具白名单。
 //
 // 用白名单常量而不是给 Tool 加一个「我可以并发」的字段：后者会让每个工具
@@ -551,6 +576,16 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 		args["_scope"] = scope
 	}
 
+	// 读取 skill 目录不需要询问：技能是宿主安装的可信内容，提示词要求模型先
+	// file_read 它的 SKILL.md，而它位于数据目录、几乎总在会话工作目录之外。
+	// 把 skills 根注入 _allow，让执行层的 scoped 读取放行（与下面跳过越界确认卡
+	// 成对，缺一就会变成「不弹卡但静默读取失败」）。只认绝对路径，且只对读类
+	// 工具生效；模型伪造的 _allow 已在上面 delete，这里重新按真实目标决定。
+	skillRead := pathReadTools[c.Name] && skillReadPath(args) != ""
+	if skillRead {
+		args["_allow"] = []string{skillsRoot()}
+	}
+
 	// 同一次提问内，同一个工具 + 完全相同的参数只真执行一次。
 	//
 	// 依据是实测：模型会在同一轮里给出两条一模一样的 robot_notify，
@@ -589,8 +624,10 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 	// 越界读取：只读工具平时不弹卡（读个文件都要确认，三分钟内就会被关掉），
 	// 但目标在当前对话目录之外时必须由用户点名同意——这就是「默认只能操作当前目录」
 	// 的落地点。判定只对带 path 的读类工具做：没有 path 时默认用工作目录，不可能越界。
+	// skill 目录是唯一例外：技能内容由提示词点名要求读取，是宿主自己的可信文件，
+	// 不该为「读技能说明」弹确认卡；放行已在上面注入 _allow 完成。
 	outsideAbs := ""
-	if scope := mcpsrv.Scope(args); scope != "" && pathReadTools[c.Name] {
+	if scope := mcpsrv.Scope(args); scope != "" && pathReadTools[c.Name] && !skillRead {
 		if p := mcpsrv.Arg(args, "path"); p != "" {
 			if abs, out := fsguard.Outside(p, scope); out {
 				outsideAbs = abs

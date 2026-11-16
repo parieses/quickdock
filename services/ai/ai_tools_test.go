@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -367,6 +368,33 @@ func TestToolOutputText(t *testing.T) {
 	for _, c := range cases {
 		if got := toolOutputText(c.tool, c.val); got != c.want {
 			t.Errorf("%s:\n got: %q\nwant: %q", c.name, got, c.want)
+		}
+	}
+}
+
+// skillReadPath：skill 目录下的读取要判为「可信、不越界」，这样宿主既不弹确认卡、
+// 又会注入 _allow 让执行层放行。相对路径和 skills 根之外的路径不能被误判——
+// 后者一旦误判，等于给模型开了「读任意路径都不问」的口子。
+func TestSkillReadPath(t *testing.T) {
+	root := skillsRoot()
+	inside := filepath.Join(root, "labor-law-advisor-skill", "SKILL.md")
+	outside := filepath.Join(filepath.Dir(root), "some-other-project", "secret.txt")
+
+	cases := []struct {
+		name string
+		path string
+		want bool // 是否判为 skill 读取
+	}{
+		{"skill 目录下的 SKILL.md", inside, true},
+		{"skills 根之外", outside, false},
+		{"相对路径不认", filepath.Join("skills", "x", "SKILL.md"), false},
+		{"空路径不认", "", false},
+	}
+	for _, c := range cases {
+		args := map[string]any{"path": c.path}
+		got := skillReadPath(args) != ""
+		if got != c.want {
+			t.Errorf("%s: skillReadPath=%q, 判为 skill=%v, want %v", c.name, skillReadPath(args), got, c.want)
 		}
 	}
 }

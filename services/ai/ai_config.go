@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -79,6 +81,41 @@ type AIConfig struct {
 	Model       string  `json:"model"`
 	Temperature float64 `json:"temperature"`
 	MaxTokens   int     `json:"maxTokens"`
+}
+
+// profileNeedsKey 判断这个档案是否必须提供 API Key。
+//
+// 本地推理服务（Ollama、LM Studio、vLLM…）以及内网里别人起的免鉴权网关都不需要
+// Key。一刀切要求非空会让「本地模型明明跑着、对话却提示去配 Key」——用户没配错
+// 任何东西，是我们多拦了一道。
+//
+// 口径：provider=ollama，或 BaseURL 指向回环地址。不能放宽到任意地址——公网
+// 服务空 Key 只会拿到 401，提前拦下给的提示更清楚。前端 `utils/aiKey.ts` 用同一
+// 规则，两边分叉就会出现「设置能存、聊天仍被拦」。
+func profileNeedsKey(p AIProfile) bool {
+	if strings.EqualFold(strings.TrimSpace(p.Provider), "ollama") {
+		return false
+	}
+	return !isLocalAIEndpoint(p.BaseURL)
+}
+
+// isLocalAIEndpoint 判断 BaseURL 是否指向本机回环。
+//
+// 用 url.Parse 取 hostname 而不是字符串匹配：`https://localhost.example.com`
+// 这种远端域名里也含 "localhost"，按子串判断会把它误判成本地、进而放过空 Key。
+func isLocalAIEndpoint(baseURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || u.Host == "" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 // apiEndpoint 根据 provider 构建正确的 API URL 和认证头。
@@ -735,7 +772,7 @@ func (a *AIService) testConnection(profileID string) (map[string]interface{}, er
 		}
 		apiKey = dec
 	}
-	if apiKey == "" && s.Provider != "ollama" {
+	if apiKey == "" && profileNeedsKey(AIProfile{Provider: s.Provider, BaseURL: s.BaseURL}) {
 		return nil, fmt.Errorf("API Key 为空")
 	}
 

@@ -10,7 +10,6 @@ import (
 
 	"quickdock/internal/db"
 	"quickdock/internal/logger"
-	mcpsrv "quickdock/internal/mcp"
 	"quickdock/services"
 )
 
@@ -162,33 +161,6 @@ func (a *AIService) AICreateConversation(title, mode, spaceID string) *services.
 	return services.Ok(c)
 }
 
-// AISetConversationScene 切换一条对话的能力档：assistant（全开，写操作审批）/ readonly（只读）。
-//
-// 为什么单独一个入口而不是塞进「改模式」：mode 是任务模板（换它会连提示词一起换），
-// scene 是「准这条对话用多大能力」。用户常见动作是「这条我盯着它干活」→ 助手档，
-// 或者「这条只让它看别动手」→ 只读档，任务类型不变。
-func (a *AIService) AISetConversationScene(convID, scene string) *services.ApiResult {
-	if r := a.dbOK(); r != nil {
-		return r
-	}
-	convID = strings.TrimSpace(convID)
-	if convID == "" {
-		return services.FailMsg("缺少会话 ID")
-	}
-	scene = strings.TrimSpace(scene)
-	if scene != mcpsrv.SceneAssistant && scene != mcpsrv.SceneReadOnly {
-		return services.FailMsg("能力档只能是 assistant 或 readonly")
-	}
-	if err := a.App.DB.SetAIConversationScene(convID, scene); err != nil {
-		return services.Fail(err)
-	}
-	c, err := a.App.DB.GetAIConversation(convID)
-	if err != nil {
-		return services.Fail(err)
-	}
-	return services.Ok(c)
-}
-
 // AIDeleteConversation 删除任务（进回收站，可恢复）。
 //
 // 走回收站而不是硬删：一条任务里攒着几十轮对话，误删等于丢掉一整段上下文。
@@ -272,8 +244,12 @@ func (a *AIService) AISetConversationMode(convID, mode string) *services.ApiResu
 	return services.Ok(mode)
 }
 
-// AISetConversationPermission 切换这条对话的执行权限（bound）：
-// "full" = 完全访问，其余一律落成默认权限。
+// AISetConversationPermission 切换这条对话的执行权限（bound），三档：
+// "" = 默认（敏感操作逐个确认）、"readonly" = 只读、'full' = 完全访问。
+//
+// 合并前这里只认 full，只读是另一个「能力档」标记、另一个入口。两个开关都影响
+// 「AI 能不能动手」，却要用户自己在脑子里组合，实际用起来就是没人切只读。
+// 合成一条从紧到松的轴之后，一个下拉就是全部语义。
 //
 // 与技能选择不同，这个一按就落库：权限档位决定「接下来会问、还是直接做」，
 // 界面上那个标记和库里的值必须一直是同一个。否则下次打开这条对话时显示
@@ -388,7 +364,7 @@ func (a *AIService) AIRegenerateTitle(convID string) *services.ApiResult {
 		return r
 	}
 	cfg, ok := a.getActiveAIProfile()
-	if !ok || cfg.APIKey == "" {
+	if !ok || (cfg.APIKey == "" && profileNeedsKey(cfg)) {
 		return services.FailMsg("missing api key")
 	}
 	msgs, err := a.App.DB.ListAIMessagesTail(convID, aiTitleMaxMsgs)
@@ -484,7 +460,7 @@ func (a *AIService) AISummarizeConversation(convID string) *services.ApiResult {
 		return r
 	}
 	cfg, ok := a.getActiveAIProfile()
-	if !ok || cfg.APIKey == "" {
+	if !ok || (cfg.APIKey == "" && profileNeedsKey(cfg)) {
 		return services.FailMsg("missing api key")
 	}
 	msgs, err := a.App.DB.ListAIMessagesTail(convID, aiDigestMaxMsgs)

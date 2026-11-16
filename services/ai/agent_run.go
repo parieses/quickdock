@@ -75,18 +75,13 @@ type AgentRunReq struct {
 	// 建会话时按「没选过」落空串 → 走全局默认）；空切片 = 明确「本次不用技能」。
 	// 两者必须分开：否则用户在输入框里删掉 /技能名 之后，下一条消息又把全局默认挂回来。
 	Skills []string
-	// Permission 这条对话的执行权限：空 = 默认（敏感操作逐个确认），"full" = 完全访问
-	// （用户在输入框右下角按过「允许完全访问」）。
+	// Permission 这条对话的执行权限，三档："" = 默认（敏感操作逐个确认）、
+	// "readonly" = 只读（不挂写类工具）、"full" = 完全访问（不再逐条确认）。
 	//
 	// 跟请求走而不是每轮从库里读：权限是「这条消息按什么口径执行」，
 	// 用户在点发送前刚切过，读库会拿到上一轮的值——而这两者的差别正是
-	// 「要不要停下来问」。库里那份只用于「切走再切回来时把开关显示回去」。
+	// 「要不要停下来问」。空串且请求也没带时回落到会话上存的那档。
 	Permission string
-	// Scene 这条对话的能力档："assistant" = 工具全开（默认），"readonly" = 只挂读类工具。
-	//
-	// 与 Permission 是两个正交维度，别合并：Permission 决定「写操作问不问」，
-	// Scene 决定「有没有写操作这只手」。空 = 没表态，按会话上存过的值回落。
-	Scene string
 	// ProfileID 这一轮用哪个模型档案（ai_profiles.id）。前端每次发消息都带输入框里
 	// 选中的那个；空 = 没表态，后端按「会话上存过的 → 全局激活项」回落。
 	//
@@ -251,9 +246,9 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 全局那份仍然有用——插件、SSH 屏显、摘要压缩这些没有模型选择器的入口靠它，
 	// 且用户最后一次主动选的模型会写回它（见 AISetConversationProfile）。
 	cfg, okp := a.aiProfileForRun(req.ProfileID, res.ConvID)
-	if !okp || cfg.APIKey == "" {
+	if !okp || (cfg.APIKey == "" && profileNeedsKey(cfg)) {
 		// 用户报「AI 不回话」时，最常见原因就是没配 Key；这条必须留痕。
-		logger.W("[ai] 请求被拒：未配置 API Key（conv=%s mode=%s）", res.ConvID, mode)
+		logger.W("[ai] 请求被拒：未配置 API Key（conv=%s mode=%s provider=%s base=%s）", res.ConvID, mode, cfg.Provider, cfg.BaseURL)
 		sink.Event("error", map[string]any{"message": "请在设置中配置 API Key"})
 		res.Err = errNoAPIKey
 		return res
@@ -298,10 +293,6 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 				Skills: encodeConvSkills(req.Skills),
 				// 权限同理：落地页就能把权限切成完全访问再发第一句。
 				Permission: permission,
-				// 能力档同理：落地页选了「只读」再发第一句，这个值必须落库，
-				// 否则第二句又变成全开的助手档。存的是归一后的值（不是原始字符串）：
-				// 库里只该出现 assistant / readonly 两种。
-				Scene: aiSceneFor(mode, req.Scene),
 				// 落地页输入框里选好的模型随建会话落库：少了这一步，第一句用的
 				// 是请求带来的值、第二句却会回落到全局，出现「越聊越换了模型」。
 				ProfileID: cfg.ID,
@@ -344,6 +335,15 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		sink.Event("error", map[string]any{"message": "会话不存在或已被删除"})
 		res.Err = errConvNotFound
 		return res
+	}
+
+	// 三档权限取一个生效值：请求里带了就以请求为准（前端每次发消息都带输入框里
+	// 当前那一档），没带（插件、定时任务、老前端）才回落到会话上存的。
+	// 工具面与审批闸门必须用同一个值，否则会出现「只读档却弹了写操作确认」
+	// 或者反过来「完全访问却还在问」——两处各算一遍是这类不一致的老源头。
+	effPermission := permission
+	if strings.TrimSpace(req.Permission) == "" {
+		effPermission = aiConversationPermission(conv)
 	}
 
 	// 工作目录：请求里带了就以它为准（用户刚在界面上切的），并写回会话；
@@ -415,31 +415,27 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 技能选择的回写：请求里带了（前端每次发消息都带输入框里的 /技能名）就以请求为准，
 	// 顺手存回会话——不然「这条对话用了哪些技能」只有前端内存记得，切走就没了。
 	// 没带（nil）时不动库里的值：那表示「这次没表态」，不是「清空」。
+	//
+	// 必须同时更新内存里的 conv.Skills：后面的提示词装配读的是 conv.Skills，
+	// 只写库不回填的话，**这一轮**用的还是上一轮的技能名单——用户新选的技能
+	// 要等到第二句才生效，表现就是「我明明选了技能，它却没用」。
 	if !req.Fresh && req.Skills != nil {
 		if enc := encodeConvSkills(req.Skills); enc != conv.Skills {
 			if err := a.App.DB.SetAIConversationSkills(res.ConvID, enc); err != nil {
 				logger.W("[ai] 保存会话技能选择失败 conv=%s: %v", res.ConvID, err)
 			}
+			conv.Skills = enc
 		}
 	}
 
 	// 权限的回写：前端每次发消息都带当前开关，与库里的值不同就存回去——
 	// 「切走再切回来」看到的是上次真正执行用的权限，而不是一个可能已经过期的界面状态。
-	if !req.Fresh && permission != strings.TrimSpace(conv.Permission) {
+	//
+	// 只在请求**明确**带了权限时写：定时任务、插件、老前端都不带这个字段，
+	// 跟着写会把会话上的「完全访问」悄悄清成默认档。
+	if !req.Fresh && strings.TrimSpace(req.Permission) != "" && permission != strings.TrimSpace(conv.Permission) {
 		if err := a.App.DB.SetAIConversationPermission(res.ConvID, permission); err != nil {
 			logger.W("[ai] 保存会话权限失败 conv=%s: %v", res.ConvID, err)
-		}
-	}
-
-	// 能力档的回写。只在请求**明确**带了 scene 时写：定时任务、子 agent、老前端
-	// 都不带这个字段，跟着写会把「没表态」误存成一个具体档位，而它下一次就该
-	// 按 mode 重新推导（比如老的 plan 会话切回 chat）。
-	if want := strings.TrimSpace(req.Scene); !req.Fresh && want != "" {
-		if s := aiSceneFor(mode, want); s != strings.TrimSpace(conv.Scene) {
-			if err := a.App.DB.SetAIConversationScene(res.ConvID, s); err != nil {
-				logger.W("[ai] 保存会话能力档失败 conv=%s: %v", res.ConvID, err)
-			}
-			conv.Scene = s
 		}
 	}
 
@@ -482,7 +478,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 也就没人能往里插话。
 	var injects *injectQueue
 	if !req.Fresh {
-		gate := newApprovalGate(sink, res.ConvID, a.App.DB, a.loadApprovalRules(), permission == aiPermissionFull)
+		gate := newApprovalGate(sink, res.ConvID, a.App.DB, a.loadApprovalRules(), effPermission == aiPermissionFull)
 		a.registerGate(res.ConvID, gate)
 		defer a.unregisterGate(res.ConvID, gate)
 		ctx = withApprovalGate(ctx, gate)
@@ -505,7 +501,9 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 子 agent 跳过：它的 task 不是「用户说的话」，落进 ai_messages 会让侧栏那条
 	// 对话里凭空冒出几条不是用户写的提问。
 	if !req.Fresh {
-		if err := a.saveUserTurn(res.ConvID, message, imagesJSON); err != nil {
+		// 这一轮真正挂上的技能名，跟着用户消息落库，聊天里据此标出「用了哪个技能」。
+		// 取的就是提示词那份 conv.Skills（上面刚回填过），两边不会对不上。
+		if err := a.saveUserTurn(res.ConvID, message, imagesJSON, convSkillNamesJSON(conv.Skills)); err != nil {
 			logger.W("[ai] 保存用户消息失败 conv=%s: %v", res.ConvID, err)
 			sink.Event("error", map[string]any{"message": err.Error()})
 			res.Err = err
@@ -583,7 +581,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	}
 	// 装配一次，后续执行复用同一个 Surface（见 withToolSurface）：
 	// 模型看到的工具面与「能调什么」必须是同一份对象。
-	sf := a.aiSurface(mode, aiConversationScene(conv), filter)
+	sf := a.aiSurface(mode, effPermission, aiConversationLegacyScene(conv), filter)
 	tools, extTrimmed := aiToolsPayload(sf)
 	// 纯问答档：工具一个都不挂，模型看不到自然不会调，审批闸门也就无从触发。
 	if req.ScheduledNoTools {

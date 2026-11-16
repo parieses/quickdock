@@ -67,18 +67,25 @@ func (a *AIService) saveAIToolPolicy(p mcpsrv.Policy) error {
 	return a.App.DB.SetSetting(aiToolPolicyKey, string(b))
 }
 
-// aiSceneFor 一次对话的能力档。
+// aiSceneForPermission 把执行权限三档翻译成工具面档位。
 //
-// 优先用会话上显式存的值；老会话没有 scene 时按 mode 推导——
-// tutorial 也走 assistant（教程只是提示词不同，不再独占工具面），
-// 只有遗留的 plan 会话收成只读。
-func aiSceneFor(mode, scene string) string {
-	switch strings.ToLower(strings.TrimSpace(scene)) {
+// readonly → 只挂读类工具；其余两档都全开（差别在审批闸门要不要问）。
+// legacyScene 是合并前的「能力档」列（ai_conversations.scene）：只在请求/会话
+// 都没有明确权限时才看它，让升级前设成「只读档」的老任务不会突然长出写操作的手。
+func aiSceneForPermission(mode, permission, legacyScene string) string {
+	switch strings.ToLower(strings.TrimSpace(permission)) {
+	case aiPermissionReadOnly:
+		return mcpsrv.SceneReadOnly
+	case aiPermissionFull:
+		return mcpsrv.SceneAssistant
+	}
+	switch strings.ToLower(strings.TrimSpace(legacyScene)) {
 	case mcpsrv.SceneReadOnly:
 		return mcpsrv.SceneReadOnly
 	case mcpsrv.SceneAssistant:
 		return mcpsrv.SceneAssistant
 	}
+	// 遗留的 plan 会话当年是隐式只读：没有 scene、没有 permission 的老行靠这条收口。
 	if strings.TrimSpace(mode) == aiPlanMode {
 		return mcpsrv.SceneReadOnly
 	}
@@ -89,11 +96,11 @@ func aiSceneFor(mode, scene string) string {
 //
 // filter 是编排层的角色收窄（子 agent），nil 表示不收窄。场景、策略、角色三层
 // 都在 mcpsrv.Resolve 里，这里只是把 AI 侧的输入翻译成它的 Scope。
-func (a *AIService) aiSurface(mode, scene string, filter *ToolFilter) mcpsrv.Surface {
+func (a *AIService) aiSurface(mode, permission, legacyScene string, filter *ToolFilter) mcpsrv.Surface {
 	return mcpsrv.Resolve(mcpsrv.ToolScope{
 		Caller: mcpsrv.CallerAI,
 		Policy: a.aiToolPolicy(),
-		Scene:  aiSceneFor(mode, scene),
+		Scene:  aiSceneForPermission(mode, permission, legacyScene),
 		Keep:   filter.keep,
 	})
 }
@@ -208,11 +215,11 @@ const (
 		"引号、换行、编码在那条路上都容易出错，而且用户看不出你写了什么。\n" +
 		"- 高危命令被拒绝时，把命令写给用户让他在终端里执行，不要换个写法反复试。\n"
 
-	// toolHintReadOnly 只读档的说明。写类工具没挂，必须明说，
+	// toolHintReadOnly 只读权限档的说明。写类工具没挂，必须明说，
 	// 否则模型会照着自己的习惯去调 file_write，然后收到一串「本次未开放」。
-	toolHintReadOnly = "\n[能力档：只读]\n" +
+	toolHintReadOnly = "\n[执行权限：只读]\n" +
 		"本次对话是**只读档**：写类工具（file_write / file_edit / run_command、启停服务、建任务等）没有挂载，你调不到。" +
-		"需要动手时说明「这需要切到助手档 / 用户手动操作」，不要尝试绕过。\n"
+		"需要动手时说明「把执行权限切到默认或完全访问」，不要尝试绕过。\n"
 
 	// toolHintExhausted 工具轮次用尽后的 system 说明。
 	//
@@ -404,10 +411,18 @@ func (a *AIService) AISetToolMaxLevel(level int) *services.ApiResult {
 	return services.OkMsg(nil, "已更新")
 }
 
-// aiConversationScene 取会话的能力档（conv 可能为空——新建对话的第一条消息）。
-func aiConversationScene(conv *db.AIConversation) string {
+// aiConversationPermission 取会话上落库的执行权限（conv 可能为空——新建对话的第一条消息）。
+func aiConversationPermission(conv *db.AIConversation) string {
 	if conv == nil {
-		return mcpsrv.SceneAssistant
+		return ""
 	}
-	return aiSceneFor(conv.Mode, conv.Scene)
+	return strings.TrimSpace(conv.Permission)
+}
+
+// aiConversationLegacyScene 取合并前的能力档列，只用于兜住老数据。
+func aiConversationLegacyScene(conv *db.AIConversation) string {
+	if conv == nil {
+		return ""
+	}
+	return conv.Scene
 }

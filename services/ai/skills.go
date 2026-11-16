@@ -282,22 +282,24 @@ func encodeConvSkills(names []string) string {
 	return string(data)
 }
 
-// convSkillsPrompt 按会话选择组装技能注入块。raw 是 ai_conversations.skills 列：
+// convSkillList 按会话选择解析出本次生效的技能。raw 是 ai_conversations.skills 列：
 //
 //   - 空串：这条对话从未选过技能 → 回落到全局启用（老会话因此保持升级前的行为）；
-//   - `[]`：用户明确「这条不用技能」→ 不注入（与「没选过」必须区分开，
+//   - `[]`：用户明确「这条不用技能」→ 空列表（与「没选过」必须区分开，
 //     否则「把 /名字 删掉」这件事根本没有落点）；
 //   - 有内容：按名字挑；磁盘上已删掉的技能自动忽略，不报错——
 //     技能目录是用户可以随手改的地方，为它拦下整轮对话不值得。
-func convSkillsPrompt(raw string) string {
+//
+// global 表示这批是从全局开关来的，提示词里要交代清楚「不是本次对话选的」。
+func convSkillList(raw string) (picked []aiSkill, global bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return renderSkillsPrompt(enabledSkillList(), true)
+		return enabledSkillList(), true
 	}
 	var names []string
 	if err := json.Unmarshal([]byte(raw), &names); err != nil {
 		logger.W("[skills] 会话技能列解析失败，按全局默认处理: %v", err)
-		return renderSkillsPrompt(enabledSkillList(), true)
+		return enabledSkillList(), true
 	}
 	want := make(map[string]bool, len(names))
 	for _, n := range names {
@@ -306,15 +308,46 @@ func convSkillsPrompt(raw string) string {
 		}
 	}
 	if len(want) == 0 {
-		return ""
+		return nil, false
 	}
-	picked := make([]aiSkill, 0, len(want))
+	list := make([]aiSkill, 0, len(want))
 	for _, sk := range scanSkills() {
 		if want[sk.Name] && sk.Error == "" {
-			picked = append(picked, sk)
+			list = append(list, sk)
 		}
 	}
-	return renderSkillsPrompt(picked, false)
+	return list, false
+}
+
+// convSkillsPrompt 按会话选择组装技能注入块。
+func convSkillsPrompt(raw string) string {
+	picked, global := convSkillList(raw)
+	return renderSkillsPrompt(picked, global)
+}
+
+// convSkillNamesJSON 本次真正挂上的技能名（JSON 数组），空 = 没有技能。
+//
+// 这份值会落到 ai_messages.skills 上，用来在聊天里标出「这条用到了哪个技能」。
+// 在此之前技能只存在于提示词里：模型读了 SKILL.md 也只是一条普通的工具行，
+// 用户看不出「我选的技能到底生效了没有」。
+func convSkillNamesJSON(raw string) string {
+	picked, _ := convSkillList(raw)
+	if len(picked) == 0 {
+		return ""
+	}
+	if len(picked) > skillCountMax {
+		picked = picked[:skillCountMax]
+	}
+	names := make([]string, 0, len(picked))
+	for _, sk := range picked {
+		names = append(names, sk.Name)
+	}
+	data, err := json.Marshal(names)
+	if err != nil {
+		logger.W("[skills] 编码消息技能名失败: %v", err)
+		return ""
+	}
+	return string(data)
 }
 
 // -------- bound 方法 --------

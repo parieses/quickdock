@@ -82,7 +82,7 @@ func (a *AIService) AIFetchModels(req AIFetchModelsRequest) *services.ApiResult 
 	if baseURL == "" {
 		return services.FailMsg("请先填写 Base URL")
 	}
-	if apiKey == "" && provider != "ollama" {
+	if apiKey == "" && profileNeedsKey(AIProfile{Provider: provider, BaseURL: baseURL}) {
 		return services.FailMsg("请先填写 API Key")
 	}
 
