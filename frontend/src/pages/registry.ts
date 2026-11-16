@@ -29,6 +29,7 @@ import { KEEP_ALIVE_PAGES } from './keepAlive'
 // 工作空间复合页是首屏默认页，静态引（异步会让启动时内容区先空一拍）
 import WorkspacePage from '../components/WorkspacePage.vue'
 import PageLoading from '../components/PageLoading.vue'
+import PageLoadError from '../components/PageLoadError.vue'
 
 /**
  * 内容页懒加载的统一入口。
@@ -40,9 +41,39 @@ import PageLoading from '../components/PageLoading.vue'
  * 只有「首次进入某页」会看到骨架：defineAsyncComponent 内部缓存 resolvedComp，
  * 之后再创建同名包装器会同步拿到组件，不再经过 loading 分支。也就是说这个
  * 占位专治 chunk 加载，不管数据等待——切回非保活页时的数据空白见 KEEP_ALIVE_PAGES。
+ *
+ * errorComponent 是同一件事的另一半：chunk 真的拉不到时（dev 期 Vite 换 ?v= 哈希、
+ * 或 SFC 正在编译返回 5xx），不配它就是一块永久空白，用户除了重启应用没有别的出路。
+ * 现在换成「加载失败 + 重试」面板，见 PageLoadError.vue。
+ *
+ * 退避阈值按预构建的实测耗时定（本机 46 个依赖约 4 秒），不再用「几百毫秒就好」的假设：
+ * 只给 1.8 秒时，明明再等两秒就能加载成功的场景会被判死刑。
  */
+export const PAGE_LOAD_RETRY = 6
+
+/** chunk 加载失败的退避重试：400ms 起逐次递增，6 次共约 8 秒，覆盖整个预构建窗口。
+ *  App.vue 的 SshPage 复用同一份，避免两处阈值各调各的。 */
+export function retryChunkLoad(
+  _err: unknown,
+  retry: () => void,
+  fail: () => void,
+  attempts: number,
+) {
+  if (attempts <= PAGE_LOAD_RETRY) {
+    setTimeout(retry, 400 * attempts)
+  } else {
+    fail()
+  }
+}
+
 function lazy(loader: AsyncComponentLoader) {
-  return defineAsyncComponent({ loader, loadingComponent: PageLoading, delay: 0 })
+  return defineAsyncComponent({
+    loader,
+    loadingComponent: PageLoading,
+    errorComponent: PageLoadError,
+    delay: 0,
+    onError: retryChunkLoad,
+  })
 }
 
 // 主窗口内容页的异步组件集中在此定义（替代此前散落在 App.vue 的 defineAsyncComponent）。

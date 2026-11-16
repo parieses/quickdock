@@ -28,8 +28,11 @@ import CredentialPrompt from './components/CredentialPrompt.vue';
 // 懒加载会留出一段「内容已经可见、锁层还没到」的空窗。组件本身只有几十行。
 import LockScreen from './components/LockScreen.vue';
 import LockedNotice from './components/LockedNotice.vue';
+// 懒加载失败的兜底面板：SshPage 是 App 里唯一自带重试的异步组件，
+// 重试仍失败时必须能画出「加载失败 + 重试」，否则 SSH 窗口就是一块永久白屏。
+import PageLoadError from './components/PageLoadError.vue';
 // 页面注册表：主窗口内容页与侧边栏导航项的单一数据源（替代 currentPage 手动 switch）
-import { findContentPage, findNavEntry, KEEP_ALIVE_PAGES, type PageContext } from './pages/registry'
+import { findContentPage, findNavEntry, KEEP_ALIVE_PAGES, retryChunkLoad, type PageContext } from './pages/registry'
 
 // 异步加载的页面级组件（仅在主窗口中用，减少独立窗口的加载体积）
 const SettingsModal = defineAsyncComponent(() => import('./components/SettingsModal.vue'))
@@ -50,18 +53,18 @@ const UpdatePrompt = defineAsyncComponent(() => import('./components/UpdatePromp
 // dev 期 Vite 重跑 optimizeDeps 会换掉依赖的 ?v= 哈希，已经加载完的模块图再去拉
 // 这个懒加载 chunk 就会吃到 504（Outdated Optimize Dep）。defineAsyncComponent 没配
 // errorComponent 时渲染结果是一片空白，表现就是「SSH 窗口打开全白」。
-// 先就地重试：预构建通常几百毫秒就完成，比整页 location.reload() 温和得多——
-// SSH 窗口是 Hide/Show 保活的，刷新会清空 xterm 屏幕而 Go 侧会话还活着。
-// 连试几次仍失败就 fail()，交给 main.ts 的 stale-dep 自愈做整页重载兜底。
+// 先就地重试：比整页 location.reload() 温和得多——SSH 窗口是 Hide/Show 保活的，
+// 刷新会清空 xterm 屏幕而 Go 侧会话还活着。
+// 退避窗口按「一次全量预构建的实测耗时」定：本机 46 个依赖约 4 秒（见 2026-11-15 日志），
+// 原来 3 次 × 300ms 只有 1.8 秒，正好卡在预构建没完成就放弃 —— 于是明明等一会儿就能好，
+// 却每次都判死刑。阈值与注册表的 lazy() 共用 retryChunkLoad（约 8 秒）。
+// 连试几次仍失败就 fail()，交给 main.ts 的 stale-dep 自愈做整页重载兜底；
+// 自愈配额用尽（15 秒内已刷过 2 次）时它只记日志不再刷新 —— 那就退到 errorComponent，
+// 至少让用户看到「加载失败」和一个重试按钮，而不是对着白屏怀疑功能坏了。
 const SshPage = defineAsyncComponent({
   loader: () => import('./components/SshPage.vue'),
-  onError(_err, retry, fail, attempts) {
-    if (attempts <= 3) {
-      setTimeout(retry, 300 * attempts)
-    } else {
-      fail()
-    }
-  },
+  errorComponent: PageLoadError,
+  onError: retryChunkLoad,
 })
 // 剪贴板面板：独立剪贴板窗口（#/clipboard）与主窗口内容页共用它。
 // 这里必须也是动态 import，不能静态 import —— 静态引用会把它无条件编进主 chunk，
@@ -706,7 +709,7 @@ body {
 
 .plugin-standalone-empty {
   height: 100%; display: flex; align-items: center; justify-content: center;
-  color: var(--color-text-disabled); font-size: 13px;
+  color: var(--color-text-disabled); font-size: var(--text-md);
 }
 
 .app-container {
