@@ -22,7 +22,7 @@ import { defineAsyncComponent, type AsyncComponentLoader, type Component, type R
 import {
   FolderKanban, FileText, ListTodo, AlarmClock, Activity,
 	Clipboard, Server, SquareTerminal, Bot, Terminal, Puzzle, LayoutDashboard, GitBranch, Search, BookOpen, Download,
-	KeyRound,
+	KeyRound, Cloud,
 } from '@lucide/vue'
 // 保活白名单从零依赖模块引（名字常量与组件里 defineOptions 共用同一份）
 import { KEEP_ALIVE_PAGES } from './keepAlive'
@@ -99,6 +99,8 @@ const FileSearchPage = lazy(() => import('../components/FileSearchPage.vue'))
 const KnowledgePage = lazy(() => import('../components/KnowledgePage.vue'))
 // 下载器：aria2 daemon 由环境管理托管，页面只调 DownloadService 绑定方法。
 const DownloadPage = lazy(() => import('../components/DownloadPage.vue'))
+// 网盘：入口是本机 OpenList 网关的 WebDAV（网关本身同样由环境管理托管）。
+const NetdiskPage = lazy(() => import('../components/NetdiskPage.vue'))
 // 密码库：条目管理 + 浏览器扩展配对入口。与「设置 → 安全」的启动密码是两件事——
 // 那边锁的是整个应用，这边存的是各种场景的账号密码。
 const CredentialsPage = lazy(() => import('../components/CredentialsPage.vue'))
@@ -182,6 +184,9 @@ export const navEntries: NavEntry[] = [
   // download：引擎（aria2）是环境管理里注册的一个运行时，这里是任务面板；
   // 不进 KeepAlive 白名单——引擎状态与进度都是易失的，切走时停掉轮询更省电。
   { id: 'download', labelKey: 'navDownload', icon: Download, component: DownloadPage },
+  // netdisk：紧跟下载器——同属「取文件」，一个管本机下载任务、一个管网盘目录。
+  // 网关（OpenList）由环境管理托管，页面内的安装/启动按钮复用同一条 Env 链路。
+  { id: 'netdisk', labelKey: 'navNetdisk', icon: Cloud, component: NetdiskPage },
   // git：仓库视角（分支树 / 提交历史 / 改动预览），放在环境与 SSH 之间——同属「开发现场」
   { id: 'git', labelKey: 'navGit', icon: GitBranch, component: GitPage },
   // 密码库：放在「开发现场」那组（git → 密码库 → ssh）之后。
