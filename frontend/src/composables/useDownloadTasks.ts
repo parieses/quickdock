@@ -20,7 +20,7 @@ import {
   DlGlobalStat, DlGlobalOptions, DlSetGlobalOption,
   DlEngineInfo, DlShutdown, DlReveal, DlDiskSpace, DlProbeUrl,
   DlImportScan, DlImportCommit,
-  DlChangePosition, DlChangeUri,
+  DlChangePosition, DlChangeUri, DlForgetHistory,
 } from '../../bindings/quickdock/services/download/downloadservice'
 import { SelectLocalFile, SelectLocalDirectory } from '../../bindings/quickdock/services/appservice'
 
@@ -52,6 +52,9 @@ export interface DlTask {
   source: string
   error: string
   createdAt: number
+  // stale = 历史记录：aria2 里已经没有这个 gid（daemon 重启过 / 结果被清除），
+  // 数据来自本机 dl_tasks。没有任何实时进度，所有控制类操作都会失败。
+  stale?: boolean
   uploadSpeed: number
   uploaded: number
   seeders: number
@@ -357,9 +360,23 @@ export function useDownloadTasks() {
     }
   }
 
+  // 引擎没跑时也拉一次列表：里面是本机保存的历史记录（后端会降级返回），
+  // 否则「重启后不启用下载器就完全看不到之前下过什么」。
+  // 失败按 60s 节流，别让停用的引擎每 8s 往日志里塞一条 RPC 失败。
+  let historyRetryAt = 0
   async function refreshTasks() {
-    // 引擎没跑时跳过兜底轮询，别每 8s 往日志里塞一条 RPC 失败。
-    if (!status.value.running) return
+    if (!status.value.running) {
+      if (Date.now() < historyRetryAt) return
+      try {
+        const list = unwrap<DlTask[]>(await DlList())
+        tasks.value = Array.isArray(list) ? list : []
+      } catch (e) {
+        historyRetryAt = Date.now() + 60_000
+        logErr('download/history', e)
+      }
+      return
+    }
+    historyRetryAt = 0
     try {
       const list = unwrap<DlTask[]>(await DlList())
       tasks.value = Array.isArray(list) ? list : []
@@ -594,11 +611,31 @@ export function useDownloadTasks() {
     return batchAction('resume', gids)
   }
 
-  async function removeMany(items: Array<{ gid: string; force: boolean }>): Promise<number> {
-    // force 是批级参数，强制移除与普通移除要分两批，否则语义会被整批统一掉。
-    const normal = items.filter((x) => !x.force).map((x) => x.gid)
-    const forced = items.filter((x) => x.force).map((x) => x.gid)
+  // 历史记录只有本机 dl_tasks 里那一行，aria2 已不认识这个 gid——
+  // 走 DlRemove 只会拿到 "GID not found"，所以单独一条通道。
+  async function forgetHistory(gids: string[]): Promise<number> {
+    if (!gids.length) return 0
     let ok = 0
+    for (const gid of gids) {
+      try {
+        unwrap(await DlForgetHistory(gid))
+        ok++
+      } catch (e) {
+        toast.error(getErrorMessage(e)); logErr('download/forget', e)
+      }
+    }
+    await refreshTasks()
+    return ok
+  }
+
+  async function removeMany(items: Array<{ gid: string; force: boolean; stale?: boolean }>): Promise<number> {
+    // 历史项与真实任务必须分开：前者只删本机记录，后者才动 aria2。
+    const history = items.filter((x) => x.stale).map((x) => x.gid)
+    const live = items.filter((x) => !x.stale)
+    let ok = history.length ? await forgetHistory(history) : 0
+    // force 是批级参数，强制移除与普通移除要分两批，否则语义会被整批统一掉。
+    const normal = live.filter((x) => !x.force).map((x) => x.gid)
+    const forced = live.filter((x) => x.force).map((x) => x.gid)
     if (normal.length) ok += await batchAction('remove', normal, false)
     if (forced.length) ok += await batchAction('remove', forced, true)
     return ok
@@ -818,7 +855,7 @@ export function useDownloadTasks() {
     refreshStatus, refreshOptions, refreshTasks, refreshGlobal, checkDisk, probeUrls,
     scanImport, commitImport,
     enable, disable, add, addBatch, addTorrent, addMetalink, pickFile, pickDir,
-    pause, forcePause, resume, remove, pauseMany, resumeMany, removeMany,
+    pause, forcePause, resume, remove, forgetHistory, pauseMany, resumeMany, removeMany,
     pauseAll, resumeAll, purgeResults, changePosition, changeUri,
     detailOf, setTaskOption, setFileSelection,
     globalOptions, setGlobalOption, engineInfo, shutdown, reveal, saveOptions,

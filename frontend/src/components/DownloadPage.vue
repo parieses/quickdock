@@ -39,7 +39,7 @@ const toast = useToast()
 const {
   status, statusReady, options, tasks, busy, error, speedHistory, uploadHistory, global,
   refreshStatus, refreshOptions, refreshTasks, refreshGlobal, enable, disable, add, addBatch, addTorrent, addMetalink, pickFile,
-  pause, forcePause, resume, remove, pauseMany, resumeMany, removeMany,
+  pause, forcePause, resume, remove, forgetHistory, pauseMany, resumeMany, removeMany,
   pauseAll, resumeAll, purgeResults, changePosition, changeUri,
   detailOf, setTaskOption, setFileSelection, globalOptions, setGlobalOption,
   engineInfo, shutdown, reveal, saveOptions, checkDisk, probeUrls, pickDir,
@@ -570,6 +570,7 @@ function sourceLabel(s: string): string {
   if (s === 'manual') return t('dlSourceManual')
   if (s === 'batch') return t('dlSourceBatch')
   if (s === 'import') return t('dlSourceImport')
+  if (s === 'netdisk') return t('dlSourceNetdisk')
   if (s === 'torrent') return t('dlModeTorrent')
   if (s === 'metalink') return t('dlModeMetalink')
   return s || '-'
@@ -628,7 +629,7 @@ async function bulkResume() {
 }
 
 async function bulkRemove() {
-  const items = selectedTasks().map((x) => ({ gid: x.gid, force: forceFor(x) }))
+  const items = selectedTasks().map((x) => ({ gid: x.gid, force: forceFor(x), stale: x.stale }))
   if (!items.length) { toast.error(t('dlNoAction')); return }
   if (!(await toast.confirm(t('dlBulkRemoveConfirm', { count: items.length })))) return
   const ok = await removeMany(items)
@@ -868,6 +869,13 @@ watch(selectedId, async (gid) => {
 
 async function loadDetail() {
   if (!selectedId.value) return
+  // 历史记录在 aria2 里已经没有这个 gid，DlDetail 必然失败；直接按只读概览渲染，
+  // 不去打一次注定报错的 RPC，也别在日志里刷一条「任务不存在」。
+  if (tasks.value.find((x) => x.gid === selectedId.value)?.stale) {
+    detail.value = null
+    detailLoading.value = false
+    return
+  }
   detailLoading.value = true
   const d = await detailOf(selectedId.value)
   detail.value = d
@@ -973,12 +981,18 @@ async function ctxRemove() {
   const task = ctxTask.value
   closeCtx()
   if (!task) return
-  if (!(await toast.confirm(t('dlRemoveConfirm')))) return
-  await remove(task.gid, forceFor(task))
+  await confirmRemove(task)
 }
 
 // 列表行内的单条移除：与批量 / 右键菜单走同一套确认文案，避免「有的删要确认、有的不要」。
+// 历史记录（stale）只能删本机那一行，文件与 aria2 都不受影响，所以文案要分开。
 async function confirmRemove(task: DlTask) {
+  if (task.stale) {
+    if (!(await toast.confirm(t('dlForgetConfirm')))) return
+    const ok = await forgetHistory([task.gid])
+    if (ok) toast.success(t('dlForgetDone'))
+    return
+  }
   if (!(await toast.confirm(t('dlRemoveConfirm')))) return
   await remove(task.gid, forceFor(task))
 }
@@ -1173,6 +1187,7 @@ onUnmounted(() => {
                 <div class="dl-item-head">
                   <input type="checkbox" class="dl-check" :checked="selectedIds.has(task.gid)" :aria-label="task.name" @click.stop @change.stop="toggleCheck(task.gid)" />
                   <span class="dl-name" :title="task.url">{{ task.name }}</span>
+                  <span v-if="task.stale" class="dl-badge is-history" :title="t('dlHistoryHint')">{{ t('dlHistoryBadge') }}</span>
                   <span v-if="task.isTorrent" class="dl-badge" :title="t('dlBtBadge')"><Magnet :size="12" />BT</span>
                   <span class="dl-tag" :class="'is-' + task.status">{{ statusKey(task.status) }}</span>
                 </div>
@@ -1192,11 +1207,13 @@ onUnmounted(() => {
                   <span class="dl-grow"></span>
                   <button v-if="task.status === 'active' || task.status === 'waiting'" class="qd-btn qd-btn-sm" @click.stop="pause(task.gid)">{{ t('dlPause') }}</button>
                   <button v-if="task.status === 'paused'" class="qd-btn qd-btn-sm" @click.stop="resume(task.gid)">{{ t('dlResume') }}</button>
-                  <button class="qd-icon-btn" :title="t('dlMoveUp')" @click.stop="moveTask(task, -1)"><ArrowUp :size="14" /></button>
-                  <button class="qd-icon-btn" :title="t('dlMoveDown')" @click.stop="moveTask(task, 1)"><ArrowDown :size="14" /></button>
+                  <template v-if="!task.stale">
+                    <button class="qd-icon-btn" :title="t('dlMoveUp')" @click.stop="moveTask(task, -1)"><ArrowUp :size="14" /></button>
+                    <button class="qd-icon-btn" :title="t('dlMoveDown')" @click.stop="moveTask(task, 1)"><ArrowDown :size="14" /></button>
+                  </template>
                   <button class="qd-icon-btn" :title="t('dlOpenFolder')" @click.stop="openFolder(task)"><Folder :size="14" /></button>
-                  <button v-if="task.status === 'error'" class="qd-btn qd-btn-sm" @click.stop="retryTask(task)"><RotateCcw :size="14" />{{ t('dlRetry') }}</button>
-                  <button class="qd-btn qd-btn-sm qd-btn-danger" @click.stop="confirmRemove(task)">{{ t('dlRemove') }}</button>
+                  <button v-if="task.status === 'error' && !task.stale" class="qd-btn qd-btn-sm" @click.stop="retryTask(task)"><RotateCcw :size="14" />{{ t('dlRetry') }}</button>
+                  <button class="qd-btn qd-btn-sm qd-btn-danger" @click.stop="confirmRemove(task)">{{ task.stale ? t('dlForgetRecord') : t('dlRemove') }}</button>
                   <button class="qd-icon-btn" :title="t('dlDetail')" @click.stop="selectedId = task.gid"><Info :size="14" /></button>
                 </div>
               </div>
@@ -1214,14 +1231,16 @@ onUnmounted(() => {
       <button class="dl-ctx-item" @click="ctxReveal"><ExternalLink :size="14" />{{ t('dlOpenFolder') }}</button>
       <button v-if="ctxTask?.infoHash" class="dl-ctx-item" @click="ctxCopyHash"><Hash :size="14" />{{ t('dlCopyInfoHash') }}</button>
       <div class="dl-ctx-sep"></div>
-      <button v-if="ctxTask?.status === 'active' || ctxTask?.status === 'waiting'" class="dl-ctx-item" @click="ctxPause(false)"><Pause :size="14" />{{ t('dlPause') }}</button>
-      <button v-if="ctxTask?.status === 'active'" class="dl-ctx-item" @click="ctxPause(true)"><Shield :size="14" />{{ t('dlForcePause') }}</button>
-      <button v-if="ctxTask?.status === 'paused'" class="dl-ctx-item" @click="ctxResume"><Play :size="14" />{{ t('dlResume') }}</button>
-      <button v-if="ctxTask?.status === 'error'" class="dl-ctx-item" @click="ctxRetry"><RotateCcw :size="14" />{{ t('dlRetry') }}</button>
-      <button class="dl-ctx-item" @click="ctxMove(-1)"><ArrowUp :size="14" />{{ t('dlMoveUp') }}</button>
-      <button class="dl-ctx-item" @click="ctxMove(1)"><ArrowDown :size="14" />{{ t('dlMoveDown') }}</button>
+      <button v-if="!ctxTask?.stale && (ctxTask?.status === 'active' || ctxTask?.status === 'waiting')" class="dl-ctx-item" @click="ctxPause(false)"><Pause :size="14" />{{ t('dlPause') }}</button>
+      <button v-if="!ctxTask?.stale && ctxTask?.status === 'active'" class="dl-ctx-item" @click="ctxPause(true)"><Shield :size="14" />{{ t('dlForcePause') }}</button>
+      <button v-if="!ctxTask?.stale && ctxTask?.status === 'paused'" class="dl-ctx-item" @click="ctxResume"><Play :size="14" />{{ t('dlResume') }}</button>
+      <button v-if="!ctxTask?.stale && ctxTask?.status === 'error'" class="dl-ctx-item" @click="ctxRetry"><RotateCcw :size="14" />{{ t('dlRetry') }}</button>
+      <template v-if="!ctxTask?.stale">
+        <button class="dl-ctx-item" @click="ctxMove(-1)"><ArrowUp :size="14" />{{ t('dlMoveUp') }}</button>
+        <button class="dl-ctx-item" @click="ctxMove(1)"><ArrowDown :size="14" />{{ t('dlMoveDown') }}</button>
+      </template>
       <div class="dl-ctx-sep"></div>
-      <button class="dl-ctx-item is-danger" @click="ctxRemove"><Trash2 :size="14" />{{ t('dlRemove') }}</button>
+      <button class="dl-ctx-item is-danger" @click="ctxRemove"><Trash2 :size="14" />{{ ctxTask?.stale ? t('dlForgetRecord') : t('dlRemove') }}</button>
     </div>
 
     <!-- 换电脑续传：旧会话给 URL，本机目录给 .aria2 / 数据文件 -->
@@ -1506,11 +1525,23 @@ onUnmounted(() => {
     <span class="dl-modal-sub">{{ detailTask.gid }}</span>
   </template>
 
-          <div class="dl-modal-tabs">
+          <div v-if="!detailTask.stale" class="dl-modal-tabs">
             <QdTabs v-model="detailTab" :tabs="detailTabs" variant="chip" />
           </div>
 
-            <div v-if="detailLoading" class="dl-table-empty">{{ t('dlLoadingDetail') }}</div>
+            <div v-if="detailTask.stale" class="dl-modal-section">
+              <p class="dl-hint">{{ t('dlHistoryDetailHint') }}</p>
+              <div class="dl-kv">
+                <div class="dl-kv-row"><span>{{ t('dlFieldStatus') }}</span><b>{{ statusKey(detailTask.status) }}</b></div>
+                <div class="dl-kv-row"><span>{{ t('dlFieldSize') }}</span><b>{{ formatBytes(detailTask.completed) }} / {{ formatBytes(detailTask.total) }}</b></div>
+                <div class="dl-kv-row"><span>{{ t('dlFieldCreated') }}</span><b>{{ formatTime(detailTask.createdAt) }}</b></div>
+                <div class="dl-kv-row"><span>{{ t('dlFieldSource') }}</span><b>{{ sourceLabel(detailTask.source) }}</b></div>
+                <div class="dl-kv-row"><span>{{ t('dlFieldDir') }}</span><b>{{ detailTask.dir || '-' }}</b></div>
+                <div v-if="detailTask.error" class="dl-kv-row"><span>{{ t('dlFieldError') }}</span><b class="dl-err-text">{{ detailTask.error }}</b></div>
+                <div class="dl-kv-row"><span>{{ t('dlFieldLink') }}</span><b>{{ detailTask.url || '-' }}</b></div>
+              </div>
+            </div>
+            <div v-else-if="detailLoading" class="dl-table-empty">{{ t('dlLoadingDetail') }}</div>
             <div v-else-if="!detail" class="dl-table-empty">{{ t('dlNoDetail') }}</div>
 
             <template v-else-if="detailTab === 'overview'">
@@ -1678,11 +1709,11 @@ onUnmounted(() => {
   <div class="dl-modal-body">
   </div>
   <template #footer>
-    <button v-if="detailTask.status === 'active' || detailTask.status === 'waiting'" class="qd-btn qd-btn-sm" @click="pause(detailTask.gid)">{{ t('dlPause') }}</button>
-    <button v-if="detailTask.status === 'active'" class="qd-btn qd-btn-sm" @click="forcePause(detailTask.gid)">{{ t('dlForcePause') }}</button>
-    <button v-if="detailTask.status === 'paused'" class="qd-btn qd-btn-sm" @click="resume(detailTask.gid)">{{ t('dlResume') }}</button>
-    <button v-if="detailTask.status === 'error'" class="qd-btn qd-btn-sm" @click="retryTask(detailTask)"><RotateCcw :size="14" />{{ t('dlRetry') }}</button>
-    <button class="qd-btn qd-btn-sm qd-btn-danger" @click="remove(detailTask.gid, forceFor(detailTask))">{{ t('dlRemove') }}</button>
+    <button v-if="!detailTask.stale && (detailTask.status === 'active' || detailTask.status === 'waiting')" class="qd-btn qd-btn-sm" @click="pause(detailTask.gid)">{{ t('dlPause') }}</button>
+    <button v-if="!detailTask.stale && detailTask.status === 'active'" class="qd-btn qd-btn-sm" @click="forcePause(detailTask.gid)">{{ t('dlForcePause') }}</button>
+    <button v-if="!detailTask.stale && detailTask.status === 'paused'" class="qd-btn qd-btn-sm" @click="resume(detailTask.gid)">{{ t('dlResume') }}</button>
+    <button v-if="!detailTask.stale && detailTask.status === 'error'" class="qd-btn qd-btn-sm" @click="retryTask(detailTask)"><RotateCcw :size="14" />{{ t('dlRetry') }}</button>
+    <button class="qd-btn qd-btn-sm qd-btn-danger" @click="confirmRemove(detailTask)">{{ detailTask.stale ? t('dlForgetRecord') : t('dlRemove') }}</button>
     <span class="dl-grow"></span>
     <button class="qd-btn qd-btn-sm" @click="openFolder(detailTask)"><Folder :size="14" />{{ t('dlOpenFolder') }}</button>
     <button class="qd-btn qd-btn-sm" @click="copyField(detailTask.path || detailTask.dir)">{{ t('dlCopyPath') }}</button>
@@ -1951,6 +1982,9 @@ onUnmounted(() => {
   border-radius: var(--radius-sm); background: var(--color-accent-bg); color: var(--color-accent);
   font-size: var(--text-2xs);
 }
+/* 历史记录标记：刻意做得比 BT 徽章更淡——它只是「这条不是当前任务」的提示，
+   不该在列表里抢走进行中任务的注意力。 */
+.dl-badge.is-history { background: var(--color-bg-tertiary); color: var(--color-text-tertiary); }
 .dl-tag { flex: none; padding: var(--space-1) var(--space-4); border-radius: var(--radius-full); font-size: var(--text-xs); color: var(--color-text-secondary); background: var(--color-bg-tertiary); }
 .dl-tag.is-active { color: var(--color-accent); background: var(--color-accent-border-strong); }
 .dl-tag.is-complete { color: var(--color-success); background: var(--color-success-bg); }
