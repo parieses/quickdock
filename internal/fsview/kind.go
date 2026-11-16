@@ -2,6 +2,18 @@ package fsview
 
 import "strings"
 
+// KindByExt 是 kindByExt 的对外版本，供其它模块（网盘远端文件的预览判定）复用。
+//
+// 单独开一个出口而不是让调用方自己再写一份扩展名表：两份表一旦分叉，
+// 同一个 .mkv 在本地预览能播、在网盘页却不能，这种不一致最难查。
+func KindByExt(ext string) Kind {
+	ext = strings.ToLower(strings.TrimSpace(ext))
+	if ext != "" && !strings.HasPrefix(ext, ".") {
+		ext = "." + ext
+	}
+	return kindByExt(ext)
+}
+
 // kindByExt 按扩展名给出预览形态。
 //
 // 刻意不认识 .docx/.xlsx/.pptx：它们要真实内容就得调 Office COM，脆弱且会在用户

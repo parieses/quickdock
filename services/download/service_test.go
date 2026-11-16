@@ -274,25 +274,25 @@ func TestTaskFolderName(t *testing.T) {
 func TestTaskFolderDir(t *testing.T) {
 	const uri = "https://x.com/dl/ubuntu.iso"
 	cfg := &aria2.Config{}
-	if got := taskFolderDir(cfg, "D:/dl", uri); got != "D:/dl" {
+	if got := taskFolderDir(cfg, "D:/dl", uri, ""); got != "D:/dl" {
 		t.Fatalf("未开启时不应改目录: %q", got)
 	}
 	cfg.PerTaskFolder = true
 	want := filepath.Join(filepath.Clean("D:/dl"), "ubuntu")
-	if got := taskFolderDir(cfg, "D:/dl", uri); got != want {
+	if got := taskFolderDir(cfg, "D:/dl", uri, ""); got != want {
 		t.Fatalf("子目录不对: got %q want %q", got, want)
 	}
-	if got := taskFolderDir(cfg, "D:/dl", "magnet:?xt=urn:btih:abc"); got != filepath.Clean("D:/dl") {
+	if got := taskFolderDir(cfg, "D:/dl", "magnet:?xt=urn:btih:abc", ""); got != filepath.Clean("D:/dl") {
 		t.Errorf("磁力链接不该建子目录: %q", got)
 	}
-	if got := taskFolderDir(cfg, "", uri); got != "" {
+	if got := taskFolderDir(cfg, "", uri, ""); got != "" {
 		t.Errorf("保存目录为空时不该拼路径: %q", got)
 	}
 	cfg.RemoteEnabled, cfg.RemoteHost = true, "192.168.1.5"
-	if got := taskFolderDir(cfg, "/mnt/dl", uri); got != "/mnt/dl/ubuntu" {
+	if got := taskFolderDir(cfg, "/mnt/dl", uri, ""); got != "/mnt/dl/ubuntu" {
 		t.Errorf("远程 Linux 路径应保持斜杠: %q", got)
 	}
-	if got := taskFolderDir(cfg, `F:\Downloads`, uri); got != `F:\Downloads\ubuntu` {
+	if got := taskFolderDir(cfg, `F:\Downloads`, uri, ""); got != `F:\Downloads\ubuntu` {
 		t.Errorf("远程 Windows 路径应保持反斜杠: %q", got)
 	}
 }

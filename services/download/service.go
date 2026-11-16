@@ -576,6 +576,32 @@ func (s *DownloadService) DlAdd(uri, dir, optsJSON string) *services.ApiResult {
 	return services.Ok(gid)
 }
 
+// DlAddNamed 建任务时显式指定落盘文件名（网盘转发专用）。
+//
+// 为什么需要：网盘页交给 aria2 的是本机代理地址（.../f?p=<base64 远端路径>），
+// nameFromURL 从这种 URL 只能解析出 "f" —— 结果是下载列表里一排 f、按扩展名
+// 分类失效、开了「每任务子目录」还会造出名为 f 的文件夹。显式传真实文件名才行。
+func (s *DownloadService) DlAddNamed(uri, dir, name, optsJSON string) *services.ApiResult {
+	if r := s.dbOK(); r != nil {
+		return r
+	}
+	if strings.TrimSpace(name) == "" {
+		return services.FailMsg("文件名不能为空")
+	}
+	// 远程引擎跑在另一台机器上，127.0.0.1 指的是那台机器的回环地址，
+	// 网盘代理根本不在那儿。与其让任务建出来卡在 0%，不如在入口说清楚。
+	if cfg, err := aria2.LoadConfig(); err == nil && cfg.IsRemote() {
+		if u, e := url.Parse(uri); e == nil && isLoopbackHost(u.Hostname()) {
+			return services.FailMsg("下载器当前连的是远程 aria2，它访问不到本机网盘代理。请到「下载器 → 设置」切回本机引擎，或改用「下载到本地」")
+		}
+	}
+	gid, err := s.addOneNamed(uri, dir, optsJSON, "netdisk", name)
+	if err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(gid)
+}
+
 func (s *DownloadService) DlBatchAdd(urisJSON, dir string) *services.ApiResult {
 	if r := s.dbOK(); r != nil {
 		return r
@@ -678,6 +704,11 @@ func (s *DownloadService) addBinary(kind, filePath, dir, optsJSON string) ([]str
 }
 
 func (s *DownloadService) addOne(uri, dir, optsJSON, source string) (string, error) {
+	return s.addOneNamed(uri, dir, optsJSON, source, "")
+}
+
+// addOneNamed 是 addOne 的完整实现，name 非空时用它做落盘文件名（网盘转发用）。
+func (s *DownloadService) addOneNamed(uri, dir, optsJSON, source, name string) (string, error) {
 	uri = strings.TrimSpace(uri)
 	if err := validateURI(uri); err != nil {
 		return "", err
@@ -702,12 +733,16 @@ func (s *DownloadService) addOne(uri, dir, optsJSON, source string) (string, err
 			return "", fmt.Errorf("保存目录 %s 不可用（%v），请到下载设置更换保存目录", dir, err)
 		}
 	}
-	if source == "manual" || source == "batch" {
-		if d := categoryDir(cfg, dir, uri); d != "" {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = nameFromURL(uri)
+	}
+	if source == "manual" || source == "batch" || source == "netdisk" {
+		if d := categoryDir(cfg, dir, name); d != "" {
 			dir = d
 			opts["dir"] = d
 		}
-		if d := taskFolderDir(cfg, dir, uri); d != dir {
+		if d := taskFolderDir(cfg, dir, uri, name); d != dir {
 			// 本机引擎先建出子目录：aria2 对不存在的 dir 行为不一致，且前端磁盘预检
 			// 与断点续传都依赖这个真实路径。远程引擎的路径属于远端机器，不能在本机建。
 			if !cfg.IsRemote() {
@@ -724,10 +759,25 @@ func (s *DownloadService) addOne(uri, dir, optsJSON, source string) (string, err
 	if err != nil {
 		return "", err
 	}
-	s.insertMeta(gid, uri, nameFromURL(uri), dir, source)
+	s.insertMeta(gid, uri, name, dir, source)
+	// 立刻写一次会话：--save-session-interval=60 意味着刚建的任务最多有 60 秒
+	// 只活在内存里，这期间重启（开发期尤其频繁）任务就彻底没了，只剩一条历史。
+	s.persistSession()
 	s.invalidate()
 	s.startPoller()
 	return gid, nil
+}
+
+// persistSession 让 aria2 立刻把当前任务列表写回 --save-session 文件。
+//
+// 新建/移除任务的频率很低，每次补一次 saveSession 的代价（几 KB 落盘）远小于
+// 「重启后任务消失」的代价。异步执行：不能因为落盘把 addUri 的响应拖住。
+func (s *DownloadService) persistSession() {
+	go func() {
+		if err := s.simpleCall(func(c *aria2.Client) error { return c.SaveSession() }); err != nil {
+			logger.W("[download] 立即保存 aria2 会话失败: %v", err)
+		}
+	}()
 }
 
 // takePosition 从 optsJSON 里取出前端的 __position（队列插入位置）并从选项表中删掉：
@@ -768,24 +818,27 @@ func baseOptions(cfg *aria2.Config, dir, optsJSON string) (map[string]string, st
 }
 
 func (s *DownloadService) insertMeta(gid, uri, name, dir, source string) {
-	if err := s.App.DB.InsertDlTask(db.DlTask{
+	now := time.Now().UnixMilli()
+	if err := s.App.DB.UpsertDlTaskMeta(db.DlTask{
 		GID:       gid,
 		URL:       uri,
 		Name:      name,
 		SaveDir:   dir,
 		Source:    source,
-		CreatedAt: time.Now().UnixMilli(),
+		CreatedAt: now,
+		Status:    "waiting",
+		UpdatedAt: now,
 	}); err != nil {
 		logger.W("[download] 登记任务元数据失败 gid=%s: %v", gid, err)
 	}
 }
 
 // categoryDir 按扩展名把默认下载目录细分成子目录；用户显式指定目录时不接管。
-func categoryDir(cfg *aria2.Config, dir, uri string) string {
+// name 是任务的落盘文件名（调用方已解析好，网盘转发时是真实文件名）。
+func categoryDir(cfg *aria2.Config, dir, name string) string {
 	if !cfg.AutoCategory || cfg.DownloadDir == "" || dir != cfg.DownloadDir {
 		return ""
 	}
-	name := nameFromURL(uri)
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
 	if ext == "" {
 		return ""
@@ -816,6 +869,14 @@ func taskFolderName(uri string) string {
 	if name == "" || name == "." || name == "/" || strings.Contains(name, "://") {
 		return ""
 	}
+	return sanitizeFolderStem(name)
+}
+
+// sanitizeFolderStem 把文件名清洗成可安全用作目录名的 stem（不含扩展名）。
+//
+// 单独抽出来是因为网盘转发拿到的真实文件名不在 URL 上：协议是 127.0.0.1 代理，
+// URL 里只有 base64 的远端路径，必须由调用方直接给名字。清洗规则两边共用一份。
+func sanitizeFolderStem(name string) string {
 	stem := strings.TrimSuffix(name, filepath.Ext(name))
 	if stem == "" {
 		stem = name
@@ -854,11 +915,19 @@ func taskFolderName(uri string) string {
 // taskFolderDir 开启「每个下载单独文件夹」后返回 <dir>/<文件名>/。
 // 自动分类在前（<默认目录>/<分类>/），文件名子目录接在它下面；同名文件复用
 // 同一个目录，重新添加同一 URL 才能命中已有的 .aria2 续传控制文件。
-func taskFolderDir(cfg *aria2.Config, dir, uri string) string {
+func taskFolderDir(cfg *aria2.Config, dir, uri, name string) string {
 	if !cfg.PerTaskFolder || strings.TrimSpace(dir) == "" {
 		return dir
 	}
-	folder := taskFolderName(uri)
+	// 磁力仍交给 aria2 自己决定（真实名字要等元数据）；其它一律以调用方给的
+	// 文件名为准，URL 路径只作兜底。
+	folder := ""
+	if !strings.HasPrefix(strings.ToLower(uri), "magnet:") {
+		folder = sanitizeFolderStem(name)
+		if folder == "" {
+			folder = taskFolderName(uri)
+		}
+	}
 	if folder == "" {
 		return dir
 	}
@@ -888,9 +957,25 @@ func (s *DownloadService) DlList() *services.ApiResult {
 	}
 	tasks, err := s.snapshot()
 	if err != nil {
+		// 引擎没起来（用户主动停了 / 刚重启还没启用）时，列表不该是一片空白：
+		// dl_tasks 里保存着历史记录，照常返回（前端按 stale 渲染），
+		// 这样「重启后还能看到之前下过什么」在引擎关闭时也成立。
+		if hist := s.historyOnly(); len(hist) > 0 {
+			return services.Ok(hist)
+		}
 		return services.Fail(err)
 	}
 	return services.Ok(tasks)
+}
+
+// historyOnly 只从库里取历史记录，不碰 aria2。引擎不可达时的降级路径。
+func (s *DownloadService) historyOnly() []aria2.TaskView {
+	metas, err := s.App.DB.ListDlTasks()
+	if err != nil {
+		logger.W("[download] 读取下载历史失败: %v", err)
+		return nil
+	}
+	return s.historyViews(metas, map[string]bool{})
 }
 
 func (s *DownloadService) DlPause(gid string) *services.ApiResult {
@@ -940,6 +1025,14 @@ func (s *DownloadService) DlPurgeResults() *services.ApiResult {
 	}
 	c := aria2.NewClient(cfg)
 	if err := c.PurgeDownloadResult(); err != nil {
+		// 引擎没在跑（刚重启、还没点启用）时，列表里那些「已结束」其实全是
+		// dl_tasks 里的历史记录。这时直接清库才是用户按这个按钮的本意，
+		// 报一句 RPC 连不上只会让人以为历史删不掉。
+		if n, e := s.App.DB.DeleteDlFinished(); e == nil && n > 0 {
+			logger.I("[download] 引擎未运行，直接清理 %d 条下载历史", n)
+			s.invalidate()
+			return services.Ok(nil)
+		}
 		return services.Fail(err)
 	}
 	if err := c.SaveSession(); err != nil {
@@ -1531,7 +1624,7 @@ func (s *DownloadService) probeUnknownSizes(tasks []aria2.TaskView) {
 	now := time.Now()
 	list := make([]candidate, 0, len(tasks))
 	for _, v := range tasks {
-		if v.Total != 0 || v.Completed != 0 || v.GID == "" {
+		if v.Total != 0 || v.Completed != 0 || v.GID == "" || v.Stale {
 			continue
 		}
 		if v.Status != "paused" && v.Status != "waiting" {
@@ -1629,7 +1722,9 @@ func (s *DownloadService) snapshotLocked(full bool) ([]aria2.TaskView, error) {
 		byGID[m.GID] = m
 	}
 	out := make([]aria2.TaskView, 0, len(statuses))
+	alive := make(map[string]bool, len(statuses))
 	for _, st := range statuses {
+		alive[st.GID] = true
 		v := st.ToView()
 		s.applyKnownSize(&v)
 		if m, ok := byGID[v.GID]; ok {
@@ -1644,8 +1739,108 @@ func (s *DownloadService) snapshotLocked(full bool) ([]aria2.TaskView, error) {
 		}
 		out = append(out, v)
 	}
+	out = append(out, s.historyViews(metas, alive)...)
 	s.probeUnknownSizes(out)
 	return out, nil
+}
+
+// dlHistoryLimit 单次最多补多少条历史记录。列表本身是「最近的时间线」，
+// 不是归档库；再多也只是把页面撑长，DB 里另有 PruneDlTasks 做保留上限。
+const dlHistoryLimit = 200
+
+// historyGraceMS 是「刚建的任务」的保护窗：addUri 刚返回时，DB 已有这条记录，
+// 但 aria2 的 tellActive/tellWaiting 快照可能还没轮到它。这不代表任务丢了，
+// 按历史渲染会让它在列表里闪一下并被当成 stale。
+const historyGraceMS = 90_000
+
+// historyViews 把「库里还有、aria2 里已经没有」的任务补成历史记录。
+//
+// 为什么需要：aria2 的 tellStopped 是纯进程内存，daemon 一停（关软件、切引擎、
+// 崩溃自愈）已完成/失败的任务就再也查不到了——下载页的历史会整片清空，用户
+// 看到的就是「下载记录凭空消失」。这里用 dl_tasks 里的终态快照把那段补回来。
+func (s *DownloadService) historyViews(metas []db.DlTask, alive map[string]bool) []aria2.TaskView {
+	if len(metas) == 0 {
+		return nil
+	}
+	now := time.Now().UnixMilli()
+	out := make([]aria2.TaskView, 0, 16)
+	for _, m := range metas {
+		if alive[m.GID] {
+			continue
+		}
+		finished := m.Status == db.DlStatusComplete || m.Status == db.DlStatusError || m.Status == "removed"
+		// 非终态 + 刚创建：大概率是快照还没轮到它，不是历史。
+		if !finished && now-m.CreatedAt < historyGraceMS {
+			continue
+		}
+		status := m.Status
+		if status != db.DlStatusComplete && status != db.DlStatusError {
+			// 升级前的老记录只有元数据（status 空），或者在跑的任务被 daemon
+			// 重启打断了。两种都归到「已停止」，不能假装成功，也不该冒充
+			// waiting/active——那会让用户以为它还在队列里。
+			status = "removed"
+		}
+		v := aria2.TaskView{
+			GID:       m.GID,
+			Name:      m.Name,
+			URL:       m.URL,
+			Status:    status,
+			Total:     m.Total,
+			Completed: m.Completed,
+			Dir:       m.SaveDir,
+			Source:    m.Source,
+			Error:     m.Error,
+			CreatedAt: m.CreatedAt,
+			Stale:     true,
+		}
+		if m.Total > 0 {
+			v.Progress = float64(m.Completed) / float64(m.Total) * 100
+			if v.Progress > 100 {
+				v.Progress = 100
+			}
+		} else if status == db.DlStatusComplete {
+			v.Progress = 100
+		}
+		if v.Name == "" {
+			v.Name = nameFromURL(m.URL)
+		}
+		out = append(out, v)
+		if len(out) >= dlHistoryLimit {
+			break
+		}
+	}
+	return out
+}
+
+// DlForgetHistory 删除一条历史记录（只删本机 dl_tasks，不动 aria2）。
+//
+// 历史项在 aria2 里已经没有对应 gid，走 DlRemove 只会得到 "GID not found"，
+// 所以单独开一个入口。
+func (s *DownloadService) DlForgetHistory(gid string) *services.ApiResult {
+	if r := s.dbOK(); r != nil {
+		return r
+	}
+	if err := s.App.DB.DeleteDlTask(gid); err != nil {
+		return services.Fail(err)
+	}
+	s.invalidate()
+	return services.Ok(nil)
+}
+
+// recordState 把一次状态观察写进 dl_tasks。
+//
+// 只在状态变化时调用（emitSnapshot 里判），所以写频率跟任务状态切换次数同阶，
+// 不是每秒一次。终态要盖 finished_at：历史列表按它显示「完成于何时」。
+func (s *DownloadService) recordState(t aria2.TaskView) {
+	now := time.Now().UnixMilli()
+	var finished int64
+	switch t.Status {
+	case db.DlStatusComplete, db.DlStatusError, "removed":
+		finished = now
+	}
+	if err := s.App.DB.UpdateDlTaskState(t.GID, t.Status, t.Total, t.Completed, t.Error, now, finished); err != nil {
+		logger.W("[download] 记录任务状态失败 gid=%s: %v", t.GID, err)
+	}
 }
 
 func (s *DownloadService) startPoller() {
@@ -1782,7 +1977,22 @@ func (s *DownloadService) emitSnapshot() {
 				failed = append(failed, t)
 			}
 		}
+		// 状态一变就把快照写进 dl_tasks：这是重启后唯一还能看到的历史来源。
+		// stale 项本身就是从库里读出来的，再写回去只会在每个 full tick 刷一遍
+		// updated_at（纯写放大），跳过。
+		if !t.Stale && old != t.Status {
+			s.recordState(t)
+		}
 		s.prev[t.GID] = t.Status
+	}
+	// 每 10 分钟裁一次历史：只留最近 500 条终态记录，避免几年后这张表几千行
+	// 全都拉到内存里参与合并。非终态（还在跑）的记录不在删除范围内。
+	if s.tickCount%600 == 0 {
+		if n, err := s.App.DB.PruneDlTasks(500); err != nil {
+			logger.W("[download] 清理下载历史失败: %v", err)
+		} else if n > 0 {
+			logger.I("[download] 已清理 %d 条过期下载历史", n)
+		}
 	}
 	// 任务被移除后清掉去重标记，否则重试生成的新状态可能被旧记录挡住。
 	alive := make(map[string]bool, len(tasks))
@@ -2186,6 +2396,16 @@ func (s *DownloadService) mutating(fn func(*aria2.Client) error) error {
 func parseInt64(s string) int64 {
 	v, _ := strconv.ParseInt(s, 10, 64)
 	return v
+}
+
+// isLoopbackHost 判断 URL 主机是否本机回环（网盘代理只会是这几种）。
+// 127.0.0.0/8 整段都算回环，不只看 127.0.0.1。
+func isLoopbackHost(host string) bool {
+	switch strings.ToLower(host) {
+	case "localhost", "::1", "[::1]":
+		return true
+	}
+	return strings.HasPrefix(host, "127.")
 }
 
 func validateURI(raw string) error {

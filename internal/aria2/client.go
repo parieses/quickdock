@@ -819,6 +819,10 @@ type TaskView struct {
 	Source    string  `json:"source"`
 	Error     string  `json:"error"`
 	CreatedAt int64   `json:"createdAt"`
+	// Stale 表示这条是「历史记录」：来自 dl_tasks，aria2 里已经没有这个 gid
+	// （daemon 重启过、任务被清除）。进度/速度恒为 0，所有控制类操作都会失败，
+	// 前端只能提供「打开目录 / 删除记录」。
+	Stale bool `json:"stale"`
 	// BT 相关（非 BT 任务为 0 / 空串）
 	UploadSpeed int64   `json:"uploadSpeed"`
 	Uploaded    int64   `json:"uploaded"`

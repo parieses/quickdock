@@ -427,16 +427,47 @@ func aria2DaemonStateOf(cfg *aria2.Config) aria2DaemonState {
 }
 
 func (a *Aria2Runtime) Stop(version string) error {
-	// 先按句柄精确终止：aria2 卡死时不写日志、也可能已经不再 Listen，
-	// 只靠 stopByPort（netstat 反查监听 PID）会找不到目标，进程变孤儿继续占着
-	// 会话文件与内存；下一轮 Start 起来后两个实例抢同一个 RPC 端口，后者即以
-	// code=1 退出。killTracked 不依赖端口，覆盖这条路径。
+	// 先请 aria2 自己退出，再动手杀。
+	//
+	// 为什么不能直接 killTracked：那是 TerminateProcess，aria2 来不及执行退出流程，
+	// --save-session 只停在最后一次 60 秒定时写。这期间新建的任务（尤其是网盘转发的
+	// 大文件）重启后就不会出现在列表里 —— 用户看到的就是「下载任务和历史记录凭空消失」。
+	// RPC saveSession + shutdown 能保证退出前把当前任务列表完整落盘。
+	if cfg, err := aria2.LoadConfig(); err == nil && !cfg.IsRemote() {
+		gracefulAria2Shutdown(cfg)
+	}
+	// 兜底：没响应 RPC（假活 / 卡死）或优雅退出超时，继续按句柄精确终止。
+	// killTracked 不依赖端口，覆盖「进程已不 Listen」的情况；stopByPort 覆盖
+	// 「句柄丢了但进程还在监听」的情况。
 	svcMgr.killTracked(RuntimeAria2)
 	if cfg, err := aria2.LoadConfig(); err == nil {
 		stopByPort(cfg.Port, "aria2c.exe")
+		waitPortClosed(cfg.Port, 3*time.Second)
 	}
 	svcMgr.forget(RuntimeAria2)
 	return nil
+}
+
+// gracefulAria2Shutdown 让 aria2 保存会话后自行退出，最多等 5 秒。
+//
+// 超时不代表失败：调用方紧接着还会强杀，这里只是尽力把「最后 60 秒」补上。
+// 先 saveSession 再 shutdown 是双保险——shutdown 正常也会写，但某些构建在
+// 有活动任务时会把保存推迟，显式保存一次更稳。
+func gracefulAria2Shutdown(cfg *aria2.Config) {
+	c := aria2.NewClient(cfg)
+	if _, err := c.GetVersion(); err != nil {
+		return // 没在跑 / 不是本配置的实例，交给强杀兜底
+	}
+	if err := c.SaveSession(); err != nil {
+		logger.W("[env][aria2] 退出前保存会话失败: %v", err)
+	}
+	if err := c.Shutdown(false); err != nil {
+		logger.W("[env][aria2] 优雅关闭请求失败，改为强杀: %v", err)
+		return
+	}
+	if !waitPortClosed(cfg.Port, 5*time.Second) {
+		logger.W("[env][aria2] 优雅关闭超时，按强杀处理")
+	}
 }
 
 func (a *Aria2Runtime) Status(version string) ServiceStatus {
