@@ -9,9 +9,10 @@
  * - segmented（默认）：带外框的分段控件，用于设置页「同级视图切换」；
  * - chip：无外框的胶囊标签，用于列表筛选 / 弹窗内分页这类轻量切换。
  *
- * 存量曾有 5 套私有实现（.dl-tab / .settings-tabs / .ai-tabs / .php-tab / .db-tab），
- * 选中态有的用实色底、有的用下划线、有的只换字色。统一到本组件后，外观靠 variant
- * 区分，role=tab / aria-selected / disabled 只有一份实现。
+ * 存量曾有 7 套私有实现（.dl-tab / .settings-tabs / .ai-tabs / .php-tab / .vt-tab，
+ * 以及 SchedulePage、SshHostDialog 各自的 .seg-btn），选中态有的用实色底、有的用下划线、
+ * 有的只换字色。11-16 已全部收编到本组件：外观靠 variant 区分，图标与彩色圆点走 #tab
+ * 插槽，计数走 badge，role=tab / aria-selected / disabled / 键盘可达只有一份实现。
  *
  * 需要更复杂的内容（图标、未读徽章）时用 #tab 具名插槽，别另起一套按钮。
  */

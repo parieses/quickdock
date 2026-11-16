@@ -33,6 +33,7 @@ import {
 } from '../utils/ssh'
 import type { SshHostDisplay } from '../utils/sshTree'
 import SshFingerprintDialog from './SshFingerprintDialog.vue'
+import QdTabs from './QdTabs.vue'
 
 const { t } = useI18n()
 // 只取 success：失败文案可能很长（认证方式不匹配、指纹异常等），
@@ -119,6 +120,17 @@ interface FormState {
 }
 
 const form = reactive<FormState>(blankForm())
+
+// 环境与认证两组分段的标签；环境色在 #tab 插槽里以圆点表达（见 .env-dot）。
+const envTabs = computed(() => [
+  { id: 'prod' as const, label: t('sshEnvProd') },
+  { id: 'staging' as const, label: t('sshEnvStaging') },
+  { id: 'test' as const, label: t('sshEnvTest') },
+])
+const authTabs = computed(() => [
+  { id: 'password' as const, label: t('sshAuthPassword') },
+  { id: 'key' as const, label: t('sshAuthKey') },
+])
 const panelRef = ref<HTMLElement | null>(null)
 const { onKeydown: onKeydownTrap } = useFocusTrap(toRef(props, 'visible'), panelRef)
 
@@ -483,18 +495,16 @@ function onKeydown(e: KeyboardEvent) {
               </label>
               <div class="fd">
                 <span class="fd-label">{{ t('sshEnvLabel') }}</span>
-                <div class="seg">
-                  <button
-                    v-for="e in ['prod', 'staging', 'test']"
-                    :key="e"
-                    type="button"
-                    class="seg-btn"
-                    :class="[`seg-${e}`, { on: form.env === e }]"
-                    @click="form.env = e"
-                  >
-                    {{ t(e === 'prod' ? 'sshEnvProd' : e === 'staging' ? 'sshEnvStaging' : 'sshEnvTest') }}
-                  </button>
-                </div>
+                <QdTabs
+                  :model-value="form.env"
+                  :tabs="envTabs"
+                  @update:model-value="(v: string) => (form.env = v as 'prod' | 'staging' | 'test')"
+                >
+                  <template #tab="{ tab }">
+                    <span class="env-dot" :class="tab.id" />
+                    {{ tab.label }}
+                  </template>
+                </QdTabs>
               </div>
             </div>
 
@@ -529,24 +539,12 @@ function onKeydown(e: KeyboardEvent) {
 
             <!-- 认证 -->
             <div class="hd-section">
-              <div class="seg seg--wide">
-                <button
-                  type="button"
-                  class="seg-btn"
-                  :class="{ on: form.authType === 'password' }"
-                  @click="form.authType = 'password'"
-                >
-                  {{ t('sshAuthPassword') }}
-                </button>
-                <button
-                  type="button"
-                  class="seg-btn"
-                  :class="{ on: form.authType === 'key' }"
-                  @click="form.authType = 'key'"
-                >
-                  {{ t('sshAuthKey') }}
-                </button>
-              </div>
+              <QdTabs
+                class="seg--wide"
+                :model-value="form.authType"
+                :tabs="authTabs"
+                @update:model-value="(v: string) => (form.authType = v as 'password' | 'key')"
+              />
 
               <template v-if="form.authType === 'password'">
                 <label class="fd">
@@ -980,56 +978,22 @@ select.fd-input {
   color: var(--color-warning);
 }
 
-/* 分段选择器：比 select 少一次点击，也避免下拉框在深色下样式跳变 */
-.seg {
-  display: flex;
-  gap: var(--space-1);
-  padding: var(--space-1);
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
-
+/* 分段选择器已统一到 QdTabs；这里只保留它作为 flex 子项的对齐方式。 */
 .seg--wide {
   align-self: flex-start;
 }
 
-.seg-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
-  flex: 1 1 auto;
-  height: 28px; padding: 0 11px;
-  font-size: var(--text-sm);
-  font-family: inherit;
-  color: var(--color-text-muted);
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: color var(--transition-fast), background var(--transition-fast);
+/* 环境色仍是安全语义（生产/预发/测试），但不再整块染色——
+   统一约定是「状态用小图标 + 常规文字色」，整块底色会把一行字变成色块。 */
+.env-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
 }
-
-.seg-btn:hover {
-  color: var(--color-text-primary);
-}
-
-.seg-btn.on {
-  color: var(--color-text-primary);
-  background: var(--color-bg-active);
-}
-
-/* 选中态带环境色：一眼看出正在给生产机配连接 */
-.seg-prod.on {
-  color: var(--color-danger);
-  background: var(--color-danger-bg);
-}
-
-.seg-staging.on {
-  color: var(--color-warning);
-  background: var(--color-warning-bg);
-}
-
-.seg-test.on {
-  color: var(--color-text-primary);
-}
+.env-dot.prod { background: var(--color-danger); }
+.env-dot.staging { background: var(--color-warning); }
+.env-dot.test { background: var(--color-success); }
 
 .hd-status {
   display: flex;

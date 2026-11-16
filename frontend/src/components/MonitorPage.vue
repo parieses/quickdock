@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import PageHeader from './PageHeader.vue'
+import QdTabs from './QdTabs.vue'
 defineOptions({ name: KEEP_ALIVE.monitor })
 // name 的唯一来源：pages/keepAlive.ts（与 KeepAlive 白名单共用同一常量）
 import { KEEP_ALIVE } from '../pages/keepAlive'
@@ -489,6 +490,13 @@ const viewMode = ref<'active' | 'status'>('active')
 function openRecycleBin() {
   try { Events.Emit('app:open-settings', 'history:recycle') } catch { /* 事件通道未就绪时静默 */ }
 }
+
+// 两项视图的标签；计数不放进 tabs 数据，而是在 #tab 插槽里渲染——
+// .vt-count 带告警色变体，QdTabs 的中性 badge 会把告警弱化成普通小字。
+const viewTabs = computed(() => [
+  { id: 'active', label: t('mon_view_active') },
+  { id: 'status', label: t('monitorViewStatus') },
+])
 
 async function switchView(v: 'active' | 'status') {
   viewMode.value = v
@@ -1018,12 +1026,17 @@ onUnmounted(() => {
 
     <!-- 视图切换：活动列表 / 状态页（回收站在设置 → 历史） -->
     <div class="mon-viewtabs">
-      <button :class="['vt-tab', { active: viewMode === 'active' }]" @click="switchView('active')">
-        {{ t('mon_view_active') }}<span v-if="summary.total" class="vt-count">{{ summary.total }}</span>
-      </button>
-      <button :class="['vt-tab', { active: viewMode === 'status' }]" @click="switchView('status')">
-        {{ t('monitorViewStatus') }}
-      </button>
+      <QdTabs
+        :model-value="viewMode"
+        :tabs="viewTabs"
+        variant="chip"
+        @update:model-value="(v: string) => switchView(v as 'active' | 'status')"
+      >
+        <template #tab="{ tab }">
+          {{ tab.label }}
+          <span v-if="tab.id === 'active' && summary.total" class="vt-count">{{ summary.total }}</span>
+        </template>
+      </QdTabs>
     </div>
 
     <!-- 分组筛选（有命名分组时才出现，否则纯属噪音） -->
@@ -1581,20 +1594,6 @@ onUnmounted(() => {
 .mon-viewtabs { display: flex; gap: var(--space-2); padding: 0 var(--space-7) 10px; }
 /* 状态页与列表互斥，继承同一块可滚动内容区，避免多出一截空白。 */
 .mon-status-wrap { flex: 1; min-height: 0; overflow-y: auto; padding: 0 var(--space-7) var(--space-6); }
-.vt-tab {
-  display: inline-flex; align-items: center; gap: var(--space-3);
-  padding: 5px var(--space-5); border-radius: var(--radius-full);
-  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
-  color: var(--color-text-muted); font-size: var(--text-md); cursor: pointer;
-}
-/* 视图 tab 的选中态与全站一致：淡底 + 强调色描边 + 强调色文字。
-   原来用「灰底 + 蓝框」，蓝框在深色底上像聚焦环，反而不像"当前这一档"。 */
-.vt-tab.active {
-  background: var(--color-accent-bg);
-  border-color: var(--color-accent-border);
-  color: var(--color-accent);
-  font-weight: 600;
-}
 .vt-count {
   min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--radius-md);
   display: inline-flex; align-items: center; justify-content: center;

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import PageHeader from './PageHeader.vue'
+import QdTabs from './QdTabs.vue'
 import { ref, computed, onMounted, onBeforeUnmount, onActivated, onDeactivated, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { KEEP_ALIVE } from '../pages/keepAlive'
@@ -55,6 +56,10 @@ const KINDS = ['once', 'interval', 'daily', 'weekly', 'monthly', 'cron'] as cons
 // 常用表达式做成可点选的预设：五段语法不常用的人记不住，空输入框最容易
 // 直接填一个四段或六段表达式然后被后端拒绝。
 const CRON_PRESETS = ['*/5 * * * *', '0 9 * * 1-5', '0 0 1 * *', '0 2 * * 0'] as const
+// 两组分段选择的数据；图标是内容不是皮肤，用 #tab 插槽放。
+const actionTabs = computed(() => ACTIONS.map((a) => ({ id: a as string, label: actionLabel(a) })))
+const kindTabs = computed(() => KINDS.map((k) => ({ id: k as string, label: t('sched_kind_' + k) })))
+const iconOf = (id: string) => actionIcon[id]
 const MONTH_DAYS = Array.from({ length: 31 }, (_, i) => i + 1)
 // 周一为首列展示；v 使用 JS 星期编号（0=周日..6=周六）
 const WEEKDAYS = computed(() => {
@@ -838,12 +843,16 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 
         <!-- 动作类型 -->
         <label>{{ t('sched_action') }}</label>
-        <div class="seg">
-          <button v-for="a in ACTIONS" :key="a" type="button"
-                  :class="['seg-btn', { active: fAction === a }]" @click="fAction = a">
-            <component :is="actionIcon[a]" :size="13" /> {{ actionLabel(a) }}
-          </button>
-        </div>
+        <QdTabs
+          :model-value="fAction"
+          :tabs="actionTabs"
+          @update:model-value="(v: string) => (fAction = v)"
+        >
+          <template #tab="{ tab }">
+            <component :is="iconOf(tab.id)" :size="13" />
+            <span>{{ tab.label }}</span>
+          </template>
+        </QdTabs>
 
         <!-- 目标：ai 动作存的是多行提示词，用 textarea；路径类动作才显示应用/场景选择器 -->
         <label>{{ targetLabel(fAction) }}</label>
@@ -895,12 +904,11 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 
         <!-- 调度类型 -->
         <label>{{ t('sched_kind') }}</label>
-        <div class="seg">
-          <button v-for="k in KINDS" :key="k" type="button"
-                  :class="['seg-btn', { active: fKind === k }]" @click="fKind = k">
-            {{ t('sched_kind_' + k) }}
-          </button>
-        </div>
+        <QdTabs
+          :model-value="fKind"
+          :tabs="kindTabs"
+          @update:model-value="(v: string) => (fKind = v)"
+        />
 
         <!-- once -->
         <template v-if="fKind === 'once'">
@@ -1225,17 +1233,6 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 .modal-area { height: auto; padding: var(--space-4) 10px; resize: vertical; line-height: 1.5; }
 .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .modal-grid > * { min-width: 0; }
-
-/* 分段选择 */
-.seg { display: flex; flex-wrap: wrap; gap: var(--space-3); }
-.seg-btn {
-  display: inline-flex; align-items: center; gap: var(--space-2); height: 28px; padding: 0 11px;
-  border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary); border-radius: var(--radius-sm); font-size: var(--text-sm);
-  cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
-}
-.seg-btn:hover { color: var(--color-text-primary); }
-.seg-btn.active { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-accent-border); }
 
 .wd-row { display: flex; gap: 5px; }
 .wd-btn {

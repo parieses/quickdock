@@ -10,13 +10,38 @@
  *
  * 样式随模板一起搬：scoped 选择器穿不进子组件，留在父级会整块失效。
  */
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ConfigEditor from './ConfigEditor.vue'
 import RuntimeLogView from './RuntimeLogView.vue'
+import QdTabs from './QdTabs.vue'
 import { useToast } from '../composables/useToast'
 const props = defineProps<{ ctx: any }>()
 const { t } = useI18n()
 const { confirm: toastConfirm } = useToast()
+
+// 四组页签的标签统一在这里声明，模板只留一行 QdTabs。
+// Go 环境那组的第一项带版本号，所以走 computed 跟随 ctx 变化。
+const phpTabs = computed(() => [
+  { id: 'ini', label: t('phpIni') },
+  { id: 'disable', label: t('phpDisableFunctions') },
+  { id: 'errorlog', label: t('phpErrorLog') },
+  { id: 'ext', label: t('phpExtensions') },
+])
+const goEnvTabs = computed(() => [
+  { id: 'version', label: t('goEnvScopeVersion', { v: props.ctx.goEnvModal.version }) },
+  { id: 'global', label: t('goEnvScopeGlobal') },
+])
+const redisTabs = computed(() => [
+  { id: 'config', label: t('redisConfigFile') },
+  { id: 'log', label: t('redisLog') },
+])
+const maintTabs = computed(() => [
+  { id: 'check', label: t('maintTabCheck') },
+  { id: 'disk', label: t('maintTabDisk') },
+  { id: 'manifest', label: t('maintTabManifest') },
+  { id: 'envvar', label: t('maintTabEnvVar') },
+])
 
 // 删除系统环境变量不可撤销：走一次 toast.confirm，不再用行内的「点两次」态。
 async function confirmDeleteVar(name: string) {
@@ -31,10 +56,11 @@ async function confirmDeleteVar(name: string) {
   <div class="modal php-modal">
     <div class="modal-title">{{ t('phpConfigTitle') }} · {{ ctx.phpModal.version }}</div>
     <div class="php-tabs">
-      <button class="php-tab" :class="{ active: ctx.phpModal.tab === 'ini' }" @click="ctx.phpModal.tab = 'ini'">{{ t('phpIni') }}</button>
-      <button class="php-tab" :class="{ active: ctx.phpModal.tab === 'disable' }" @click="ctx.phpModal.tab = 'disable'">{{ t('phpDisableFunctions') }}</button>
-      <button class="php-tab" :class="{ active: ctx.phpModal.tab === 'errorlog' }" @click="ctx.phpModal.tab = 'errorlog'">{{ t('phpErrorLog') }}</button>
-      <button class="php-tab" :class="{ active: ctx.phpModal.tab === 'ext' }" @click="ctx.phpModal.tab = 'ext'">{{ t('phpExtensions') }}</button>
+      <QdTabs
+        :model-value="ctx.phpModal.tab"
+        :tabs="phpTabs"
+        @update:model-value="(v: string) => (ctx.phpModal.tab = v)"
+      />
     </div>
     <div class="php-tab-body">
       <template v-if="ctx.phpModal.tab === 'ini'">
@@ -93,12 +119,11 @@ async function confirmDeleteVar(name: string) {
       <p class="go-path-hint">{{ t('goEnvPathHint') }}</p>
     </div>
     <div class="php-tabs go-env-tabs">
-      <button class="php-tab" :class="{ active: ctx.goEnvModal.scope === 'version' }" @click="ctx.switchGoEnvScope('version')">
-        {{ t('goEnvScopeVersion', { v: ctx.goEnvModal.version }) }}
-      </button>
-      <button class="php-tab" :class="{ active: ctx.goEnvModal.scope === 'global' }" @click="ctx.switchGoEnvScope('global')">
-        {{ t('goEnvScopeGlobal') }}
-      </button>
+      <QdTabs
+        :model-value="ctx.goEnvModal.scope"
+        :tabs="goEnvTabs"
+        @update:model-value="(v: string) => ctx.switchGoEnvScope(v)"
+      />
     </div>
     <p class="modal-text go-env-desc">
       {{ ctx.goEnvModal.scope === 'global' ? t('goEnvGlobalHint') : t('goEnvDesc') }}
@@ -183,8 +208,11 @@ async function confirmDeleteVar(name: string) {
   <div class="modal php-modal">
     <div class="modal-title">{{ t('redisConfigTitle') }} · {{ ctx.redisModal.version }}</div>
     <div class="php-tabs">
-      <button class="php-tab" :class="{ active: ctx.redisModal.tab === 'config' }" @click="ctx.redisModal.tab = 'config'">{{ t('redisConfigFile') }}</button>
-      <button class="php-tab" :class="{ active: ctx.redisModal.tab === 'log' }" @click="ctx.openLogTab()">{{ t('redisLog') }}</button>
+      <QdTabs
+        :model-value="ctx.redisModal.tab"
+        :tabs="redisTabs"
+        @update:model-value="(v: string) => (v === 'log' ? ctx.openLogTab() : (ctx.redisModal.tab = v))"
+      />
     </div>
     <div class="php-tab-body">
       <template v-if="ctx.redisModal.tab === 'config'">
@@ -268,10 +296,11 @@ async function confirmDeleteVar(name: string) {
   <div class="modal maint-modal">
     <div class="modal-title">{{ t('maintTitle') }}</div>
     <div class="php-tabs">
-      <button class="php-tab" :class="{ active: ctx.maint.tab === 'check' }" @click="ctx.openMaintenance('check')">{{ t('maintTabCheck') }}</button>
-      <button class="php-tab" :class="{ active: ctx.maint.tab === 'disk' }" @click="ctx.openMaintenance('disk')">{{ t('maintTabDisk') }}</button>
-      <button class="php-tab" :class="{ active: ctx.maint.tab === 'manifest' }" @click="ctx.openMaintenance('manifest')">{{ t('maintTabManifest') }}</button>
-      <button class="php-tab" :class="{ active: ctx.maint.tab === 'envvar' }" @click="ctx.openMaintenance('envvar')">{{ t('maintTabEnvVar') }}</button>
+      <QdTabs
+        :model-value="ctx.maint.tab"
+        :tabs="maintTabs"
+        @update:model-value="(v: string) => ctx.openMaintenance(v)"
+      />
     </div>
 
     <div class="php-tab-body maint-body">
@@ -790,13 +819,6 @@ async function confirmDeleteVar(name: string) {
 
 .php-tabs { display: flex; gap: var(--space-2); margin: var(--space-2) 0 10px; flex-wrap: wrap; }
 
-.php-tab {
-  font-size: var(--text-sm); padding: 5px 11px; border-radius: var(--radius-sm); cursor: pointer;
-  border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
-  font-family: inherit;
-}
-
-.php-tab.active { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-accent-border-strong); }
 
 .php-tab-body { min-height: 200px; flex: 1 1 auto; max-height: 60vh; overflow: auto; }
 
