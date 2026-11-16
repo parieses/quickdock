@@ -486,8 +486,11 @@ function safeOsc7Path(data: string): string | null {
   try {
     path = decodeURIComponent(m[1] || '')
   } catch {
-    // 非法 % 转义（如 %ZZ）视作投毒，丢弃。
-    return null
+    // 非法 % 转义（如 %ZZ）。以前这里直接丢弃当成投毒，但我们自己的 shell
+    // 集成钩子是拿 $PWD 原样拼的、不做 URL 编码，目录名里带 % (如 /var/www/50%)
+    // 就会解不出来——那不是投毒，是路径真的长这样。退回原始字符串即可：
+    // 不解码也就不会被 %2e%2e 之类绕过，下面「不含 ..」的校验照样在原文上生效。
+    path = m[1] || ''
   }
   // 校验必须放在解码之后：%2e%2e → .. 、%0a → 换行 同样要被挡住。
   if (!path.startsWith('/')) return null

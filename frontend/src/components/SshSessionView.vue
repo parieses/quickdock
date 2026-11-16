@@ -61,6 +61,14 @@ const props = defineProps<{
    * 终端没有焦点的话用户敲的键全被浏览器吃掉，看起来就是「终端卡死」。
    */
   focused?: boolean
+  /**
+   * 登录后是否给远端 shell 注入目录上报钩子（OSC 7）。
+   *
+   * 必须在 Connect 时就定下来：钩子是连接时写进会话的一行命令，
+   * 连完再改这个值不会补注入，得重连才生效。缺省关闭（undefined = false），
+   * 由 SshPage 显式传下来，这样单独复用本组件的地方不会被偷偷改远端 shell。
+   */
+  shellIntegration?: boolean
 }>()
 const emit = defineEmits<{
   /** 连接状态变化：标签栏据此显示转圈 / 清除忙碌态 */
@@ -235,7 +243,7 @@ async function doConnect(allowPrompt = true) {
   let needPassword = false
   let askReason: 'missing' | 'failed' = 'missing'
   try {
-    const res = unwrap<SshConnectResult>(await Connect(props.host.id, size.cols, size.rows))
+    const res = unwrap<SshConnectResult>(await Connect(props.host.id, size.cols, size.rows, !!props.shellIntegration))
     if (!res?.sessionId) throw new Error(t('sshConnectFailed'))
     sessionId.value = res.sessionId
     // 父级要靠它才知道「关这个标签该断哪条会话」——

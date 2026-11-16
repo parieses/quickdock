@@ -24,7 +24,7 @@ func TestConnPoolReusesOneTCPForSameHost(t *testing.T) {
 
 	var sids []string
 	for i := 0; i < 3; i++ {
-		r := svc.Connect(h.ID, 80, 24)
+		r := svc.Connect(h.ID, 80, 24, false)
 		if r.Code != 0 {
 			t.Fatalf("第 %d 个标签建立失败: %+v", i, r)
 		}
@@ -83,7 +83,7 @@ func TestConnPoolConcurrentAcquireDialsOnce(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start // 尽量让所有 goroutine 同时冲进 Acquire
-			r := svc.Connect(h.ID, 80, 24)
+			r := svc.Connect(h.ID, 80, 24, false)
 			if r.Code != 0 {
 				fails[i] = r.Msg
 				return
@@ -125,8 +125,8 @@ func TestConnPoolDistinctHostsDoNotShare(t *testing.T) {
 	hA := saveTrustedHost(t, svc, hostA, portA)
 	hB := saveTrustedHost(t, svc, hostB, portB)
 
-	rA := svc.Connect(hA.ID, 80, 24)
-	rB := svc.Connect(hB.ID, 80, 24)
+	rA := svc.Connect(hA.ID, 80, 24, false)
+	rB := svc.Connect(hB.ID, 80, 24, false)
 	if rA.Code != 0 || rB.Code != 0 {
 		t.Fatalf("建立失败: A=%+v B=%+v", rA, rB)
 	}
@@ -164,14 +164,14 @@ func TestConnPoolReleaseIdempotent(t *testing.T) {
 	host, port, _, _ := startPtySvcServer(t)
 	h := saveTrustedHost(t, svc, host, port)
 
-	r := svc.Connect(h.ID, 80, 24)
+	r := svc.Connect(h.ID, 80, 24, false)
 	if r.Code != 0 {
 		t.Fatalf("建立失败: %+v", r)
 	}
 	sid := r.Data.(SshConnectResult).SessionID
 
 	// 再开一个，让引用数变成 2。
-	r2 := svc.Connect(h.ID, 80, 24)
+	r2 := svc.Connect(h.ID, 80, 24, false)
 	if r2.Code != 0 {
 		t.Fatalf("建立第二个失败: %+v", r2)
 	}
@@ -203,7 +203,7 @@ func TestConnPoolDropsDeadConnection(t *testing.T) {
 	host, port, rec, _ := startPtySvcServer(t)
 	h := saveTrustedHost(t, svc, host, port)
 
-	r := svc.Connect(h.ID, 80, 24)
+	r := svc.Connect(h.ID, 80, 24, false)
 	if r.Code != 0 {
 		t.Fatalf("建立失败: %+v", r)
 	}
@@ -220,7 +220,7 @@ func TestConnPoolDropsDeadConnection(t *testing.T) {
 	})
 
 	// 再开一个标签：必须重拨，而不是复用死连接。
-	r2 := svc.Connect(h.ID, 80, 24)
+	r2 := svc.Connect(h.ID, 80, 24, false)
 	if r2.Code != 0 {
 		t.Fatalf("死连接后重连失败: %+v", r2)
 	}
@@ -256,10 +256,10 @@ func TestConnPoolCloseAllShutdown(t *testing.T) {
 	hA := saveTrustedHost(t, svc, hostA, portA)
 	hB := saveTrustedHost(t, svc, hostB, portB)
 
-	if r := svc.Connect(hA.ID, 80, 24); r.Code != 0 {
+	if r := svc.Connect(hA.ID, 80, 24, false); r.Code != 0 {
 		t.Fatalf("A 失败: %+v", r)
 	}
-	if r := svc.Connect(hB.ID, 80, 24); r.Code != 0 {
+	if r := svc.Connect(hB.ID, 80, 24, false); r.Code != 0 {
 		t.Fatalf("B 失败: %+v", r)
 	}
 	if conns, _ := svc.pool.Stats(); conns != 2 {
@@ -347,7 +347,7 @@ func TestMultiTabShareConnectionEndToEnd(t *testing.T) {
 
 	var sids []string
 	for i := 0; i < 3; i++ {
-		r := svc.Connect(h.ID, 80, 24)
+		r := svc.Connect(h.ID, 80, 24, false)
 		if r.Code != 0 {
 			t.Fatalf("第 %d 个标签建立失败: %s", i, r.Msg)
 		}

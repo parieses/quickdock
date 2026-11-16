@@ -605,7 +605,7 @@ func TestRemoveTrustedKeys(t *testing.T) {
 
 	// 关键验证：清掉之后连接会重新走「待确认」而不是被旧指纹拦住。
 	// 这才是用户真正想要的——换密钥后能重新信任。
-	r := svc.Connect(h.ID, 80, 24)
+	r := svc.Connect(h.ID, 80, 24, false)
 	if r.Code == 0 {
 		t.Fatal("清掉指纹后不应能直接连上，应停在待确认")
 	}

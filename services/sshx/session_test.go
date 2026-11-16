@@ -293,7 +293,7 @@ func TestConnectTerminalLifecycle(t *testing.T) {
 	host, port, rec, inject := startPtySvcServer(t)
 	h := saveTrustedHost(t, svc, host, port)
 
-	r := svc.Connect(h.ID, 100, 30)
+	r := svc.Connect(h.ID, 100, 30, false)
 	if r.Code != 0 {
 		t.Fatalf("建立终端失败: %+v", r)
 	}
@@ -378,7 +378,7 @@ func TestConnectUntrustedHostNeedsTrust(t *testing.T) {
 		AuthType: "password", Password: "pw",
 	}).Data.(*db.SshHost)
 
-	r := svc.Connect(h.ID, 80, 24)
+	r := svc.Connect(h.ID, 80, 24, false)
 	if r.Code != 1 {
 		t.Fatalf("未信任主机应先失败: %+v", r)
 	}
@@ -397,12 +397,12 @@ func TestTerminalValidation(t *testing.T) {
 
 	// 文件夹不能连。
 	folder := svc.SaveHost(SshHostInput{Name: "目录", IsFolder: true}).Data.(*db.SshHost)
-	if got := errorCode(svc.Connect(folder.ID, 80, 24)); got != CodeFolderNotConnectable {
+	if got := errorCode(svc.Connect(folder.ID, 80, 24, false)); got != CodeFolderNotConnectable {
 		t.Fatalf("文件夹应报 %s，实际 %s", CodeFolderNotConnectable, got)
 	}
 
 	// 尺寸非法。
-	if got := errorCode(svc.Connect(h.ID, 0, 24)); got != CodeInvalidPtySize {
+	if got := errorCode(svc.Connect(h.ID, 0, 24, false)); got != CodeInvalidPtySize {
 		t.Fatalf("列数 0 应报 %s，实际 %s", CodeInvalidPtySize, got)
 	}
 
@@ -418,7 +418,7 @@ func TestTerminalValidation(t *testing.T) {
 	}
 
 	// 非法 base64 输入。
-	sess := svc.Connect(h.ID, 80, 24)
+	sess := svc.Connect(h.ID, 80, 24, false)
 	if sess.Code != 0 {
 		t.Fatalf("建立终端失败: %+v", sess)
 	}
@@ -439,7 +439,7 @@ func TestListSessionsCarriesHostIdentity(t *testing.T) {
 	host, port, _, _ := startPtySvcServer(t)
 	h := saveTrustedHost(t, svc, host, port)
 
-	r := svc.Connect(h.ID, 100, 30)
+	r := svc.Connect(h.ID, 100, 30, false)
 	if r.Code != 0 {
 		t.Fatalf("建立终端失败: %+v", r)
 	}
@@ -482,7 +482,7 @@ func TestListSessionsOrderedByStart(t *testing.T) {
 
 	var ids []string
 	for i := 0; i < 3; i++ {
-		r := svc.Connect(h.ID, 80, 24)
+		r := svc.Connect(h.ID, 80, 24, false)
 		if r.Code != 0 {
 			t.Fatalf("第 %d 次建立终端失败: %+v", i, r)
 		}
@@ -516,7 +516,7 @@ func TestOwnerMappingOutlivesDisconnect(t *testing.T) {
 	host, port, _, _ := startPtySvcServer(t)
 	h := saveTrustedHost(t, svc, host, port)
 
-	r := svc.Connect(h.ID, 80, 24)
+	r := svc.Connect(h.ID, 80, 24, false)
 	if r.Code != 0 {
 		t.Fatalf("建立终端失败: %+v", r)
 	}

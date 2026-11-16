@@ -111,7 +111,11 @@ func (e eventSink) Send(sessionID string, data []byte) error {
 //
 // 这是 SSH 功能的主入口：拨号 → 指纹校验 → 申请 PTY → 起 shell。
 // 返回后前端通过事件接收输出，用 Write 发送按键，用 Replay 恢复画面。
-func (s *SshService) Connect(hostID string, cols, rows int) *services.ApiResult {
+//
+// shellIntegration 控制「登录后要不要给远端 shell 挂目录上报钩子」。
+// 它由前端偏好决定（默认开、可关），关掉后会话里不会多出任何注入命令，
+// 目录跟随就只能依赖远端自己打印 OSC 7（zsh + oh-my-zsh 之类）。
+func (s *SshService) Connect(hostID string, cols, rows int, shellIntegration bool) *services.ApiResult {
 	host, secret, err := s.loadHost(hostID)
 	if err != nil {
 		return failSsh(err)
@@ -143,6 +147,7 @@ func (s *SshService) Connect(hostID string, cols, rows int) *services.ApiResult 
 		Label:            host.User + "@" + host.Host + ":" + strconv.Itoa(host.Port),
 		PostLoginCommand: host.PostLoginCommand,
 		AutoReplySudo:    host.AutoReplySudo,
+		ShellIntegration: shellIntegration,
 	}
 	// 没开自动应答就别把明文密码带进引擎层：那是另一份不该常驻内存的副本。
 	if host.AutoReplySudo {

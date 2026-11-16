@@ -20,7 +20,7 @@ import { KEEP_ALIVE } from '../pages/keepAlive'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
-import { FolderPlus, ListChecks, MapPin, Network, Plus, Radio, RefreshCw, Search, Send, Server, ShieldCheck, X, Zap } from '@lucide/vue'
+import { FolderPlus, ListChecks, MapPin, Network, Plus, Radio, RefreshCw, Search, Send, Server, ShieldCheck, SquareTerminal, X, Zap } from '@lucide/vue'
 import {
   DeleteHost,
   Disconnect,
@@ -137,6 +137,37 @@ function toggleFollowCwd() {
 watch(activeId, () => {
   followSftpPath.value = ''
 })
+
+// ---- 远端 shell 集成（登录后注入 OSC 7 钩子，默认开） ----
+//
+// 这是「跟随终端目录」能生效的前提：OSC 7 不是终端的能力，而是 shell 每次画
+// 提示符时自己打印的序列。bash 默认不打，zsh 要装 oh-my-zsh 之类才有，所以在
+// 裸 Debian/Ubuntu 上不注入就永远收不到事件——功能看着像坏的。
+//
+// 注入的是连接时写进会话的一行命令（改 PROMPT_COMMAND / 加 precmd 钩子），
+// 不改远端任何文件、重连即消失；代价是这行命令会被 tty 回显在会话顶部。
+// 所以给一个关掉的开关：关掉后会话里零噪声，但跟随目录只能靠远端自己配好。
+const SHELL_INTEG_KEY = 'qd_ssh_shell_integ'
+const shellIntegration = ref(true)
+
+function loadShellIntegration() {
+  try {
+    // 只认显式写过的 'false'：没存过（新装）默认开，否则「功能默认不工作」。
+    shellIntegration.value = localStorage.getItem(SHELL_INTEG_KEY) !== 'false'
+  } catch (e) {
+    logErr('SshPage.loadShellIntegration', e)
+    shellIntegration.value = true
+  }
+}
+
+function toggleShellIntegration() {
+  shellIntegration.value = !shellIntegration.value
+  try {
+    localStorage.setItem(SHELL_INTEG_KEY, String(shellIntegration.value))
+  } catch (e) {
+    logErr('SshPage.toggleShellIntegration', e)
+  }
+}
 
 /**
  * OSC 7 事件 → 只驱动「当前激活且已打开文件面板」的那一个标签。
@@ -724,6 +755,7 @@ onMounted(async () => {
   // 挂载期间若发生卸载（窗口 hash 切换、组件被替换），onBeforeUnmount 会先跑，
   // 那时 offShown 还是 null；等 await 返回后再注册，就再没有人对它解绑了。
   loadFollowCwd()
+  loadShellIntegration()
   // OSC 7 目录跟随：订阅 SshTerminal 发出的自定义 DOM 事件（另一组实现）。
   window.addEventListener('quickdock:ssh:cwd', onSshCwd)
   offShown = Events.On('quickdock:ssh:shown', () => {
@@ -881,6 +913,15 @@ defineExpose({
           <MapPin :size="14" />
           <span>{{ t('sshFollowCwd') }}</span>
         </button>
+        <button
+          class="ssh-tool"
+          :class="{ 'is-on': shellIntegration }"
+          :title="t('sshShellIntegHint')"
+          @click="toggleShellIntegration"
+        >
+          <SquareTerminal :size="14" />
+          <span>{{ t('sshShellInteg') }}</span>
+        </button>
         <span class="ssh-toolbar-spacer" />
         <button
           v-if="tabs.length >= 2"
@@ -925,6 +966,7 @@ defineExpose({
           :host="tab.host"
           :resume="tab.resume"
           :focused="tab.id === activeId"
+          :shell-integration="shellIntegration"
           @busy="(v: boolean) => markTabBusy(tab.id, v)"
           @session="(sid: string) => onTabSession(tab.id, sid)"
         />

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -84,6 +85,17 @@ type PtyOptions struct {
 	// 两者任一为零值即完全关闭，行为与新增这两个字段之前一致。
 	AutoReplySudo bool
 	SudoPassword  string
+
+	// ShellIntegration 让远端 shell 每画一次提示符就上报当前目录（OSC 7）。
+	//
+	// 为什么必须注入：OSC 7 不是终端协议能力，而是 shell 自己打印的序列。
+	// bash 默认不打印，zsh 也只有装了 oh-my-zsh 一类框架才打印，因此在裸
+	// Debian / Ubuntu 上「跟随终端目录」永远等不到事件——功能看着像坏的。
+	//
+	// 注入的内容只是当前会话里的一行命令（改 PROMPT_COMMAND / 加 precmd
+	// 钩子），不落盘、不改远端任何文件，重连即消失。代价是这行命令会被
+	// tty 回显在会话顶部，且规避不了，所以调用方给了关掉的开关。
+	ShellIntegration bool
 }
 
 // SessionInfo 会话摘要（前端标签栏用）。
@@ -281,16 +293,34 @@ func (m *Manager) Start(client *Client, opts PtyOptions) (*PtySession, error) {
 		s.finish(waitErr)
 	}()
 
-	// ---- 登录后自动命令（便利功能，尽力而为）----
+	// ---- 登录后注入（便利功能，尽力而为）----
 	// 放在 Start 末尾：会话已登记、Wait 已起、PTY 已就绪且 s.stdin 可用。
 	// 用独立 goroutine 做短延时，不阻塞 Start 返回。
-	if opts.PostLoginCommand != "" {
+	//
+	// shell 集成与登录后命令合到同一个 goroutine 里按序写：两条都是往同一个
+	// stdin 塞一行命令，若各起一个 goroutine 去抢同一个延时点，先后顺序就是
+	// 随机的——用户在登录后命令里 cd 一次，目录上报可能恰好错过那一次提示符。
+	if opts.PostLoginCommand != "" || opts.ShellIntegration {
 		cmd := opts.PostLoginCommand
+		integrate := opts.ShellIntegration
 		go func() {
 			// 保守兜底：见 postLoginReadyDelay 的说明。协议里没有 shell 就绪
 			// 握手，现有 Start 也没有现成的就绪信号可复用，故只做一次很短的
 			// 延时，不假装有握手协议；命令能否被接收不作保证。
 			time.Sleep(postLoginReadyDelay)
+			if integrate {
+				if hook := shellIntegrationHook(client); hook != "" {
+					// 开头先送一个 Ctrl-U（kill line）：注入点固定在连接后 200ms，
+					// 手快的用户可能已经敲了半行命令，直接拼上去会把那半行和钩子
+					// 粘成一条错误命令。Ctrl-U 在 bash / zsh / fish 的行编辑里
+					// 都是「抹掉光标前整行」，代价只是丢掉那半行输入（250ms 内，
+					// 实际几乎不存在）。
+					_ = s.injectStdin([]byte("\x15 " + hook + "\r"))
+				}
+			}
+			if cmd == "" {
+				return
+			}
 			s.postLoginOnce.Do(func() {
 				// 前导空格：借 bash/zsh 的 HISTCONTROL=ignorespace 约定尽量
 				// 不进 history；服务端可能没开，不承诺。结尾回车让 shell 执行。
@@ -367,6 +397,55 @@ func (s *PtySession) Write(p []byte) (int, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	return s.stdin.Write(p)
+}
+
+// shellIntegrationHook 返回「让远端 shell 每画一次提示符就上报 OSC 7」的一行命令。
+//
+// 认不出的 shell 一律返回空串：往 csh / tcsh 里塞 POSIX 语法只会在用户屏幕上
+// 刷一行报错，比功能不生效更糟。已知能挂钩子的：
+//   - bash：PROMPT_COMMAND 每次提示符前执行，直接追加（保留原有内容）；
+//   - zsh：走 add-zsh-hook precmd，比直接覆盖 precmd 更能和用户的框架共存；
+//   - fish：监听 fish_prompt 事件（fish 自己的 printf 支持 \e、\a）。
+//
+// 注意 OSC 7 的载荷是 file://<host><path>，host 部分前端不校验也不使用
+// （远端本来就不可信，取到空 host 也照样只取路径），所以取不到 HOSTNAME 时
+// 退化成 file:///path 即可，不必为了拼 host 再做一次探测。
+func shellIntegrationHook(client *Client) string {
+	switch sh := remoteShellName(client); {
+	case strings.Contains(sh, "bash"):
+		return `PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND;}printf '\033]7;file://%s%s\007' \"${HOSTNAME:-localhost}\" \"\$PWD\""`
+	case strings.Contains(sh, "zsh"):
+		return `autoload -Uz add-zsh-hook; __qd_osc7(){ printf '\033]7;file://%s%s\007' "${HOST:-localhost}" "$PWD" }; add-zsh-hook precmd __qd_osc7`
+	case strings.Contains(sh, "fish"):
+		return `function __qd_osc7 --on-event fish_prompt; printf '\e]7;file://%s%s\a' $hostname $PWD; end`
+	default:
+		return ""
+	}
+}
+
+// remoteShellName 问远端「登录 shell 是哪个」，拿不到返回空串。
+//
+// 走一条独立的一次性 exec 通道，不碰交互会话：如果靠往终端里敲命令再解析
+// 回显来判壳，既要处理回显擦除、又会把探测命令留在用户屏幕上。代价是开局
+// 多一次往返（已认证连接上一次 exec，通常几毫秒），失败就静默放弃。
+//
+// 为什么信 $SHELL 而不是 /proc/self/...：sshd 就是按 passwd 里的登录 shell
+// 起交互会话的，$SHELL 与它一致；而这条 exec 通道本身也是用它来执行命令
+// 的（POSIX shell 由 sshd 用 `$SHELL -c` 跑），所以拿到的就是同一个壳。
+func remoteShellName(client *Client) string {
+	if client == nil || client.conn == nil {
+		return ""
+	}
+	sess, err := client.conn.NewSession()
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = sess.Close() }()
+	out, err := sess.Output(`printf %s "$SHELL"`)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(string(out)))
 }
 
 // injectStdin 把内部生成的字节直接写进远端 stdin。
