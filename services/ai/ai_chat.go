@@ -321,8 +321,35 @@ func flushToolCalls(pending map[int]*aiToolCall) []aiToolCall {
 // buildAIMessages 组装发送给模型的消息列表，并自动执行摘要压缩。
 // 当前用户消息已在调用前由 saveUserTurn 落库（见 ai_stream.go），
 // 故这里仅从 DB 加载历史（已含本轮用户消息），不再单独追加。
-func (a *AIService) buildAIMessages(ctx context.Context, cfg AIProfile, convID, mode string) ([]map[string]interface{}, error) {
-	return a.buildAIMessagesWithin(ctx, cfg, convID, mode, aiContextBudget(cfg), false)
+//
+// sink 只用来播报压缩过程（compact 事件）；传 nil 时压缩照做，只是不说。
+func (a *AIService) buildAIMessages(ctx context.Context, cfg AIProfile, convID, mode string, sink EventSink) ([]map[string]interface{}, error) {
+	return a.buildAIMessagesWithin(ctx, cfg, convID, mode, aiContextBudget(cfg), false, sink)
+}
+
+// compactEvent compact 事件的载荷。
+//
+// 字段偏多是有意的：界面上那两行分隔字要同时回答三件事——有没有在压（phase）、
+// 压掉了多少（before → after）、这条会话的天花板在哪（window / ceiling / limit）。
+// 少了天花板，用户看到「48.2K → 12.1K」也无从判断这个 48.2K 算大还是算小，
+// 而这恰恰是他会追问的下一句。
+//
+// measured 是上一发请求上游实报的输入 token：与 before（我们的估算）一起看
+// 就知道自己的估法是高估还是低估，排查「总是提前压」时是关键线索。
+func compactEvent(phase string, before, after, dropped, kept int, lim aiContextLimits, budget int, summarized bool) map[string]any {
+	return map[string]any{
+		"phase":    phase,
+		"before":   before,
+		"after":    after,
+		"dropped":  dropped,
+		"kept":     kept,
+		"window":   lim.Window,
+		"ceiling":  lim.Ceiling,
+		"limit":    budget,
+		"floor":    lim.Floor,
+		"measured": lim.Measured,
+		"summary":  summarized,
+	}
 }
 
 // estimateMessageTokens 单条历史消息的 token 估算。
@@ -366,7 +393,10 @@ func keepRecentCount(hist []db.AIMessage, budget int) int {
 // budget <= 0 时用自动预算。force 用于超窗兜底：上游已经报过 400 之后
 // 不再等「待压缩段攒够 keep 条」——那时候必须真的压下去，否则重试
 // 只会原样再撞一次。
-func (a *AIService) buildAIMessagesWithin(ctx context.Context, cfg AIProfile, convID, mode string, budget int, force bool) ([]map[string]interface{}, error) {
+//
+// sink 非空时在压缩前后各发一条 compact 事件：摘要是一次真正花钱、要等几秒的
+// 模型调用，不告诉用户，表现就是「发出去之后卡住半天，然后 AI 忽然不记得前文了」。
+func (a *AIService) buildAIMessagesWithin(ctx context.Context, cfg AIProfile, convID, mode string, budget int, force bool, sink EventSink) ([]map[string]interface{}, error) {
 	hist, err := a.App.DB.ListAIMessages(convID)
 	if err != nil {
 		return nil, err
@@ -403,10 +433,20 @@ func (a *AIService) buildAIMessagesWithin(ctx context.Context, cfg AIProfile, co
 		toSum := hist[:len(hist)-keep]
 		if len(toSum) >= keep || force {
 			recent := hist[len(hist)-keep:]
+			// 压缩前先播报：摘要本身是一次要等几秒的模型调用，
+			// 这几秒里界面上必须有个「正在压缩」的说法。
+			before := estTokens(hist)
+			lim := contextLimitsOf(cfg)
+			lim.Measured = lastRequestSize(convID)
+			if sink != nil {
+				sink.Event("compact", compactEvent("start", before, 0, len(toSum), len(recent), lim, budget, false))
+			}
+			summarized := false
 			if summary, serr := a.summarizeAndStore(ctx, cfg, conv, toSum); serr == nil {
 				_ = a.App.DB.DeleteOldAIMessages(convID, keep)
 				hist = recent
 				conv.Summary = summary
+				summarized = true
 			} else {
 				// 摘要失败（多为摘要请求自己也超窗或上游抖动）：不能就这么算了，
 				// 否则每轮都会拿同一份超长历史重试、每次都失败、每轮都撞 400。
@@ -415,6 +455,9 @@ func (a *AIService) buildAIMessagesWithin(ctx context.Context, cfg AIProfile, co
 				logger.W("[ai] 摘要压缩失败 conv=%s，降级为硬截断: %v", convID, serr)
 				_ = a.App.DB.DeleteOldAIMessages(convID, keep)
 				hist = recent
+			}
+			if sink != nil {
+				sink.Event("compact", compactEvent("done", before, estTokens(recent), len(toSum), len(recent), lim, budget, summarized))
 			}
 		}
 	}

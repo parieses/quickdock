@@ -13,12 +13,12 @@ import { computed, nextTick, ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAiCostPreference } from '../composables/useAiCostPreference'
 import {
-  ArrowDown, Bot, ChevronDown, ChevronRight, Copy, FileText, Pencil, Play, RotateCcw, StickyNote, Undo2, Wrench,
+  ArrowDown, Bot, Check, ChevronDown, ChevronRight, Copy, FileText, Loader2, Pencil, Play, RotateCcw, StickyNote, Undo2, Wrench,
 } from '@lucide/vue'
 import AgentRunTree from './AgentRunTree.vue'
 import AiDiffView from './AiDiffView.vue'
 import type { LiveBlock } from '../composables/useAiMarkdownBlocks'
-import type { AIRun } from '../utils/aiRuns'
+import type { AICompact, AIRun } from '../utils/aiRuns'
 import { pickActiveRun } from '../utils/aiRuns'
 import type {
   AIArtifact, AICheckpointView, AIJobRow, AIMessage, AIMsgImage, AIRuleFile, AIStreamStat, AIToolCall,
@@ -90,6 +90,7 @@ const props = defineProps<{
 const NO_TOOLS: AIToolCall[] = []
 const NO_BLOCKS: LiveBlock[] = []
 const NO_RULES: AIRuleFile[] = []
+const NO_COMPACTS: AICompact[] = []
 
 /** 这一页该画的那条流（多条任务同时跑时只取属于当前会话的那条） */
 const activeRun = computed<AIRun | null>(
@@ -100,6 +101,11 @@ const reasoningText = computed(() => activeRun.value?.reasoning ?? '')
 const streamTools = computed<AIToolCall[]>(() => activeRun.value?.tools ?? NO_TOOLS)
 const streamBlocks = computed<LiveBlock[]>(() => activeRun.value?.blocks ?? NO_BLOCKS)
 const runRules = computed<AIRuleFile[]>(() => activeRun.value?.rules ?? NO_RULES)
+// 这一轮的上下文压缩记录：通常一行都没有，长会话里才会有 1～2 行。
+// 数字一律走下面那个 fmtTokens（与设置页、气泡费用同一套口径）——
+// 界面上看到的两处 token 数必须是同一种写法，否则「48k」和「48.2K」会让人
+// 以为是两个不同的量。
+const runCompacts = computed<AICompact[]>(() => activeRun.value?.compacts ?? NO_COMPACTS)
 // 流式期的产物：file_write 返回的当下就挂出来，等 done 再显示会让
 // 「文件已经写完了」和「看得见」之间隔一整轮回答。
 const streamArtifacts = computed<AIArtifact[]>(() => artifactsFromCalls(streamTools.value))
@@ -791,6 +797,32 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
              然后开始动手」，往上翻历史时它会跟着一起滚走。 -->
         <slot name="plan" />
 
+        <!-- 上下文压缩：一条分隔行插在流式气泡之前。
+             位置和语义都对：压缩发生在「这一问的上下文刚组装完、还没调模型」那一刻，
+             所以它在时间线上就是回答之前的一件事。
+             为什么不留到 done 再显示：摘要是一次几秒的模型调用，这几秒里界面
+             原本一片空白，用户会以为卡死去点停止；而点完恰好吃掉一条正在写库的摘要。
+             第二步（done）只把同一行改文案，不新增一行——一次压缩只该出现一次。 -->
+        <div
+          v-for="c in runCompacts"
+          :key="c.id"
+          class="ai-compact"
+          :class="{ 'is-running': c.phase === 'start' }"
+          :title="t('aiCompactTitle', { window: fmtTokens(c.window), limit: fmtTokens(c.limit), floor: fmtTokens(c.floor) })"
+        >
+          <Loader2 v-if="c.phase === 'start'" :size="12" class="ai-compact-ico is-spin" />
+          <Check v-else :size="12" class="ai-compact-ico" />
+          <span class="ai-compact-text">
+            {{ c.phase === 'start' ? t('aiCompacting') : t('aiCompacted') }}
+          </span>
+          <span v-if="c.phase === 'done'" class="ai-compact-num">
+            {{ fmtTokens(c.before) }} → {{ fmtTokens(c.after) }}
+          </span>
+          <!-- 摘要失败时降级为硬截断：必须说，否则用户看到「压缩了但 AI 还是忘了
+               中间那段」，会以为是模型的问题而不是这里退化了。 -->
+          <span v-if="c.phase === 'done' && !c.summary" class="ai-compact-warn">{{ t('aiCompactTruncated') }}</span>
+        </div>
+
         <!-- 流式思考：与历史消息、工具卡片同一口径，默认收起。
              长推理动辄几千字，常驻展开会把正文挤到屏幕外；摘要行给出实时字数，
              首字之前那十几秒仍有「它还在动」的进度可看，想看过程自己点开。
@@ -1156,6 +1188,42 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-family: var(--font-mono);
 }
+
+/* 上下文压缩的分隔行。
+   两侧的细线不是装饰：这一行说的是「时间线上的一件事」，不是某个人说的话，
+   没有线就会跟下面那条 AI 回答混成一体。文字固定居中，所以压缩前后只换字不换位。 */
+.ai-compact {
+  display: flex; align-items: center; gap: var(--space-2);
+  margin: var(--space-3) 0;
+  font-size: var(--text-xs); color: var(--color-text-muted);
+}
+
+.ai-compact::before,
+.ai-compact::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--color-border);
+}
+
+.ai-compact-ico { flex: none; }
+.ai-compact-ico.is-spin { animation: ai-compact-spin 900ms linear infinite; }
+@keyframes ai-compact-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+.ai-compact-text { flex: none; }
+
+/* 「48k → 12k」：等宽字体让两个数位数对齐，压缩前后的量级差一眼看得出来 */
+.ai-compact-num {
+  flex: none;
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+}
+
+.ai-compact-warn { flex: none; color: var(--color-warning); }
+
+/* 压缩进行中给一点强调色：那是唯一一个「正在花你的钱等几秒」的状态 */
+.ai-compact.is-running { color: var(--color-text-secondary); }
+.ai-compact.is-running .ai-compact-ico { color: var(--color-accent); }
 
 
 .ai-tool-err {

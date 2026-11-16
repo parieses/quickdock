@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"encoding/json"
 	"regexp"
 	"strconv"
 	"strings"
@@ -153,14 +154,38 @@ func contextWindowOf(cfg AIProfile) int {
 	return aiContextDefaultWindow
 }
 
-// aiContextBudget 返回「历史 + 工具结果」可用的 token 预算。
+// aiContextOverhead 系统提示、工具定义与估算误差的固定预留。
 //
-// 窗口不能全给输入：max_tokens 是预扣而不是上限，上游会把
-// 「输入 + 预留输出」一起跟窗口比（DeepSeek 的报错就直接写明
-// "10001 in the prompt, 0 for the completion"）。所以先扣掉输出预留
-// 与系统提示/工具定义的位置，再只取七成——我们自己的 token 估算
-// 与真实分词器之间有 1.5 倍以上的差距，压到边上等于每轮都撞 400。
-func aiContextBudget(cfg AIProfile) int {
+// 原来只当「几百 token」处理，实际不是：65 个 MCP 工具的 JSON schema
+// 本身就有一两万 token，再加上系统提示、记忆、规则文件，光固定部分就
+// 能吃掉小窗口的一大半。这一项只做兜底——真正发出去之前会用
+// aiPayloadTokens 把工具定义实测一遍（见 agent_run.go 的请求前守卫）。
+const aiContextOverhead = 2000
+
+// aiContextLimits 一次请求的上下限快照。
+//
+// 「上下限」是四个数而不是一个，因为它们回答的是不同的问题：
+//
+//	Window  硬上限：模型的物理窗口，超了上游直接 400；
+//	Ceiling 出站上限：窗口扣掉输出预留后的可用输入空间，这是请求真正的天花板；
+//	History 软上限：历史预算，到这里就该摘要压缩，留出估算误差的余量；
+//	Floor   下限：压缩之后至少要留住的历史量，低于它就没有压的意义了。
+//
+// 分成四个数是因为「拿窗口当一个阈值」两头都错：按 Window 判太晚（一定 400），
+// 按 History 判太早（还没超窗就把能留住的历史压掉了）。
+type aiContextLimits struct {
+	Window  int
+	Output  int
+	Ceiling int
+	History int
+	Floor   int
+	// Measured 上一发请求的实测输入 token（上游 usage 报的，0 = 还没有）。
+	// 它比任何估算都准，有它时判断超限就以它为准。
+	Measured int
+}
+
+// contextLimitsOf 算出某个档案当前的上下限。
+func contextLimitsOf(cfg AIProfile) aiContextLimits {
 	w := contextWindowOf(cfg)
 	out := cfg.MaxTokens
 	if out <= 0 {
@@ -171,15 +196,122 @@ func aiContextBudget(cfg AIProfile) int {
 	if out > w/4 {
 		out = w / 4
 	}
-	// 2000 留给系统提示、工具定义，以及估算误差的固定部分。
-	b := (w - out - 2000) * 7 / 10
-	if b > aiContextSoftCap {
-		b = aiContextSoftCap
+	ceiling := w - out - aiContextOverhead
+	if ceiling < 1024 {
+		ceiling = 1024
 	}
-	if b < aiContextMinBudget {
-		b = aiContextMinBudget
+	// 只取七成：我们自己的 token 估算与真实分词器之间有 1.5 倍以上的差距，
+	// 压到边上等于每轮都撞 400。
+	history := ceiling * 7 / 10
+	if history > aiContextSoftCap {
+		history = aiContextSoftCap
+	}
+	if history < aiContextMinBudget {
+		history = aiContextMinBudget
+	}
+	if history > ceiling {
+		history = ceiling
+	}
+	// 下限同时受两头夹：不超过软上限（小窗口上软上限本来就很小），
+	// 也不低于 1K（再低等于把历史清空，下一句就接不上了）。
+	floor := aiContextMinBudget
+	if floor > history {
+		floor = history
+	}
+	if floor < 1024 {
+		floor = 1024
+	}
+	return aiContextLimits{Window: w, Output: out, Ceiling: ceiling, History: history, Floor: floor}
+}
+
+// aiContextBudget 返回「历史 + 工具结果」可用的 token 预算（= 软上限）。
+func aiContextBudget(cfg AIProfile) int {
+	return contextLimitsOf(cfg).History
+}
+
+// requestSizes 每条会话最近一次请求的实测输入 token（上游 usage 报的）。
+//
+// 为什么值得缓存：我们自己的估算与真实分词器差得很远（中文、代码、JSON
+// 的偏差方向都不一样），而 usage.prompt_tokens 是厂商自己数的。一次真实值
+// 就能把后面每一轮的判断校准回来——尤其是「上一发已经占了 9 成、这一发
+// 还要再塞 3 万 token 的工具结果」这种靠估算永远判不准的情况。
+//
+// 按会话缓存、进程内即可：重启后第一发按估算走，拿到 usage 就补回来。
+var requestSizes sync.Map
+
+// rememberRequestSize 记下这一发请求的实测大小。
+func rememberRequestSize(convID string, n int) {
+	if convID == "" || n <= 0 {
+		return
+	}
+	requestSizes.Store(convID, n)
+}
+
+// lastRequestSize 取这条会话上一发的实测大小（0 = 还没测过）。
+func lastRequestSize(convID string) int {
+	if convID == "" {
+		return 0
+	}
+	if v, ok := requestSizes.Load(convID); ok {
+		if n, _ := v.(int); n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+// aiLoopBudgetThisTurn 这一轮的工具结果预算：以上一发实测用量为准收紧。
+//
+// 默认预算（aiLoopBudget）是按窗口算的静态值，它假设「上下文是空的、从零开始长」。
+// 多轮工具循环里不成立：上一发可能已经占掉窗口八成，这一轮再按三分之一的额度
+// 往里塞工具结果，就等于往一条快满的管道里继续加水——表现是循环跑到第三四轮
+// 突然 400，而前几轮都好好的。
+//
+// curTokens 是当前消息列表的估算大小，remain 是「离出站上限还剩多少」，
+// 两者相加才是这一轮真正能容忍的体积；再按默认预算封顶（别因为余量大就放宽，
+// 历史越长每轮重发越贵）。
+func aiLoopBudgetThisTurn(cfg AIProfile, convID string, base, curTokens int) int {
+	if base <= 0 {
+		base = 24000
+	}
+	used := lastRequestSize(convID)
+	if used <= 0 {
+		return base
+	}
+	lim := contextLimitsOf(cfg)
+	if lim.Ceiling <= 0 {
+		return base
+	}
+	// 与请求前守卫同一个 85%：留一成半给分词器差异。
+	remain := lim.Ceiling*85/100 - used
+	if remain < 8000 {
+		// 剩得不多时也不能把预算压成 0：一条全新的工具结果（读一个文件）
+		// 至少要几 K，压得太狠的结果是模型反复重试同一个调用。
+		remain = 8000
+	}
+	b := curTokens + remain
+	if b > base {
+		b = base
+	}
+	if b < 8000 {
+		b = 8000
 	}
 	return b
+}
+
+// aiPayloadTokens 估算「真正要发出去的那一坨」有多大：消息 + 工具定义。
+//
+// 与 estimateLoopTokens 的分工：那个只看消息（循环内判断要不要折叠工具结果），
+// 这个把工具定义也算进去——请求前守卫要回答的是「这一发会不会 400」，
+// 而工具 schema 是每一发都要重发的固定成本，漏掉它就会长期系统性低估。
+func aiPayloadTokens(messages []map[string]interface{}, tools []map[string]any) int {
+	n := estimateLoopTokens(messages)
+	if len(tools) > 0 {
+		if b, err := json.Marshal(tools); err == nil {
+			n += len([]rune(string(b))) * 10 / 16
+		}
+	}
+	return n
 }
 
 // aiLoopBudget 本轮工具循环内的工具结果预算。

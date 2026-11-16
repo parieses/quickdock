@@ -459,6 +459,7 @@ export function useAiRuns(deps: AiRunsDeps) {
       reasonBuf: '',
       tools: [],
       rules: [],
+      compacts: [],
       blocks: [],
       error: '',
       startedAt: performance.now(),
@@ -711,6 +712,36 @@ export function useAiRuns(deps: AiRunsDeps) {
               ? (data.files as any[]).map((f) => ({ name: String(f?.name || ''), bytes: Number(f?.bytes) || 0, truncated: !!f?.truncated }))
               : []
             break
+          case 'compact': {
+            // 上下文压缩的开始 / 结束（后端 ai_chat.go 的 buildAIMessagesWithin
+            // 与请求前守卫都会发）。两条一组：start 先挂一行「正在压缩」，
+            // done 到了就地把同一行改成「已压缩 48k → 12k」。
+            //
+            // 为什么不在 done 时才加：摘要本身是一次几秒的模型调用，
+            // 这段时间界面上原本什么都没有——用户以为卡死了就会去点停止，
+            // 而点完恰好吃掉一条正要写库的摘要。
+            const num = (v: unknown) => (Number(v) || 0)
+            const patch = {
+              before: num(data.before),
+              after: num(data.after),
+              dropped: num(data.dropped),
+              kept: num(data.kept),
+              window: num(data.window),
+              ceiling: num(data.ceiling),
+              limit: num(data.limit),
+              floor: num(data.floor),
+              summary: !!data.summary,
+            }
+            const last = run.compacts[run.compacts.length - 1]
+            if (data.phase === 'start' || !last || last.phase === 'done') {
+              run.compacts.push({ id: ++runSeq, phase: 'start', ...patch })
+            } else {
+              // 已有待完成的 start：原地补齐。保留 id，否则那一行的 DOM
+              // 会被重建，进度动画从头闪一下。
+              Object.assign(last, patch, { phase: 'done' })
+            }
+            break
+          }
           case 'notice':
             // 后端主动告知的过程事件（上下文超窗已压缩、引用读取失败等）。
             // 必须让用户看见：多条问题一起消失时，不说一声就像「AI 忽然忘事」。

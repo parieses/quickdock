@@ -84,8 +84,13 @@ func TestContextBudgetScalesWithWindow(t *testing.T) {
 	if big > aiContextSoftCap {
 		t.Fatalf("预算超过软上限: %d", big)
 	}
-	if small < aiContextMinBudget {
-		t.Fatalf("预算低于下限: %d", small)
+	// 下限让位于物理上限：4K 窗口上「至少给历史留 8000」是不可能兑现的，
+	// 硬撑到 8000 只会让每一发都撞 400。这时预算必须收到出站上限以内。
+	if small > contextLimitsOf(AIProfile{Model: "phi-3-mini", MaxTokens: 1024}).Ceiling {
+		t.Fatalf("预算超过了出站上限（压到边上必然 400）: %d", small)
+	}
+	if small <= 0 {
+		t.Fatalf("预算被压成非正数: %d", small)
 	}
 	// 老版本的固定 3000 是这次要修的问题：128K 窗口下必须明显更高，
 	// 否则第 4、5 轮就把前面全摘要掉了。

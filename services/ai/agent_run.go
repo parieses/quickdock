@@ -502,7 +502,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		messages = a.subAgentMessages(cfg, mode, req.Role, message)
 	} else {
 		var berr error
-		messages, berr = a.buildAIMessages(ctx, cfg, res.ConvID, mode)
+		messages, berr = a.buildAIMessages(ctx, cfg, res.ConvID, mode, sink)
 		if berr != nil {
 			logger.W("[ai] 组装上下文失败 conv=%s mode=%s: %v", res.ConvID, mode, berr)
 			sink.Event("error", map[string]any{"message": berr.Error()})
@@ -594,6 +594,66 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 是这类功能最常见的抱怨，而用户没法自己看出 AI 到底读没读到。
 	if len(rules.Files) > 0 {
 		sink.Event("rules", map[string]any{"files": rules.Files})
+	}
+
+	// ── 请求前实测：这一发到底有多大 ──
+	//
+	// buildAIMessages 估的是「库里历史有多长」，但真正发出去的还有三样它看不见：
+	// 系统提示（记忆 + 技能 + 规则）、工具定义（几十个 MCP 工具的 JSON schema
+	// 本身就有一两万 token）、以及 @ 引用展开的正文（最多几百行）。
+	// 少算这三样，估算与上游实测能差出一倍——「估算说还有余量、请求却 400」
+	// 基本都是这么来的。
+	//
+	// 所以这里在一切都挂好之后按**真实载荷**量一次：超了就在发出去之前压，
+	// 而不是等 400 回来再重试（那时用户已经白等了一整个上游超时）。
+	//
+	// 子 agent 跳过：它的上下文只有角色提示 + 一条 task（见 subAgentMessages），
+	// 没有历史可压，压了反而会去读父会话——正是 Fresh 要避免的事。
+	if !req.Fresh {
+		// 留 15% 余量：我们按「字数 ÷ 1.6」估 token，中文与 JSON 的真实
+		// 分词普遍更贵，贴着天花板发等于赌分词器的心情。
+		const preflightMargin = 85
+		prevUsed := 0
+		for pass := 0; pass < 2; pass++ {
+			lim := contextLimitsOf(cfg)
+			lim.Measured = lastRequestSize(res.ConvID)
+			used := aiPayloadTokens(messages, tools)
+			// 上一发的实测比这一发的估算还大时以实测算：估算偏低是常态，
+			// 而 usage.prompt_tokens 是厂商自己数的（见 rememberRequestSize）。
+			if lim.Measured > used {
+				used = lim.Measured
+			}
+			ceiling := lim.Ceiling * preflightMargin / 100
+			// 上一轮压完体积几乎没降：说明大头不在历史里（超大的工具定义、
+			// 超长 @ 引用，或者窗口本身就小于固定开销）。再压一次只是白付
+			// 一次摘要调用的钱和几秒等待，直接让它发出去。
+			if pass > 0 && used >= prevUsed*95/100 {
+				logger.I("[ai] 请求前压缩无明显效果，停止 conv=%s used=%d prev=%d", res.ConvID, used, prevUsed)
+				break
+			}
+			// 已经压到下限就没得压了：再压等于把对话清空，而请求未必会失败
+			// （估算本身有误差）。让它发出去，真超了还有下面 400 那条兜底。
+			if used <= ceiling || used <= lim.Floor {
+				break
+			}
+			prevUsed = used
+			logger.I("[ai] 请求前实测超限 conv=%s used=%d ceiling=%d window=%d pass=%d",
+				res.ConvID, used, ceiling, lim.Window, pass+1)
+			// 目标是上限的一半而不是刚好压到线上：只压掉刚超出的那一点，
+			// 下一轮工具结果一长就又超，等于每轮多付一次摘要的钱。
+			newMsgs, berr := a.buildAIMessagesWithin(ctx, cfg, res.ConvID, mode, ceiling/2, true, sink)
+			if berr != nil || len(newMsgs) == 0 {
+				logger.W("[ai] 请求前压缩无果 conv=%s: %v", res.ConvID, berr)
+				break
+			}
+			// system / 规则 / @ 引用要重新贴回去：压缩换掉的是整个消息列表，
+			// 而这三样只存在于内存里（与下面超窗兜底里那段是同一份处理）。
+			baseSystem = firstSystem(newMsgs)
+			baseSystem = withRules(baseSystem, rules)
+			applySystemHints(newMsgs, baseSystem, mode, cwd, len(tools) > 0, modeHasTools && len(tools) == 0)
+			applyMentionBlock(newMsgs, mentionBlock)
+			messages = newMsgs
+		}
 	}
 
 	// 流式调用模型，逐段写入 sink。
@@ -717,7 +777,12 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 
 		// 每轮开头压一次上下文：工具结果是在循环中间长出来的，
 		// buildAIMessages 里那次摘要压缩管不到这里。
-		compactLoopMessages(messages, loopBudget)
+		//
+		// 预算随「上一发的实测用量」收紧：compactLoopMessages 的默认预算是按
+		// 窗口的三分之一算的，那是个静态值——长会话里上一发可能已经占掉八成，
+		// 再按三分之一往里塞工具结果，这一发就撞线了。上游报过 prompt_tokens
+		// 之后，这一轮能给工具结果留的空间就是「上限 - 已用」，比固定值准。
+		compactLoopMessages(messages, aiLoopBudgetThisTurn(cfg, res.ConvID, loopBudget, estimateLoopTokens(messages)))
 
 		// 后台任务结束的通知：在下一轮模型调用前递过去。
 		//
@@ -836,7 +901,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			if req.Fresh {
 				break
 			}
-			newMsgs, berr := a.buildAIMessagesWithin(ctx, cfg, res.ConvID, mode, rebudget, true)
+			newMsgs, berr := a.buildAIMessagesWithin(ctx, cfg, res.ConvID, mode, rebudget, true, sink)
 			if berr != nil {
 				break
 			}
@@ -856,6 +921,10 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			})
 		}
 		totalUsage = addTokenUsage(totalUsage, turn.Usage)
+		// 记下这一发的实测输入大小：下一轮判断要不要压时，它比我们的估算可信
+		// （上游自己分的词）。多轮循环里上下文是逐轮长出来的，这个数字每轮刷新，
+		// 于是「已经用了九成、再塞一轮工具结果就会超」这件事终于判得准了。
+		rememberRequestSize(res.ConvID, turn.Usage.Prompt)
 		// 段落用量单独累：落库是分段落的，每条回复只该记自己那几次调用的 token，
 		// 否则插话后的第二段会把第一段的花费再算一遍。
 		segUsage = addTokenUsage(segUsage, turn.Usage)

@@ -34,6 +34,8 @@ export interface AIRun extends RunLike {
   reasonBuf: string
   tools: AIToolCall[]
   rules: AIRuleFile[]
+  /** 这一轮的上下文压缩记录（通常 0～2 行） */
+  compacts: AICompact[]
   blocks: LiveBlock[]
   /** 只属于这一条的错误（切走再切回来仍能看到失败原因） */
   error: string
@@ -52,6 +54,37 @@ export interface AIRun extends RunLike {
   stoppedByUser?: boolean
   /** 发送时定下的模型名（done 事件没回传时用它） */
   model: string
+}
+
+/**
+ * 一次上下文压缩的过程记录。
+ *
+ * 由后端 compact 事件驱动，两条一组：start（正在压缩）与 done（压完了）。
+ * 为什么要在界面上留一行：摘要压缩是一次真正花钱、要等几秒的模型调用，
+ * 而且它会把旧消息从库里删掉——不说明的话，用户看到的是「发出去之后卡住
+ * 半天，然后 AI 忽然不记得前面聊过什么」，像 bug 而不像设计。
+ *
+ * before / after 是一对估算值（我们自己按字数折算的），measured 是上一发
+ * 请求上游实报的输入 token。界面上只显示 before → after，measured 留着排查用。
+ */
+export interface AICompact {
+  /** v-for 的稳定 key（递增序号，不随 DOM 重建而变） */
+  id: number
+  phase: 'start' | 'done'
+  /** 压缩前的历史估算 token */
+  before: number
+  /** 压缩后的历史估算 token（start 阶段为 0） */
+  after: number
+  /** 被压掉的条数 / 留下的条数 */
+  dropped: number
+  kept: number
+  /** 模型的物理窗口、出站上限、本次历史预算、下限 */
+  window: number
+  ceiling: number
+  limit: number
+  floor: number
+  /** 摘要是否真的生成了（false = 摘要失败、降级为硬截断最旧部分） */
+  summary: boolean
 }
 
 export function pickActiveRun<T extends RunLike>(
