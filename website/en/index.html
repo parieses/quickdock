@@ -358,6 +358,26 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">One UI toolkit everywhere, AI actions in schedules, more for weather and SSH</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>Dialogs, switches and segmented controls now have exactly one implementation each. Before this there were seven dialog shells (different radii, padding, overlay tint, close button and size steps), two switch sizes and five segmented skins, so the same action looked different depending on which page you were on. Unifying them also unified Esc-to-close, click-the-backdrop-to-close and focus handling — including the old cases where clicking the backdrop did nothing or focus never came back after closing.</li>
+          <li>Destructive actions no longer leave a "click twice to confirm" trap behind. Arming a delete button used to persist after you moved to another row, so a stray second click deleted the wrong thing. Everything now goes through an in-app confirm that states the consequence before you press the red button. Anything you could do with a mouse also works from the keyboard: cards, headers and collapse bars are reachable with Tab and fire on Enter / Space, and collapse headers announce their state to screen readers.</li>
+          <li>A failing backend call no longer looks like "nothing happened" — errors are surfaced and logged. A few paths that used to fail silently (clearing old logs, the crash list, the pause switch in the log viewer) now say so, and a failed pause flips the switch back instead of pretending it worked while logs keep streaming.</li>
+          <li>A failed lazy chunk no longer leaves a blank region. During development, dependency pre-bundling makes lazily loaded modules fail with 504; the old retry gave up after 1.8 seconds and the kept-alive SSH window never remounts, so the only way out was restarting the app. Retries now back off to about 8 seconds, and a persistent failure renders a panel with the error text and a retry button.</li>
+          <li>Scheduled tasks can run an AI prompt: at the scheduled time the prompt goes to the assistant and the answer is appended to a single conversation by run time, with a dedicated space and unread marker in the AI page and a history entry that links back to the conversation that produced it. Tasks can carry a validity window that disables them and stops scheduling at expiry — otherwise they sit at enabled forever and the list keeps showing "due". Runs missed while the machine was off are caught up within a window instead of replaying a whole week on boot. Notifications can be set to every run, failures only, or off, with the notification center still keeping a record.</li>
+          <li>Weather is no longer tied to a single source. Open-Meteo and wttr.in work without a key, HeFeng and Caiyun accept one, and the default auto mode switches between the two keyless sources — or you can pin one while debugging. An unreachable source falls through to the next, and if every source fails the last good result stays on screen instead of the card going blank. The day/night check for other cities was fixed too: checking New York from Beijing in the evening used to draw a sun.</li>
+          <li>SSH picked up a batch of everyday conveniences: URLs in the terminal open on click, keyword search jumps through output, tabs can be dragged to reorder, and a command can be broadcast to several sessions (sent one by one, each confirmed, so nobody rm -rf's ten machines at once). OpenSSH config can be imported one-way (read-only, never written back). ProxyCommand, post-login commands and multi-round keyboard-interactive prompts are supported. SFTP writes go through a temp file and an atomic replace, with a remote hash check before saving — a file changed elsewhere produces a clear error instead of being silently overwritten. Screen content sent to the AI is redacted first: PEM blocks, key assignments, --token flags, credentials inside URLs, Bearer tokens and vendor tokens are stripped before the model sees them.</li>
+          <li>Notes had a bug that could actually lose data: after saving and switching back, the document appeared empty. The local snapshot never picked up the saved body, and the next autosave wrote that empty body back to the database, turning a display glitch into real data loss. Revision history now uses readable Chinese labels instead of raw <code>save</code> / <code>rollback</code> values.</li>
+          <li>The MCP server gained an SSH tool domain: list saved hosts, read the terminal screen, list and read over SFTP, and run restricted commands. No host is authorized by default — you opt in per host — and write, upload and delete tools are deliberately absent, backed by a per-host gate, command risk classification and an audit log that records commands but never output. The tool count is now 65, with 62 enabled by default.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.49</span>
+          <span class="log-date">2026-11-12</span>
           <span class="log-title">The password vault is here: web logins autofill, SSH passwords get a home</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -406,21 +426,6 @@
         </ul>
       </details>
 
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.46</span>
-          <span class="log-date">2026-11-10</span>
-          <span class="log-title">Startup lock, and no more white flash when a panel opens</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>Startup lock: lock the interface when you step away. The main window and every detached window collapse to one unlock box, and panel hotkeys bring up the main window with a hint instead. Everything behind keeps running — monitors, scheduled tasks, mail codes, weather, the clipboard listener, SSH sessions, the MCP listener. MCP tool calls are refused wholesale while locked (handing the whole database to any local process would defeat the point); window tiling <code>Ctrl+Alt+W</code> and screenshots <code>F1</code> stay allowed.</li>
-          <li>The password itself: bcrypt, then DPAPI, then app_state — a table deliberately left out of WebDAV backups, so the password never travels with a sync and restoring elsewhere means setting it again. A one-time recovery code is shown when you set it (only its hash is stored); use it to clear the password if you forget. Five wrong tries start a backoff that doubles up to five minutes, timed in the backend.</li>
-          <li>Unlocks on the last keystroke: the length is recorded when the password is set or changed, and the box submits as soon as that many characters are in — no Enter needed. Counted in characters, so emoji work; IME composition is skipped so pinyin can't trigger it mid-word. Passwords set before this release pick the length up on their first successful unlock.</li>
-          <li>The white flash when a panel opens is gone. When Wails hides a window it also makes the WebView2 controller invisible, which releases the GPU surface; the first frame after showing again is empty, and it is drawn inside the WebView2 child window, above our client area — window background and DWM material cannot cover it (both themes flash the same pure white). Windows are now moved off-screen before showing and moved back 60ms later. The material rewrite on a single wake-up also went from two passes to one.</li>
-          <li>Performance: the notes panel's CodeMirror core loads on demand, saving about 300KB on the main window's first paint; log tailing gets an 8MB budget and drops an O(n²) prepend, so multi-hundred-megabyte runtime logs no longer load whole; app_state reads get an in-process cache, cutting three DB round-trips per clipboard copy; the dashboard heat grid and two search highlighters moved into computed caches.</li>
-        </ul>
-      </details>
 
     </div>
 
