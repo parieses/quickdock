@@ -358,6 +358,26 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">Cloud drive and cross-machine migration arrive; AI permissions collapse to three levels, downloads survive restarts</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>New "Cloud Drive" page: OpenList aggregates your cloud accounts into WebDAV and QuickDock draws its own browser instead of embedding the vendor console. Browse directories, preview images / video / audio / PDF / text inline (video seeking works), create / rename / delete, search and sort. Sending a batch to the downloader now carries real file names instead of a row of "f". The gateway is still installed and managed under Environment → OpenList, and its admin password is re-synced on every start — a drifted password used to leave the drive page permanently empty with no error.</li>
+          <li>Switching computers no longer means setting everything up again: Settings → Storage now has whole-install export / import. Machine A packs everything into one zip (including a consistent database snapshot); importing on machine B <em>merges</em> rather than replaces — records already on B are kept as-is, only missing ones are added, and there is no directory switch or restart. The credential vault can be sealed into the package with a passphrase and restored on B with the same phrase; leave it blank to migrate data only. Packages are validated and their origin shown before import, with progress throughout.</li>
+          <li>AI execution permissions collapse into one three-level axis: read-only / default / full access. On read-only, write tools are never attached to the model — not attached-then-blocked. Full access needs a one-time risk acknowledgement to take effect; tightening back is a single step. The old "capability tier" and the switch beside it fold in here, so there is no longer a pair of toggles to combine mentally. The level can also be changed on the new-task landing page and applies from your very first message.</li>
+          <li>Using a skill no longer triggers an out-of-scope confirmation, and you can tell whether it actually took effect: reading a selected skill's SKILL.md no longer prompts just because it lives outside the task directory. Your message bubble now shows which skills were actually attached, so you don't have to infer it from the answer. A related bug where a newly selected skill only worked from the second message is fixed too.</li>
+          <li>Downloads and their history no longer vanish on restart: aria2 forgets finished tasks when its process exits, so status, size, errors and finish time are now persisted, and the engine is asked to save its session before shutting down. Finished / failed jobs stay in the list as history entries offering only "open folder / delete record" — no more rows of controls that do nothing.</li>
+          <li>AI tool switches are now two independent sets: toggling something in the MCP panel no longer changes the AI settings, and vice versa — previously either side could silently turn off the other. Tool capability assembly and execution also converge onto a single path, so read-only can't accidentally grow write operations, and the default / full boundary matches the three levels shown in the UI.</li>
+          <li>The "run at startup" switches for Everything and DSH move to their page headers using the same control as other runtimes. With resident mode off, the file-search toggle can no longer quietly start Everything in the background — before, the UI showed off while the process ran. The duplicate checkbox inside the DSH panel is gone; the header is the single entry point.</li>
+          <li>The "?" info card beside each runtime in Environment now also opens for special entries not in the runtime list, such as DSH; previously it mistakenly showed node's description.</li>
+          <li>Replies now end with a fixed note: "AI-generated content — verify important information." The "Regenerate" button also moves from the bottom of the conversation onto the message you sent, so it's no longer a long scroll or an easy misclick.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.50</span>
+          <span class="log-date">2026-11-16</span>
           <span class="log-title">One UI toolkit everywhere, AI actions in schedules, more for weather, SSH and long conversations</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -410,23 +430,6 @@
         </ul>
       </details>
 
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.47</span>
-          <span class="log-date">2026-11-11</span>
-          <span class="log-title">Mail source view, runtime info cards, and a round of fixes</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>Mail codes now open the original message: HTML is rendered with the card's own styles, no remote assets and no scripts. Both MaxMind security-alert templates are recognized too, and password-change / new-location sign-in alerts are flagged separately and pushed to the notification center. Multi-account template quirks and connection error messages were tidied up along the way.</li>
-          <li>The "?" next to each runtime in Environment grew from a single sentence into an info card: group, what you can actually do on this page, a first-use tip, live status (installed versions / managed service / always-on switch / console port), plus website, docs and source links. The popover measures its real height to pick a side and scrolls internally when the content is long.</li>
-          <li>Weather city search no longer returns a pile of same-named villages. Typing "Henan" used to surface places literally called Henan in Heilongjiang, Zhejiang, Beijing, North Korea and Sichuan; provinces, abbreviations and both Chinese / English input now resolve to the provincial capital. Results are ranked by population and administrative level, with airports, hamlets and duplicate multilingual aliases filtered out. Cities with patchy Chinese indexing such as Haikou and Taipei are fixed as well.</li>
-          <li>Thoughts and tool calls in the AI assistant are now collapsed by default, including while streaming. The summary lines show a live character count / call count as progress, and only a click expands the content, so a long chain of thought or half a dozen tool calls no longer pushes the answer off screen.</li>
-          <li>Fixed "click any nav item and the whole content area goes blank": the dashboard template had become a fragment root, which collided with the out-in page transition. The leave hook never fired, so the placeholder stayed forever. The dialog is back inside the single root, and the page registry now spells out the single-root rule.</li>
-          <li>The first-use guide is easier to find: both Settings -&gt; About and the workspace empty-state guide link to it, with the URL kept in one place in the code.</li>
-          <li>Reliability: an aria2 download directory on a removed external drive no longer traps startup in an endless self-heal loop, and the same portable / system install no longer shows up as two versions. Clipboard probe failure logging, command-palette FTS5 queries, the SFTP permissions dialog, and a few note / download-settings interactions were fixed too.</li>
-        </ul>
-      </details>
 
 
     </div>

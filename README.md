@@ -8,7 +8,7 @@
 Windows 桌面工具。资源集合、快速启动、本地开发环境、若干常用工具，都放在一个窗口里。
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-4a9eff)
-![Version](https://img.shields.io/badge/Version-v0.0.50-4a9eff)
+![Version](https://img.shields.io/badge/Version-v0.0.51-4a9eff)
 ![License](https://img.shields.io/badge/License-MIT-4a9eff)
 ![Built with](https://img.shields.io/badge/Built%20with-Go%20%2B%20Vue-4a9eff)
 ![Framework](https://img.shields.io/badge/Framework-Wails%20v3-4a9eff)
@@ -31,8 +31,10 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 
 - **资源树**：工作空间 → 场景 → 集合 → 项目 四级结构，支持拖拽排序、FTS5 全文搜索、变量展开
 - **快捷键**：`Ctrl+Space` 主窗口、`Ctrl+K` 命令面板、`` Ctrl+` `` 剪贴板、`F1` 截图，均可改键
-- **运行环境**：29 种语言与服务，安装、切换版本、启停、看日志都在应用内完成
+- **运行环境**：30 种语言与服务，安装、切换版本、启停、看日志都在应用内完成
 - **AI**：能改文件、跑命令的本地 agent（每步可审批、可回滚），多模型对话、SSH 终端侧栏、剪贴板与笔记的快捷问答，对外提供 MCP 服务
+- **网盘**：自建浏览页接管聚合网关，在线预览 / 播放、批量下载交给下载器，不内嵌厂商后台
+- **跨机迁移**：整机数据导出 zip、在另一台电脑合并导入，密码库用口令加密随包带走
 - **密码库**：SSH、网站登录等场景共用一处，AES-256-GCM 本地加密、密钥由系统 DPAPI 包裹；配浏览器扩展可在网页里自动填充，不联网、不外传
 - **安装**：单文件，用户态安装，不需要管理员权限，更新就地替换
 - **锁定**：`Ctrl+Alt+L` 一键锁界面，后台任务照常跑；密码输满自动解锁，忘密码用一次性恢复码
@@ -83,7 +85,7 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 |------|------|
 | AI 助手 | OpenAI / DeepSeek / Kimi / 通义 / Ollama / Azure / 自定义兼容接口；SSE 流式、思考过程与工具调用默认收起、多会话，会话可重命名、搜索、星标置顶、一键摘要与导出 Markdown；Key 经 DPAPI 加密，编辑时可查看明文与一键复制 |
 | 提示词库 | 内置 13 条常用话术，可在「设置 → AI 助手」里增删改；输入框 `+` 面板按分类级联展开，插入时才替换 `{{date}}` 等变量，还能把本对话产物与工作目录文件挂成引用 chip |
-| AI agent | 内置 AI 能直接改文件、跑命令：执行前逐步审批（可按命令族记住）、写盘前快照与按步回滚、行级 diff、计划模式、项目规则文件、项目级钩子、@ 引用文件与历史对话、接入外部 MCP server；长命令转后台（面板看日志、可终止），回答生成中还能插话 |
+| AI agent | 内置 AI 能直接改文件、跑命令：执行前逐步审批（可按命令族记住）、写盘前快照与按步回滚、行级 diff、项目规则文件、项目级钩子、@ 引用文件与历史对话、接入外部 MCP server；执行权限三档（只读 / 默认 / 完全访问），只读档连写类工具都不挂载、完全访问需勾选风险确认；选中 skill 后读取其 SKILL.md 免越界确认，并在对话气泡上标出本次挂了哪些技能；长命令转后台（面板看日志、可终止），回答生成中还能插话，回答末尾固定标注「内容由 AI 生成，请核实重要信息」 |
 | 回答渲染 | LaTeX 公式、Mermaid 流程图、代码高亮、表格排序与 CSV 导出、html 代码块沙箱预览；图与公式可复制为图片；回答写过的文件挂成「产物」条，点开即预览，配置文件可在右侧面板直接编辑（CodeMirror 6） |
 | AI 用量统计 | 近 7 天 / 30 天 / 全部的估算花费、问答次数、Token，按模型与入口拆分，缓存命中单独列出 |
 | 图片理解 | 对话中粘贴、选择或拖入图片，按模型能力配置输入方式 |
@@ -93,8 +95,9 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 | DeepSeek Harness | 内嵌完整 Agent 编程入口，自动装填便携 Node，原生窗口承载 3080 端口；打开前校验 WebView2 版本，进程意外退出自动重拉 |
 | MCP 服务 | `http://127.0.0.1:9230/mcp`，65 个工具分只读、低危写、高危三级权限（默认开放 62 个）；含下载器工具域（查任务与进度、暂停 / 恢复 / 删除）与 SSH 工具域（列主机、SFTP 读、受限执行——默认一台主机都不授权，需逐台勾选 `mcpAllowed`，写文件与上传类工具刻意不注册）；高危的杀进程与执行系统指令恒不注册，等同工具不存在 |
 | Git 面板 | 对标 SourceTree 的仓库视角：分支 / 标签 / 远端 / 子模块管理，贮藏，文件历史与逐行归属（blame），amend、cherry-pick、revert，分支对比、side-by-side diff，SSH 密钥一键配置 GitHub / GitLab，多选批量操作与存档导出 |
-| 环境管理 | 29 种运行时，安装、切换、启停、配置、日志、控制台，全部在用户目录内；每个运行时标题旁的「?」给一张资料卡（分组、本页能做什么、上手提示、实时状态与官网 / 文档 / 源码链接）；可对项目目录做只读体检：版本声明逐个对照已装与激活版本，依赖清单（`package.json` / `go.mod` / `pyproject.toml` 等）出一份快照 |
-| 下载器 | 以 aria2 为引擎：链接、批量、磁力、种子、Metalink；状态分页与七标签详情、多选批量、速度曲线、下载前空间预检、失败重试、完成通知。可逐任务指定目录、按文件名独立建文件夹；大文件写满有磁盘守卫与引擎自愈，还支持换机续传导入。支持 BT 与远程引擎，也能在 MCP 里查进度 |
+| 环境管理 | 30 种运行时，安装、切换、启停、配置、日志、控制台，全部在用户目录内；每个运行时标题旁的「?」给一张资料卡（分组、本页能做什么、上手提示、实时状态与官网 / 文档 / 源码链接），DSH 等不在运行时列表里的特殊项也能单独打开自己的资料卡；可对项目目录做只读体检：版本声明逐个对照已装与激活版本，依赖清单（`package.json` / `go.mod` / `pyproject.toml` 等）出一份快照 |
+| 下载器 | 以 aria2 为引擎：链接、批量、磁力、种子、Metalink；状态分页与七标签详情、多选批量、速度曲线、下载前空间预检、失败重试、完成通知。可逐任务指定目录、按文件名独立建文件夹；大文件写满有磁盘守卫与引擎自愈，还支持换机续传导入。退出前让 aria2 自己落盘会话、历史跨重启保留（已完成 / 失败的任务不再凭空消失，标为历史项只留打开目录与删除）。支持 BT 与远程引擎，也能在 MCP 里查进度 |
+| 网盘 | 以 OpenList 为聚合网关（百度 / 夸克等转 WebDAV + 网页后台），自建浏览页而非内嵌厂商后台：目录浏览、图片 / 视频 / 音频 / PDF / 文本在线预览（本地代理只绑回环 + 随机令牌，视频拖进度原样透传 Range）、新建 / 重命名 / 删除 / 深搜与排序、批量下载交给下载器（显式传落盘名，不再全叫 f）。网关由环境管理托管，密码每次启动自动与网关库对齐 |
 | 知识库 | 把本地文档（Word / Excel / PDF / Markdown / 纯文本）导进来做问答与检索：中文走 FTS5 trigram，配了 embedding 模型就同时跑向量召回，两路按 RRF 融合。检索结果给到出处片段，可点回原文核对；文档按库分组，同一份文件只入库一次 |
 
 </details>
@@ -112,6 +115,7 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 | 文件搜索 | — | 接 Everything 的独立检索页：四态探测（未安装 / 未运行 / 索引进度 / 正常）带安装引导，支持查询语法提示、排序与条数、多选批量复制路径，右侧直接预览文件 |
 | WebDAV 同步与快照 | — | 全量 JSON 备份恢复、多版本、任意 WebDAV 服务器 |
 | 数据目录搬家 | — | 「设置 → 存储与同步」更换存储位置，整个数据目录打包迁移，重启生效 |
+| 跨机数据迁移 | — | A 机把整机数据导出成 zip（含 DB 一致性快照与 manifest），B 机在设置里导入：按行合并而非替换，同名记录保留本机、只补缺失、不换目录不用重启；密码库用用户口令封一份便携包随 zip 带走，换机解开后还原。导入前只读校验包内容，全程有进度提示 |
 | 界面缩放 | — | 主界面与全部独立窗口统一 1.15 倍等比放大 |
 
 </details>
@@ -565,12 +569,12 @@ AI 完成通知有前置判断：主窗口可见且当前停在 AI 对话页时�
 <details>
 <summary><b>环境管理</b></summary>
 
-29 种运行时的版本管理，安装、切换、启停都在用户目录内完成，不写注册表，不改系统 PATH，不申请管理员权限。
+30 种运行时的版本管理，安装、切换、启停都在用户目录内完成，不写注册表，不改系统 PATH，不申请管理员权限。
 
 | 分组 | 运行时 |
 |------|--------|
 | 语言 | Node.js、Go、PHP、Python、Bun、Erlang、JDK |
-| 网络服务 | Nginx、Caddy、Apache、Traefik、FTP、WebDAV（内置 9080） |
+| 网络服务 | Nginx、Caddy、Apache、Traefik、FTP、WebDAV（内置 9080）、OpenList |
 | 数据库 | MariaDB、MySQL、PostgreSQL、MongoDB |
 | 中间件 | Redis、Memcached、MinIO、RabbitMQ |
 | 开发工具 | Git、Composer、FFmpeg、Mailpit、frpc、GitHub CLI、mkcert、aria2 |
@@ -583,7 +587,9 @@ AI 完成通知有前置判断：主窗口可见且当前停在 AI 对话页时�
 - **项目体检**：选一个目录，读 `.nvmrc` / `.tool-versions` / `go.mod` / `package.json` 等版本声明（含上级目录），和本机已装、当前激活的版本逐条对比，缺的当场切过去；同时按 `packageManager` / 锁文件出一份依赖清单快照，只看不装 —— 这个页面不会替你执行任何安装命令
 - **文件搜索自测**：页内可以直接调一次与命令面板相同的检索接口。返回 0 条但状态正常时，通常是 Everything 索引没建好或以管理员身份运行导致 IPC 不通
 - **Ollama**：单版本语义，程序目录在 `runtime/ollama/`；有新版本只提示不自动更新；模型库共享 `~/.ollama/models`；卸载只删程序
-- **aria2**：单版本语义，挂在「开发工具」组，是下载器的引擎。安装 / 启停 / 常驻开关都走环境管理那套，下载页只管任务；DHT、监听端口这类参数只在引擎启动时读取，改完要停一次再启动。检测按安装目录去重，便携 / 系统同一份不会再显示成两行；保存目录指向已拔掉的移动硬盘时，只在真要拉起引擎时回退到默认目录，不会让启动自愈循环刷日志
+- **aria2**：单版本语义，挂在「开发工具」组，是下载器的引擎。安装 / 启停 / 常驻开关都走环境管理那套，下载页只管任务；DHT、监听端口这类参数只在引擎启动时读取，改完要停一次再启动。检测按安装目录去重，便携 / 系统同一份不会再显示成两行；保存目录指向已拔掉的移动硬盘时，只在真要拉起引擎时回退到默认目录，不会让启动自愈循环刷日志。停止时先请它自己 `saveSession` + `shutdown` 再杀进程，最后 60 秒新建的任务也来得及落盘
+- **OpenList**：网盘聚合网关（AList 社区分支），把百度 / 夸克等网盘统一成 WebDAV + 网页后台，单版本挂在「网络服务」组，账号数据在 `runtime/openlist/data/`，卸载默认保留。管理员密码用凭据域加密保存，**每次启动都跟网关库强制同步一次**——密码漂移会导致网盘页永久空列表；启动前清残留实例并等端口释放，避免 CLI 写库撞上 `SQLITE_BUSY` 把网关库锁死；真锁死了页头有「重启网关」按钮
+- **Everything / DSH 常驻**：页头的「常驻开启」开关是启动期拉起进程的唯一门禁。关着常驻时，文件搜索总开关也不会再在后台把 Everything 拉起来，避免 UI 与后台状态相反
 - **代码位置**：门面层 `services/env/`，引擎层 `internal/env/`（注册表、下载、解压、服务生命周期、项目级版本探测，平台差异用 `_windows` `_darwin` `_unix` 分文件）
 
 </details>
@@ -607,8 +613,22 @@ aria2 作为第 29 个运行时装在「环境管理」里，下载页只是它�
 - **预分配可配置**：设置里切 none / falloc / trunc / prealloc，默认仍 none（预分配只解决「提前知道空间够不够」，已被预检 + 守卫替代，且零等待、不占空间）
 - **每个下载单独文件夹**：设置「自动化」开关，按文件名建子目录，同名链接复用保证续传命中控制文件
 - **换机续传导入**：把旧机 `aria2.session` + 数据文件 + 同名 `.aria2` 拷过来，点「导入续传」按新机实际路径重写提交；磁力不设文件名，签名过期直接换链接
-- **代码位置**：门面 `services/download/`，RPC 客户端与配置 `internal/aria2/`，任务元数据在 `dl_tasks`。状态真相源是引擎，`dl_tasks` 只存 gid / url / dir 且**不进快照** —— GID 与本机 `.aria2` 控制文件绑定，换机无效
+- **历史跨重启保留**：状态 / 大小 / 错误 / 结束时间落进 `dl_tasks`（进度与速度仍只认引擎实时值，不双写），引擎里已没有的 gid 标为历史项，只留「打开目录 / 删除记录」；停止时先 RPC 存会话再退，避免最后一批任务丢失
+- **代码位置**：门面 `services/download/`，RPC 客户端与配置 `internal/aria2/`，任务元数据与终态快照在 `dl_tasks`。进度真相源是引擎，`dl_tasks` 存的是引擎自己记不住的那部分
 - **MCP**：见「MCP 服务」的 `download_*` 工具域；`download_add` 归高危且当前不开放
+
+</details>
+
+<details>
+<summary><b>网盘</b></summary>
+
+以 OpenList 为聚合网关（把各家网盘转成标准 WebDAV + 网页后台），但 QuickDock 自己写浏览页，不内嵌网关后台 —— 内嵌等于把管理员会话交出去，也不受本应用的样式与快捷键约束。网关的安装 / 启停 / 常驻走「环境管理 → OpenList」，本页只负责取文件。
+
+- **目录浏览**：列目录、进 / 退目录、路径筛选；文件按扩展名分类型（图片 / 视频 / 音频 / PDF / 文本 / 压缩包 / 其它），图标与本地文件搜索同一套判定，不会两处分叉
+- **在线预览 / 播放**：图片、音频、视频、PDF 与纯文本内联打开；走只绑 `127.0.0.1` + 随机令牌的本地代理，视频拖进度条时 Range 请求原样透传。端口与令牌落 `netdisk/proxy.json` 优先复用 —— aria2 会话恢复的网盘任务会在启动瞬间来拉流，懒监听会让它们先撞 502
+- **文件管理**：新建目录、重命名、删除、深搜（有条数与深度上限）、表头排序；行内图标操作与批量操作条
+- **下载**：批量勾选交给下载器，显式传真实落盘名（代理 URL 本身解析不出文件名，不传就会全叫 f）；远程 aria2 连不到本机代理时，入口直接说清楚而不是建个卡在 0% 的任务
+- **代码位置**：门面 `services/netdisk/`，WebDAV 客户端 / 本地代理 / 写操作在 `internal/netdisk/`；连接信息只从 `internal/env` 的 OpenListRuntime 读，不在这一层再拼一遍网关路径
 
 </details>
 
@@ -747,6 +767,18 @@ SSH 终端右侧的 AI 侧栏，把终端里看到的现象转成可执行的命
 </details>
 
 <details>
+<summary><b>跨机数据迁移</b></summary>
+
+在「设置 → 存储与同步」里，A 机把整机数据导出成一个 zip，拷到 B 机后在同一个位置导入，把数据**合并**进当前安装（不是替换，也不用换目录 / 重启）。同机换目录走上面那套搬家流程，跨机合并走这一套，两条路不共用语义。
+
+- **包内容**：DB 一致性快照（`VACUUM INTO`，不是复制正在写的文件）、manifest（来源目录、时间、体积、是否含密码库），以及其余整机文件；zip 解压有路径穿越与压缩包炸弹防护
+- **合并规则**：按行 `INSERT OR IGNORE`——同名主键保留本机、只补本机没有的行，只合并两边都有的列；跳过 `app_state`（绑本机 DPAPI）、快照、日志、剪贴板、下载任务与凭据等本机数据。导入前先只读校验 manifest 并展示来源信息
+- **密码库**：密文用本机 DPAPI 的密钥包裹，原样搬到新机解不开。导出时填一个口令，把密码库解密后重新封成便携包放进 zip；导入时填同一口令解回本机密钥下。不带口令就只迁数据、不迁密码库
+- **进度与路径**：导出 / 导入各阶段推进度事件，界面按阶段给中文文案；包里写死的源目录路径会在解压时改写成当前数据目录，不会让 B 机还指向 A 机的盘符
+
+</details>
+
+<details>
 <summary><b>WebDAV 同步、快照与系统命令</b></summary>
 
 - **WebDAV 同步**：全量 JSON 备份与恢复、多版本、任意 WebDAV 服务器。后端分层为 `services/sync.go` → `internal/sync` → `internal/webdav`
@@ -791,8 +823,8 @@ macOS 每个 release 产出 `quickdock-darwin-arm64` 与 `quickdock-darwin-amd64
 │                                                                   │
 │   ┌────────────────────┐      ┌────────────────────────────────┐  │
 │   │  Vue 3 前端         │◄────►│  services/  Wails 绑定门面      │  │
-│   │  (frontend/dist     │ IPC  │  AppService + 30 领域子包      │  │
-│   │   go:embed)         │      │  709 个绑定方法                 │  │
+│   │  (frontend/dist     │ IPC  │  AppService + 31 领域子包      │  │
+│   │   go:embed)         │      │  733 个绑定方法                 │  │
 │   └────────────────────┘      └───────────────┬────────────────┘  │
 │                                                │ 单向依赖          │
 │                                 ┌──────────────▼────────────────┐  │
@@ -811,12 +843,12 @@ macOS 每个 release 产出 `quickdock-darwin-arm64` 与 `quickdock-darwin-amd64
 
 几点实现上的选择：
 
-- **门面分层**：领域能力下沉到 30 个门面子包，宿主核心留在 AppService；`wails3 generate bindings` 生成 32 个 Service / 709 个绑定方法（口径以 bindings 导出函数为准，见下方项目结构）
+- **门面分层**：领域能力下沉到 31 个门面子包，宿主核心留在 AppService；`wails3 generate bindings` 生成 33 个 Service / 733 个绑定方法（口径以 bindings 导出函数为准，见下方项目结构）
 - **截图层用原生窗口**：自建 Win32 分层窗口整帧提交，工具条、标注、图形都画进同一张 DIB，可以避免 WebView 流程带来的闪烁
 - **次级窗口延迟创建**：首次热键触发时才创建 WebView2，减少启动白屏；浮窗位置经 kvstore 持久化
 - **后台服务**：SQLite WAL、待办（10s）、定时与监控调度器、AI 流式 HTTP 服务、邮件 IMAP 长连接、天气轮询、插件健康检查、DSH 隐藏进程、内置 MCP（9230）
 - **安全**：纯 Go SQLite 无 CGO，SQL 列名白名单，API Key、邮箱授权码与密码库统一走 DPAPI，单实例锁防止并发写库，本地流式服务使用随机端口与随机 token；AI 的外部工具调用另过审批闸门，文件读写统一走 `fsguard` 白名单。给浏览器扩展用的本地 API 只绑回环、校验扩展 Origin 与 Bearer token，且只在开关打开时监听
-- **规模**：Go 源码约 16.3 万行（`services` 6.1 万 + `internal` 9.8 万 + 入口与窗口 0.36 万，含 133 个测试文件），前端约 11.9 万行（130 个 Vue 组件 + 151 个 TS 模块，其中 34 个单测文件）
+- **规模**：Go 源码约 16.6 万行（`services` 6.4 万 + `internal` 10.1 万 + 入口与窗口 0.12 万，含 137 个测试文件），前端约 12.2 万行（132 个 Vue 组件 + 152 个 TS 模块，其中 34 个单测文件）
 
 ---
 
@@ -903,7 +935,7 @@ wails3 generate bindings -ts -i -clean   # 等价于 cd frontend && npm run bind
 ```
 quickdock/
 ├── main.go / tray.go / windows.go        # 入口、托盘、浮动窗口、单实例锁
-├── services/                             # Wails 门面层，宿主 + 30 领域子包，709 个绑定方法
+├── services/                             # Wails 门面层，宿主 + 31 领域子包，733 个绑定方法
 │   ├── service.go  api_result.go  types.go  lifecycle.go
 │   ├── hotkey.go  theme.go  autostart.go  winmgr_service.go
 │   ├── app_launcher.go  focus.go  tool.go  clipboard_sys.go  clipboard_files.go
@@ -913,13 +945,13 @@ quickdock/
 │   ├── storage.go  storage_service.go  clipboard_image.go
 │   └── ai/ clipboard/ collection/ credentials/ diag/ download/ dsh/ env/
 │       frecency/ git/ item/ kb/ logtail/ mailbox/ mcp/ monitor/ note/ notify/
-│       plugin/ port/ recycle/ scene/ shelf/ snapshot/ sshx/ system/ todo/
+│       netdisk/ plugin/ port/ recycle/ scene/ shelf/ snapshot/ sshx/ system/ todo/
 │       update/ weather/ workspace/
 ├── internal/                             # 引擎层，被门面调用，无 Wails 绑定
 │   ├── db/  env/  sites/  sshx/  dsh/  plugin/  platform/  sync/  webdav/  webdavsrv/
 │   ├── mcp/  mcpclient/  fsguard/  fsview/   # 宿主 MCP、外部 MCP 客户端、文件读写闸门与浏览器
 │   ├── credentials/  lock/  kb/               # 密码库引擎、启动密码锁、知识库解析与向量
-│   ├── mailbox/  weather/  aria2/             # 只读 IMAP、Open-Meteo、下载引擎 RPC（都只由宿主发请求）
+│   ├── mailbox/  weather/  aria2/  netdisk/    # 只读 IMAP、Open-Meteo、下载引擎 RPC、网盘 WebDAV/预览代理（都只由宿主发请求）
 │   ├── screenshot/  winmgr/  dl/  logger/  sysutil/  validators/
 │   └── aiutil/  cliprule/  logtail/  linkutil/  # 提示词预算、剪贴板规则、文件尾随、链接识别
 ├── frontend/src/                         # Vue 3 + TS
