@@ -39,6 +39,7 @@ import (
 	mailboxsvc "quickdock/services/mailbox"
 	mcpsvc "quickdock/services/mcp"
 	monitorsvc "quickdock/services/monitor"
+	netdisksvc "quickdock/services/netdisk"
 	notesvc "quickdock/services/note"
 	notifysvc "quickdock/services/notify"
 	pluginsvc "quickdock/services/plugin"
@@ -714,6 +715,16 @@ func main() {
 	// 本门面只代理任务指令、合并任务元数据并推送进度快照。
 	downloadSvc := downloadsvc.NewDownloadService(appService)
 
+	// 网盘页门面：网关（OpenList）由环境管理托管，本门面只做 WebDAV 列目录与
+	// 下载代理（引擎在 internal/netdisk）。
+	netdiskSvc := netdisksvc.NewNetdiskService(appService)
+	// 网盘页的「交给下载器」按钮复用下载器同一套任务链路（元数据、分类、进度轮询
+	// 全都在那边），这里只注入接口，不复制一份 aria2 客户端。
+	netdiskSvc.Downloader = downloadSvc
+	// 提前挂上预览代理：aria2 重启后会按会话恢复网盘任务并立刻来拉流，
+	// 懒到打开网盘页才监听会让这批任务先撞 502 而失败。
+	netdiskSvc.Startup()
+
 	// SSH 服务门面：主机管理/指纹信任/连通性测试/命令执行（引擎在 internal/sshx），
 	// 单独绑定为独立 Wails service。
 	sshSvc := sshxsvc.NewSshService(appService)
@@ -789,6 +800,7 @@ func main() {
 			application.NewService(gitSvc),
 			application.NewService(kbSvc),
 			application.NewService(downloadSvc),
+			application.NewService(netdiskSvc),
 			application.NewService(sshSvc),
 			application.NewService(credentialsSvc),
 			application.NewService(mcpSvc),
