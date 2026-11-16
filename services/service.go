@@ -289,10 +289,11 @@ func (a *AppService) SetApp(app *application.App) {
 		watchdogCtx, watchdogCancel := context.WithCancel(context.Background())
 		a.EnvWatchdogCancel = watchdogCancel
 		a.Env.StartWatchdog(watchdogCtx)
-		// Everything 文件检索预热：后台无头拉起实例（内部自带全部前置条件判断：
-		// 已装/未运行/总开关开/本进程建得了索引），把冷索引的空窗挪出用户交互期。
+		// Everything 启动预热：常驻状态取自 states.json，是整个应用唯一的进程生命周期门禁；
+		// 关了常驻却仍被文件搜索开关拉起会让 UI 与后台矛盾。引擎内部再判断已装/未运行/能否建索引，
+		// 把冷索引空窗挪出用户交互期。
 		if ev := a.Env.EverythingRuntime(); ev != nil {
-			go ev.WarmUp()
+			go ev.WarmUp(a.Env.Enabled(env.RuntimeEverything))
 		}
 	}
 	// 站点服务：用户此前显式启用过站点则自动拉起。

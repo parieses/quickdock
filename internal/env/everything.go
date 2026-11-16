@@ -586,15 +586,20 @@ func (e *EverythingRuntime) probeInstance() instanceHealth {
 	return ipcHealthy
 }
 
-// WarmUp 启动期预热文件检索：已装 + 未运行 + 总开关开 + 本进程建得了索引时，
+// WarmUp 启动期预热文件检索：常驻开启 + 已装 + 未运行 + 本进程建得了索引时，
 // 后台无头拉起 Everything 实例。
+//
+// 常驻开关（Manager states.json，由调用方以 residentEnabled 传入）是启动期的唯一门禁：
+// 关闭时常驻进程不该被拉起——否则 UI 显示「常驻关闭」，后台却因文件搜索总开关仍把
+// Everything 拉起来，两者矛盾。fileSearchEnabled 的职责收窄为「检索能力是否可用」
+// （见 EnvEverythingSearch），不再决定进程生命周期。
 //
 // 为什么不在启动路径上省掉这一步：冷索引要把所有 NTFS 卷扫一遍（本机实测 1-2 分钟），
 // 纯懒拉起会把这段空窗留给用户的第一次 Ctrl+K——搜了个空，用户看到的就是
 // "还是没有文件分组"。提前到启动期，用户正常摸到面板/按下快捷键时索引已热或接近热。
 // 用户自己开着实例（isRunning）则尊重现状，不抢。
-func (e *EverythingRuntime) WarmUp() {
-	if !FileSearchEnabled() {
+func (e *EverythingRuntime) WarmUp(residentEnabled bool) {
+	if !residentEnabled {
 		return
 	}
 	if e.detectEverythingExe() == "" || e.isRunning() {

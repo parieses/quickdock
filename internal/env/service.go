@@ -535,6 +535,28 @@ func killTree(pid int) {
 	_ = exec.Command("kill", "-9", strconv.Itoa(pid)).Run()
 }
 
+// waitPortClosed 轮询等待端口释放（进程退出后端口才真正空出来）。
+//
+// 为什么必须等：killTree 返回只代表「信号发出去了」，进程还在收尾——它可能仍持有
+// 数据文件锁。紧接着启动同一服务时，初始化进程（如 openlist admin set）会撞上
+// SQLITE_BUSY，反过来把网关库锁死。宁可在这里多等几百毫秒。
+func waitPortClosed(port int, timeout time.Duration) bool {
+	if port <= 0 {
+		return true
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		if findListenPID(port) == 0 {
+			return true
+		}
+		if time.Now().After(deadline) {
+			logger.W("[env] 等待端口 %d 释放超时（%s），继续后续流程", port, timeout)
+			return false
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
 // stopByPort 找到占用 port 的监听进程，校验镜像名匹配 expect 后强制杀掉进程树。
 // 作为停止服务的兜底手段，覆盖孤儿/残留进程，且只杀真正的目标程序。
 func stopByPort(port int, expectImage string) {

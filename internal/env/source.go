@@ -82,6 +82,14 @@ const (
 	// RuntimeAria2：下载器引擎。单版本语义，Windows 便携 zip 由 QuickDock 首次启用时下载；
 	// 以 daemon 常驻，任务与进度经 JSON-RPC 由 services/download 门面代理。
 	RuntimeAria2 Runtime = "aria2"
+
+	// RuntimeOpenList：网盘聚合网关（AList 社区分支），把百度/夸克等网盘统一转成标准
+	// WebDAV + 网页后台。「网盘」页内嵌它的管理后台，浏览与下载都由它自己完成，
+	// QuickDock 侧不实现任何网盘的私有协议。
+	//
+	// 单版本语义（singleVersion=true）：一份网关足够，装新版本即原地覆盖 exe；
+	// 账号数据在 runtime/openlist/data/ 下，卸载时默认保留（卸载不删 data）。
+	RuntimeOpenList Runtime = "openlist"
 )
 
 // 环境管理分组（侧边栏按职责归类：语言 / 网络服务 / 数据库 / 中间件 / AI / 开发工具）
@@ -283,6 +291,14 @@ var (
 			{ID: "ghproxy", Name: "GitHub 加速 (gh-proxy.com)", Build: aria2URL("https://gh-proxy.com/https://github.com/aria2/aria2/releases/download/release-{version}/aria2-{version}-win-64bit-build1.zip")},
 			{ID: "official", Name: "aria2 官方 (GitHub)", Build: aria2URL("https://github.com/aria2/aria2/releases/download/release-{version}/aria2-{version}-win-64bit-build1.zip")},
 		}},
+		// OpenList：网盘聚合网关（百度/夸克等 → WebDAV + 网页后台）。单版本。
+		// 发布资产按平台架构区分（openlist-windows-amd64.zip / openlist-darwin-arm64.tar.gz），
+		// 与 GitHub tag 的 "v" 前缀无关，版本号一律不带 v。
+		// 国内直连 GitHub 不稳，gh-proxy 排在官方直连之前（与 git/ollama/aria2 同一约定）。
+		RuntimeOpenList: {display: "OpenList", group: GroupTool, singleVersion: true, versions: []string{"4.2.9"}, versURL: "https://api.github.com/repos/OpenListTeam/OpenList/releases?per_page=100", versParse: parseOpenListVersions, versHTMLFallbackParse: parseReleasesTagVersionsHTML, fallbackHTMLURL: "https://github.com/OpenListTeam/OpenList/releases", sources: []Source{
+			{ID: "ghproxy", Name: "GitHub 加速 (gh-proxy.com)", Build: openlistURL("https://gh-proxy.com/https://github.com/OpenListTeam/OpenList/releases/download/v{version}")},
+			{ID: "official", Name: "OpenList 官方 (GitHub)", Build: openlistURL("https://github.com/OpenListTeam/OpenList/releases/download/v{version}")},
+		}},
 		// Ollama：本地大模型推理服务，体积巨大（1.4 GB/版本，其中 1.36 GB 是 CUDA v12/v13 双轨 dll），
 		// 故虽为多版本骨架，实际按「单活跃版本 + 可保留旧版回退」使用。
 		// 下载：官方 ollama.com/download 只做 307 跳转到 GitHub Releases（不托管文件），
@@ -448,6 +464,29 @@ func ollamaURL(winTmpl string) func(version, goos, arch string) string {
 			return ""
 		}
 		return strings.NewReplacer("{version}", version).Replace(winTmpl)
+	}
+}
+
+// openlistURL 构造 OpenList 发布资产地址。base 是「/releases/download/v{version}」前缀，
+// 文件名按平台拼：windows 是 zip、darwin/linux 是 tar.gz，架构与 GOARCH 同名。
+// extract.go 只认 zip/tar.gz，官方两种包正好都覆盖。
+func openlistURL(base string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		switch arch {
+		case "amd64", "arm64":
+			// 官方资产名与 GOARCH 一致，无需映射
+		default:
+			return "" // 其它架构没有对应资产，交给下一个源
+		}
+		prefix := strings.NewReplacer("{version}", version).Replace(base)
+		switch goos {
+		case "windows":
+			return prefix + "/openlist-windows-" + arch + ".zip"
+		case "darwin", "linux":
+			return prefix + "/openlist-" + goos + "-" + arch + ".tar.gz"
+		default:
+			return ""
+		}
 	}
 }
 
@@ -1223,6 +1262,22 @@ func parseTagVersions(body []byte, prefixes ...string) []string {
 			continue
 		}
 		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// parseOpenListVersions 解析 OpenList 的 Releases 列表。
+//
+// 在通用 parseTagVersions 之上再收一道：该仓库有个长期存在的 beta 渠道 release
+// （tag 名就叫 "beta"，虽然标了 prerelease，但 tag 本身不含版本号），
+// 只保留纯 x.y.z 形态，避免版本下拉里冒出一个装不了的 "beta"。
+func parseOpenListVersions(body []byte) []string {
+	re := regexp.MustCompile(`^\d+\.\d+\.\d+$`)
+	out := make([]string, 0, 4)
+	for _, v := range parseTagVersions(body, "v") {
+		if re.MatchString(v) {
 			out = append(out, v)
 		}
 	}

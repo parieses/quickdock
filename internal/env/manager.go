@@ -155,7 +155,7 @@ type Manager struct {
 // runtimeOrder 运行时固定展示顺序
 var runtimeOrder = []Runtime{RuntimeNode, RuntimePHP, RuntimeGo, RuntimeBun, RuntimeErlang, RuntimeRedis, RuntimeNginx, RuntimeGit, RuntimeCaddy, RuntimeTraefik, RuntimeComposer,
 	RuntimeFFmpeg, RuntimePython, RuntimeApache, RuntimeMemcached, RuntimeMariaDB, RuntimeMySQL, RuntimePostgreSQL, RuntimeMongoDB,
-	RuntimeMailpit, RuntimeMinIO, RuntimeRabbitMQ, RuntimeFrpc, RuntimeFTP, RuntimeWebDAV, RuntimeGh, RuntimeMkcert, RuntimeOllama, RuntimeJDK, RuntimeMCP, RuntimeEverything, RuntimeAria2}
+	RuntimeMailpit, RuntimeMinIO, RuntimeRabbitMQ, RuntimeFrpc, RuntimeFTP, RuntimeWebDAV, RuntimeGh, RuntimeMkcert, RuntimeOllama, RuntimeJDK, RuntimeMCP, RuntimeEverything, RuntimeAria2, RuntimeOpenList}
 
 // aria2 与其它工具一样在环境管理侧栏暴露（tool 分组、单版本）：安装、启停、
 // 常驻开关都走环境管理那套，下载器页只是它的任务门面，一键启用复用同一适配器。
@@ -199,6 +199,7 @@ func newAdapters() map[Runtime]RuntimeAdapter {
 		RuntimeWebDAV:     NewWebDAVRuntime(),
 		RuntimeEverything: NewEverythingRuntime(),
 		RuntimeAria2:      NewAria2Runtime(),
+		RuntimeOpenList:   NewOpenListRuntime(),
 	}
 }
 
@@ -441,6 +442,16 @@ func (m *Manager) adapter(rt Runtime) (RuntimeAdapter, error) {
 func (m *Manager) EverythingRuntime() *EverythingRuntime {
 	if e, ok := m.lookupAdapter(RuntimeEverything).(*EverythingRuntime); ok {
 		return e
+	}
+	return nil
+}
+
+// OpenListRuntime 返回网盘网关实例（未注册时返回 nil）。
+// 供 services/netdisk 取网关端口、管理员密码与安装位置 —— 这些信息的归属方是本包，
+// 让调用方自己去拼 runtime/openlist 路径会出现第二份「网盘数据在哪」的答案。
+func (m *Manager) OpenListRuntime() *OpenListRuntime {
+	if r, ok := m.lookupAdapter(RuntimeOpenList).(*OpenListRuntime); ok {
+		return r
 	}
 	return nil
 }
