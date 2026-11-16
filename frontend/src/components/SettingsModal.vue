@@ -37,8 +37,8 @@ import {
   SuspendHotkeys,
   ResumeHotkeys,
 } from '../../bindings/quickdock/services/clipboard/clipboardservice'
-import { GetAutoStart, SetAutoStart, GetDataDir, SetDataDir, ResetDataDir, NormalizeDataDir, GetUiZoom, SetUiZoom, GetWindowBackdrop, SetWindowBackdrop, RestartApp as RestartAppPlain } from '../../bindings/quickdock/services/appservice'
-import { StorageMigrate } from '../../bindings/quickdock/services/storageservice'
+import { GetAutoStart, SetAutoStart, GetDataDir, SetDataDir, ResetDataDir, NormalizeDataDir, GetUiZoom, SetUiZoom, GetWindowBackdrop, SetWindowBackdrop, RestartApp as RestartAppPlain, SelectLocalFile, SelectSavePath } from '../../bindings/quickdock/services/appservice'
+import { StorageMigrate, DataExport, DataImport, DataImportInspect } from '../../bindings/quickdock/services/storageservice'
 import { GetValue, SetValue } from '../../bindings/quickdock/services/appservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { GetAppVersion, CheckForUpdates, DownloadUpdate, RestartApp, GetUpdateState } from '../../bindings/quickdock/services/update/updateservice'
@@ -525,8 +525,26 @@ const migratePhaseText = computed(() => {
     case 'rebind':
     case 'envvars':
       return t('storageMigrateDownloading')
+    case 'export_db':
+      return t('dataExportDb')
+    case 'export_vault':
+      return t('dataExportVault')
+    case 'export_packing':
+      return t('dataExportPacking')
+    case 'import_extracting':
+      return t('dataImportExtracting')
+    case 'import_db':
+      return t('dataImportDb')
+    case 'import_files':
+      return t('dataImportFiles')
+    case 'import_vault':
+      return t('dataImportVault')
+    case 'import_env':
+      return t('dataImportEnv')
     case 'done':
-      return t('storageMigrateDone')
+    case 'export_done':
+    case 'import_done':
+      return t('dataTransferDone')
     default:
       return ''
   }
@@ -549,14 +567,19 @@ function watchMigrateProgress() {
     migrateCurrent.value = p.current || ''
     if (Array.isArray(p.skipped)) migrateSkipped.value = p.skipped
     if (p.message) storageMsg.value = p.message
-    if (p.phase === 'done') {
+    if (p.phase === 'done' || p.phase === 'export_done' || p.phase === 'import_done') {
       migrateRunning.value = false
       migrateDone.value = true
-      // 迁移完成 → 刷新显示的当前路径（后端已写配置）
-      loadStorage()
+      if (p.phase === 'export_done' || p.phase === 'import_done') {
+        dataTransferBusy.value = false
+        dataTransferDone.value = true
+      }
+      // 导入完成会切数据目录 → 刷新显示的当前路径（后端已写配置）
+      if (p.phase === 'import_done') loadStorage()
     }
     if (p.phase === 'error') {
       migrateRunning.value = false
+      dataTransferBusy.value = false
       storageMsg.value = p.err || t('updateError')
     }
   })
@@ -670,6 +693,97 @@ async function resetStorage() {
   } finally {
     storageLoading.value = false
   }
+}
+
+// ---- 整机数据迁移包（A 机导出 zip → B 机导入）----
+//
+// 导入是**合并**不是替换：本机已有的记录和文件都留着，只把包里多出来的并进来
+// （同名主键/同名文件保留本地那份）。所以它不切数据目录、也不用重启。
+const dataTransferBusy = ref(false)
+const dataTransferDone = ref(false)
+const dataImportInfo = ref<{ sourceDir: string; createdAt: string; dbBytes: number; hasVault: boolean } | null>(null)
+// 密码库口令。导出时给一个口令重新封装（本机 DPAPI 的密文搬不走），
+// 导入时用同一个口令解开。空 = 不动密码库。
+const dataVaultPassword = ref('')
+const importZipPath = ref('')
+
+/** 导出当前数据到 zip：选保存位置 → 后端异步打包，进度走 quickdock:storage:migrate。 */
+async function exportData() {
+  if (dataTransferBusy.value) return
+  dataTransferBusy.value = true
+  storageMsg.value = ''
+  try {
+    const day = new Date().toISOString().slice(0, 10)
+    const dest = (unwrap<string>(await SelectSavePath(t('dataExportSaveTitle'), `quickdock-backup-${day}.zip`)) ?? '').trim()
+    if (!dest) { dataTransferBusy.value = false; return }
+    resetMigrateUi()
+    unwrap(await DataExport(dest, dataVaultPassword.value.trim()))
+    toast.success(t('dataExportStarted'))
+  } catch (e: any) {
+    dataTransferBusy.value = false
+    toast.error(getErrorMessage(e))
+    logErr('Settings.exportData', e)
+  }
+}
+
+/** 选 zip → 先校验是不是整机包，是则记住信息，供「开始导入」使用。 */
+async function pickImportZip() {
+  storageMsg.value = ''
+  dataImportInfo.value = null
+  importZipPath.value = ''
+  try {
+    const src = (unwrap<string>(await SelectLocalFile(t('dataImportPickTitle')))) ?? ''
+    const path = typeof src === 'string' ? src.trim() : ''
+    if (!path) return
+    const info = unwrap<any>(await DataImportInspect(path))
+    if (info) {
+      dataImportInfo.value = {
+        sourceDir: info.sourceDir,
+        createdAt: info.createdAt,
+        dbBytes: info.dbBytes,
+        hasVault: !!info.hasVault,
+      }
+      importZipPath.value = path
+      storageMsg.value = t('dataImportReady', { dir: info.sourceDir })
+    }
+  } catch (e: any) {
+    toast.error(getErrorMessage(e))
+    logErr('Settings.pickImportZip', e)
+  }
+}
+
+/** 开始导入：合并进当前数据目录（不换目录、不重启），密码库用同一口令还原。 */
+async function importData() {
+  if (dataTransferBusy.value || !importZipPath.value) return
+  if (dataImportInfo.value?.hasVault && !dataVaultPassword.value.trim()) {
+    toast.error(t('dataImportNeedPass'))
+    return
+  }
+  const ok = await toast.confirm(t('dataImportConfirm'))
+  if (!ok) return
+  dataTransferBusy.value = true
+  storageMsg.value = ''
+  try {
+    resetMigrateUi()
+    unwrap(await DataImport(importZipPath.value, dataVaultPassword.value.trim()))
+    toast.success(t('dataImportStarted'))
+  } catch (e: any) {
+    dataTransferBusy.value = false
+    toast.error(getErrorMessage(e))
+    logErr('Settings.importData', e)
+  }
+}
+
+/** 每轮导出/导入前清掉上一轮的进度态。 */
+function resetMigrateUi() {
+  migratePhase.value = ''
+  migrateTotalFiles.value = 0
+  migrateDoneFiles.value = 0
+  migrateTotalBytes.value = 0
+  migrateDoneBytes.value = 0
+  migrateCurrent.value = ''
+  migrateDone.value = false
+  dataTransferDone.value = false
 }
 
 // 切换到存储页时刷新状态（弹窗常驻，onMounted 只在首次执行）
@@ -1317,6 +1431,65 @@ async function toggleAutoStart() {
 
               <p class="field-hint">{{ t('storageRestartHint') }}</p>
               <p class="result-hint" v-if="storageMsg">{{ storageMsg }}</p>
+            </div>
+
+            <!-- 整机数据迁移：导出当前数据成 zip / 从 zip 导入（换机迁移）。
+                 与上面的目录迁移共用进度条（同一事件通道），故进度条放在两者都能看到的位置。 -->
+            <div v-show="backupTab === 'storage'" class="section">
+              <h3 class="section-title">{{ t('dataTransferTitle') }}</h3>
+              <p class="section-desc">{{ t('dataTransferDesc') }}</p>
+
+              <!-- 导出/导入进度：与目录迁移共用事件与百分比，用 dataTransferBusy 区分，
+                   避免和上面目录迁移的进度条同时显示两份。 -->
+              <div v-if="dataTransferBusy || dataTransferDone" class="storage-migrate-progress">
+                <div class="storage-migrate-head">
+                  <span class="storage-migrate-phase">{{ migratePhaseText }}</span>
+                  <span class="storage-migrate-size">{{ migrateSizeText }}</span>
+                </div>
+                <div class="storage-migrate-bar">
+                  <div class="storage-migrate-fill" :style="{ width: migratePercent + '%' }" />
+                </div>
+                <p class="field-hint" v-if="migrateCurrent">
+                  {{ t('storageMigrateCurrent') }}：{{ migrateCurrent }}
+                </p>
+              </div>
+
+              <!-- 密码库口令：导出时用它重新封装（本机 DPAPI 的密文搬不走），
+                   导入时用同一口令解开。留空 = 不动密码库，包就不带它。 -->
+              <div class="setting-row">
+                <label class="setting-label">{{ t('dataVaultPass') }}</label>
+                <div class="setting-control">
+                  <input
+                    v-model="dataVaultPassword"
+                    type="password"
+                    class="field-input storage-path-input"
+                    autocomplete="new-password"
+                    :placeholder="t('dataVaultPassHint')"
+                    :disabled="dataTransferBusy"
+                  />
+                </div>
+              </div>
+
+              <div class="action-row">
+                <button class="btn btn-secondary" :disabled="dataTransferBusy || migrateRunning" @click="exportData">
+                  {{ t('dataExportBtn') }}
+                </button>
+                <button class="btn btn-secondary" :disabled="dataTransferBusy || migrateRunning" @click="pickImportZip">
+                  {{ t('dataImportPick') }}
+                </button>
+                <button
+                  class="btn btn-primary"
+                  :disabled="dataTransferBusy || migrateRunning || !importZipPath"
+                  @click="importData"
+                >
+                  {{ t('dataImportBtn') }}
+                </button>
+              </div>
+              <p class="field-hint" v-if="dataImportInfo">
+                {{ t('dataImportSource', { dir: dataImportInfo.sourceDir }) }}
+                <span v-if="dataImportInfo.hasVault"> · {{ t('dataImportHasVault') }}</span>
+              </p>
+              <p class="field-hint">{{ t('dataImportTip') }}</p>
             </div>
             <!-- v-show 而不是 v-if：两者内部都有表单草稿（WebDAV 地址、快照名），
                  切走再切回不该丢；但加载只看 visible，没切到这一段就不发请求。 -->
