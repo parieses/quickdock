@@ -298,7 +298,7 @@ defineExpose({ capturing })
          因为它不是保存动作的一部分） -->
     <header class="hk-header">
       <h3 class="page-title">{{ t('hotkeySettings') }}</h3>
-      <button class="hk-btn hk-btn-ghost" @click="showCheatSheet = true">
+      <button class="qd-btn qd-btn-ghost" @click="showCheatSheet = true">
         <Keyboard :size="13" />
         <span>{{ t('cheatSheet') }}</span>
       </button>
@@ -406,7 +406,7 @@ defineExpose({ capturing })
     </section>
 
     <div class="hk-actions">
-      <button class="hk-btn hk-btn-primary" @click="saveAll">{{ t('saveAll') }}</button>
+      <button class="qd-btn qd-btn-primary" @click="saveAll">{{ t('saveAll') }}</button>
       <p v-if="message" class="hk-msg" :class="{ 'is-error': msgTone === 'err' }">{{ message }}</p>
     </div>
 
@@ -527,24 +527,6 @@ defineExpose({ capturing })
 .hk-reset.is-idle { visibility: hidden; }
 
 .hk-actions { display: flex; align-items: center; gap: var(--space-5); margin-top: var(--space-5); }
-.hk-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-3);
-  height: 28px;
-  padding: 0 11px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
-  font-family: inherit;
-  cursor: pointer;
-  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
-}
-.hk-btn-primary { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
-.hk-btn-primary:hover { background: var(--color-accent-hover); border-color: var(--color-accent-hover); }
-.hk-btn-ghost { background: transparent; color: var(--color-text-secondary); border-color: var(--color-border); }
-.hk-btn-ghost:hover { color: var(--color-text-primary); background: var(--color-bg-hover); border-color: var(--color-border-focus); }
-
 .hk-msg { margin: 0; font-size: var(--text-sm); color: var(--color-success); }
 .hk-msg.is-error { color: var(--color-danger); }
 

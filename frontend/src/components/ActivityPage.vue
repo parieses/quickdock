@@ -227,9 +227,11 @@ onUnmounted(() => {
       <template #titles>
         <slot name="titles">
           <h2 v-if="!props.embedded" class="qd-page-title">{{ t('navActivity') }}</h2>
-          <span class="qd-page-sub">{{ t('activitySubtitle') }}</span>
         </slot>
       </template>
+      <!-- 副标题作为页头 flex 子项与标题同行（Knowledge/Netdisk 同款）；
+           嵌进设置时外层已替换 titles 插槽，这里也不该重复副标题。 -->
+      <span v-if="!props.embedded" class="qd-page-sub qd-page-sub-inline">{{ t('activitySubtitle') }}</span>
       <div class="qd-page-actions">
         <button class="qd-btn" :disabled="loading" @click="load">
           <RefreshCw :size="13" /> {{ t('logRefresh') }}

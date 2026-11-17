@@ -16,7 +16,7 @@
  *
  * 需要更复杂的内容（图标、未读徽章）时用 #tab 具名插槽，别另起一套按钮。
  */
-import { computed } from 'vue'
+import { computed, ref, nextTick } from 'vue'
 
 interface QdTabItem<T extends string = string> {
   id: T
@@ -36,19 +36,46 @@ const props = defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [value: T] }>()
 
 const variantClass = computed(() => 'is-' + (props.variant ?? 'segmented'))
+
+// WAI-ARIA tab 模式：整组 tab 只让选中项进 Tab 序列（roving tabindex），
+// 左右方向键在组内移动并切换。禁用项跳过，到两端不回绕（桌面工具的常见预期）。
+const tabEls = ref<HTMLButtonElement[]>([])
+function setTabEl(el: unknown, i: number) {
+  if (el) tabEls.value[i] = el as HTMLButtonElement
+}
+function moveFocus(from: number, delta: number) {
+  let i = from + delta
+  while (i >= 0 && i < props.tabs.length && props.tabs[i].disabled) i += delta
+  if (i < 0 || i >= props.tabs.length) return
+  emit('update:modelValue', props.tabs[i].id)
+  nextTick(() => tabEls.value[i]?.focus())
+}
+function onTabKey(e: KeyboardEvent, i: number) {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    e.preventDefault()
+    moveFocus(i, e.key === 'ArrowRight' ? 1 : -1)
+  } else if (e.key === 'Home' || e.key === 'End') {
+    e.preventDefault()
+    const delta = e.key === 'Home' ? -i : props.tabs.length - 1 - i
+    moveFocus(i, delta || (e.key === 'Home' ? 1 : -1))
+  }
+}
 </script>
 
 <template>
   <div class="qd-tabs" :class="variantClass" role="tablist" :aria-label="ariaLabel">
     <button
-      v-for="tab in tabs"
+      v-for="(tab, i) in tabs"
       :key="tab.id"
+      :ref="(el) => setTabEl(el, i)"
       type="button"
       class="qd-tab"
       role="tab"
       :aria-selected="modelValue === tab.id"
+      :tabindex="modelValue === tab.id ? 0 : -1"
       :disabled="tab.disabled"
       @click="emit('update:modelValue', tab.id)"
+      @keydown="onTabKey($event, i)"
     >
       <slot name="tab" :tab="tab" :active="modelValue === tab.id">
         <span class="qd-tab-label">{{ tab.label }}</span>

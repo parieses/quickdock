@@ -1020,19 +1020,19 @@ onUnmounted(() => {
         </div>
       </div>
       <div class="qd-page-actions">
-        <button class="qd-icon-btn" :class="{ active: multiSelect }" @click="toggleMultiSelect" :title="t('cbMultiSelect')">
+        <button class="qd-icon-btn" :class="{ active: multiSelect }" :aria-pressed="multiSelect" @click="toggleMultiSelect" :title="t('cbMultiSelect')" :aria-label="t('cbMultiSelect')">
           <CheckSquare :size="14" />
         </button>
-        <button v-if="checkedIds.length" class="qd-icon-btn" @click="enqueueChecked" :title="t('cbBatchEnqueue', { n: checkedIds.length })">
+        <button v-if="checkedIds.length" class="qd-icon-btn" @click="enqueueChecked" :title="t('cbBatchEnqueue', { n: checkedIds.length })" :aria-label="t('cbBatchEnqueue', { n: checkedIds.length })">
           <ListPlus :size="14" />
         </button>
-        <button class="qd-icon-btn" @click="loadEntries" :title="t('refresh')">
+        <button class="qd-icon-btn" @click="loadEntries" :title="t('refresh')" :aria-label="t('refresh')">
           <RefreshCw :size="14" />
         </button>
-        <button class="qd-icon-btn" @click="exportClipboard" :title="t('exportClipboard')">
+        <button class="qd-icon-btn" @click="exportClipboard" :title="t('exportClipboard')" :aria-label="t('exportClipboard')">
           <Download :size="14" />
         </button>
-        <button class="qd-icon-btn" @click="clearClipboard" :title="t('clearClipboard')">
+        <button class="qd-icon-btn" @click="clearClipboard" :title="t('clearClipboard')" :aria-label="t('clearClipboard')">
           <Trash2 :size="14" />
         </button>
       </div>

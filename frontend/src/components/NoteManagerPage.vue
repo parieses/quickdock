@@ -1361,16 +1361,16 @@ watch(pendingOpenNoteId, (id) => {
           </div>
           <div class="tb-line">
             <input v-model="batchTagText" class="tb-input" :placeholder="t('notesBatchTagPh')" @keyup.enter="batchTag" />
-            <button class="tb-btn" :disabled="!batchTagText.trim() || !selectedCount" @click="batchTag">{{ t('notesBatchTagApply') }}</button>
+            <button class="qd-btn" :disabled="!batchTagText.trim() || !selectedCount" @click="batchTag">{{ t('notesBatchTagApply') }}</button>
           </div>
           <div class="tb-line">
             <select v-model="moveTarget" class="tb-select">
               <option value="">{{ t('notesMoveTo') }}</option>
               <option v-for="f in folderOptions" :key="f.id" :value="f.id">{{ f.name }}</option>
             </select>
-            <button class="tb-btn" :disabled="!moveTarget || !selectedCount" @click="batchMove">{{ t('notesBatchMove') }}</button>
+            <button class="qd-btn" :disabled="!moveTarget || !selectedCount" @click="batchMove">{{ t('notesBatchMove') }}</button>
           </div>
-          <button class="tb-btn danger" :disabled="!selectedCount" @click="askBatchDelete">{{ t('notesBatchDelete') }}</button>
+          <button class="qd-btn qd-btn-danger" :disabled="!selectedCount" @click="askBatchDelete">{{ t('notesBatchDelete') }}</button>
         </div>
 
         <div class="tree-wrap">
@@ -1388,7 +1388,7 @@ watch(pendingOpenNoteId, (id) => {
                 :class="{ active: !selectMode && selectedDocId === n.id, 'sel-on': selectMode && selectedIds.has(n.id) }"
                 @click="selectMode ? toggleSelect(n.id) : onDoc(n)"
               >
-                <span v-key-click v-if="selectMode" class="tn-check" :class="{ on: selectedIds.has(n.id) }" @click.stop="toggleSelect(n.id)"></span>
+                <span v-key-click v-if="selectMode" class="tn-check" role="checkbox" :aria-checked="selectedIds.has(n.id)" :class="{ on: selectedIds.has(n.id) }" @click.stop="toggleSelect(n.id)"></span>
                 <FileText :size="13" class="tn-icon" />
                 <div class="rn-text">
                   <div class="rn-line1">
@@ -1417,7 +1417,7 @@ watch(pendingOpenNoteId, (id) => {
           <!-- 搜索/标签结果：扁平展示 -->
           <template v-else>
             <div v-key-click v-for="n in flatResults" :key="'res-'+n.id" class="qd-row sr-row" :class="{ active: !selectMode && selectedDocId === n.id, 'sel-on': selectMode && selectedIds.has(n.id) }" @click="selectMode ? toggleSelect(n.id) : (n.isFolder ? toggleFolder(n.id) : onDoc(n))">
-              <span v-key-click v-if="selectMode" class="tn-check" :class="{ on: selectedIds.has(n.id) }" @click.stop="toggleSelect(n.id)"></span>
+              <span v-key-click v-if="selectMode" class="tn-check" role="checkbox" :aria-checked="selectedIds.has(n.id)" :class="{ on: selectedIds.has(n.id) }" @click.stop="toggleSelect(n.id)"></span>
               <component :is="n.isFolder ? Folder : FileText" :size="13" class="tn-icon" />
               <div class="sr-text">
                 <div class="sr-title"><template v-for="(p, i) in rowHighlight(n)" :key="i"><mark v-if="p.hit" class="tn-hl">{{ p.s }}</mark><template v-else>{{ p.s }}</template></template></div>
@@ -1485,7 +1485,7 @@ watch(pendingOpenNoteId, (id) => {
                 </div>
                 <pre class="nh-preview-text">{{ historyPreview.content }}</pre>
                 <div class="nh-preview-foot">
-                  <button class="tb-btn" @click="askRestore(historyPreview.id)">{{ t('notesHistoryRestore') }}</button>
+                  <button class="qd-btn" @click="askRestore(historyPreview.id)">{{ t('notesHistoryRestore') }}</button>
                 </div>
               </template>
               <div v-else class="nh-empty">{{ t('notesHistoryPick') }}</div>
@@ -1825,11 +1825,6 @@ watch(pendingOpenNoteId, (id) => {
 .tb-clear:disabled { opacity: 0.4; cursor: default; }
 .tb-input, .tb-select { flex: 1; min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: var(--text-sm); outline: none; font-family: inherit; }
 .tb-input:focus, .tb-select:focus { border-color: var(--color-border-focus-soft); }
-.tb-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);  flex-shrink: 0; height: 28px; padding: 0 11px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-secondary); font-size: var(--text-sm); cursor: pointer; border-radius: var(--radius-sm); font-family: inherit; }
-.tb-btn:hover:not(:disabled) { color: var(--color-text-primary); border-color: var(--color-border-focus); }
-.tb-btn:disabled { opacity: 0.4; cursor: default; }
-.tb-btn.danger { color: var(--color-danger); border-color: var(--color-danger-border); }
-.tb-btn.danger:hover:not(:disabled) { background: var(--color-danger-bg); }
 
 /* 树收起后的恢复条：窄竖条，hover 提示可展开 */
 .tree-reopen {

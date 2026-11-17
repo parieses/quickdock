@@ -57,10 +57,25 @@ export function useDragSort(opts: DragSortOptions) {
     opts.onReorder(ids)
   }
 
+  /**
+   * 键盘重排：Alt+↑/↓ 把 id 在列表里挪一格，走与拖拽相同的 ids()/onReorder 管道。
+   * 返回是否真的移动了——调用方据此决定是否 preventDefault / 播报状态。
+   */
+  function moveByKey(id: string, delta: -1 | 1): boolean {
+    const ids = opts.ids()
+    const from = ids.indexOf(id)
+    const to = from + delta
+    if (from < 0 || to < 0 || to >= ids.length) return false
+    ids.splice(from, 1)
+    ids.splice(to, 0, id)
+    opts.onReorder(ids)
+    return true
+  }
+
   function onDragEnd() {
     dragId.value = ''
     dragOverIndex.value = -1
   }
 
-  return { dragId, dragOverIndex, onDragStart, onDragOver, onDrop, onDragEnd }
+  return { dragId, dragOverIndex, onDragStart, onDragOver, onDrop, onDragEnd, moveByKey }
 }

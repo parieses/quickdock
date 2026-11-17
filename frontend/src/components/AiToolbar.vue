@@ -52,7 +52,7 @@ const { t } = useI18n()
       <span class="ai-cwd-name">{{ props.cwdLabel }}</span>
     </button>
     <div class="ai-toolbar-right">
-      <button v-if="props.activeId" class="ai-icon-btn" :title="t('aiRegenTitle')" @click="emit('regen-title')">
+      <button v-if="props.activeId" class="ai-icon-btn" :title="t('aiRegenTitle')" :aria-label="t('aiRegenTitle')" @click="emit('regen-title')">
         <RefreshCw :size="13" />
       </button>
       <button
@@ -60,6 +60,7 @@ const { t } = useI18n()
         class="ai-icon-btn"
         :class="{ 'is-active': !!props.activeConv?.starred }"
         :title="t(props.activeConv?.starred ? 'aiStarOff' : 'aiStarOn')"
+        :aria-label="t(props.activeConv?.starred ? 'aiStarOff' : 'aiStarOn')"
         :disabled="props.starBusy === props.activeId"
         @click="props.activeConv && emit('toggle-star', props.activeConv)"
       >
@@ -70,6 +71,7 @@ const { t } = useI18n()
         class="ai-icon-btn"
         :class="{ 'is-active': props.digestOpen }"
         :title="t('aiOutline')"
+        :aria-label="t('aiOutline')"
         @click="emit('update:digestOpen', !props.digestOpen)"
       >
         <ListTree :size="13" />
@@ -80,16 +82,17 @@ const { t } = useI18n()
         class="ai-icon-btn ai-jobs-btn"
         :class="{ 'is-active': props.jobsOpen }"
         :title="t('aiJobsTitle')"
+        :aria-label="t('aiJobsTitle')"
         @click="emit('toggle-jobs')"
       >
         <Terminal :size="13" />
         <span v-if="props.runningJobs" class="ai-jobs-badge">{{ props.runningJobs }}</span>
       </button>
-      <button v-if="props.activeId" class="ai-icon-btn" :title="t('aiExportMd')" @click="emit('export-md')">
+      <button v-if="props.activeId" class="ai-icon-btn" :title="t('aiExportMd')" :aria-label="t('aiExportMd')" @click="emit('export-md')">
         <Download :size="13" />
       </button>
       <!-- 右侧面板开关：常驻最右（与常见 AI 工作台同位同快捷键） -->
-      <button class="ai-icon-btn" :class="{ 'is-active': props.sideOpen }" :title="t(props.sideOpen ? 'aiSideClose' : 'aiSideOpen')" @click="emit('toggle-side')">
+      <button class="ai-icon-btn" :class="{ 'is-active': props.sideOpen }" :title="t(props.sideOpen ? 'aiSideClose' : 'aiSideOpen')" :aria-label="t(props.sideOpen ? 'aiSideClose' : 'aiSideOpen')" @click="emit('toggle-side')">
         <PanelRight :size="13" />
       </button>
     </div>

@@ -240,6 +240,10 @@
   --color-code-inline-bg: #212630;
   /* 文档/网页内容视口（iframe）：始终白底，模拟浏览器渲染，不随主题变化 */
   --color-content-bg: #ffffff;
+  /* 媒体预览视口（网盘图片/视频/文本预览）：始终黑底浅字，模拟播放器/阅读器，
+     不随主题变化。浅色主题下若复用 --color-text-primary 会变成深字压黑底不可读。 */
+  --color-media-bg: #000000;
+  --color-media-text: #cfd6e4;
 
   /* 终端调色板：xterm 只接受具体色值，无法传 var()，所以这些 token 由
      SshTerminal.vue 用 getComputedStyle 读出实际值再喂给 xterm。
@@ -424,6 +428,10 @@
   --color-code-inline-bg: #e4e7ec;
   /* 文档/网页内容视口（iframe）：始终白底，模拟浏览器渲染，不随主题变化 */
   --color-content-bg: #ffffff;
+  /* 媒体预览视口（网盘图片/视频/文本预览）：始终黑底浅字，模拟播放器/阅读器，
+     不随主题变化。浅色主题下若复用 --color-text-primary 会变成深字压黑底不可读。 */
+  --color-media-bg: #000000;
+  --color-media-text: #cfd6e4;
 
   /* 浅色终端调色板：对比度按浅底重算过，直接复用深色色值会偏灰、
      在 #fbfaf7 上读不清（尤其 yellow / cyan）。 */

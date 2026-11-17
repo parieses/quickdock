@@ -67,10 +67,23 @@ const {
   onDragOver: onDragOverScene,
   onDrop: onDropScene,
   onDragEnd: onDragEndScene,
+  moveByKey: moveSceneByKey,
 } = useDragSort({
   ids: () => displaySceneIds.value,
   onReorder: (ids) => { store.reorderScenes(ids) },
 })
+
+// 键盘重排：Alt+↑/↓，与拖拽同一守卫（搜索中 / 有分组时都不让动顺序）。
+const a11yMoveMsg = ref('')
+function onSceneMoveKey(e: KeyboardEvent, scene: { id: string; name: string }) {
+  if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return
+  if (store.hasSearch || hasGroups.value) return
+  e.preventDefault()
+  const moved = moveSceneByKey(scene.id, e.key === 'ArrowUp' ? -1 : 1)
+  if (moved) {
+    a11yMoveMsg.value = t(e.key === 'ArrowUp' ? 'sceneMovedUp' : 'sceneMovedDown', { name: scene.name })
+  }
+}
 
 // 搜索
 const searchText = ref('')
@@ -131,6 +144,8 @@ function openCreate() {
 
 <template>
   <aside class="scene-rail qd-panel">
+    <!-- 键盘重排的状态播报：视觉隐藏，读屏会念出移动结果 -->
+    <span class="qd-sr-only" aria-live="polite">{{ a11yMoveMsg }}</span>
     <!-- 面板头：标题 + 新建（三栏同高同内边距，样式见 styles/panels.css） -->
     <div class="qd-panel-header">
       <span class="qd-panel-title">{{ t('scenes') }}</span>
@@ -181,6 +196,7 @@ function openCreate() {
               class="qd-row"
               :class="{ active: scene.id === store.activeSceneId, dragging: dragSceneId === scene.id }"
               :draggable="!store.hasSearch && !hasGroups"
+              @keydown="onSceneMoveKey($event, scene)"
               @click="handleSceneClick(scene.id)"
               @dragstart="onDragStartScene(scene.id, $event, i)"
               @dragend="onDragEndScene"

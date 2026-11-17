@@ -131,7 +131,7 @@ function goHotkeySettings() {
           <h3 class="cs-title">{{ t('cheatSheet') }}</h3>
           <p class="cs-desc">{{ t('cheatSheetDesc') }}</p>
         </div>
-        <button class="cs-icon-btn" :title="t('cancel')" @click="emit('close')">
+        <button class="cs-icon-btn" :title="t('cancel')" :aria-label="t('cancel')" @click="emit('close')">
           <X :size="16" />
         </button>
       </div>

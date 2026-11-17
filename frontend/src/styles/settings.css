@@ -574,7 +574,7 @@
    「一份需要签字的授权」的确认/放弃，样式一致是有意为之。 */
 .ai-hook-ok {
   padding: 3px var(--space-5); font-size: var(--text-xs); border-radius: var(--radius-xs); cursor: pointer;
-  border: 1px solid var(--color-accent); background: var(--color-accent); color: #fff;
+  border: 1px solid var(--color-accent); background: var(--color-accent); color: var(--color-accent-text);
 }
 .ai-hook-ok:disabled { opacity: .6; cursor: default; }
 .ai-hook-no {

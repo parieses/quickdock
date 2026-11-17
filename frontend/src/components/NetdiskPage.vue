@@ -1134,7 +1134,7 @@ function shortTime(s: string): string {
   outline: none;
   background: none;
   color: var(--color-text-primary);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   font-family: inherit;
 }
 .nd-search-deep {
@@ -1171,7 +1171,7 @@ function shortTime(s: string): string {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg-secondary);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   color: var(--color-text-secondary);
 }
 .nd-bulk-count {
@@ -1416,7 +1416,7 @@ function shortTime(s: string): string {
   align-items: center;
   justify-content: center;
   padding: var(--space-7);
-  background: rgba(0, 0, 0, 0.62);
+  background: var(--color-bg-overlay-deep);
 }
 .nd-pv {
   display: flex;
@@ -1427,7 +1427,7 @@ function shortTime(s: string): string {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-pop);
 }
 .nd-pv-head {
   flex: none;
@@ -1472,8 +1472,9 @@ function shortTime(s: string): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  /* 视频/图片用纯黑底：比面板底色更接近播放器的观感，也不会露出页面纹理 */
-  background: #000;
+  /* 视频/图片用纯黑底：比面板底色更接近播放器的观感，也不会露出页面纹理。
+     用固定的 media token 而非主题 text/bg——黑底浅字不随明暗主题翻转。 */
+  background: var(--color-media-bg);
 }
 .nd-pv-media,
 .nd-pv-image {
@@ -1488,7 +1489,7 @@ function shortTime(s: string): string {
   width: 100%;
   height: 100%;
   border: none;
-  background: #fff;
+  background: var(--color-content-bg);
 }
 .nd-pv-text {
   margin: 0;
@@ -1497,9 +1498,9 @@ function shortTime(s: string): string {
   overflow: auto;
   padding: var(--space-5);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   line-height: 1.65;
-  color: #cfd6e4;
+  color: var(--color-media-text);
   white-space: pre-wrap;
   word-break: break-word;
 }

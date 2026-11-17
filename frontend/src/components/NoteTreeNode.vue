@@ -119,7 +119,7 @@ function onDragStart(e: DragEvent) {
       @dragleave="onDragLeave"
       @drop="onDrop"
     >
-      <span v-key-click v-if="selectMode" class="tn-check" :class="{ on: isChecked }" @click.stop="emit('toggle-select', node.id)"></span>
+      <span v-key-click v-if="selectMode" class="tn-check" role="checkbox" :aria-checked="isChecked" :class="{ on: isChecked }" @click.stop="emit('toggle-select', node.id)"></span>
       <button v-else-if="isFolder" class="tn-caret" @click.stop="emit('toggle', node.id)">
         <ChevronRight v-if="!isOpen" :size="12" /><ChevronDown v-else :size="12" />
       </button>

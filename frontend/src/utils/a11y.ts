@@ -181,6 +181,78 @@ export const vDialog: Directive<HTMLElement> = {
 }
 
 /**
+ * 右键菜单的键盘可达：挂在实际的菜单容器上（不是铺满的 backdrop）。
+ * 打开时聚焦首项，↑↓/Home/End 在菜单项间移动，Esc 关掉整个菜单；
+ * 关闭后把焦点还给触发它的元素，否则键盘用户会掉回 body 重头 Tab。
+ *
+ * 为什么不做成全局指令：项目有三处结构不同的右键菜单（工作空间集合/条目、
+ * Git 文件树），但菜单容器 class 都是 .ctx-menu、项都是 .ctx-item button，
+ * 指令按这个契约实现即可三处复用，不必各写一份焦点代码。
+ * 刻意不进 v-dialog 的白名单（见 DIALOG_SELECTOR 注释）：菜单不是对话框，
+ * 不该有 Tab 循环陷阱。
+ */
+interface MenuState {
+  onKey: (e: KeyboardEvent) => void
+  previous: HTMLElement | null
+}
+const MENU_STATE = '__qdMenuState'
+const MENU_ITEM = '.ctx-item:not([disabled])'
+
+function menuItems(el: HTMLElement): HTMLElement[] {
+  return Array.from(el.querySelectorAll<HTMLElement>(MENU_ITEM)).filter(
+    (n) => n.getClientRects().length > 0,
+  )
+}
+
+export const vMenu: Directive<HTMLElement> = {
+  mounted(el) {
+    if ((el as any)[MENU_STATE]) return
+    if (!el.hasAttribute('role')) el.setAttribute('role', 'menu')
+    // 菜单项为空时兜底聚焦容器本身；有 tabindex 才能被 focus()。
+    if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '-1')
+    const previous = document.activeElement as HTMLElement | null
+    // 菜单刚 v-if 出来时子项还没布局完，下一帧再聚焦，否则 getClientRects 为空。
+    const raf = requestAnimationFrame(() => {
+      const items = menuItems(el)
+      for (const item of items) if (!item.hasAttribute('role')) item.setAttribute('role', 'menuitem')
+      ;(items[0] ?? el).focus()
+    })
+    const onKey = (e: KeyboardEvent) => {
+      if (e.isComposing || e.keyCode === 229) return
+      const items = menuItems(el)
+      if (!items.length) return
+      const cur = items.indexOf(document.activeElement as HTMLElement)
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        // 走遮罩的 @click：等价于点空白处关闭，菜单自己的 close 链路仍生效。
+        const backdrop = el.parentElement
+        if (backdrop) backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        return
+      }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End') {
+        e.preventDefault()
+        let next: number
+        if (e.key === 'Home') next = 0
+        else if (e.key === 'End') next = items.length - 1
+        else if (cur < 0) next = e.key === 'ArrowDown' ? 0 : items.length - 1
+        else next = (cur + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+        items[next].focus()
+      }
+    }
+    el.addEventListener('keydown', onKey)
+    ;(el as any)[MENU_STATE] = { onKey, previous, raf } as MenuState & { raf: number }
+  },
+  unmounted(el) {
+    const state = (el as any)[MENU_STATE] as (MenuState & { raf: number }) | undefined
+    if (!state) return
+    cancelAnimationFrame(state.raf)
+    el.removeEventListener('keydown', state.onKey)
+    delete (el as any)[MENU_STATE]
+    if (state.previous && document.contains(state.previous)) state.previous.focus()
+  },
+}
+
+/**
  * 存量弹窗的兜底：只盯白名单里的遮罩出现/消失，自动补 aria、焦点陷阱与
  * 「延后一帧」的 Esc 兜底（见 attachDialog 的 onKey，不会抢组件自己的 Esc 链）。
  * 用 MutationObserver 而不是全局 click 代理，是因为 Vue 的 v-if 卸载时机与
@@ -189,6 +261,7 @@ export const vDialog: Directive<HTMLElement> = {
 export function installA11y(app: App) {
   app.directive('key-click', vKeyClick)
   app.directive('dialog', vDialog)
+  app.directive('menu', vMenu)
 
   const sync = () => {
     const present = new Set(Array.from(document.querySelectorAll<HTMLElement>(DIALOG_SELECTOR)))

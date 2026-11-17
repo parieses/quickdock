@@ -1,4 +1,6 @@
-/* Auto-generated from highlight.js styles/atom-one-dark.css — 跟随 <html data-theme> */
+/* Auto-generated from highlight.js styles/atom-one-dark.css — 跟随 <html data-theme>
+   令牌例外：语法高亮是第三方配色方案（Atom One Dark/Light 完整色板），
+   不是应用 UI 面层，故不收编进 --color-* 设计令牌；与 cm-theme.css 同源，改色须同步。 */
 [data-theme="dark"] {
 
 

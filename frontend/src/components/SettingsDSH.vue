@@ -610,7 +610,7 @@ watch(() => props.visible, async (v) => {
       <div class="dsh-status-row">
         <div class="dsh-status-left">
           <span class="dsh-status-label">Node.js</span>
-          <span v-key-click v-if="status?.nodePath" class="dsh-status-path clickable" :title="'在资源管理器中打开: ' + status.nodePath" @click="reveal(status.nodePath)">{{ status.nodePath }}</span>
+          <span v-key-click v-if="status?.nodePath" class="dsh-status-path clickable" :title="t('openInExplorer') + ': ' + status.nodePath" @click="reveal(status.nodePath)">{{ status.nodePath }}</span>
         </div>
         <span :class="['dsh-badge', { ok: status?.nodeFound }]">
           <component :is="status?.nodeFound ? CheckCircle2 : AlertCircle" :size="13" />
@@ -630,8 +630,8 @@ watch(() => props.visible, async (v) => {
       <div class="dsh-status-row">
         <div class="dsh-status-left">
           <span class="dsh-status-label">DeepSeek Harness</span>
-          <span v-key-click v-if="status?.dshPath" class="dsh-status-path clickable" :title="'在资源管理器中打开: ' + status.dshPath" @click="reveal(status.dshPath)">{{ status.dshPath }}</span>
-          <span v-key-click v-if="status?.dshHome" class="dsh-status-path dsh-status-home clickable" :title="'在资源管理器中打开: ' + status.dshHome" @click="reveal(status.dshHome)">DSH_HOME: {{ status.dshHome }}</span>
+          <span v-key-click v-if="status?.dshPath" class="dsh-status-path clickable" :title="t('openInExplorer') + ': ' + status.dshPath" @click="reveal(status.dshPath)">{{ status.dshPath }}</span>
+          <span v-key-click v-if="status?.dshHome" class="dsh-status-path dsh-status-home clickable" :title="t('openInExplorer') + ': ' + status.dshHome" @click="reveal(status.dshHome)">DSH_HOME: {{ status.dshHome }}</span>
         </div>
         <span :class="['dsh-badge', { ok: status?.dshInstalled }]">
           <component :is="status?.dshInstalled ? CheckCircle2 : AlertCircle" :size="13" />

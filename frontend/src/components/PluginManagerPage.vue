@@ -834,7 +834,7 @@ onUnmounted(() => {
       <button
         :class="['cat-tab', { active: selectedCategory === '' }]"
         @click="selectedCategory = ''"
-      >全部 <span class="cat-count">{{ plugins.length }}</span></button>
+      >{{ t('pluginMarketAll') }} <span class="cat-count">{{ plugins.length }}</span></button>
       <button
         v-for="cat in categories"
         :key="cat"

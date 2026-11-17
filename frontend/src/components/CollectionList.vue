@@ -300,7 +300,7 @@ function onDropCol(e: DragEvent, targetId: string) {
 
     <!-- 右键菜单：遮罩点哪都关，菜单自身 stop 掉 -->
     <div v-if="ctx" class="ctx-backdrop" @click="closeContextMenu" @contextmenu.prevent="closeContextMenu">
-      <div class="ctx-menu" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }" @click.stop>
+      <div v-menu class="ctx-menu" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }" @click.stop>
         <button
           v-for="a in ctxActions"
           :key="a.id"

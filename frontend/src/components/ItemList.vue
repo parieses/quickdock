@@ -7,6 +7,7 @@ import TypeIcon from './TypeIcon.vue'
 import ItemEditor from './ItemEditor.vue'
 import CreateDialog, { type CreateField } from './CreateDialog.vue'
 import { getErrorMessage } from '../utils/error'
+import { logErr } from '../utils/logger'
 import { unwrap } from '../utils/api'
 import { ITEM_TYPE } from '../constants/itemTypes'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
@@ -198,15 +199,21 @@ async function batchDelete() {
   if (!ids.length || batchBusy.value) return
   if (!(await toast.confirm(t('wsBatchDeleteConfirm', { n: ids.length })))) return
   batchBusy.value = true
-  let failed = 0
+  const failures: string[] = []
   for (const id of ids) {
-    try { unwrap(await DeleteItem(id)) } catch { failed++ }
+    try {
+      unwrap(await DeleteItem(id))
+    } catch (e) {
+      const reason = getErrorMessage(e)
+      failures.push(`${id}: ${reason}`)
+      logErr('ItemList.batchDelete', e)
+    }
   }
   batchBusy.value = false
   clearSel()
   if (store.activeCollectionId) await store.fetchItems(store.activeCollectionId)
-  if (!failed) toast.success(t('wsBatchDeleted', { n: ids.length }))
-  else toast.error(t('wsBatchPartial', { n: failed }))
+  if (!failures.length) toast.success(t('wsBatchDeleted', { n: ids.length }))
+  else toast.error(t('wsBatchPartial', { n: failures.length }) + ' — ' + failures.join('; '))
 }
 
 const moveMenuOpen = ref(false)
@@ -215,15 +222,21 @@ async function batchMove(targetId: string) {
   moveMenuOpen.value = false
   if (!ids.length || batchBusy.value) return
   batchBusy.value = true
-  let failed = 0
+  const failures: string[] = []
   for (const id of ids) {
-    try { unwrap(await UpdateItem(id, { collection_id: targetId })) } catch { failed++ }
+    try {
+      unwrap(await UpdateItem(id, { collection_id: targetId }))
+    } catch (e) {
+      const reason = getErrorMessage(e)
+      failures.push(`${id}: ${reason}`)
+      logErr('ItemList.batchMove', e)
+    }
   }
   batchBusy.value = false
   clearSel()
   if (store.activeCollectionId) await store.fetchItems(store.activeCollectionId)
-  if (!failed) toast.success(t('wsBatchMoved', { n: ids.length }))
-  else toast.error(t('wsBatchPartial', { n: failed }))
+  if (!failures.length) toast.success(t('wsBatchMoved', { n: ids.length }))
+  else toast.error(t('wsBatchPartial', { n: failures.length }) + ' — ' + failures.join('; '))
 }
 
 // ---- 右键菜单 ----
@@ -334,10 +347,28 @@ function onDropItem(e: DragEvent, targetId: string) {
   store.reorderItems(ids)
   dragItemId.value = null
 }
+
+// 键盘重排：Alt+↑/↓，与拖拽同守卫（搜索/本地过滤时下标不是全量，不能写回）
+const itemMoveMsg = ref('')
+function onItemMoveKey(e: KeyboardEvent, item: { id: string; name: string }) {
+  if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return
+  if (store.hasSearch || filtering.value) return
+  e.preventDefault()
+  const ids = store.filteredItems.map(it => it.id)
+  const from = ids.indexOf(item.id)
+  const to = from + (e.key === 'ArrowUp' ? -1 : 1)
+  if (from < 0 || to < 0 || to >= ids.length) return
+  ids.splice(from, 1)
+  ids.splice(to, 0, item.id)
+  store.reorderItems(ids)
+  itemMoveMsg.value = t(e.key === 'ArrowUp' ? 'sceneMovedUp' : 'sceneMovedDown', { name: item.name })
+}
 </script>
 
 <template>
   <section class="item-list qd-panel">
+    <!-- 键盘重排的状态播报：视觉隐藏，读屏会念出移动结果 -->
+    <span class="qd-sr-only" aria-live="polite">{{ itemMoveMsg }}</span>
     <div class="qd-panel-header">
       <span class="qd-panel-title">{{ t('items') }}</span>
       <span v-if="store.activeCollection" class="qd-panel-chip">{{ store.activeCollection.name }}</span>
@@ -411,6 +442,7 @@ function onDropItem(e: DragEvent, targetId: string) {
           :draggable="!store.hasSearch && !filtering"
           @click="handleItemClick(item)"
           @contextmenu.prevent="openContextMenu($event, item)"
+          @keydown="onItemMoveKey($event, item)"
           @dragstart="onDragStartItem($event, item.id)"
           @dragend="onDragEndItem"
           @dragover="onDragOverItem"
@@ -457,6 +489,7 @@ function onDropItem(e: DragEvent, targetId: string) {
           :draggable="!store.hasSearch && !filtering"
           @click="handleItemClick(item)"
           @contextmenu.prevent="openContextMenu($event, item)"
+          @keydown="onItemMoveKey($event, item)"
           @dragstart="onDragStartItem($event, item.id)"
           @dragend="onDragEndItem"
           @dragover="onDragOverItem"
@@ -513,7 +546,7 @@ function onDropItem(e: DragEvent, targetId: string) {
 
     <!-- 右键菜单：遮罩点哪都关，菜单自身 stop 掉 -->
     <div v-if="ctx" class="ctx-backdrop" @click="closeContextMenu" @contextmenu.prevent="closeContextMenu">
-      <div class="ctx-menu" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }" @click.stop>
+      <div v-menu class="ctx-menu" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }" @click.stop>
         <button
           v-for="a in ctxActions"
           :key="a.id"

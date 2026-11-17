@@ -170,7 +170,8 @@ md.use({
   renderer: {
     checkbox(token: { checked?: boolean }) {
       const done = !!token.checked
-      return `<span class="ai-task-box${done ? ' is-done' : ''}" role="img" aria-label="${done ? '已完成' : '未完成'}"></span>`
+      const label = done ? t('aiTaskDone') : t('aiTaskTodo')
+      return `<span class="ai-task-box${done ? ' is-done' : ''}" role="img" aria-label="${label}"></span>`
     },
     listitem(token: { tokens?: any[]; task?: boolean; checked?: boolean }) {
       const body = this.parser.parse(token.tokens ?? [])

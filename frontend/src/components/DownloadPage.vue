@@ -1984,7 +1984,7 @@ onUnmounted(() => {
 }
 /* 历史记录标记：刻意做得比 BT 徽章更淡——它只是「这条不是当前任务」的提示，
    不该在列表里抢走进行中任务的注意力。 */
-.dl-badge.is-history { background: var(--color-bg-tertiary); color: var(--color-text-tertiary); }
+.dl-badge.is-history { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .dl-tag { flex: none; padding: var(--space-1) var(--space-4); border-radius: var(--radius-full); font-size: var(--text-xs); color: var(--color-text-secondary); background: var(--color-bg-tertiary); }
 .dl-tag.is-active { color: var(--color-accent); background: var(--color-accent-border-strong); }
 .dl-tag.is-complete { color: var(--color-success); background: var(--color-success-bg); }

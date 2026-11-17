@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { RotateCcw, Trash2 } from '@lucide/vue'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { logErr } from '../utils/logger'
 import {
   GetSyncConfig,
   SetSyncConfig,
@@ -49,7 +50,11 @@ async function loadBackends() {
   try {
     const list = unwrap<{ type: string; name: string; desc: string }[]>(await SyncListBackends())
     backends.value = list ?? []
-  } catch { backends.value = [] }
+  } catch (e) {
+    backends.value = []
+    toast.error(getErrorMessage(e))
+    logErr('SettingsSync.loadBackends', e)
+  }
 }
 
 async function loadConfig() {

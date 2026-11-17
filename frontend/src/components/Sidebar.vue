@@ -213,6 +213,7 @@ const {
   onDragOver: wsSortDragOver,
   onDrop: wsSortDrop,
   onDragEnd: wsSortDragEnd,
+  moveByKey: moveWsByKey,
 } = useDragSort({
   ids: () => store.workspaces.map(w => w.id),
   onReorder: (ids) => {
@@ -228,6 +229,16 @@ const {
 function onWsDragStart(id: string, e: DragEvent, i: number) {
   if (wsDragDisabled.value) { e.preventDefault(); return }
   wsSortDragStart(id, e, i)
+}
+// 键盘重排：Alt+↑/↓，与拖拽同守卫（搜索时列表被过滤，不能按过滤下标写回全量）
+const wsMoveMsg = ref('')
+function onWsMoveKey(e: KeyboardEvent, ws: { id: string; name: string }) {
+  if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return
+  if (wsDragDisabled.value) return
+  e.preventDefault()
+  if (moveWsByKey(ws.id, e.key === 'ArrowUp' ? -1 : 1)) {
+    wsMoveMsg.value = t(e.key === 'ArrowUp' ? 'sceneMovedUp' : 'sceneMovedDown', { name: ws.name })
+  }
 }
 function onWsDragOver(i: number, e: DragEvent) {
   // 禁用时不 preventDefault：浏览器不认为是合法落点，既不画指示线也不派发 drop
@@ -293,6 +304,8 @@ async function handleDeleteWorkspace(wsId: string) {
 
 <template>
   <aside class="sidebar" :class="{ collapsed }">
+    <!-- 键盘重排的状态播报：视觉隐藏，读屏会念出移动结果 -->
+    <span class="qd-sr-only" aria-live="polite">{{ wsMoveMsg }}</span>
     <!-- 工作空间切换器 -->
     <div v-key-click class="workspace-selector" @click.stop="toggleWorkspaceMenu">
       <FolderKanban :size="16" class="ws-icon" />
@@ -307,6 +320,7 @@ async function handleDeleteWorkspace(wsId: string) {
             class="ws-item-row"
             :class="{ dragging: wsDragId === ws.id, 'drop-before': !!wsDragId && wsDragOverIndex === i && wsDragId !== ws.id }"
             :draggable="!wsDragDisabled"
+            @keydown="onWsMoveKey($event, ws)"
             :title="wsDragDisabled ? t('workspaceDragDisabledHint') : t('workspaceDragHint')"
             @dragstart="onWsDragStart(ws.id, $event, i)"
             @dragover="onWsDragOver(i, $event)"

@@ -17,6 +17,7 @@ const loading = ref(true)
 const error = ref('')
 const killPid = ref<number | null>(null)
 const showKillConfirm = ref(false)
+const killing = ref(false)
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 const filtered = computed(() => {
@@ -51,12 +52,15 @@ async function confirmKill() {
   const pid = killPid.value
   showKillConfirm.value = false
   killPid.value = null
-  if (pid == null) return
+  if (pid == null || killing.value) return
+  killing.value = true
   try {
     await unwrap(await KillProcess(pid))
     await load()
   } catch (e: any) {
     error.value = getErrorMessage(e)
+  } finally {
+    killing.value = false
   }
 }
 
@@ -82,12 +86,12 @@ onUnmounted(() => {
 
 <template>
   <div class="port-page">
-    <div class="port-head">
-      <div class="port-title-wrap">
-        <h2 class="port-title">{{ t('portsTitle') }}</h2>
-        <span class="port-sub">{{ t('portsDesc') }}</span>
+    <div class="qd-page-header port-head">
+      <div class="qd-page-titles port-title-wrap">
+        <h2 class="qd-page-title port-title">{{ t('portsTitle') }}</h2>
+        <span class="qd-page-sub port-sub">{{ t('portsDesc') }}</span>
       </div>
-      <div class="port-tools">
+      <div class="qd-page-actions port-tools">
         <div class="port-search">
           <Search :size="13" />
           <input v-model="kw" :placeholder="t('portsSearch')" class="port-search-input" />
@@ -123,8 +127,8 @@ onUnmounted(() => {
           <span v-if="p.self" class="port-self-badge">{{ t('portsSelf') }}</span>
         </span>
         <span class="port-path" :title="t('portsPath') + '：' + (p.path || t('portsPathUnknown'))">{{ p.path || '—' }}</span>
-        <button class="port-kill" @click="askKill(p)" :title="t('portsKill')">
-          <Trash2 :size="13" /> {{ t('portsKill') }}
+        <button class="port-kill" :disabled="killing" @click="askKill(p)" :title="t('portsKill')">
+          <Trash2 :size="13" /> {{ killing ? t('portsKilling') : t('portsKill') }}
         </button>
       </div>
     </div>
@@ -142,13 +146,22 @@ onUnmounted(() => {
 /* 本组件嵌在 EnvironmentPage 的 .env-detail 里，外层已给了内边距与滚动容器。
    这里再自带一层 padding 会让顶部双重缩进（比其它分类低一截）；
    height:100% + overflow:hidden 更糟——父容器是 auto 高度的 flex 列，
-   内层 .port-list 拿不到确定高度，会把列表压扁或整个裁掉。 */
+   内层 .port-list 拿不到确定高度，会把列表压扁或整个裁掉。
+   页头沿用全站 .qd-page-header 骨架，但像 StatusPage 的 embedded 态那样降级成
+   一行轻量标题——父区块自己有标题上下文，不能再来一层 46px 通栏底色/下缘线。 */
 .port-page { display: flex; flex-direction: column; padding: 0; }
-.port-head { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: var(--space-5); flex-shrink: 0; gap: var(--space-4); }
+.qd-page-header.port-head {
+  min-height: 0;
+  margin-bottom: var(--space-5);
+  padding: 0;
+  background: none;
+  border-bottom: none;
+  flex-shrink: 0;
+  gap: var(--space-4);
+}
+/* 标题字号由 .qd-page-title 统一给出（--text-lg），不再用 --text-xl 另起一档 */
 .port-title-wrap { display: flex; align-items: baseline; gap: var(--space-3); }
-.port-title { font-size: var(--text-xl); font-weight: 600; color: var(--color-text-primary); margin: 0; }
-.port-sub { font-size: var(--text-sm); color: var(--color-text-disabled); }
-.port-tools { display: flex; align-items: center; gap: var(--space-3); }
+.port-tools { display: flex; align-items: center; gap: var(--space-3); margin-left: auto; }
 .port-search { display: flex; align-items: center; gap: 5px; padding: 5px 9px; border-radius: var(--radius-sm); background: var(--color-bg-secondary); color: var(--color-text-disabled); min-width: 200px; }
 .port-search-input { flex: 1; border: none; outline: none; background: transparent; color: var(--color-text-primary); font-size: var(--text-md); }
 .port-btn { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); height: 28px; padding: 0 11px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--color-border); background: var(--color-bg-secondary); color: var(--color-text-primary); }
@@ -190,4 +203,5 @@ onUnmounted(() => {
 .port-path { flex: 1.6; min-width: 0; font-size: var(--text-sm); color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .port-kill { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); padding: var(--space-2) 9px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--color-border); background: transparent; color: var(--color-danger); transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast); }
 .port-kill:hover { background: var(--color-danger-bg); border-color: var(--color-danger-border); }
+.port-kill:disabled { opacity: .5; cursor: default; }
 </style>

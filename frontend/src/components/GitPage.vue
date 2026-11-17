@@ -2814,7 +2814,7 @@ const dialogCtx = reactive({
     <Teleport to="body">
       <div v-if="ctx" class="ctx-backdrop" @click="closeCtx" @contextmenu.prevent="closeCtx"
            @wheel.prevent="closeCtx">
-        <div ref="ctxMenuEl" class="ctx-menu" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }"
+        <div v-menu ref="ctxMenuEl" class="ctx-menu" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }"
              @click.stop @contextmenu.stop>
           <template v-for="a in ctxActions" :key="a.id">
             <div v-if="a.sep" class="ctx-sep"></div>

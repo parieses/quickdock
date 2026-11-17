@@ -2,6 +2,9 @@
    色板与 hljs-theme.css 同源（Atom One Dark / Light），编辑态与读视图观感一致。
    token → class 的映射在 utils/aiCodeEditor.ts 的 HighlightStyle 里。
 
+   令牌例外：语法高亮必须用 One Dark/Light 的完整色板（几十种 token 色），
+   这是第三方配色方案本身，不是应用 UI 面层，故不收编进 --color-* 设计令牌。
+   改色请连同 hljs-theme.css 一起改，保持编辑态与读视图同源。 */
    选择器刻意写成扁平形式而不用 CSS 嵌套：WebView2 的内核版本不保证支持嵌套，
    一旦不支持就是「整片代码没颜色」这种没法一眼看出原因的问题。 */
 

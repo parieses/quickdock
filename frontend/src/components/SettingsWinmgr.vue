@@ -309,8 +309,8 @@ async function saveAll() {
     </section>
 
     <div class="wm-actions">
-      <button class="wm-btn wm-btn-primary" @click="saveAll">{{ t('saveAll') }}</button>
-      <button class="wm-btn wm-btn-ghost" @click="resetAll">{{ t('restoreDefault') }}</button>
+      <button class="qd-btn qd-btn-lg qd-btn-primary" @click="saveAll">{{ t('saveAll') }}</button>
+      <button class="qd-btn qd-btn-lg qd-btn-ghost" @click="resetAll">{{ t('restoreDefault') }}</button>
     </div>
     <p v-if="message" class="wm-msg">{{ message }}</p>
     <p class="wm-tip">{{ t('winmgrTip') }}</p>
@@ -419,19 +419,6 @@ async function saveAll() {
 .wm-hint { font-size: var(--text-xs); color: var(--color-text-disabled); margin: var(--space-4) 0 0; line-height: 1.5; }
 
 .wm-actions { display: flex; gap: var(--space-4); margin-top: var(--space-1); }
-.wm-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
-  height: 32px; padding: 0 var(--space-6);
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-md);
-  font-family: inherit;
-  cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
-}
-.wm-btn-primary { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
-.wm-btn-primary:hover { background: var(--color-accent-hover); border-color: var(--color-accent-hover); }
-.wm-btn-ghost { background: transparent; color: var(--color-text-secondary); border-color: var(--color-border); }
-.wm-btn-ghost:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .wm-msg { font-size: var(--text-sm); color: var(--color-success); margin: 10px 0 0; }
 .wm-tip { font-size: var(--text-xs); color: var(--color-text-disabled); line-height: 1.6; margin: 10px 0 0; }
 </style>
