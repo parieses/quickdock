@@ -3,7 +3,7 @@ import PageHeader from './PageHeader.vue'
 import QdTabs from './QdTabs.vue'
 import QdSwitch from './QdSwitch.vue'
 import QdModal from './QdModal.vue'
-import { ref, computed, onMounted, onBeforeUnmount, onActivated, onDeactivated, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, onActivated, onDeactivated, watch, nextTick, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { KEEP_ALIVE } from '../pages/keepAlive'
 defineOptions({ name: KEEP_ALIVE.schedule })
@@ -354,6 +354,36 @@ const fNotifyPolicy = ref('always')
 function toInput(s: string): string { return s ? s.replace(' ', 'T') : '' }
 function fromInput(s: string): string { return s ? s.replace('T', ' ') : '' }
 
+// 三个时间字段仍以单一字符串为源（YYYY-MM-DDTHH:MM:SS），拆成 date + time 两个原生框
+// 只是输入方式；buildPayload / openEdit / 有效期比较的口径都不变。
+// 原生 datetime-local 在中文 WebView 下占位符是 "yyyy/mm/日 --:--:--"，改 CSS 改不掉，
+// 拆开后 date 框只显示 yyyy-mm-dd、time 框只显示 --:--，不再中英混排。
+function todayStr(): string {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+function splitDateTime(source: Ref<string>) {
+  const date = computed({
+    get: () => source.value.slice(0, 10),
+    set: (d: string) => {
+      // 只选日期时补一个默认时间，避免拼出 'YYYY-MM-DDT' 这种半截值交给后端
+      source.value = d ? `${d}T${source.value.slice(11) || '09:00:00'}` : ''
+    },
+  })
+  const time = computed({
+    get: () => source.value.slice(11),
+    set: (t: string) => {
+      // 用户先填了时间、日期还空着时补今天，别把时间丢掉
+      source.value = `${source.value.slice(0, 10) || todayStr()}T${t}`
+    },
+  })
+  return { date, time }
+}
+const runAtParts = splitDateTime(fRunAt)
+const validFromParts = splitDateTime(fValidFrom)
+const validUntilParts = splitDateTime(fValidUntil)
+
 /** 机器人 Webhook 是全局配置，跳设置页去改（本页不重复实现一份表单）。 */
 function openNotifySettings() {
   try { Events.Emit('app:open-settings', 'notify') } catch { /* 事件通道未就绪时静默，不阻塞新建任务 */ }
@@ -388,7 +418,9 @@ function openCreate() {
   fHttpHeaders.value = ''
   fHttpBody.value = ''
   fKind.value = 'once'
-  fRunAt.value = ''
+  // 默认选中今天：一次性任务最常见的就是「今天某个点跑一下」，
+  // 原生 datetime-local 空值时日期段是 yyyy/mm/日，用户得从年份一格格拨到今天。
+  fRunAt.value = `${todayStr()}T09:00:00`
   fIntervalVal.value = 5
   fIntervalUnit.value = 'min'
   fTimeOfDay.value = '09:00'
@@ -842,6 +874,7 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
         <!-- 动作类型 -->
         <label>{{ t('sched_action') }}</label>
         <QdTabs
+          class="sched-action-tabs"
           :model-value="fAction"
           :tabs="actionTabs"
           @update:model-value="(v: string) => (fAction = v)"
@@ -911,7 +944,10 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
         <!-- once -->
         <template v-if="fKind === 'once'">
           <label>{{ t('sched_runat') }}</label>
-          <input v-model="fRunAt" type="datetime-local" step="1" class="modal-input" />
+          <div class="sched-dt">
+            <input v-model="runAtParts.date" type="date" class="modal-input" />
+            <input v-model="runAtParts.time" type="time" step="1" class="modal-input" />
+          </div>
         </template>
 
         <!-- interval -->
@@ -971,9 +1007,15 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 
         <!-- 有效期：留空 = 不限，对所有动作通用 -->
         <label>{{ t('sched_valid_from') }}</label>
-        <input v-model="fValidFrom" type="datetime-local" step="1" class="modal-input" />
+        <div class="sched-dt">
+          <input v-model="validFromParts.date" type="date" class="modal-input" />
+          <input v-model="validFromParts.time" type="time" step="1" class="modal-input" />
+        </div>
         <label>{{ t('sched_valid_until') }}</label>
-        <input v-model="fValidUntil" type="datetime-local" step="1" class="modal-input" />
+        <div class="sched-dt">
+          <input v-model="validUntilParts.date" type="date" class="modal-input" />
+          <input v-model="validUntilParts.time" type="time" step="1" class="modal-input" />
+        </div>
         <p class="form-hint">{{ t('sched_valid_hint') }}</p>
 
         <!-- 开关 -->
@@ -1222,6 +1264,28 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 .modal-area { height: auto; padding: var(--space-4) 10px; resize: vertical; line-height: 1.5; }
 .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .modal-grid > * { min-width: 0; }
+
+/* 动作类型 6 项在 440px 弹窗里一行放不下（最后两个被裁掉）：
+   改 3 列 2 行等宽铺排。注意 class 透传后 .sched-action-tabs 与 .qd-tabs 是同一个根元素，
+   所以这里不能用 `.sched-action-tabs :deep(.qd-tabs)`——那会编译成后代选择器而失效。 */
+.sched-action-tabs.qd-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+  gap: var(--space-1);
+}
+.sched-action-tabs :deep(.qd-tab) {
+  justify-content: center;
+  padding: 0 var(--space-2);
+}
+
+/* 日期+时间拆成两个原生框：日期要宽一点放 yyyy-mm-dd，时间固定够放 HH:MM:SS。
+   用 grid 而非 flex 是为了让两框严格对齐、日期框被挤压时时间框不被推走。 */
+.sched-dt {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 104px;
+  gap: var(--space-2);
+}
 
 .wd-row { display: flex; gap: 5px; }
 .wd-btn {
