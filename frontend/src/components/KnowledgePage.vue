@@ -737,8 +737,10 @@ onScopeDispose(() => {
           <BookOpen :size="16" />
           {{ t('kbTitle') }}
         </h1>
-        <p class="qd-page-sub">{{ subtitle }}</p>
       </template>
+      <!-- 文档/片段统计跟在标题后面同一行：原来放在 .qd-page-titles 里是第二行，
+           且 <p> 带浏览器默认上下 margin，把 46px 公共页头撑得比其它页都高。 -->
+      <span class="qd-page-sub qd-page-sub-inline">{{ subtitle }}</span>
       <div class="qd-page-actions">
         <button v-if="status?.running" class="qd-btn qd-btn-danger" :disabled="indexStopping" @click="stopIndex">
           <Square :size="12" />

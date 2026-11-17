@@ -713,19 +713,24 @@ function shortTime(s: string): string {
     <PageHeader>
       <template #titles>
         <h2 class="qd-page-title"><Cloud :size="16" />{{ t('netdiskTitle') }}</h2>
-        <span class="qd-page-sub">{{ t('netdiskSubtitle') }}</span>
       </template>
+      <!-- 副标题与标题同一行；状态走中间 .qd-page-fill，操作按钮走 .qd-page-actions 靠右，
+           和其它一级页的「标题 | 中间控件 | 右侧动作」同一套排布。 -->
+      <span class="qd-page-sub qd-page-sub-inline">{{ t('netdiskSubtitle') }}</span>
       <div class="qd-page-fill">
         <span v-if="gw" class="nd-chip" :class="gw.running ? 'is-on' : 'is-off'">
           {{ gw.running ? t('netdiskGatewayOn', { version: gw.version, port: gw.port }) : t('netdiskGatewayOff') }}
         </span>
-        <button class="btn btn-secondary" :disabled="!gw" @click="openAdmin">
+      </div>
+      <div class="qd-page-actions">
+        <!-- 页头按钮走功能页的 .qd-btn，不再用设置页那套 .btn.btn-secondary -->
+        <button class="qd-btn" :disabled="!gw" @click="openAdmin">
           <Settings2 :size="14" />{{ t('netdiskOpenAdmin') }}
         </button>
-        <button v-if="gw?.installed" class="btn btn-secondary" :disabled="!!busy" @click="restartGateway">
+        <button v-if="gw?.installed" class="qd-btn" :disabled="!!busy" @click="restartGateway">
           <Power :size="14" />{{ busy === 'restart' ? t('netdiskRestarting') : t('netdiskRestartGateway') }}
         </button>
-        <button class="btn btn-secondary" :disabled="loading" @click="refreshStatus">
+        <button class="qd-btn" :disabled="loading" @click="refreshStatus">
           <RefreshCw :size="14" />{{ t('netdiskRefresh') }}
         </button>
       </div>
@@ -974,6 +979,13 @@ function shortTime(s: string): string {
   padding: var(--space-6);
   gap: var(--space-5);
   color: var(--color-text-primary);
+}
+
+/* 页头通栏：抵消容器的上/左/右 16px padding，让公共 .qd-page-header 贴顶并撑满整行。
+   只动页头、不给内容块统一补 margin —— .nd-empty 靠 margin:auto 居中，.nd-pv-mask 是
+   position:fixed + inset:0 的遮罩，给它们加左右 margin 会一个偏左、一个露出没盖住的边。 */
+.netdisk-page > :deep(.qd-page-header) {
+  margin: calc(0px - var(--space-6)) calc(0px - var(--space-6)) 0;
 }
 
 .nd-chip {

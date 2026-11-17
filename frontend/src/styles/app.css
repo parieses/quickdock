@@ -93,9 +93,22 @@
 }
 
 .qd-page-sub {
+  /* 必须清 margin：这个类早期被当成 <p> 用过，浏览器默认的 1em 上下外边距
+     会把 46px 的公共页头撑到 60+px，看起来就是「这一页比别的页高」。 */
+  margin: 0;
   font-size: var(--text-sm);
   line-height: 1.4;
   color: var(--color-text-muted);
+}
+
+/* 标题后的副标题（统计、说明）：作为页头 flex 子项与标题同一行，
+   而不是塞进 .qd-page-titles（那是 column，会变成第二行）。窄窗口时先压缩它，
+   别把右侧操作按钮挤到换行。 */
+.qd-page-sub-inline {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 页头里需要占满中间的控件（搜索框 / 标签条）。没有它时按钮靠
