@@ -225,7 +225,8 @@ jobs:
           Copy-Item bin/quickdock.exe bin/quickdock-amd64.exe
 
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
+        # v5 发布说明虽提 node24，但 action.yml 仍声明 node20；v6 才是原生 node24。
+        uses: actions/upload-artifact@v6
         with:
           name: win
           path: |
@@ -250,7 +251,8 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        # v5 仍声明 node20，会被 runner 强制切到 node24 并打印弃用告警；v6 原生 node24。
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -315,7 +317,8 @@ jobs:
           python verify_ext.py
 
       - name: Upload extension artifact
-        uses: actions/upload-artifact@v4
+        # v5 发布说明虽提 node24，但 action.yml 仍声明 node20；v6 才是原生 node24。
+        uses: actions/upload-artifact@v6
         with:
           name: ext
           path: browser-ext/dist/*.zip
@@ -382,7 +385,9 @@ jobs:
           echo "VERSION=$ver" >> "$GITHUB_ENV"
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        # v5/v6 仍声明 node20；v7 原生 node24。本步按 name 下载 + merge-multiple，
+        # 不涉及 v5「按 artifact-id 单下载」的路径变更，行为不变。
+        uses: actions/download-artifact@v7
         with:
           # merge-multiple 把所有 artifact 摊平到同一目录（文件名无冲突）
           path: dist
