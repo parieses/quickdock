@@ -125,8 +125,9 @@ type CommandOutcome struct {
 // 用前几百字——但若不设上限，全量会先整个灌进内存。
 const commandOutputCap = 8 << 10
 
-// RunCommandCapture 执行一条命令行（按 argv 拆词，避免直接交给 shell 解释导致
-// 注入；需要管道/重定向等 shell 特性时显式写 cmd /c "..."），等待其结束并捕获
+// RunCommandCapture 执行一条命令行（按 argv 拆词，避免把整条命令直接交给 shell；
+// 需要管道/重定向等 shell 特性时显式写 cmd /c "..."；首段是本地 .bat/.cmd 时
+// 由 commandForRun 经 shell 执行并显式引用路径），等待其结束并捕获
 // stdout/stderr 与退出码。用于 ls / dir / git status 这类要拿输出的命令
 // （定时任务的 command 动作走这里，输出会进执行历史与通知）。
 //
@@ -139,7 +140,25 @@ func RunCommandCapture(command, workingDir string, timeout time.Duration) Comman
 	if len(argList) == 0 {
 		return CommandOutcome{ExitCode: -1, Err: fmt.Errorf("命令内容为空")}
 	}
-	cmd := exec.Command(argList[0], argList[1:]...)
+	// 相对路径的可执行文件（如「打开目录」里填的 xxx.bat）按工作目录解析。
+	// exec.Command 构造时就用**父进程 cwd** 做 LookPath，cmd.Dir 只管启动后的
+	// 工作目录、管不到查找阶段——裸相对 .bat 在 workingDir 里存在也会报
+	// "executable file not found in %PATH%"。实测确认后在这里先拼绝对路径。
+	if strings.TrimSpace(workingDir) != "" {
+		exe := argList[0]
+		// 盘符路径（D:\...）、UNC（\\host\...）、绝对斜杠路径与带协议的都不动；
+		// 只处理不含分隔符的裸名字与 .\ / ..\ 这种相对路径。
+		if !filepath.IsAbs(exe) && !strings.Contains(exe, "://") {
+			candidate := filepath.Join(workingDir, exe)
+			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				argList[0] = candidate
+			}
+		}
+	}
+	// 首段是本地 .bat/.cmd 时经 commandForRun 走 shell 并显式引用路径。
+	// Windows 下 Go 的 exec.Command 自动 cmd /c 包装对含括号/中文的 bat 路径
+	// 会截断到第一个 "("，必须手写 CmdLine（详见 opener_windows.go）。
+	cmd := commandForRun(argList[0], argList[1:])
 	if strings.TrimSpace(workingDir) != "" {
 		cmd.Dir = workingDir
 	}

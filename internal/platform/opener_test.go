@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -97,6 +98,61 @@ func TestRunCommandCapture(t *testing.T) {
 		}
 		if out.ExitCode != -1 {
 			t.Errorf("启动失败时退出码应为 -1，实为 %d", out.ExitCode)
+		}
+	})
+
+	// 回归：定时任务的「命令行」常填工作目录里的相对脚本（xxx.bat）。
+	// exec.Command 的 LookPath 用父进程 cwd，不认 cmd.Dir，裸相对名会报
+	// "executable file not found in %PATH%"。RunCommandCapture 必须先按
+	// workingDir 把首段解析成绝对路径再执行。（实测确认过 A/B 两种写法的差异。）
+	t.Run("相对脚本按工作目录解析", func(t *testing.T) {
+		if runtime.GOOS != "windows" {
+			t.Skip("批处理脚本仅 Windows 适用")
+		}
+		dir := t.TempDir()
+		script := "qd-rel-" + strings.ReplaceAll(t.Name(), "/", "-") + ".bat"
+		body := "@echo off\r\necho WD-QD-MARK\r\ncd\r\n"
+		if err := os.WriteFile(filepath.Join(dir, script), []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+		out := RunCommandCapture(script, dir, 10*time.Second)
+		if out.Err != nil {
+			t.Fatalf("相对脚本应能在工作目录中找到并执行: %v", out.Err)
+		}
+		if !strings.Contains(out.Stdout, "WD-QD-MARK") {
+			t.Errorf("脚本应被执行，stdout=%q", out.Stdout)
+		}
+		if want := filepath.Base(dir); !strings.Contains(out.Stdout, want) {
+			t.Errorf("应运行于工作目录 %s，实际 cd 输出=%q", dir, out.Stdout)
+		}
+	})
+
+	// 回归：用户实测路径含半角括号和中文（D:\green\激活补丁(Navicat16、17可用)\...\x.bat）。
+	// Go 默认 exec.Command 的 cmd /c 包装不引用无空格路径，cmd 把 "(" 当语法字符
+	// 截断，报「不是内部或外部命令」。必须用 /s /c "call "路径"" 显式加引号。
+	t.Run("含括号与中文路径的批处理", func(t *testing.T) {
+		if runtime.GOOS != "windows" {
+			t.Skip("批处理脚本仅 Windows 适用")
+		}
+		base := t.TempDir()
+		dir := filepath.Join(base, "激活补丁(Navicat16、17可用)", "激活补丁(Navicat16、17可用)")
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		script := filepath.Join(dir, "无限试用Navicat.bat")
+		body := "@echo off\r\necho WD-QD-PAREN-MARK\r\ncd\r\n"
+		if err := os.WriteFile(script, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+		out := RunCommandCapture(script, dir, 10*time.Second)
+		if out.Err != nil {
+			t.Fatalf("含括号路径的 bat 应能执行: %v", out.Err)
+		}
+		if !strings.Contains(out.Stdout, "WD-QD-PAREN-MARK") {
+			t.Errorf("脚本应被执行，stdout=%q（stderr=%q）", out.Stdout, out.Stderr)
+		}
+		if want := filepath.Base(dir); !strings.Contains(out.Stdout, want) {
+			t.Errorf("应运行于工作目录 %s，实际 cd 输出=%q", dir, out.Stdout)
 		}
 	})
 
