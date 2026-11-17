@@ -4397,6 +4397,8 @@ export default {
   netdiskNotInstalledHint: 'Drives are proxied by a local OpenList gateway: install it, add your Baidu / Quark accounts in its console, then browse and download here.',
   netdiskStopped: 'Gateway is not running',
   netdiskStoppedHint: 'OpenList is installed but the service is down. Start it to read your drive folders.',
+  netdiskNoStorageTitle: 'No drives added yet',
+  netdiskNoStorageDesc: 'The gateway is running but has no storage mounted, so the root folder cannot be listed. Add a Baidu / Quark account in Console → Storages, make sure it opens, then come back and hit Refresh.',
   netdiskRoot: 'All drives',
   netdiskUp: 'Up',
   netdiskLoginHint: 'Console user {user}; password is in the vault or the runtime log',

@@ -76,6 +76,8 @@ interface GatewayInfo {
   version: string
   /** 预览地址前缀（http://127.0.0.1:PORT/<token>/f?p=），空串表示代理没起来。 */
   previewBase: string
+  /** 网关已运行但一个存储都没有（或根目录列不出来）：首屏进引导页，别弹 HTTP 500。 */
+  needSetup: boolean
 }
 
 interface Entry {
@@ -104,6 +106,8 @@ interface JobRow {
 }
 
 const gw = ref<GatewayInfo | null>(null)
+/** 网关已跑起来但没添加存储：单独一档引导态，避免列目录撞 500。 */
+const needSetup = ref(false)
 const entries = ref<Entry[]>([])
 /** 当前目录（相对 WebDAV 根，"/" 表示根）。 */
 const dir = ref('/')
@@ -172,6 +176,13 @@ const allSelected = computed(
 async function refreshStatus() {
   try {
     gw.value = unwrap<GatewayInfo>(await NetdiskStatus())
+    // 后端在 Status 里探测过根目录：没存储时直接进引导页，不再发那次注定
+    // 返回 500 的列目录请求；用户在后台加完存储点「刷新」就会重新探测。
+    needSetup.value = !!gw.value?.needSetup
+    if (needSetup.value) {
+      entries.value = []
+      return
+    }
     if (ready.value) await loadDir(dir.value)
   } catch (e) {
     logErr('NetdiskPage.refreshStatus', e)
@@ -756,6 +767,22 @@ function shortTime(s: string): string {
       </button>
     </section>
 
+    <!-- 已运行但一个存储都没加（或根目录列不出来）：给「去后台添加 + 刷新」，
+         首屏不再撞那条没有下一步动作的 HTTP 500。 -->
+    <section v-else-if="needSetup" class="nd-empty">
+      <Cloud :size="28" class="nd-empty-icon" />
+      <p class="nd-empty-title">{{ t('netdiskNoStorageTitle') }}</p>
+      <p class="nd-empty-desc">{{ t('netdiskNoStorageDesc') }}</p>
+      <div class="nd-empty-acts">
+        <button class="qd-btn qd-btn-primary" @click="openAdmin">
+          <Settings2 :size="14" />{{ t('netdiskOpenAdmin') }}
+        </button>
+        <button class="qd-btn" @click="refreshStatus">
+          <RefreshCw :size="14" />{{ t('netdiskRefresh') }}
+        </button>
+      </div>
+    </section>
+
     <template v-else-if="ready">
       <div class="nd-bar">
         <button class="btn btn-secondary nd-up" :disabled="dir === '/' || loading" @click="goUp">
@@ -1017,6 +1044,15 @@ function shortTime(s: string): string {
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
+}
+
+/* 引导态里并排的两个动作：主操作 + 刷新，窄窗口允许换行 */
+.nd-empty-acts {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
 }
 .nd-empty-icon {
   color: var(--color-text-muted);

@@ -66,6 +66,10 @@ type GatewayInfo struct {
 	// 前端拼上 base64url(远端路径) 即可给 <video>/<img> 直接使用；文本预览再追加 &text=1。
 	// 空串表示代理没起来，页面应退化成「只能下载」。
 	PreviewBase string `json:"previewBase"`
+	// NeedSetup 网关已运行，但根目录一个存储都没有（或根本列不出来）。
+	// 前端据此显示「去管理后台添加网盘」的引导页，而不是把网关的 HTTP 500
+	// 原样弹成一条没有下一步动作的 toast。
+	NeedSetup bool `json:"needSetup"`
 }
 
 // downloadProgress 下载进度事件载荷（quickdock:netdisk:download）。
@@ -105,6 +109,9 @@ func (s *NetdiskService) NetdiskStatus() *services.ApiResult {
 	info.Running = st.Running
 	if st.Version != "" {
 		info.Version = st.Version
+	}
+	if info.Running {
+		info.NeedSetup = s.gatewayNeedSetup()
 	}
 	// 预览代理按需启动：只有页面真的打开才占一个本地端口。
 	if p := s.ensureProxy(); p != nil {
@@ -148,6 +155,40 @@ func (s *NetdiskService) ensureProxy() *netdisk.ProxyServer {
 	return p
 }
 
+// gatewayNeedSetup 判断网关是否还停在「没添加存储 / 根目录列不出来」的初始态。
+//
+// 为什么在 Status 里探测：没有存储时 OpenList 的 WebDAV 根目录会直接失败
+// （细节只在它自己的日志里 "storage not found; please add a storage first"），
+// 首次装完点进网盘页只会看到一条 HTTP 500 toast，用户不知道下一步该做什么。
+// 这里用一次短超时的根目录 PROPFIND 把「500」变成可引导的状态：
+//   - 列得出且非空 → 已配置好；
+//   - 列得出但为空 → 根目录没有任何挂载点，就是没添加存储；
+//   - 列不出来     → 网关没准备好（无存储 / 驱动未登录 / 刚启动），显示引导页
+//     让用户去后台确认，回来点「刷新」。
+//
+// 401、连不上、SQLITE_BUSY 三种例外一律返回 false：前两者是瞬时状态，写锁死了
+// hint() 另有「重启网关」的专门指引，都不该被误读成「没加存储」。
+//
+// 探测本身失败也返回 false：Status 是状态概览，不能因为一次探测把正常页锁死。
+func (s *NetdiskService) gatewayNeedSetup() bool {
+	c, r := s.client()
+	if r != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	entries, err := c.List(ctx, "/")
+	if err != nil {
+		if errors.Is(err, netdisk.ErrUnauthorized) ||
+			strings.Contains(err.Error(), "无法连接") ||
+			s.gatewayDatabaseLocked() {
+			return false
+		}
+		return true
+	}
+	return len(entries) == 0
+}
+
 // NetdiskListDir 列出网关上的目录。path 为空表示根（各网盘的挂载点都在这层）。
 func (s *NetdiskService) NetdiskListDir(path string) *services.ApiResult {
 	c, r := s.client()
@@ -179,18 +220,23 @@ func (s *NetdiskService) NetdiskTest() *services.ApiResult {
 
 // hint 把网关的典型失败翻译成「用户能照着做」的一句话。
 //
-// 两种已知成因：
+// 三种已知成因：
 //  1. 401：密码库里的值与网关库不一致（data/ 被重建、手工改过密码、上次 set 失败）。
 //     重启动网关会让 Start 里的 ensureAdminPassword 用库里的值重新 set 一遍。
 //  2. 500 + 网关日志出现 `database is locked`：OpenList 在一次写事务失败后留下永久
 //     写锁，自身无法自愈。WebDAV 那一侧只有 "Internal Server Error"，不读它的日志
 //     就永远查不出原因，只能重启进程。
+//  3. 其它 500：多半是网关还没配置好（一个存储都没加、驱动未登录、刚启动还没
+//     加载完）。首屏已有引导页，这里再兜一句可操作的指引，别只甩一个状态码。
 func (s *NetdiskService) hint(err error) string {
 	if errors.Is(err, netdisk.ErrUnauthorized) {
 		return "网关拒绝认证：QuickDock 记的管理员密码与网关库不一致。到「环境管理 → OpenList」点停止再启动，会自动同步密码"
 	}
 	if strings.Contains(err.Error(), "HTTP 500") && s.gatewayDatabaseLocked() {
 		return "网关数据库被锁死（SQLITE_BUSY）：OpenList 在一次写库失败后留下了永久写锁，只能重启解除。点右上角「重启网关」或到「环境管理 → OpenList」停止再启动。"
+	}
+	if strings.Contains(err.Error(), "HTTP 500") {
+		return "网关返回 500：多半是还没添加存储或网盘账号未登录。先点「管理后台」添加百度/夸克等网盘并确认能打开目录，回来点「刷新」；仍失败就点「重启网关」。"
 	}
 	return err.Error()
 }

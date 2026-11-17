@@ -4411,6 +4411,8 @@ export default {
   netdiskNotInstalledHint: '网盘由本机 OpenList 网关代理：装好后在它的后台添加百度 / 夸克账号，这里就能浏览和下载。',
   netdiskStopped: '网关未运行',
   netdiskStoppedHint: '已安装 OpenList，但服务没起来。启动后才能读取网盘目录。',
+  netdiskNoStorageTitle: '还没有添加网盘',
+  netdiskNoStorageDesc: '网关已经运行，但里面一个存储都没有，根目录暂时读不出来。到「管理后台 → 存储」添加百度 / 夸克等账号并确认能打开目录，回来点「刷新」即可。',
   netdiskRoot: '全部网盘',
   netdiskUp: '上一级',
   netdiskLoginHint: '后台登录用户 {user}，密码见密码库或运行日志',
