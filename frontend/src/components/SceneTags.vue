@@ -139,7 +139,6 @@ function onClickAway() {
         >✕</button>
       </div>
     </div>
-    <div class="tab-line" />
 
     <!-- 右键菜单 -->
     <Teleport to="body">
@@ -161,38 +160,45 @@ function onClickAway() {
 </template>
 
 <style scoped>
+/* 标签条并入一级页头（.qd-page-header 46px）：不再是页头下面另起的一整行，
+   而是紧跟「工作空间」标题、占满中间空档的横向 chip 组。页头自带下缘线，
+   所以不再需要原 tab-line；标签也不再做成「上圆角 + 底部连内容」的页签，
+   那种形态脱离分隔线后会像一块贴在页头上的补丁。 */
 .tag-tabs {
+  flex: 1;
+  min-width: 0;
   display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
+  align-items: center;
   background: transparent;
 }
 
 .tabs-container {
   display: flex;
-  align-items: flex-end;
-  gap: var(--space-1);
-  /* 高度对齐一级页头（.qd-page-header 46px）：工作空间没有传统页头，
-     这条标签栏就是它的顶栏；不等高的话从工作空间切到其它页会上下跳。
-     减去 1px 是因为下面还有 .tab-line 那条分隔线。 */
-  min-height: 45px;
-  padding: var(--space-3) 10px 0;
-  overflow: hidden;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  /* 标签多到放不下时横向滚动，别像以前那样直接裁掉看不见的标签。
+     隐藏滚动条：46px 的页头里再塞一条滚动条会把标签挤窄。 */
+  overflow-x: auto;
+  scrollbar-width: none;
   --wails-draggable: no-drag;
 }
+.tabs-container::-webkit-scrollbar { display: none; }
 
 .tab {
   position: relative;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: 7px 10px;
+  height: 28px;
+  padding: 0 10px;
   min-width: 80px;
   max-width: 180px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-bottom: none;
-  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: var(--color-bg-tertiary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   font-size: var(--text-sm);
   cursor: pointer;
@@ -203,7 +209,7 @@ function onClickAway() {
 
 .tab:hover {
   background: var(--color-bg-hover);
-  color: var(--color-text-secondary);
+  color: var(--color-text-primary);
 }
 
 .tab:hover .tab-close,
@@ -213,12 +219,14 @@ function onClickAway() {
 /* 键盘 Tab 到关闭按钮时也得看得见，不能只靠行 hover */
 .tab-close:focus-visible { opacity: 1 !important; }
 
+/* 选中态复用 QdTabs chip 的口径（accent 底 + accent 字 + 描边），不再用
+   bg-primary 实心块：那是「选中标签与下方内容连成一片」的旧做法，标签搬进
+   页头后下方没有内容可连，实色块压在 bg-secondary 上反而像挖了个洞。 */
 .tab.active {
-  background: var(--color-bg-primary);
-  color: var(--color-text-primary);
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
   font-weight: 500;
-  border-color: var(--color-border);
-  padding-bottom: 7px;
+  border-color: var(--color-accent-border-strong);
   z-index: 1;
 }
 
@@ -228,17 +236,6 @@ function onClickAway() {
 
 .tab.drag-over {
   box-shadow: inset 2px 0 0 var(--color-accent);
-}
-
-.tab.active::after {
-  content: '';
-  position: absolute;
-  bottom: -1px;
-  left: 1px;
-  right: 1px;
-  height: 2px;
-  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-light));
-  border-radius: 0 0 var(--radius-2xs) var(--radius-2xs);
 }
 
 .tab-label {
@@ -291,11 +288,5 @@ function onClickAway() {
 
 .tab.active .tab-close {
   opacity: 0.3;
-}
-
-.tab-line {
-  height: 1px;
-  background: var(--color-border);
-  flex-shrink: 0;
 }
 </style>

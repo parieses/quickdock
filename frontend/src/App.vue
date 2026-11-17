@@ -590,9 +590,9 @@ const activeConfirm = computed(() =>
         @navigate="setPage"
         @open-settings="openSettings"
       />
-      <!-- 场景栏不再挂在 .app-body 下：它必须和集合/项目在同一行里，
-           否则 SceneTags 这条横栏只把集合/项目往下推，
-           三栏的面板头不在同一条水平线上 —— 这才是"三栏割裂"的主因。 -->
+      <!-- 工作空间的「页头 + 三栏」整体收在 WorkspacePage 里：页头放标题与场景标签，
+           其下场景 → 集合 → 项目 共用同一条顶部基线。不再在 .app-body 下另挂
+           SceneTags 横栏把集合/项目往下推，那会让三栏的面板头错开一行。 -->
       <div class="app-content">
         <!-- 内容区只有一套渲染：注册页（工作空间也在这里，复合布局在 WorkspacePage 内部）。
              此前 workspace 是一支独立分支，四层条件嵌套；现在它与其它页完全同权。 -->

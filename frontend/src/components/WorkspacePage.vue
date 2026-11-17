@@ -94,6 +94,13 @@ const showCollectionsGuide = computed(() =>
   !store.hasSearch
 )
 
+// 场景标签并入常驻页头，只在「有工作空间且不是无场景引导」时渲染。
+// 与 showHeaderActions 的差别：无集合引导态仍要保留标签（场景是可切/可关的），
+// 只是集合栏那块换成引导页；首次使用 / 无场景两档才完全不渲染标签。
+const showSceneTabs = computed(() =>
+  store.workspaces.length > 0 && !showWorkspaceGuide.value
+)
+
 // 常驻页头只在「常规三栏」态放操作按钮；三档引导态（首次使用 / 无场景 / 无集合）
 // 只显示标题 —— 那几档不渲染集合栏，折叠按钮放上去没有对象可切。
 const showHeaderActions = computed(() =>
@@ -254,11 +261,13 @@ watch([() => store.loading, () => store.workspaces.length], () => { void tryAppl
 <template>
   <div class="ws-root" :class="{ 'is-collection-open': collectionDrawerOpen }">
     <!-- 常驻共享页头：四档状态共用同一条横栏，下面只替换 body。
-         引导态只显示标题、不带操作按钮（集合栏折叠按钮在引导态没有对象可切）。 -->
+         场景标签紧跟标题排在同一行（原来单独占 46px 一条横栏，页头右侧全空），
+         引导态只显示标题、不带标签和操作按钮（集合栏折叠按钮在引导态没有对象可切）。 -->
     <PageHeader>
       <template #titles>
         <h2 class="qd-page-title">{{ t('navWorkspace') }}</h2>
       </template>
+      <SceneTags v-if="showSceneTabs" />
       <div v-if="showHeaderActions" class="qd-page-actions">
         <button
           type="button"
@@ -295,9 +304,9 @@ watch([() => store.loading, () => store.workspaces.length], () => { void tryAppl
         <span class="ws-error-text">{{ store.error }}</span>
         <button class="ws-error-close" @click="store.error = ''" :title="t('close')">✕</button>
       </div>
-      <SceneTags />
       <div class="ws-body">
-        <!-- 三栏起点：场景 → 集合 → 项目，共用同一条顶部基线 -->
+        <!-- 三栏起点：场景 → 集合 → 项目，共用同一条顶部基线。
+             标签已移入页头，这里直接从页头下缘开始，不再多占一行 -->
         <SceneRail />
         <!-- 当前场景下没有集合：引导页占满「集合 + 项目」两块区域 -->
         <EmptyGuide
