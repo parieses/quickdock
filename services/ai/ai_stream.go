@@ -397,7 +397,7 @@ func (s *aiStreamServer) handleStop(w http.ResponseWriter, r *http.Request) {
 // doneEvent 组装流式结束事件：附带首字延迟与本次用量，回传前端展示。
 // 字段名与前端 AIPage 的读取保持一致（promptTokens/completionTokens）。
 // 字段缺失（上游未回 usage）时为 0，前端按 0 隐藏即可。
-func doneEvent(convID string, firstTokenAt time.Duration, usage db.TokenUsage, model string, rounds, tools int) map[string]any {
+func doneEvent(convID string, firstTokenAt time.Duration, usage db.TokenUsage, model string, rounds, tools int, reasoning ...int) map[string]any {
 	out := map[string]any{
 		"convId":           convID,
 		"firstTokenMs":     firstTokenAt.Milliseconds(),
@@ -412,6 +412,15 @@ func doneEvent(convID string, firstTokenAt time.Duration, usage db.TokenUsage, m
 		// 回传本次实际使用的模型：前端刚落地的那条回复要用它显示模型名，
 		// 刷新后是 DB 里同一份值，两边口径一致（不取前端的档案名，那可能是旧值）。
 		"model": strings.TrimSpace(model),
+	}
+	// WP20：推理分段统计（[轮数, 字符数]）。
+	//
+	// 为什么要有：用户报「只看到一个深度思考」。两种成因——模型确实只在第一轮
+	// 给了 reasoning（不是 bug），或者我们跨轮累加把 N 轮拼成了一段（是 bug）。
+	// 没有这两个数字就只能靠猜。有了它们，一眼能分开。
+	if len(reasoning) >= 2 {
+		out["reasoningRounds"] = reasoning[0]
+		out["reasoningChars"] = reasoning[1]
 	}
 	// 单条回复的费用估算。价目表只有一份（ai_pricing.go），前端不复制一份
 	// —— 两处价格一旦漂移，气泡上写 ¥0.03、设置页账单写 ¥0.05，谁都不再可信。

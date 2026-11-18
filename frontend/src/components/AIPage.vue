@@ -13,6 +13,8 @@ import { unwrap } from '../utils/api'
 import AiSidePanel from './AiSidePanel.vue'
 import AiConversationSidebar from './AiConversationSidebar.vue'
 import AiToolbar from './AiToolbar.vue'
+import AiTraceDrawer from './AiTraceDrawer.vue'
+import AiContextDialog from './AiContextDialog.vue'
 import AiDigestPanel from './AiDigestPanel.vue'
 import AiJobsPanel from './AiJobsPanel.vue'
 import AiHero from './AiHero.vue'
@@ -85,6 +87,9 @@ import {
   AIRenameSpace,
   AIDeleteSpace,
   AIApproveToolCall,
+  AILatestRun,
+  AIAddApprovalGrant,
+  AICleanScratch,
   AIListCheckpoints,
   AIRestoreCheckpoint,
   AISearchMessages,
@@ -181,6 +186,42 @@ function onPlanToggle(e: Event) {
   // 与期望状态一致 = 我们自己改 :open 引起的，不是用户点的
   if (el.open === !planCollapsed.value) return
   planCollapsed.value = !el.open
+}
+
+// —— 清单恢复（WP17） ——
+//
+// 后端每次 plan_update 都把整份清单写进 ai_conversations.plan。这里在切会话 /
+// 加载列表时读一次，于是刷新、重启、切走再回来，清单都还在——此前它只是一个
+// SSE 事件，页面一刷新就没了，中断之后更是无从恢复。
+//
+// 边界：内存里已有这张卡就不覆盖。那说明这一轮正在实时更新它，库里的可能更旧
+// （plan 的写库与 SSE 是同一个回调里发出的，但 SSE 先到）。
+
+/** 把库里的清单 JSON 解析成卡片状态；坏数据当作没有。 */
+function parsePlanCard(raw: string | undefined): PlanCardState | null {
+  if (!raw) return null
+  try {
+    const v = JSON.parse(raw) as { items?: Array<{ text?: string; status?: string }>; note?: string }
+    const items = Array.isArray(v?.items)
+      ? v.items
+          .map((it) => ({ text: String(it?.text || ''), status: String(it?.status || 'todo') }))
+          .filter((it) => it.text)
+      : []
+    if (!items.length) return null
+    return { items, note: String(v?.note || '') }
+  } catch {
+    // 历史版本写下的形状 / 手改过的库：当作没有清单。
+    // 清理不掉的脏清单比没有清单更糟——它会一直显示并且挡在输入框上面。
+    return null
+  }
+}
+
+/** 会话记录里带清单就补进内存（已有则不动）。 */
+function hydratePlanOf(conv: { id: string; plan?: string } | null | undefined) {
+  if (!conv?.id || !conv.plan) return
+  if (planCards.has(conv.id)) return
+  const card = parsePlanCard(conv.plan)
+  if (card) planCards.set(conv.id, card)
 }
 
 function runOf(convId: string): AIRun | undefined {
@@ -444,7 +485,35 @@ async function approveTool(tc: AIToolCall, decision: 'allow' | 'deny', remember 
   }
 }
 
-// 按此计划执行：切回对话模式，把计划作为要求发出去。
+// 「以后都允许」（WP6）：先落一条沉淀规则，再按允许处理这次调用。
+//
+// 粒度是这个按钮的全部意义：
+//   - run_command 用 grantScope（命令首词），也就是「npm 开头的命令不再问」；
+//   - 文件类没有安全的「族」概念，退到「这个目录」——用当前工作目录。
+// 没有工作目录时不能沉淀目录规则，退回「本次会话都允许」并在日志里说明，
+// 而不是偷偷落一条 workspace="" 的规则（那会变成全局放行）。
+async function rememberGrantAndAllow(tc: AIToolCall) {
+  if (tc.approval !== 'pending') return
+  const isCmd = tc.name === 'run_command'
+  const dir = (convCwd.value || '').trim()
+  const value = isCmd ? (tc.grantScope || '').trim() : dir
+  if (!value) {
+    logErr('ai:rememberAlways', new Error(`缺少可沉淀的粒度 name=${tc.name} scope=${tc.grantScope || ''}`))
+    await approveTool(tc, 'allow', true)
+    return
+  }
+  try {
+    const res = await AIAddApprovalGrant(tc.name, isCmd ? 'prefix' : 'path', value, 'workspace', dir)
+    unwrap(res)
+  } catch (e) {
+    // 沉淀失败就不放行这次：用户点的是「以后都允许」，规则没落成却执行了，
+    // 等于点了一个只有一次效果、下次照样弹的按钮。
+    toast.error(getErrorMessage(e))
+    logErr('ai:addApprovalGrant', e)
+    return
+  }
+  await approveTool(tc, 'allow', true)
+}
 //
 // 必须先切模式再发送：留在计划模式里发，工具面还是只读的，模型会一边说
 // 「我来改」一边什么都调不动。模式要落库（AISetConversationMode），
@@ -894,6 +963,9 @@ async function loadConversations() {
   try {
     const list = unwrap<AIConversation[]>(await AIListConversations())
     conversations.value = list ?? []
+    // 列表里带回来的清单一次性补进内存：刷新后停在某条会话、或点了「新建任务」
+    // 再切回来时，清单不必等一次点击才出现。
+    for (const c of conversations.value) hydratePlanOf(c)
   } catch (e) {
     pageError.value = getErrorMessage(e)
   }
@@ -935,6 +1007,11 @@ async function selectConv(id: string, msgId?: string) {
   if (runOf(id)) convRunState.value[id] = 'running'
   else delete convRunState.value[id]
   const conv = conversations.value.find((c) => c.id === id)
+  // 切进来先把清单补上：它可能是在别的设备/上次进程里规划好的（WP17）。
+  hydratePlanOf(conv)
+  // 轨迹入口也要补：刷新页面后手上没有 done 事件，只能从库里取最近一次 run。
+  // 不 await——它只影响那个小圆点，不该让切会话等一次往返。
+  void loadLatestRunId(id)
   // 定时任务在后台跑完的会话带未读点：人已经切进来了就消。
   // 先改本地数组再发请求，避免后端往返期间点还在闪；写失败只留日志，
   // 不弹 toast——未读只是提示，不该打断一次正常的切会话。
@@ -1113,10 +1190,10 @@ const effectiveDir = computed(() => {
 // onMounted 里的 loadGitBranch() 负责，这里只响应后续 cwd / 空间变化。
 watch(effectiveDir, loadGitBranch)
 
-// 切到「已有空间」时把普通任务挑的目录清掉：空间自带目录，留着那个值会让
-// 「产物去哪」的两个来源互相打架（下游按空间目录走，界面上却还显示前一个路径）。
+// 离开「选目录新建空间」就清掉暂存的目录：选完目录又改选「普通任务」时，
+// 留着它会让任务悄悄带上一个目录、却没建成空间——又回到「选了目录没成空间任务」。
 watch(newTaskSpace, (v) => {
-  if (v && v !== NEW_SPACE) newTaskDir.value = ''
+  if (v !== NEW_SPACE) newTaskDir.value = ''
 })
 
 // ---- 「+ 技能和连接器」----
@@ -1526,6 +1603,125 @@ const isNewTask = computed(() =>
 // 落地页再次出现（点「新建任务」回到空态）时，open 模式再换一批示例。
 watch(isNewTask, (v) => { if (v) reshuffleHeroTips() })
 
+// —— 运行轨迹入口（WP1） ——
+//
+// runId 是「这一次执行」的标识：运行中从当前 run 的工具记录取，结束后回落到
+// 最后一条带 run_id 的工具记录。全程不额外调后端——这两个字段前端本来就有。
+const traceOpen = ref(false)
+/** 同一抽屉的两个入口：轨迹（run + session）/ 子任务（整段会话的子 agent 汇总）。 */
+const traceView = ref<'trace' | 'children'>('trace')
+function openTrace(view: 'trace' | 'children' = 'trace') {
+  traceView.value = view
+  traceOpen.value = true
+}
+/** 上下文详情弹框（WP2）：从会话用量那行点开。 */
+const ctxOpen = ref(false)
+
+// —— 清理辅助文件（WP18）——
+//
+// 两次点击 = 一次确认：第一次上膛、3 秒后自动复位，第二次才真的删。
+// 不用 window.confirm：它是浏览器级模态，在 WebView 里样式与整个应用不一致，
+// 而且这个动作的破坏面很明确（只删 `<cwd>/quickdock/`），一个上膛态足够。
+const scratchArmed = ref(false)
+let scratchTimer: ReturnType<typeof setTimeout> | null = null
+
+function disarmScratch() {
+  scratchArmed.value = false
+  if (scratchTimer) {
+    clearTimeout(scratchTimer)
+    scratchTimer = null
+  }
+}
+
+async function cleanScratch() {
+  if (!scratchArmed.value) {
+    disarmScratch()
+    scratchArmed.value = true
+    scratchTimer = setTimeout(disarmScratch, 3000)
+    return
+  }
+  disarmScratch()
+  try {
+    const msg = unwrap<string>(await AICleanScratch(convCwd.value))
+    toast.success(msg || t('aiScratchCleanDone'))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+    logErr('ai:cleanScratch', e)
+  }
+}
+
+/** 从工具调用 JSON 里取最后一个 run_id；坏数据一律当作没有。 */
+function lastRunIdOf(raw: string | undefined): string {  if (!raw) return ''
+  try {
+    const list = JSON.parse(raw) as Array<{ run_id?: string }>
+    if (!Array.isArray(list)) return ''
+    for (let i = list.length - 1; i >= 0; i--) {
+      const id = list[i]?.run_id
+      if (typeof id === 'string' && id) return id
+    }
+  } catch {
+    // 老消息 / 手改过的库都可能有非法 JSON。轨迹入口退化成「没有记录」，
+    // 绝不能因为解析失败让整页炸掉。
+  }
+  return ''
+}
+
+// 轨迹 runId 的三个来源（WP1 修复）：
+//   1. 工具结果里的 run_id —— 只有 spawn_agent 会写，普通对话永远没有；
+//   2. runIds（composable 里的会话映射）：done 事件带回的 runId，最准；
+//   3. lastRunId：从库里补的最近一次 run（刷新页面 / 切回会话时用）。
+//
+// 为什么用一张表而不是 watch run 对象：这一轮结束时 run 会被从 runs 里摘掉，
+// 而 watch 是异步的——等它跑起来，runId 已经随着 run 一起没了。
+const liveRunId = computed(() => (activeId.value ? runIds.value[activeId.value] ?? '' : ''))
+const lastRunId = ref('')
+
+async function loadLatestRunId(convId: string) {
+  lastRunId.value = ''
+  if (!convId) return
+  try {
+    const run = unwrap<{ id?: string } | null>(await AILatestRun(convId))
+    lastRunId.value = run?.id ?? ''
+  } catch (e) {
+    logErr('ai:latestRun', e)
+  }
+}
+
+const traceRunId = computed(() => {  const runTools = activeRun.value?.tools ?? []
+  for (let i = runTools.length - 1; i >= 0; i--) {
+    const id = runTools[i]?.run_id
+    if (id) return id
+  }
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    const id = lastRunIdOf(messages.value[i].tool_calls)
+    if (id) return id
+  }
+  // 本次生成的 done 事件带来的 runId（WP1 修复）：普通对话不派活，
+  // 上面两条永远取不到值——这正是「轨迹入口恒空」的根因。
+  if (liveRunId.value) return liveRunId.value
+  // 最后兜底：从库里补（刷新页面 / 切回会话时手上没有 done 事件）。
+  return lastRunId.value
+})
+
+// 会话一变就把「库里最近一次 run」重取一遍。
+//
+// 不能只挂在 selectConv 上：自动选中、恢复上次会话、从搜索跳进来这些路径都不走
+// 那个函数，于是入口一直是空的——用户看到的就是「轨迹只能看当前对话、换一个就没了」。
+watch(activeId, (id) => { void loadLatestRunId(id || '') }, { immediate: true })
+
+const traceState = computed<'empty' | 'running' | 'done'>(() => {
+  if (!traceRunId.value) return 'empty'
+  // 只有「这一页正在生成」才算运行中：后台别的会话在跑时不该让这里闪。
+  return streamingHere.value ? 'running' : 'done'
+})
+
+const traceLabel = computed(() => {
+  if (traceState.value === 'running') {
+    return t('aiTraceRunning', { n: activeRun.value?.tools.length ?? 0 })
+  }
+  return t('aiTraceEntry')
+})
+
 function openNewTask() {
   // 不打断正在生成的回答：新建任务和「切到别的会话」是同一件事——换一个空白视图，
   // 不是把上一轮砍掉。发送时如果那条还在跑，会给一句明确提示（见 send）。
@@ -1619,7 +1815,7 @@ function normDir(p: string): string {
   return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
 }
 
-async function pickNewTaskDir(mode: 'new' | 'plain' = 'new') {
+async function pickNewTaskDir() {
   // unwrap 在 code≠0 时是抛异常，不是返回带 ok 的结果：不包 try 的话，
   // 原生对话框出错会变成一条未处理的 Promise 拒绝，界面上什么都不会发生。
   let dir: string | null = null
@@ -1630,10 +1826,9 @@ async function pickNewTaskDir(mode: 'new' | 'plain' = 'new') {
     return
   }
   if (!dir) {
-    // 取消选择：新建空间那条要把下拉退回「不挂空间」，否则它会停在「新建空间…」
-    // 上却没有目录，用户看着是选中态，直到发送才被告知「请先选择目录」。
-    // 普通任务取消则保持原样（本来就没有目录，不需要回退什么）。
-    if (mode === 'new' && newTaskSpace.value === NEW_SPACE) newTaskSpace.value = ''
+    // 取消选择：把下拉退回「不挂空间」，否则它会停在「新空间」上却没有目录，
+    // 用户看着是选中态，直到发送才被告知「请先选择目录」。
+    if (newTaskSpace.value === NEW_SPACE) newTaskSpace.value = ''
     return
   }
   // 选到的目录已经是某个空间：直接切到那个空间。后端同名幂等也能兜住，
@@ -1644,10 +1839,6 @@ async function pickNewTaskDir(mode: 'new' | 'plain' = 'new') {
     newTaskDir.value = ''
     toast.success(t('aiSpaceAlreadyExists', { name: hit.name }))
     return
-  }
-  if (mode === 'plain') {
-    // 普通任务 + 指定目录：不建空间，只把这一条任务的工作目录定在这里。
-    newTaskSpace.value = ''
   }
   newTaskDir.value = dir
 }
@@ -2520,6 +2711,7 @@ const {
   stop,
   pendingInjectsHere,
   rushInject,
+  runIds,
 } = useAiRuns({
   activeId, conversations, messages, runs, draftRunId,
   input, attachments, mentions, lastMentions, pickedSkills, lastSkills, stripSkillTokens,
@@ -3064,8 +3256,9 @@ onUnmounted(() => {
 
     <!-- 右侧聊天区 -->
     <section class="ai-main">
-      <!-- 工具栏：只在有任务时出现。落地页不需要它（目录还没定）。
-           模型选择已移到输入框底部，跟技能/权限/工作区摆在一起。 -->
+      <!-- 工具栏只在「进入对话」后出现：落地页（点导航进来、还没发消息/选会话）
+           顶部不该挂一条空工具栏，尤其那个点了也没有 run 可看的轨迹入口。
+           isNewTask 在发首条消息、选中历史会话或开始流式时立刻转 false，工具栏随即出现。 -->
       <AiToolbar
         v-if="!isNewTask"
         v-model:digest-open="digestOpen"
@@ -3077,12 +3270,21 @@ onUnmounted(() => {
         :side-open="sideOpen"
         :jobs-open="jobsOpen"
         :running-jobs="runningJobs"
+        :running-job-started-at="runningJobList[0]?.startedAt || ''"
+        :new-task="isNewTask"
+        :trace-label="traceLabel"
+        :trace-state="traceState"
+        :can-clean-scratch="!!convCwd"
+        :scratch-armed="scratchArmed"
         @open-cwd="openCwd"
         @regen-title="regenTitle"
         @toggle-star="toggleStar"
         @export-md="exportConvMarkdown"
         @toggle-side="toggleSidePanel"
         @toggle-jobs="toggleJobs"
+        @open-trace="openTrace('trace')"
+        @open-children="openTrace('children')"
+        @clean-scratch="cleanScratch"
       />
 
       <!-- 后台任务面板：与大纲面板同一套浮层，挂在 .ai-main 上（相对定位）。 -->
@@ -3361,6 +3563,7 @@ onUnmounted(() => {
           :count="pendingApprovalCount"
           @allow="approveTool(pendingApproval, 'allow')"
           @remember="approveTool(pendingApproval, 'allow', true)"
+          @remember-always="rememberGrantAndAllow(pendingApproval)"
           @deny="approveTool(pendingApproval, 'deny')"
           @open-rules="emit('open-settings', 'ai:permission')"
         />
@@ -3396,7 +3599,16 @@ onUnmounted(() => {
              两者都套 --ai-column-w 居中，左边缘才落在同一条竖线上——
              留在外层通栏渲染时，窄窗口外它会贴死窗口左边缘，
              与居中的输入框错开半栏，看起来像掉到版式外面。 -->
-        <div v-if="sessionUsage.hasAny" class="ai-session-usage">
+        <!-- 会话用量：这行现在是「上下文详情」的入口（WP2）。
+             原来它只是静态文字，用户看完「一共烧了 12.3k」还是不知道余量、
+             花在哪、上限从哪来——那三个问题要一个弹框才答得清。
+             button 而不是 div：它可点，键盘与读屏都该能到。 -->
+        <button
+          v-if="sessionUsage.hasAny"
+          class="ai-session-usage"
+          :title="t('aiCtxOpenTip')"
+          @click="ctxOpen = true"
+        >
           <span class="ai-su-total">{{ t('aiSessionUsageTotal', { tokens: fmtTokens(sessionUsage.totalTokens) }) }}</span>
           <span class="ai-su-sep">·</span>
           <span class="ai-su-models">
@@ -3405,7 +3617,7 @@ onUnmounted(() => {
               <span class="ai-su-model">{{ e.model }} <em class="ai-su-calls">×{{ e.calls }}</em></span>
             </template>
           </span>
-        </div>
+        </button>
 
         <!-- 输入区 -->
         <AiComposer
@@ -3503,6 +3715,17 @@ onUnmounted(() => {
         <img v-key-click :src="imgViewer.dataUrl || imgViewer.url || ''" :alt="imgViewer.name" @click.stop />
       </div>
     </Teleport>
+
+    <!-- 运行轨迹抽屉（自身 Teleport 到 body）。放在根节点末尾：它是浮层，
+         不属于任何一块布局，混进 .ai-main 只会让那里的定位上下文更难读。 -->
+    <AiTraceDrawer v-model:open="traceOpen" :view="traceView" :run-id="traceRunId" :conv-id="activeId || ''" />
+
+    <!-- 上下文详情（WP2）。从弹框里可以直接跳到轨迹，两个「为什么」是一路的。 -->
+    <AiContextDialog
+      v-model:open="ctxOpen"
+      :conv-id="activeId"
+      @open-trace="openTrace('trace')"
+    />
   </div>
 </template>
 
@@ -3552,7 +3775,20 @@ onUnmounted(() => {
   border-top: 1px solid var(--color-border);
   user-select: none;
   -webkit-user-select: none;
+  /* 它现在是个 button（点开上下文详情）：把浏览器的默认外观清掉，
+     再补上可点的反馈。不清的话会出现灰底 + 黑边 + 系统字重。 */
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
 }
+.ai-session-usage:hover { background: var(--color-bg-hover); }
+.ai-session-usage:hover .ai-su-total { color: var(--color-text-primary); }
+.ai-session-usage:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
 .ai-su-total { color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
 .ai-su-sep { color: var(--color-text-disabled); }
 .ai-su-models { display: inline-flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }

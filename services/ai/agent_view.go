@@ -8,6 +8,8 @@ package ai
 // 真要更实时，阶段 3 再改成 Wails 事件推送——那时改的是这里和前端，不动执行核心。
 
 import (
+	"strings"
+
 	"quickdock/internal/db"
 	"quickdock/services"
 )
@@ -32,6 +34,46 @@ type AgentRunTree struct {
 //
 // afterSeq = 0 表示从头拉（首次进入、刷新后重看）。返回体里带 run 状态，
 // 前端据此决定还要不要继续轮询（终态即停），不必自己推断。
+// withRunID 把 runID 挂到事件载荷上（WP1 修复）。
+//
+// 为什么必须带：前端要靠它打开轨迹抽屉。此前 run_id 只出现在 spawn_agent 的
+// 工具结果里，于是「没有派过活的普通对话」永远拿不到 runId——抽屉一直是空的，
+// 看起来像功能没做。
+func withRunID(ev map[string]any, runID string) map[string]any {
+	if ev == nil {
+		return ev
+	}
+	if id := strings.TrimSpace(runID); id != "" {
+		ev["runId"] = id
+	}
+	return ev
+}
+
+// AILatestRun 返回某个会话最近一次运行的头信息（没有则 data 为 nil）。
+//
+// 用途：刷新页面 / 切回会话时，前端手上没有 done 事件，只能靠它把轨迹入口
+// 补回来。只回 run 头，不含节点与事件——抽屉第一次打开时会自己拉。
+func (a *AIService) AILatestRun(convID string) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	convID = strings.TrimSpace(convID)
+	if convID == "" {
+		return services.FailMsg("缺少会话 id")
+	}
+	runs, err := a.App.DB.ListAgentRunsByConv(convID, 1)
+	if err != nil {
+		return services.Fail(err)
+	}
+	if len(runs) == 0 {
+		return services.Ok(nil)
+	}
+	// 取地址：与 AIAgentRunTree 里的 Run 一样用指针，前端拿到的形状一致
+	// （都是对象而不是「有时对象有时值」）。
+	latest := runs[0]
+	return services.Ok(&latest)
+}
+
 func (a *AIService) AIAgentRunTree(runID string, afterSeq int) *services.ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r

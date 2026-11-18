@@ -23,6 +23,8 @@ import {
   AIFetchModels,
   AIGetMemoryAuto,
   AIListApprovalRules,
+  AIListApprovalGrants,
+  AIDeleteApprovalGrant,
   AIListProfiles,
   AIRevealProfileKey,
   AISaveProfiles,
@@ -41,6 +43,7 @@ import { EnvOllamaModels } from '../../bindings/quickdock/services/env/environme
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type {
   AIApprovalRuleView,
+  AIGrantView,
   AIApprovalStatsResult,
   AICostEntry,
   AIExtServerState,
@@ -238,8 +241,22 @@ function newAIProfile(): AIProfile {
     imageInput: 'both',
     // 0 = 自动（按模型名查内置表 + 撞了 400 后按上游报的真实值校正）。
     contextWindow: 0,
+    // WP11：空 = 起标题 / 摘要也用主模型。
+    cheapModel: '',
+    // WP4c 压缩阈值：0 = 默认值（占位符显示的就是默认值）。
+    contextSoftCap: 0,
+    preflightMargin: 0,
+    keepRecentMin: 0,
+    keepRecentMax: 0,
   }
 }
+
+// 默认值只用于输入框占位提示，真正的默认在后端（`softCapOf` 等）。
+// 两处写死会漂移，所以这里只在注释里说明「与后端常量一致」，不参与计算。
+const aiSoftCapDefault = 120000
+const aiPreflightMarginDefault = 85
+const aiKeepRecentMinDefault = 8
+const aiKeepRecentMaxDefault = 40
 
 async function loadAIProfiles() {
   try {
@@ -323,10 +340,40 @@ async function loadApprovalRules() {
   apError.value = ''
   try {
     apRules.value = unwrap<AIApprovalRuleView[]>(await AIListApprovalRules()) ?? []
+    await loadGrants()
   } catch (e) {
     apError.value = getErrorMessage(e)
   } finally {
     apLoading.value = false
+  }
+}
+
+// 沉淀的放行规则（WP6）：跨会话生效，所以必须有一个看得见、点得动的撤销入口。
+// 单独一张表而不是塞进上面那行：上面是「每个工具的默认策略」，
+// 这里是「用户点过的具体放行」，两者的粒度与生命周期都不同。
+const grants = ref<AIGrantView[]>([])
+
+async function loadGrants() {
+  try {
+    grants.value = unwrap<AIGrantView[]>(await AIListApprovalGrants()) ?? []
+  } catch (e) {
+    // 不与主列表共用错误位：它失败了不该把整个审批页判成加载失败。
+    logErr('settings:listGrants', e)
+  }
+}
+
+function grantScopeText(g: AIGrantView): string {
+  if (g.scope === 'global') return t('aiGrantScopeGlobal')
+  return t('aiGrantScopeWorkspace', { dir: g.workspace })
+}
+
+async function revokeGrant(g: AIGrantView) {
+  try {
+    unwrap(await AIDeleteApprovalGrant(g.tool, g.kind, g.value, g.scope, g.workspace))
+    await loadGrants()
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+    logErr('settings:revokeGrant', e)
   }
 }
 
@@ -1585,6 +1632,28 @@ function saveAIModal() {
       </table>
       <p v-if="apShowReadOnly" class="usage-hint">{{ t('aiApprovalRuleReadOnlyHint') }}</p>
       </template>
+
+      <!-- 沉淀的放行规则（WP6）：「以后都允许」点过的东西落在这里。
+           没有撤销入口的话，一次手滑就是永久放行一类操作——所以这块不能只做记录。 -->
+      <div class="approval-grants">
+        <h4 class="ai-usage-title">{{ t('aiGrantTitle', { n: grants.length }) }}</h4>
+        <p v-if="!grants.length" class="usage-hint">{{ t('aiGrantEmpty') }}</p>
+        <table v-else class="usage-table approval-rules">
+          <tbody>
+            <tr v-for="g in grants" :key="g.tool + '|' + g.kind + '|' + g.value + '|' + g.scope + '|' + g.workspace">
+              <td class="model">
+                <code>{{ g.tool }}</code>
+                <div class="usage-cell-sub">{{ g.note }}</div>
+                <div class="usage-cell-sub">{{ grantScopeText(g) }}</div>
+              </td>
+              <td class="approval-rules-mode">
+                <button class="btn btn-secondary" @click="revokeGrant(g)">{{ t('aiGrantRevoke') }}</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-if="grants.length" class="usage-hint">{{ t('aiGrantHint') }}</p>
+      </div>
     </div>
     </div>
 
@@ -1970,6 +2039,67 @@ function saveAIModal() {
           />
         </label>
         <p class="ai-field-hint">{{ t('aiContextWindowHint') }}</p>
+        <!-- 廉价模型（WP11）：只用在「起标题 / 摘要 / 压缩」这类输入长、输出短、
+             失败也不致命的调用上。留空 = 全部用主模型。 -->
+        <label class="field">
+          <span class="field-label">{{ t('aiCheapModel') }}</span>
+          <input v-model="aiEditDraft.cheapModel" class="field-input" :placeholder="t('aiCheapModelPh')" />
+        </label>
+        <p class="ai-field-hint">{{ t('aiCheapModelHint') }}</p>
+        <!-- 压缩阈值（WP4c）：0 = 用默认值，所以留空不会改变任何行为。 -->
+        <div class="field-row">
+          <label class="field field-half">
+            <span class="field-label">{{ t('aiSoftCap') }}</span>
+            <input
+              v-model.number="aiEditDraft.contextSoftCap"
+              type="number"
+              min="0"
+              max="1000000"
+              step="1000"
+              class="num-input"
+              :placeholder="String(aiSoftCapDefault)"
+            />
+          </label>
+          <label class="field field-half">
+            <span class="field-label">{{ t('aiPreflightMargin') }}</span>
+            <input
+              v-model.number="aiEditDraft.preflightMargin"
+              type="number"
+              min="0"
+              max="95"
+              step="1"
+              class="num-input"
+              :placeholder="String(aiPreflightMarginDefault)"
+            />
+          </label>
+        </div>
+        <div class="field-row">
+          <label class="field field-half">
+            <span class="field-label">{{ t('aiKeepRecentMin') }}</span>
+            <input
+              v-model.number="aiEditDraft.keepRecentMin"
+              type="number"
+              min="0"
+              max="200"
+              step="1"
+              class="num-input"
+              :placeholder="String(aiKeepRecentMinDefault)"
+            />
+          </label>
+          <label class="field field-half">
+            <span class="field-label">{{ t('aiKeepRecentMax') }}</span>
+            <input
+              v-model.number="aiEditDraft.keepRecentMax"
+              type="number"
+              min="0"
+              max="200"
+              step="1"
+              class="num-input"
+              :placeholder="String(aiKeepRecentMaxDefault)"
+            />
+          </label>
+        </div>
+        <p class="ai-field-hint">{{ t('aiThresholdHint') }}</p>
         <div class="field-row">
           <label class="field field-half">
             <span class="field-label">top_p</span>

@@ -402,6 +402,8 @@ func (a *AIService) AIRegenerateTitle(convID string) *services.ApiResult {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+	// WP11：起标题不需要主模型的智力，换廉价档（没配就是原样）。
+	cfg = aiCheapProfile(cfg)
 	title, usage, err := a.callAIOnce(ctx, cfg, []map[string]string{
 		{"role": "system", "content": "你是标题生成器，输出极简。"},
 		{"role": "user", "content": b.String()},

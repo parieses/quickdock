@@ -79,11 +79,16 @@ func NewAIService(app *services.AppService) *AIService {
 			// 导致已流出的内容丢失（流式调用改由各自 ctx 控制生命周期）。
 			// 仅用 Transport 级别的响应头超时防御「连接成功但永不返回首字节」的挂死。
 			Timeout: 0,
-			Transport: &http.Transport{
-				MaxIdleConns:          10,
-				IdleConnTimeout:       90 * time.Second,
-				TLSHandshakeTimeout:   10 * time.Second,
-				ResponseHeaderTimeout: 60 * time.Second,
+			Transport: &userAgentTransport{
+				base: &http.Transport{
+					MaxIdleConns:          10,
+					IdleConnTimeout:       90 * time.Second,
+					TLSHandshakeTimeout:   10 * time.Second,
+					ResponseHeaderTimeout: 60 * time.Second,
+				},
+				// 版本号在 main 里是稍后才写进 AppService 的（-ldflags 注入），
+				// 所以这里传闭包：每次请求现取，构造时取只会拿到空串。
+				ua: func() string { return aiUserAgentFor(app) },
 			},
 		},
 	}
@@ -149,4 +154,48 @@ func (a *AIService) dbOK() *services.ApiResult {
 // recoverPanic 兜底 recover 打日志（委托给 logger.RecoverPanic）
 func recoverPanic(context string) {
 	logger.RecoverPanic(context)
+}
+
+// aiUserAgentFor 生成发给模型服务商的 User-Agent。
+//
+// 为什么必须自己设：Go 的 net/http 默认发 "Go-http-client/1.1"。多数网关会把它
+// 归成「脚本流量」——日志里分不清是谁在调，部分厂商还会按客户端维度做限流与
+// 风控，症状是「同样的请求，浏览器/curl 能过，我们这边偶发 403/429」。
+//
+// 格式只保留产品名与版本：这是各家网关最容易接受、也最便于排查的形状。
+// 不带 OS/架构——同一份代码在两台机器上不该产生两种 UA。
+func aiUserAgentFor(app *services.AppService) string {
+	v := ""
+	if app != nil {
+		v = app.AppVersion
+	}
+	if v == "" {
+		// 单测、早期初始化路径都会走到这里（版本号由 main 的 ldflags 注入）。
+		v = "0.0.0"
+	}
+	return "QuickDock/" + v
+}
+
+// userAgentTransport 给「调用方没自己设 UA」的请求补上 QuickDock UA。
+//
+// 放在 Transport 而不是逐个请求点设置：AI 侧有四处发请求（流式对话、
+// 通道握手、连通性测试、模型列表），任何一处漏设都会退回 Go 默认 UA，
+// 而这种差异只会在服务商后台才看得出来——本地毫无症状。
+type userAgentTransport struct {
+	base http.RoundTripper
+	ua   func() string
+}
+
+func (t *userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	if req.Header.Get("User-Agent") != "" {
+		return base.RoundTrip(req)
+	}
+	// RoundTripper 的约定是不改调用方的请求，所以先 Clone 再改头。
+	clone := req.Clone(req.Context())
+	clone.Header.Set("User-Agent", t.ua())
+	return base.RoundTrip(clone)
 }

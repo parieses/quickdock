@@ -106,6 +106,12 @@ var validColumns = map[string]bool{
 	// 以及定时跑出来的 AI 会话的未读标记与来源任务 id。
 	"ai_mode": true, "ai_scope": true, "valid_from": true, "valid_until": true,
 	"notify_policy": true, "unread": true, "schedule_id": true,
+	// ai_conversations 的任务状态（WP17）：清单与清单状态。
+	// 三者都要在白名单里，因为新建会话是整行 structToMap 插入的——漏一个就是
+	// 「非法列名」，而那会让「新建任务」整条链路失败。
+	// "goal" 不必在这里补：白名单是全局共用的，agent_runs.goal 早就登记过了
+	// （这也是为什么它是 map 而不是按表分组——补一次全表可用）。
+	"plan": true, "plan_status": true,
 	"plugin_id": true, "plugin_data": true,
 	"collection":        true,
 	"working_directory": true, "args": true,
@@ -137,9 +143,12 @@ var validColumns = map[string]bool{
 	"reason":  true,
 	// ai_prompts：内置条目标记与稳定身份（builtin 只影响能否删除，source_key 决定
 	// 升级时会不会重复插一份）。白名单全局共用，漏了就是写入时「非法列名」。
-	"builtin":           true,
-	"source_key":        true,
+	"builtin":    true,
+	"source_key": true,
+	// ai_messages：思考过程与按轮拆开的思考（后者是 JSON 数组，见
+	// AIMessage.ReasoningRounds）。白名单全局共用，漏一个就是「非法列名」。
 	"reasoning_content": true,
+	"reasoning_rounds":  true,
 	"images":            true, // ai_messages：图片引用 JSON 数组（仅 user 消息）
 	"cwd":               true, // ai_conversations / ai_spaces：绑定的工作目录
 	// ai_conversations：所属空间 id（空 = 普通任务）与创建时选定的模式。

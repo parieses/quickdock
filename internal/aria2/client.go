@@ -586,11 +586,27 @@ func (c *Client) RemoveMany(gids []string, force bool) ([]MultiCallResult, error
 		st := ""
 		if i < len(statuses) {
 			if statuses[i].OK {
-				var v struct {
-					Status string `json:"status"`
+				// multicall 的成功项是**单元素数组**：[[{"status":"active"}]] 里的
+				// [{"status":"active"}]。直接解成 struct 必然失败，而错误被丢弃后
+				// st 恒为空 → 全部落到 aria2.remove，对 complete/error/removed 的
+				// 任务必然 fault（"Active Download not found"）。
+				// 所以先按首字节判形状，再取数组第 0 项。
+				raw := bytes.TrimSpace(statuses[i].Raw)
+				if len(raw) > 0 && raw[0] == '[' {
+					var arr []struct {
+						Status string `json:"status"`
+					}
+					if err := json.Unmarshal(raw, &arr); err == nil && len(arr) > 0 {
+						st = arr[0].Status
+					}
+				} else {
+					var obj struct {
+						Status string `json:"status"`
+					}
+					if err := json.Unmarshal(raw, &obj); err == nil {
+						st = obj.Status
+					}
 				}
-				_ = json.Unmarshal(statuses[i].Raw, &v)
-				st = v.Status
 			} else if isGIDNotFound(errors.New(statuses[i].Error)) {
 				// 任务已不存在的，与单条 Remove 保持一致：直接算成功，不再发删除指令。
 				continue

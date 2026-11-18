@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
@@ -390,11 +391,42 @@ func (a *AIService) saveUserTurn(convID, content, imagesJSON, skillsJSON string)
 	last, err := a.App.DB.LastAIMessage(convID)
 	if err == nil && last != nil {
 		if last.Role == "user" && last.Content == content && last.Images == imagesJSON {
-			return nil // 本轮用户消息已落库（重试场景），不重复写入
+			// WP17 尾巴：只有「刚刚」的同内容才算重试。
+			//
+			// 原来的判据只有内容相同，于是用户在上一轮**失败且没产出任何回复**
+			// 之后再发一次「继续」，会被当成重复直接吞掉——界面毫无反应，
+			// 而用户已经等了几十秒。重试发生在同一次发送里（毫秒级），
+			// 人手动重发至少是几秒之后，用时间窗能把两者分开。
+			if aiUserTurnWithinRetryWindow(last.CreatedAt) {
+				return nil // 本轮用户消息已落库（重试场景），不重复写入
+			}
 		}
 	}
 	_, e := a.App.DB.AddAIMessageUser(convID, content, imagesJSON, skillsJSON)
 	return e
+}
+
+// aiUserTurnRetryWindow 同内容用户消息的去重窗口。
+//
+// 5 秒：一次发送内部的重试（上游 429 重试、超窗重试）都在这个窗口内完成；
+// 而人看到失败提示、读完那句提示、再点一次发送，通常超过 5 秒。
+const aiUserTurnRetryWindow = 5 * time.Second
+
+// aiUserTurnWithinRetryWindow 这条消息是不是「刚刚」写进去的。
+//
+// 时间解析失败时返回 false（= 不当作重试）：宁可多落一条重复消息，
+// 也不能把用户刚说的话吞掉——后者是「点了没反应」，前者只是多一行。
+func aiUserTurnWithinRetryWindow(createdAt string) bool {
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(createdAt))
+	if err != nil {
+		return false
+	}
+	age := time.Since(t)
+	// 未来时间（时钟回拨 / 库里的脏数据）也算「刚刚」，同样按重试处理。
+	if age < 0 {
+		return true
+	}
+	return age <= aiUserTurnRetryWindow
 }
 
 // imageErrorHint 当请求含本地（base64）图片且上游报错疑似与图片相关时，返回一段

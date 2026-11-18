@@ -79,9 +79,14 @@ func (s agentRoleSpec) filter() *ToolFilter {
 func (a *AIService) registerSpawnTool() {
 	mcpsrv.Agent.Add(mcpsrv.Tool{
 		Name: spawnAgentToolName,
-		Description: "派一个子 agent 独立完成一项子任务，并拿回它的结论。" +
+		Description: "派一个子 agent 独立完成一项子任务，并拿回它的结论。多个独立子任务可以在同一轮里同时派出。" +
 			"子 agent **看不到当前对话**，task 必须自带全部背景（目标、范围、期望产出）。" +
-			"适合可以拆开并行做的活：分头调研几个问题、分别排查几个目录、独立审阅几个文件。" +
+			// 「什么时候值得派」放在「不适合」前面，而且不提「并行」：
+			// 原来的措辞是「适合可以拆开并行做的活」，读起来像「不能同时跑就别派」，
+			// 于是串行分治的大任务全留在主循环里硬跑（实机反馈 U2）。
+			"什么时候值得派：任务超过三步，或者要分别去看多个目录/多个问题——" +
+			"把**能独立完成**的条目派出去，主对话继续推进别的条目。串行分治也算，不要求能同时跑。" +
+			"默认用 explore / review 这类只读角色；code 会改文件，只在用户明确要「另一个执行者动手」时才用。" +
 			"不适合：需要你来判断的取舍、需要跟用户确认的事、一句话就能答完的问题。",
 		InputSchema: mcpsrv.Schema(
 			"派子 agent。role 决定它能用哪些工具：explore/review 只读，code 可改文件。",

@@ -34,6 +34,7 @@ import (
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 	"quickdock/services"
+	aitools "quickdock/services/ai/tools"
 )
 
 const (
@@ -381,6 +382,43 @@ func purgeAICheckpoints(database *db.Database) {
 	}
 	enforceCheckpointBudget(database)
 	purgeAIApprovals(database)
+	purgeAgentRunHistory(database)
+	purgeToolResults()
+}
+
+// purgeToolResults 清掉过老的「工具结果原文」（WP3）。
+//
+// 与回滚点同一趟做：都是 AI 自己的本地数据、启动时扫一遍。
+// 刻意不在「删会话」时清：删会话是进回收站（可恢复），把原文一起删掉会让
+// 恢复出来的对话里还挂着已经读不到的 result id。真正兜底的是这里的保留期
+// 与写盘时的「单会话 200 文件 / 100MB」双上限。
+func purgeToolResults() {
+	n := aitools.PurgeToolResultsBefore(time.Now().AddDate(0, 0, -aitools.ToolResultKeepDays).UnixNano())
+	if n > 0 {
+		logger.I("[ai-tool] 已清理 %d 个超过 %d 天的工具结果原文", n, aitools.ToolResultKeepDays)
+	}
+}
+
+// purgeAgentRunHistory 清掉过老的运行轨迹（WP1-c）。
+//
+// 为什么要有：单 run 的事件上限（8000 条）只约束「一次运行」，管不住
+// 「一千次运行」——会话表越老，agent_runs / agent_nodes / agent_events 越大，
+// 而它们回答的是「上次为什么失败」，超出追问范围之后只是体积。
+//
+// 与回滚点同一趟做：都是「AI 自己的本地数据、启动时扫一遍」，
+// 各开一条协程只会让启动多出几次全表扫。
+func purgeAgentRunHistory(database *db.Database) {
+	if database == nil {
+		return
+	}
+	n, err := database.PurgeAgentRunsBefore(time.Now().AddDate(0, 0, -db.AgentRunRetentionDays))
+	if err != nil {
+		logger.W("[ai-trace] 清理过期运行轨迹失败: %v", err)
+		return
+	}
+	if n > 0 {
+		logger.I("[ai-trace] 已清理 %d 条超过 %d 天的运行记录", n, db.AgentRunRetentionDays)
+	}
 }
 
 // aiApprovalKeepDays 审批明细的保留天数。

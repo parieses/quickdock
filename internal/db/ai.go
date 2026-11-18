@@ -28,7 +28,7 @@ type AISpace struct {
 	TaskID string `json:"task_id"`
 	// TaskGone：定时任务空间对应的任务已被删除（仅 ListAISpaces 计算）。
 	// 空间与历史会留着让人回看，但不能再「立即运行」——那条任务已经不存在了。
-	TaskGone  bool   `json:"task_gone"`
+	TaskGone  bool   `json:"task_gone" db:"-"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }
@@ -95,6 +95,20 @@ type AIConversation struct {
 	// ScheduleID 产出这条会话的定时任务 id；手工会话为空。
 	// 运行历史靠它反查「这次跑出了哪个会话」，也是将来「继续对话」的挂点。
 	ScheduleID string `json:"schedule_id"`
+	// Goal 这条对话当前在做什么（一句，取首条用户消息）。
+	//
+	// 为什么要存：中断之后要能一句话说清「上次在干什么」。只靠重新读全部消息
+	// 推目标，既贵又不准——模型会按最近几条断章取义。
+	Goal string `json:"goal"`
+	// Plan 最近一次清单的完整 JSON（形状同 tools.PlanUpdate），空 = 从未规划过。
+	// db 层不解析：清单的字段由 services/ai 定义，两边各自演进会打架。
+	//
+	// 单独一列而不是塞进 summary：清单是「还没做完的事」，要能被程序读出来
+	// 拼进续跑提示；summary 是给人看的对话摘要，两者生命周期也不同。
+	Plan string `json:"plan"`
+	// PlanStatus running（还有未完成项）/ done（全打勾）/ ''（从未规划过）。
+	// 与 Plan 分开存：判「要不要当续跑」只需要状态，不必每次都解析 JSON。
+	PlanStatus string `json:"plan_status"`
 	Starred    bool   `json:"starred"`
 	CreatedAt  string `json:"created_at"`
 	UpdatedAt  string `json:"updated_at"`
@@ -116,6 +130,13 @@ type AIMessage struct {
 	Role             string `json:"role"`
 	Content          string `json:"content"`
 	ReasoningContent string `json:"reasoning_content"`
+	// ReasoningRounds 每一轮工具调用的思考原文，JSON 数组：
+	//   [{"round":1,"text":"..."},{"round":2,"text":"..."}]
+	//
+	// 为什么要单独存：ReasoningContent 是把多轮拼成的一段，界面只能把它挂在
+	// 整条回复的顶部——十轮工具下来就是一坨几千字的东西。按轮拆开之后，
+	// 每条调用旁边能显示「模型当时在想什么」。空串表示没有分轮信息（旧数据）。
+	ReasoningRounds  string `json:"reasoning_rounds"`
 	Images           string `json:"images"`
 	Model            string `json:"model"`
 	PromptTokens     int    `json:"prompt_tokens"`
@@ -171,6 +192,9 @@ func mapToAIConversation(m map[string]interface{}) AIConversation {
 		Starred:          integer(m["starred"]) == 1,
 		Unread:           integer(m["unread"]) == 1,
 		ScheduleID:       str(m["schedule_id"]),
+		Goal:             str(m["goal"]),
+		Plan:             str(m["plan"]),
+		PlanStatus:       str(m["plan_status"]),
 		CreatedAt:        str(m["created_at"]),
 		UpdatedAt:        str(m["updated_at"]),
 	}
@@ -189,6 +213,7 @@ func mapToAIMessage(m map[string]interface{}) AIMessage {
 		Role:             str(m["role"]),
 		Content:          str(m["content"]),
 		ReasoningContent: str(m["reasoning_content"]),
+		ReasoningRounds:  str(m["reasoning_rounds"]),
 		Images:           str(m["images"]),
 		Model:            str(m["model"]),
 		PromptTokens:     integer(m["prompt_tokens"]),
@@ -890,6 +915,27 @@ func (d *Database) SetAIConversationSkills(id, skillsJSON string) error {
 	)
 }
 
+// SetAIConversationPlan 写这条对话的任务清单与它的状态（WP17）。
+//
+// 刻意不推进 updated_at：清单每完成一步都会重写一次，跟着刷新会把会话一直顶在
+// 侧栏最前（用户只是让它干活，并没有「新消息」）。排序看消息时间，不看清单。
+//
+// planJSON 原样存（形状由 services/ai 定义），db 层不解析——理由同 ai_messages.tool_calls。
+func (d *Database) SetAIConversationPlan(id, planJSON, status string) error {
+	return d.ExecuteParams(
+		`UPDATE ai_conversations SET plan = ?, plan_status = ? WHERE id = ?`,
+		[]interface{}{planJSON, strings.TrimSpace(status), strings.TrimSpace(id)},
+	)
+}
+
+// SetAIConversationGoal 写这条对话的当前目标（一句话）。同样不动 updated_at。
+func (d *Database) SetAIConversationGoal(id, goal string) error {
+	return d.ExecuteParams(
+		`UPDATE ai_conversations SET goal = ? WHERE id = ?`,
+		[]interface{}{strings.TrimSpace(goal), strings.TrimSpace(id)},
+	)
+}
+
 // SetAIConversationPermission 改这条对话的执行权限（空 = 默认，'full' = 完全访问）。
 //
 // 和 SetAIConversationCwd 一样单独一个方法：空串是有效取值（回到默认权限），
@@ -1160,6 +1206,24 @@ func (d *Database) LastAIMessage(convID string) (*AIMessage, error) {
 	return &m, nil
 }
 
+// AIMessageTextStats 一条会话的消息条数与正文字符数（不含图片）。
+//
+// 只给「上下文用了多少」那个弹框用（WP2）：它要回答的是「历史占了多少」，
+// 而把整段历史读出来只为数一下字符，长会话上就是几十 MB 的无谓拷贝。
+// 走 SUM(LENGTH()) 让 SQLite 自己算，一个聚合查询就够。
+//
+// 不含 images：图片按张数计价（见 estimateLoopTokens 的注释），
+// 按 base64 字符数会高估三个数量级。
+func (d *Database) AIMessageTextStats(convID string) (count int, chars int, err error) {
+	row, err := d.QueryOne(
+		`SELECT COUNT(*), COALESCE(SUM(LENGTH(content) + LENGTH(tool_calls)), 0)
+		   FROM ai_messages WHERE conv_id = ?`, strings.TrimSpace(convID))
+	if err != nil {
+		return 0, 0, err
+	}
+	return integer(row["COUNT(*)"]), integer(row["COALESCE(SUM(LENGTH(content) + LENGTH(tool_calls)), 0)"]), nil
+}
+
 // TruncateAIMessagesFrom 删除 targetID 及其之后的所有消息，并重算会话累计 token。
 //
 // 用于「重新生成 / 编辑重发」：这两种动作都是在改写历史，不能只往后面追加一个新回答。
@@ -1256,6 +1320,8 @@ type AssistantTurn struct {
 	// ToolCalls 工具调用记录的 JSON；空串表示没调过工具。ToolRounds 是轮数。
 	ToolCalls  string
 	ToolRounds int
+	// ReasoningRounds 按轮拆开的思考（JSON 数组，见 AIMessage.ReasoningRounds）。
+	ReasoningRounds string
 }
 
 // SaveAssistantTurn 追加一条助手回复，并记下这一次调用自己的用量。
@@ -1277,6 +1343,7 @@ func (d *Database) SaveAssistantTurn(convID string, t AssistantTurn) (*AIMessage
 		Stopped:          t.Stopped,
 		ToolCalls:        t.ToolCalls,
 		ToolRounds:       t.ToolRounds,
+		ReasoningRounds:  t.ReasoningRounds,
 		CreatedAt:        now(),
 	}
 	if err := d.BulkInsert("ai_messages", []map[string]interface{}{structToMap(m)}); err != nil {

@@ -70,6 +70,42 @@ var codeAgentDangerRules = []struct {
 	{regexp.MustCompile(`(?i)\b(npm\s+publish|yarn\s+publish|cargo\s+publish|twine\s+upload)\b`), "发布会把代码推到公共仓库，撤不回"},
 }
 
+// codeAgentSupplyChainRules 供应链类禁令：改包源、交凭据、从任意来源执行 build。
+//
+// 与上面那张表的区别不只是措辞：这些命令**不会**破坏工作区，所以原来完全不在
+// 任何表里；而它们的后果更远——一次 `npm config set registry http://10.x/`
+// 之后，用户接下来所有安装都从攻击者主机拉包，而且当场没有任何异常。
+//
+// 为什么单独一张表：报错文案要说清「会动包源或凭据」，混进「会破坏未提交的工作」
+// 会让用户以为只是丢改动，从而倾向于点「允许」。
+//
+// 代价说明：`npm install --registry https://registry.npmjs.org`（官方源）也会被拒。
+// 这是刻意的——判据是「命令长什么样」而不是「那个源可不可信」，后者需要联网校验，
+// 而这里是一道本地的、确定性的闸。用户真要装，自己在终端跑一次即可。
+var codeAgentSupplyChainRules = []struct {
+	re   *regexp.Regexp
+	note string
+}{
+	// —— 改包源 ——
+	{regexp.MustCompile(`(?i)\b(npm|yarn|pnpm)\s+config\s+set\b`), "改包管理器配置（常见手法：把 registry 指到别的主机，之后所有安装都从那里拉）"},
+	{regexp.MustCompile(`(?i)\b(npm|yarn|pnpm)\b[^\n]*--registry\b`), "用 --registry 临时换源，等于从任意主机装包"},
+	{regexp.MustCompile(`(?i)\b(pip|pip3)\s+install\b[^\n]*(--index-url|--extra-index-url|--trusted-host)`), "换索引源 / 关校验 = 从任意主机装包"},
+	{regexp.MustCompile(`(?i)\b(pip|pip3)\s+config\s+set\b`), "改 pip 全局配置会把之后所有安装导到别的源"},
+	{regexp.MustCompile(`(?i)\bpoetry\s+source\s+add\b`), "加第三方源，之后的安装都从那里解析"},
+
+	// —— 交凭据 ——
+	{regexp.MustCompile(`(?i)\b(npm|yarn|pnpm)\s+(login|adduser|logout)\b`), "登录/登出会把发布凭据交给这条命令"},
+	{regexp.MustCompile(`(?i)\bcargo\s+login\b`), "登录会把 crates.io 凭据交给这条命令"},
+
+	// —— 从任意来源执行 build script ——
+	{regexp.MustCompile(`(?i)\b(npm|yarn|pnpm)\s+(add|install|i)\s+[^\n]*(git\+|git:|https?://|file:)`), "直接从 git / URL / 本地路径安装会执行对方的 build script"},
+	{regexp.MustCompile(`(?i)\bcargo\s+install\b[^\n]*--git`), "从任意仓库编译安装会执行对方的 build script"},
+
+	// —— 发版（撤不回）——
+	{regexp.MustCompile(`(?i)\bpoetry\s+publish\b`), "发布会把包推到公共仓库，撤不回"},
+	{regexp.MustCompile(`(?i)\b(gem\s+push|dotnet\s+nuget\s+push)\b`), "发布会把包推到公共仓库，撤不回"},
+}
+
 func registerCode(d Deps) {
 	r := registrar{d: d, domain: mcpsrv.CategoryCode}
 	str := mcpsrv.Str
@@ -117,12 +153,9 @@ func registerCode(d Deps) {
 		"**不要自己造一个 detached 启动脚本绕过后台任务机制**（`child_process.spawn` + `unref`、`nohup`、" +
 		"`start /b` 这类）：这样起的进程不进后台任务面板，用户既看不到也没法停，应用退出时也不会被清理。" +
 		"**高危命令会被拒绝执行**（删除根目录、git reset --hard、强推、发版等），此时请把命令交给用户自己运行"
-	if runtime.GOOS == "windows" {
-		cmdDesc += "。**当前是 Windows，命令由 cmd.exe 执行**：没有 head / tail / grep / ls / rm 这些 POSIX 工具，" +
-			"`| head -50`、`$(...)` 这类写法会直接报「不是内部或外部命令」（管道 `|`、`&&`、重定向 `>` 本身是支持的）。" +
-			"只想看前几行就交给工具自己的输出上限（超了会截断并说明），需要那些工具时改用 PowerShell：" +
-			"`powershell -NoProfile -Command \"...\"`"
-	}
+	// WP9：平台注记走 build-tag 分片（prompts/platform/*.md），不再在运行期
+	// 判 GOOS——那样 Linux 那段永远没有测试能覆盖到。
+	cmdDesc += platformShellNote()
 
 	// addCtx 而不是 add：命令是唯一会「跑很久」的工具，用户点停止时必须能连带
 	// 把进程树杀掉。用 add 的话工具拿不到取消信号，界面停了、命令还在后台烧 CPU。
@@ -485,6 +518,10 @@ func fileWrite(ctx context.Context, d Deps, args map[string]any) (any, error) {
 		"tip":        "已写入磁盘。要再改它请 file_read 后用 file_edit 精确替换，不要整份重写",
 	}
 	attachHooks(res, d, mcpsrv.Cwd(args), "afterEdit", map[string]string{"file": path})
+	// WP18：落在 quickdock/ 却没进 .gitignore 时提醒一句（不改用户的文件）。
+	if hint := ScratchGitignoreHint(mcpsrv.Cwd(args), path); hint != "" {
+		res["scratchHint"] = hint
+	}
 	return res, nil
 }
 
@@ -522,6 +559,18 @@ func runCommand(ctx context.Context, d Deps, args map[string]any) (any, error) {
 	for _, rule := range codeAgentDangerRules {
 		if rule.re.MatchString(command) {
 			return nil, fmt.Errorf("这条命令会破坏未提交的工作，未执行：%s\n命令：%s\n"+
+				"如果确实要做，请让用户自己在终端里执行", rule.note, command)
+		}
+	}
+	// 供应链类（WP6）：改包源、交凭据、从任意仓库执行 build script。
+	//
+	// 必须放在**执行前**而不是「沉淀（记住本目录都允许）时」：
+	// 沉淀改变的只是「要不要问」，不是「允不允许」。用户批准过
+	// 「本目录都允许 npm」之后，`npm config set registry http://10.x/`
+	// 依然要在这里被拒——否则一次省事的批准就等于把供应链交出去。
+	for _, rule := range codeAgentSupplyChainRules {
+		if rule.re.MatchString(command) {
+			return nil, fmt.Errorf("这条命令会动包源或凭据，未执行：%s\n命令：%s\n"+
 				"如果确实要做，请让用户自己在终端里执行", rule.note, command)
 		}
 	}

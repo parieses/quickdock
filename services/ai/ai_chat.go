@@ -9,12 +9,65 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"quickdock/internal/db"
 	"quickdock/internal/logger"
 )
+
+// 上游失败重试（WP15）。
+//
+// 为什么必须有：长任务跑到第三十轮被限流一次，整轮就作废——前面二十九轮的
+// 上下文与费用全部沉没，用户只看到「HTTP 429」。而 429/5xx 本来就是**可重试**的
+// 语义（跟参数错误、鉴权失败完全不同类）。
+//
+// 三条边界，缺一条都会帮倒忙：
+//   - 只重试「还没开始吐字」的阶段：这里只包住建连 + 等响应头，正文一旦开始
+//     流式读取就不再重试（重试会让用户看到同一段话两遍）；
+//   - 用户停止 / 看门狗超时一律不重试：那是我们自己取消的，重试等于无视用户；
+//   - 4xx（除 429）不重试：Key 不对、参数不对，重试一万次也一样。
+const (
+	aiRetryMax      = 3
+	aiRetryBaseWait = time.Second
+	aiRetryMaxWait  = 8 * time.Second
+)
+
+// aiRetryableStatus 判断状态码是否值得重试。
+func aiRetryableStatus(code int) bool {
+	switch code {
+	case http.StatusTooManyRequests, // 429 限流
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
+		return true
+	}
+	return false
+}
+
+// aiRetryDelay 下一次重试等多久：优先照上游的 Retry-After，否则指数退避。
+func aiRetryDelay(resp *http.Response, attempt int) time.Duration {
+	if resp != nil {
+		// Retry-After 有两种格式（秒数 / HTTP-date），只处理秒数：
+		// date 形式在网关里几乎见不到，为它引一套时间解析不值。
+		if v := strings.TrimSpace(resp.Header.Get("Retry-After")); v != "" {
+			if secs, e := strconv.Atoi(v); e == nil && secs >= 0 {
+				d := time.Duration(secs) * time.Second
+				if d > aiRetryMaxWait {
+					d = aiRetryMaxWait
+				}
+				return d
+			}
+		}
+	}
+	d := aiRetryBaseWait << max(attempt-1, 0)
+	if d > aiRetryMaxWait {
+		d = aiRetryMaxWait
+	}
+	return d
+}
 
 // 上游空闲看门狗的两个窗口。
 //
@@ -49,6 +102,12 @@ type chatTurn struct {
 // 非 nil 时模型可能返回 tool_calls，此时 Content 可能为空——这不代表失败，
 // 调用方必须看 ToolCalls 是否为空，否则会把「模型决定先查一下」误判成空回复。
 func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []map[string]interface{}, convID string, tools []map[string]any, onToken func(text string), onReasoning func(text string)) (chatTurn, error) {
+	// WP4a：剥掉循环内部的轮次标记再发。
+	//
+	// 标记是给我们自己看的（决定折叠哪几轮），但 messages 里的 map 就是请求体——
+	// 多一个未知字段，严格的网关会直接 400，而这种错只在某些 provider 上出现。
+	// 放在这一个总入口而不是各个调用方：只有一处需要记得。
+	messages = stripInternalMessageKeys(messages)
 	// 链路日志只记「元数据」（模型/条数/耗时/用量），绝不记消息正文——
 	// AI 对话可能含用户隐私，日志要能排障但不能泄密。
 	startedAt := time.Now()
@@ -116,39 +175,103 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 	// 处理（保留半截正文、标 stopped），前者是一次可归因的失败。
 	idleFired := func() bool { return streamCtx.Err() != nil && ctx.Err() == nil }
 
-	req, err := http.NewRequestWithContext(streamCtx, http.MethodPost, ep, bytes.NewReader(raw))
-	if err != nil {
-		return chatTurn{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if authVal != "" {
-		req.Header.Set(authKey, authVal)
-	}
-	// 导致逐字流式退化成"一次性整段"。强制 identity 让上游返回原始分块 SSE。
-	req.Header.Set("Accept-Encoding", "identity")
-	req.Header.Set("Cache-Control", "no-store")
-
 	client := a.aiHTTPClient
-	logger.I("[ai] 请求 model=%s provider=%s conv=%s messages=%d", cfg.Model, cfg.Provider, convID, len(messages))
-	resp, err := client.Do(req)
-	if err != nil {
-		// 看门狗在等响应头的阶段就掐了：报原始错误只会是 "context canceled"，
-		// 用户看不出是上游连响应头都不给。
+	// 重试循环只覆盖「建连 → 拿到响应头」这一段：正文开始流式读取之后就不能再
+	// 重试了（会让用户看到同一段话两遍），那之后的失败交给调用方按中断处理。
+	var resp *http.Response
+	for attempt := 0; ; attempt++ {
+		// 每次都要新建请求：body 已被上一次读完，复用会发出空 body。
+		req, rerr := http.NewRequestWithContext(streamCtx, http.MethodPost, ep, bytes.NewReader(raw))
+		if rerr != nil {
+			return chatTurn{}, rerr
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if authVal != "" {
+			req.Header.Set(authKey, authVal)
+		}
+		// 导致逐字流式退化成"一次性整段"。强制 identity 让上游返回原始分块 SSE。
+		req.Header.Set("Accept-Encoding", "identity")
+		req.Header.Set("Cache-Control", "no-store")
+
+		if attempt == 0 {
+			logger.I("[ai] 请求 model=%s provider=%s conv=%s messages=%d", cfg.Model, cfg.Provider, convID, len(messages))
+		} else {
+			logger.I("[ai] 第 %d/%d 次重试 model=%s provider=%s conv=%s", attempt, aiRetryMax, cfg.Model, cfg.Provider, convID)
+		}
+
+		var derr error
+		resp, derr = client.Do(req)
+		if derr == nil && resp.StatusCode == http.StatusOK {
+			break
+		}
+
+		// 先判断「该不该重试」，再决定要不要把错误报出去。
+		retryable := derr != nil || (resp != nil && aiRetryableStatus(resp.StatusCode))
+		// 用户点停止 / 看门狗掐断：这两种都是我们自己取消的，重试等于无视用户。
+		// 看门狗的错误由下面统一给出可读文案，不在这里返回。
+		canceled := streamCtx.Err() != nil
+		if !retryable || canceled || attempt >= aiRetryMax {
+			break
+		}
+
+		wait := aiRetryDelay(resp, attempt+1)
+		if resp != nil {
+			status := resp.StatusCode
+			// 上一发的 body 必须关掉再重试，否则连接一直占着（Transport 的
+			// idle 连接池会膨胀，长任务里能明显看出句柄数上升）。
+			_ = resp.Body.Close()
+			resp = nil
+			logger.W("[ai] 上游 HTTP %d，%v 后重试（第 %d/%d 次）model=%s conv=%s",
+				status, wait, attempt+1, aiRetryMax, cfg.Model, convID)
+			// WP15 尾巴：让界面知道「在重试，不是卡死」。
+			// 用户看不到这条时最常见的反应是点停止，而那正好把
+			// 一次马上要成功的请求掐掉。
+			notifyRetry(streamCtx, attempt+1, wait, status)
+		} else {
+			logger.W("[ai] 请求失败（%v），%v 后重试（第 %d/%d 次）model=%s conv=%s",
+				derr, wait, attempt+1, aiRetryMax, cfg.Model, convID)
+			notifyRetry(streamCtx, attempt+1, wait, 0)
+		}
+
+		select {
+		case <-streamCtx.Done():
+			// 等退避期间被取消：可能是用户点停止，也可能是看门狗掐断。
+			// 两种都立刻收敛，不再重试。
+			if idleFired() {
+				logger.E("[ai] 上游 %v 未返回响应头，判定空闲超时 model=%s conv=%s", aiStreamIdleFirst, cfg.Model, convID)
+				return chatTurn{}, fmt.Errorf("上游超过 %v 没有返回响应（模型 %s），连接可能已断", aiStreamIdleFirst, cfg.Model)
+			}
+			if cErr := ctx.Err(); cErr != nil {
+				return chatTurn{}, cErr
+			}
+			return chatTurn{}, streamCtx.Err()
+		case <-time.After(wait):
+		}
+	}
+
+	if resp == nil || resp.StatusCode != http.StatusOK {
+		// 走到这里只有三种：不可重试的错误、重试用尽、被取消。
 		if idleFired() {
 			logger.E("[ai] 上游 %v 未返回响应头，判定空闲超时 model=%s conv=%s", aiStreamIdleFirst, cfg.Model, convID)
 			return chatTurn{}, fmt.Errorf("上游超过 %v 没有返回响应（模型 %s），连接可能已断", aiStreamIdleFirst, cfg.Model)
 		}
-		logger.E("[ai] 请求失败 model=%s conv=%s 耗时=%v: %v",
-			cfg.Model, convID, time.Since(startedAt).Round(time.Millisecond), err)
-		return chatTurn{}, err
+		if resp != nil {
+			eb, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+			_ = resp.Body.Close()
+			logger.E("[ai] 上游返回异常 model=%s conv=%s status=%d body=%s",
+				cfg.Model, convID, resp.StatusCode, logger.Trunc(string(eb), 300))
+			return chatTurn{}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(eb)))
+		}
+		if cErr := ctx.Err(); cErr != nil {
+			return chatTurn{}, cErr
+		}
+		if cErr := streamCtx.Err(); cErr != nil {
+			return chatTurn{}, cErr
+		}
+		logger.E("[ai] 请求失败 model=%s conv=%s 耗时=%v", cfg.Model, convID, time.Since(startedAt).Round(time.Millisecond))
+		return chatTurn{}, fmt.Errorf("请求上游失败（模型 %s），已重试 %d 次", cfg.Model, aiRetryMax)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		eb, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		logger.E("[ai] 上游返回异常 model=%s conv=%s status=%d body=%s",
-			cfg.Model, convID, resp.StatusCode, logger.Trunc(string(eb), 300))
-		return chatTurn{}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(eb)))
-	}
 
 	var sb strings.Builder
 	// tool_calls 是分片下发的：第一片带 index/id/name，后续分片只带
@@ -336,8 +459,12 @@ func (a *AIService) buildAIMessages(ctx context.Context, cfg AIProfile, convID, 
 //
 // measured 是上一发请求上游实报的输入 token：与 before（我们的估算）一起看
 // 就知道自己的估法是高估还是低估，排查「总是提前压」时是关键线索。
-func compactEvent(phase string, before, after, dropped, kept int, lim aiContextLimits, budget int, summarized bool) map[string]any {
+func compactEvent(kind, phase string, before, after, dropped, kept int, lim aiContextLimits, budget int, summarized, attempted bool) map[string]any {
 	return map[string]any{
+		// kind 区分两种压缩：history = 真调模型做摘要（贵、可能失败），
+		// loop = 循环内折叠较早的工具结果（几毫秒、不会失败）。
+		// 前端必须能分开——不然一次折叠会被显示成「摘要失败，已直接截断」。
+		"kind":     kind,
 		"phase":    phase,
 		"before":   before,
 		"after":    after,
@@ -349,6 +476,9 @@ func compactEvent(phase string, before, after, dropped, kept int, lim aiContextL
 		"floor":    lim.Floor,
 		"measured": lim.Measured,
 		"summary":  summarized,
+		// attempted 这次到底有没有真的去调模型摘要。失败时的文案只在
+		// attempted && !summary 才该出现（见前端 aiCompactTruncated）。
+		"attempted": attempted,
 	}
 }
 
@@ -369,17 +499,18 @@ func estimateMessageTokens(m db.AIMessage) int {
 // 白压成摘要；8K 窗口下留 12 条可能压缩完还是超。所以按预算反推：
 // 从尾部往前累加到用掉 45%（剩下的 55% 要给本轮回复、工具结果和
 // 待压缩部分留位置），并夹在 [8, 40] 之间。
-func keepRecentCount(hist []db.AIMessage, budget int) int {
+func keepRecentCount(hist []db.AIMessage, budget int, cfg AIProfile) int {
+	lo, hi := keepRecentOf(cfg)
 	limit := budget * 45 / 100
 	used, keep := 0, 0
-	for i := len(hist) - 1; i >= 0 && keep < aiKeepRecentMax; i-- {
+	for i := len(hist) - 1; i >= 0 && keep < hi; i-- {
 		used += estimateMessageTokens(hist[i])
 		keep++
-		if used >= limit && keep >= aiKeepRecentMin {
+		if used >= limit && keep >= lo {
 			break
 		}
 	}
-	if keep < aiKeepRecentMin {
+	if keep < lo {
 		keep = aiKeepRecentMin
 	}
 	if keep > len(hist) {
@@ -420,7 +551,7 @@ func (a *AIService) buildAIMessagesWithin(ctx context.Context, cfg AIProfile, co
 	// 摘要压缩：历史超预算且足够长时，总结最旧部分并清理。
 	// 只压缩「保留部分之前」的那一段，且要求它本身达到 keep 条——避免
 	// 「保留 recent 条 + 每轮新增 1 条」导致每轮都重算摘要、无谓消耗 token。
-	keep := keepRecentCount(hist, budget)
+	keep := keepRecentCount(hist, budget, cfg)
 	if force && keep > len(hist)/2 {
 		// 强制模式（上游已报超窗）：保留段本身就要砍一半。
 		// 否则「历史 14 条、keep 8 条」时待压缩段只有 6 条，压完仍然超窗。
@@ -438,27 +569,46 @@ func (a *AIService) buildAIMessagesWithin(ctx context.Context, cfg AIProfile, co
 			before := estTokens(hist)
 			lim := contextLimitsOf(cfg)
 			lim.Measured = lastRequestSize(convID)
+			// attempted 表示这次是否真的发起了摘要调用。
+			//
+			// 冷却期内不发：摘要失败通常不是偶发（超窗、上游拒绝、模型不认这个
+			// 端点），每轮都重试等于每轮白付一次调用 + 弹一条「摘要失败」。
+			// 冷却期仍然硬截断，对话能继续，只是这段时间里不再尝试摘要。
+			attempt := !summaryCoolingDown(convID)
 			if sink != nil {
-				sink.Event("compact", compactEvent("start", before, 0, len(toSum), len(recent), lim, budget, false))
+				sink.Event("compact", compactEvent(compactKindHistory, "start", before, 0, len(toSum), len(recent), lim, budget, false, attempt))
 			}
 			summarized := false
-			if summary, serr := a.summarizeAndStore(ctx, cfg, conv, toSum); serr == nil {
-				_ = a.App.DB.DeleteOldAIMessages(convID, keep)
-				hist = recent
-				conv.Summary = summary
-				summarized = true
+			if !attempt {
+				logger.I("[ai] 摘要冷却中，直接硬截断 conv=%s", convID)
+			}
+			if attempt {
+				if summary, serr := a.summarizeAndStore(ctx, cfg, conv, toSum); serr == nil {
+					_ = a.App.DB.DeleteOldAIMessages(convID, keep)
+					hist = recent
+					conv.Summary = summary
+					summarized = true
+					clearSummaryFailure(convID)
+				} else {
+					// 摘要失败（多为摘要请求自己也超窗或上游抖动）：不能就这么算了，
+					// 否则每轮都会拿同一份超长历史重试、每次都失败、每轮都撞 400。
+					// 降级为硬截断——丢掉最旧的那部分，只留最近 keep 条。
+					// 这点信息损失换来的是对话还能继续，比彻底卡死好。
+					logger.W("[ai] 摘要压缩失败 conv=%s，降级为硬截断: %v", convID, serr)
+					markSummaryFailure(convID)
+					_ = a.App.DB.DeleteOldAIMessages(convID, keep)
+					hist = recent
+				}
 			} else {
-				// 摘要失败（多为摘要请求自己也超窗或上游抖动）：不能就这么算了，
-				// 否则每轮都会拿同一份超长历史重试、每次都失败、每轮都撞 400。
-				// 降级为硬截断——丢掉最旧的那部分，只留最近 keep 条。
-				// 这点信息损失换来的是对话还能继续，比彻底卡死好。
-				logger.W("[ai] 摘要压缩失败 conv=%s，降级为硬截断: %v", convID, serr)
 				_ = a.App.DB.DeleteOldAIMessages(convID, keep)
 				hist = recent
 			}
 			if sink != nil {
-				sink.Event("compact", compactEvent("done", before, estTokens(recent), len(toSum), len(recent), lim, budget, summarized))
+				sink.Event("compact", compactEvent(compactKindHistory, "done", before, estTokens(recent), len(toSum), len(recent), lim, budget, summarized, attempt))
 			}
+			// 记一笔给弹框的「压缩状态」（WP2）：这是真调了一次模型的摘要，
+			// 与循环内的折叠要分开标（前者贵、后者几毫秒）。
+			rememberCompaction(convID, before, estTokens(recent), 0, len(toSum), summarized)
 		}
 	}
 
@@ -511,6 +661,8 @@ const aiSummaryInputRune = 40000
 
 // summarizeAndStore 调用模型把旧对话压缩为摘要并写回会话
 func (a *AIService) summarizeAndStore(ctx context.Context, cfg AIProfile, conv *db.AIConversation, toSum []db.AIMessage) (string, error) {
+	// WP11：摘要属于「输入长、输出短、失败不致命」那一类，换廉价档。
+	cfg = aiCheapProfile(cfg)
 	var b strings.Builder
 	b.WriteString("请将以下对话压缩为简洁的中文摘要，保留关键事实、结论与待办，便于后续延续上下文。只输出摘要，不要解释：\n\n")
 	for _, m := range toSum {

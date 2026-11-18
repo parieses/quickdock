@@ -200,6 +200,12 @@ type approvalGate struct {
 	// 按两套策略走。改了设置下一轮对话生效。
 	rules map[string]approvalMode
 
+	// grants 沉淀下来的放行规则（见 ai_approval_grants.go）。
+	// 与 granted 的区别：那个是「本次会话」，这个是跨会话落库的。
+	grants []aiApprovalGrant
+	// cwd 本次 run 的工作目录：workspace 作用域的规则只在它之内生效。
+	cwd string
+
 	// fullAccess 这条对话是否处于「完全访问」。
 	//
 	// 一次 run 一个值：用户在这轮进行中把权限切回来，也不影响正在跑的这条——
@@ -221,13 +227,15 @@ type approvalGate struct {
 	granted map[string]bool
 }
 
-func newApprovalGate(sink EventSink, convID string, database *db.Database, rules map[string]approvalMode, fullAccess bool) *approvalGate {
+func newApprovalGate(sink EventSink, convID string, database *db.Database, rules map[string]approvalMode, fullAccess bool, grants []aiApprovalGrant, cwd string) *approvalGate {
 	return &approvalGate{
 		sink:       sink,
 		convID:     convID,
 		database:   database,
 		rules:      rules,
 		fullAccess: fullAccess,
+		grants:     grants,
+		cwd:        cwd,
 		pending:    make(map[string]chan approvalDecision),
 		granted:    make(map[string]bool),
 	}
@@ -324,6 +332,15 @@ func (g *approvalGate) await(ctx context.Context, callID, name string, level int
 		if allowed {
 			return true, ""
 		}
+	}
+
+	// 沉淀规则（WP6）：用户以前明确批准过「这一族」或「这个目录」。
+	//
+	// 放在会话放行之后、弹卡之前：它是同一件事的长效版本。
+	// 注意它**只**省掉这次确认——工具层的风险判定（高危命令 / 供应链禁令）
+	// 与 fsguard 的写白名单都还在，那两层是能力边界，不是确认步骤。
+	if matchApprovalGrant(g.grants, name, g.cwd, args) {
+		return true, ""
 	}
 
 	// 已经停止的提问不该再弹卡片：用户按了停止之后界面还在要确认，

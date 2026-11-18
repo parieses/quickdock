@@ -282,7 +282,11 @@ func TestTaskFolderDir(t *testing.T) {
 	if got := taskFolderDir(cfg, "D:/dl", uri, ""); got != want {
 		t.Fatalf("子目录不对: got %q want %q", got, want)
 	}
-	if got := taskFolderDir(cfg, "D:/dl", "magnet:?xt=urn:btih:abc", ""); got != filepath.Clean("D:/dl") {
+	// 磁力链接拿不到可靠文件名 → 应当原样返回入参。
+	// 这里不能拿 filepath.Clean("D:/dl") 比：Clean 在 Windows 上会把斜杠换成
+	// 反斜杠（"D:\dl"），而函数在「不需要子目录」时是**原样返回**、不做规范化，
+	// 于是这条断言在任何平台都不可能同时成立。
+	if got := taskFolderDir(cfg, "D:/dl", "magnet:?xt=urn:btih:abc", ""); got != "D:/dl" {
 		t.Errorf("磁力链接不该建子目录: %q", got)
 	}
 	if got := taskFolderDir(cfg, "", uri, ""); got != "" {

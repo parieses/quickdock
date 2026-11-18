@@ -20,6 +20,7 @@ import AiDiffView from './AiDiffView.vue'
 import type { LiveBlock } from '../composables/useAiMarkdownBlocks'
 import type { AICompact, AIRun } from '../utils/aiRuns'
 import { pickActiveRun } from '../utils/aiRuns'
+import { fmtElapsed } from '../utils/aiRunTree'
 import type {
   AIArtifact, AICheckpointView, AIJobRow, AIMessage, AIMsgImage, AIRuleFile, AIStreamStat, AIToolCall,
 } from '../types/ai'
@@ -108,6 +109,8 @@ const lastUserId = computed(() => {
   return ''
 })
 const reasoningText = computed(() => activeRun.value?.reasoning ?? '')
+// 已归档的各轮思考（后端在轮次边界发 reasoning_round）。
+const streamReasonRounds = computed(() => activeRun.value?.reasonRounds ?? NO_REASON_ROUNDS)
 const streamTools = computed<AIToolCall[]>(() => activeRun.value?.tools ?? NO_TOOLS)
 const streamBlocks = computed<LiveBlock[]>(() => activeRun.value?.blocks ?? NO_BLOCKS)
 const runRules = computed<AIRuleFile[]>(() => activeRun.value?.rules ?? NO_RULES)
@@ -314,6 +317,54 @@ function skillsOf(m: AIMessage): string[] {
   skillCache.set(m.id, { sig: raw, list })
   return list
 }
+
+// 分轮思考的解析缓存（与 toolsOf 同一个理由：模板里一条消息会取好几次）。
+interface ReasonRound {
+  round: number
+  text: string
+}
+const reasonRoundCache = new Map<string, { sig: string; list: ReasonRound[] }>()
+function reasonRoundsOf(m: AIMessage): ReasonRound[] {
+  const raw = m.reasoning_rounds || ''
+  if (!raw) return NO_REASON_ROUNDS
+  const sig = `${m.id}:${raw.length}`
+  const hit = reasonRoundCache.get(m.id)
+  if (hit && hit.sig === sig) return hit.list
+  let list: ReasonRound[] = []
+  try {
+    const v = JSON.parse(raw)
+    if (Array.isArray(v)) {
+      list = v
+        .filter((x) => x && typeof x.text === 'string' && x.text.trim() !== '')
+        .map((x) => ({ round: Number(x.round) || 0, text: String(x.text) }))
+    }
+  } catch {
+    list = []
+  }
+  reasonRoundCache.set(m.id, { sig, list })
+  return list
+}
+
+/**
+ * 这张工具卡片之前要不要显示「本轮思考」，返回空串表示不显示。
+ *
+ * 只在「这一轮的第一个调用」前面插一次：一轮里连调五个工具时，每个卡片上方都
+ * 重复同一段思考只是噪音。轮次号来自工具记录（`round`），与 thinking 记录一一对应。
+ */
+function reasoningBefore(m: AIMessage, i: number): string {
+  const rounds = reasonRoundsOf(m)
+  if (!rounds.length) return ''
+  const list = toolsOf(m)
+  const cur = Number(list[i]?.round) || 0
+  const prev = i > 0 ? Number(list[i - 1]?.round) || 0 : -1
+  if (i > 0 && prev === cur) return ''
+  const hit = rounds.find((x) => x.round === cur)
+  return hit ? hit.text : ''
+}
+
+// 空数组常量：没有分轮信息时返回同一个引用，避免每次渲染都造新数组
+// （v-if 会因此认为依赖变了，把整块重算一遍）。
+const NO_REASON_ROUNDS: ReasonRound[] = []
 
 const artCache = new Map<string, { sig: string; list: AIArtifact[] }>()
 
@@ -679,7 +730,9 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
               <div v-else class="ai-msg-img-el ai-img-broken">{{ t('aiImageBroken') }}</div>
             </div>
           </div>
-          <details v-if="m.reasoning_content" class="ai-reasoning">
+          <!-- 整段思考：只在**没有**分轮信息时显示（旧数据、或模型只在一轮里思考）。
+               有分轮信息时，思考已经贴到对应那一轮的工具卡片上方了。 -->
+          <details v-if="m.reasoning_content && !reasonRoundsOf(m).length" class="ai-reasoning">
             <summary>{{ t('aiThought') }} · {{ t('aiThoughtChars', { n: m.reasoning_content.length }) }}</summary>
             <div class="ai-reasoning-content">{{ m.reasoning_content }}</div>
           </details>
@@ -694,8 +747,18 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
             </summary>
             <div class="ai-tools-body">
               <!-- 每条调用自带折叠：一次回答调了五六个工具时，用户只想展开
-                   其中一条看细节，而不是要么全看要么全不看。 -->
-              <details v-for="tc in toolsOf(m)" :key="tc.id" class="ai-tool" :class="{ 'is-err': !!tc.error }">
+                   其中一条看细节，而不是要么全看要么全不看。
+                   有分轮思考时，在「这一轮的第一个调用」上方插一段思考——这样
+                   「它当时在想什么」就贴在那一步旁边，而不是全堆在回复顶部。 -->
+              <template v-for="(tc, ti) in toolsOf(m)" :key="tc.id">
+              <details v-if="reasoningBefore(m, ti)" class="ai-reasoning is-round">
+                <summary>
+                  {{ t('aiThought') }} ·
+                  {{ t('aiThoughtChars', { n: reasoningBefore(m, ti).length }) }}
+                </summary>
+                <div class="ai-reasoning-content">{{ reasoningBefore(m, ti) }}</div>
+              </details>
+              <details class="ai-tool" :class="{ 'is-err': !!tc.error }">
                 <summary class="ai-tool-line">
                   <component :is="toolIcon(tc.name)" :size="12" class="ai-tool-icon" />
                   <span class="ai-tool-verb">{{ toolVerb(tc.name) }}</span>
@@ -708,7 +771,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
                   </span>
                   <span v-if="tc.denied" class="ai-tool-ms is-denied">{{ t('aiToolDenied') }}</span>
                   <span v-else-if="tc.dedup" class="ai-tool-ms">{{ t('aiToolDedup') }}</span>
-                  <span v-else-if="tc.ms" class="ai-tool-ms">{{ tc.ms }}ms</span>
+                  <span v-else-if="tc.ms" class="ai-tool-ms">{{ fmtElapsed(tc.ms) }}</span>
                   <!-- 回滚到这一步之前：只有真的建过快照的写类调用才有这个按钮。 -->
                   <button v-if="cpForCall(tc)" class="ai-tool-undo" :title="t('aiCheckpointUndo')" @click.stop.prevent="emit('restore-checkpoint', cpForCall(tc)!)">
                     <Undo2 :size="11" />
@@ -734,6 +797,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
                   <button class="ai-job-note-open" @click.stop.prevent="emit('open-jobs', jobIdOf(tc))">{{ t('aiJobBgView') }}</button>
                 </div>
               </details>
+              </template>
             </div>
           </details>
           <!-- 编排 run 树：这条回复派出去的子 agent。只有带 run_id 的回复才渲染，
@@ -861,24 +925,42 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
           <Loader2 v-if="c.phase === 'start'" :size="12" class="ai-compact-ico is-spin" />
           <Check v-else :size="12" class="ai-compact-ico" />
           <span class="ai-compact-text">
-            {{ c.phase === 'start' ? t('aiCompacting') : t('aiCompacted') }}
+            {{
+              c.phase === 'start'
+                ? t('aiCompacting')
+                : c.kind === 'loop'
+                  ? t('aiCompactFolded')
+                  : t('aiCompacted')
+            }}
           </span>
           <span v-if="c.phase === 'done'" class="ai-compact-num">
             {{ fmtTokens(c.before) }} → {{ fmtTokens(c.after) }}
           </span>
+          <!-- 折叠条数：折叠与摘要是两种不同的动作，用户得知道「是丢细节还是真总结过」。 -->
+          <span v-if="c.phase === 'done' && c.kind === 'loop'" class="ai-compact-num">
+            {{ t('aiCompactFoldedCount', { n: c.dropped }) }}
+          </span>
           <!-- 摘要失败时降级为硬截断：必须说，否则用户看到「压缩了但 AI 还是忘了
-               中间那段」，会以为是模型的问题而不是这里退化了。 -->
-          <span v-if="c.phase === 'done' && !c.summary" class="ai-compact-warn">{{ t('aiCompactTruncated') }}</span>
+               中间那段」，会以为是模型的问题而不是这里退化了。
+               只在「真发起过摘要且失败」时出现——冷却期与循环内折叠都不属于失败。 -->
+          <span
+            v-if="c.phase === 'done' && c.kind === 'history' && c.attempted && !c.summary"
+            class="ai-compact-warn"
+          >{{ t('aiCompactTruncated') }}</span>
         </div>
 
         <!-- 流式思考：与历史消息、工具卡片同一口径，默认收起。
              长推理动辄几千字，常驻展开会把正文挤到屏幕外；摘要行给出实时字数，
              首字之前那十几秒仍有「它还在动」的进度可看，想看过程自己点开。
-             details 没有 open 属性 → 浏览器自带三角提示可展开；点开后本轮内
-             Vue 只 patch 文本节点，展开态会一直保留到这一轮定格。
+             已完成的轮次单独成块（后端在轮次边界发 reasoning_round），
+             当前这一轮还在长的部分挂在最后——不然十几轮的思考会实时糊成一个。
              正文开始输出后文案从「思考中」切成历史消息用的「已思考」。 -->
-        <div v-if="reasoningText" class="ai-reasoning">
-          <details>
+        <div v-if="streamReasonRounds.length || reasoningText" class="ai-reasoning">
+          <details v-for="r in streamReasonRounds" :key="'rr' + r.round" class="is-round">
+            <summary>{{ t('aiThought') }} · {{ t('aiThoughtChars', { n: r.text.length }) }}</summary>
+            <div class="ai-reasoning-content">{{ r.text }}</div>
+          </details>
+          <details v-if="reasoningText">
             <summary>{{ hasStreamText ? t('aiThought') : t('aiThinking') }} · {{ t('aiThoughtChars', { n: reasoningText.length }) }}</summary>
             <div class="ai-reasoning-content">{{ reasoningText }}</div>
           </details>
@@ -918,7 +1000,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
                   <span v-else-if="tc.approval === 'denied'" class="ai-tool-ms is-denied">{{ t('aiToolDenied') }}</span>
                   <span v-else-if="tc.running" class="ai-tool-ms">{{ t('aiToolRunning') }}</span>
                   <span v-else-if="tc.dedup" class="ai-tool-ms">{{ t('aiToolDedup') }}</span>
-                  <span v-else-if="tc.ms" class="ai-tool-ms">{{ tc.ms }}ms</span>
+                  <span v-else-if="tc.ms" class="ai-tool-ms">{{ fmtElapsed(tc.ms) }}</span>
                   <!-- 流式期也能回滚：改错了最好在那一步刚结束时退回去，而不是等整轮跑完。 -->
                   <button v-if="cpForCall(tc)" class="ai-tool-undo" :title="t('aiCheckpointUndo')" @click.stop.prevent="emit('restore-checkpoint', cpForCall(tc)!)">
                     <Undo2 :size="11" />

@@ -372,6 +372,23 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .qd-run-tokens { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-muted); flex-shrink: 0; }
+/* 节点执行过的每一步（tool / tool_result / notice / error）。
+   与结论同一缩进，折叠态只占一行——它比结论更「按需」，
+   不该让默认展开的节点变成一长串工具流水。 */
+.qd-run-events { margin: 2px 0 3px var(--space-5); }
+.qd-run-events > summary {
+  font-size: var(--text-xs); color: var(--color-text-muted); cursor: pointer; user-select: none;
+}
+.qd-run-events > summary:hover { color: var(--color-text-primary); }
+.qd-run-event-list {
+  list-style: none; margin: var(--space-1) 0 0; padding: 0 0 0 var(--space-3);
+  border-left: 1px solid var(--color-border-light);
+}
+.qd-run-event {
+  padding: 1px 0; font-size: var(--text-xs); line-height: 1.5;
+  color: var(--color-text-muted); font-variant-numeric: tabular-nums;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .qd-run-result { margin: 3px 0 3px var(--space-5); }
 .qd-run-result > summary {
   font-size: var(--text-xs); color: var(--color-text-muted); cursor: pointer; user-select: none;

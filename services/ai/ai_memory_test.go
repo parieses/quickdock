@@ -53,14 +53,20 @@ func TestAppendDailyMemoryMergesSameConv(t *testing.T) {
 	if items[0].label != "扫描这个项目" {
 		t.Errorf("条目名应保留任务标题，实际 %q", items[0].label)
 	}
-	// 活动记录仍要逐轮留痕：重点块是索引，不是替代。
-	if n := strings.Count(body, "\n## "); n != 1 { // 第一行没有前导换行
-		if n+1 != 2 {
-			t.Errorf("活动记录应有 2 段，实际 %d", n+1)
+	// 活动记录按**任务**分节（不是按时间）：同一件事的进展要连续可读，
+	// 而每轮开一个新 `## 时:分` 正是用户说的「这记忆根本不能用」。
+	if n := strings.Count(body, "## "); n != 1 {
+		t.Errorf("同一任务应只有 1 个活动小节，实际 %d:\n%s", n, body)
+	}
+	// 两轮的投入都要留痕（重点块只给合计，看不到「哪一轮做了多少」）。
+	for _, want := range []string{"12 轮 / 35 次调用", "11 轮 / 28 次调用"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("活动小节缺少 %q:\n%s", want, body)
 		}
 	}
-	if !strings.Contains(body, "- 用户：继续") {
-		t.Errorf("活动记录应保留每轮原始诉求:\n%s", body)
+	// 「继续」是续跑口令，不是任务内容，不该被记成用户诉求。
+	if strings.Contains(body, "用户：继续") {
+		t.Errorf("续跑口令不该进活动记录:\n%s", body)
 	}
 }
 

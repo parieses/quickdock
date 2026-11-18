@@ -160,7 +160,10 @@ type AgentRunResult struct {
 	Usage     db.TokenUsage
 	Rounds    int
 	ToolCount int
-	Err       error
+	// RunID 本次执行对应的运行轨迹 id（未开启轨迹或未建记录时为空）。
+	// 前端靠它在 done 事件之后打开轨迹抽屉。
+	RunID string
+	Err   error
 }
 
 // runAgent 跑完一次多轮 agent 执行：组装上下文 → 逐轮调模型 → 执行工具 → 落库。
@@ -213,7 +216,7 @@ func jobNoticeText(evs []aitools.JobDone) string {
 	return b.String()
 }
 
-func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSink) AgentRunResult {
+func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink EventSink) AgentRunResult {
 	res := AgentRunResult{ConvID: strings.TrimSpace(req.ConvID)}
 
 	// 这一轮起的后台任务（run_command background=true）记在 ctx 上。
@@ -319,6 +322,20 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			// 「前端这次没传」不等于「改回对话」。
 			if conv != nil && mode == "" {
 				mode = strings.TrimSpace(conv.Mode)
+			}
+		}
+	}
+	// WP17：记下这条对话的目标（一句话）。
+	//
+	// 只在为空时写：目标回答的是「这条对话一开始要干什么」，每轮覆盖会把它改成
+	// 最后一次追加的那句要求，于是「上次的目标」变得毫无意义。
+	// 子 agent（Fresh）不写：它借的是父会话 id，写进去就把父会话的目标改掉了。
+	if !req.Fresh && conv != nil && strings.TrimSpace(conv.Goal) == "" {
+		if goal := aiGoalOf(message); goal != "" {
+			if gerr := a.App.DB.SetAIConversationGoal(conv.ID, goal); gerr != nil {
+				logger.W("[ai] 记录会话目标失败 conv=%s: %v", conv.ID, gerr)
+			} else {
+				conv.Goal = goal
 			}
 		}
 	}
@@ -468,6 +485,29 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	}
 	ctx = withAgentScope(ctx, sc)
 
+	// 主对话也落 agent_events。
+	//
+	// 顶层此前只有 sseSink：事件发完就没了，run 树里只有子 agent 的步骤，主 agent
+	// 「为什么派活、派之前试过什么、拿到结果后怎么收尾」全都无从回看。dbSink 就是
+	// 为这件事准备的（见 agent_sink.go 开头），只是此前只给了子 agent。
+	//
+	// 只包顶层：子 agent 的 sink 已经是 dbSink（agent_spawn.go），再包一层会把
+	// 同一条事件往同一张表写两遍。run 与根节点由 ensureRun 幂等创建——子 agent 那条
+	// 路径带的是父级 RunID，会直接返回，不会重复建节点。
+	//
+	// 失败只记一行 W：运行轨迹是旁路，它建不起来不该让这轮对话发不出去。
+	if !req.Fresh {
+		if runID, nodeID, rerr := sc.ensureRun(); rerr != nil {
+			logger.W("[ai] 建立运行记录失败，本次不落事件表 conv=%s: %v", res.ConvID, rerr)
+		} else if runID != "" {
+			sink = &multiSink{sinks: []EventSink{sink, &dbSink{db: a.App.DB, runID: runID, nodeID: nodeID}}}
+		}
+		// runID 在这里就定下来，**不能等到主循环结束后再赋值**：
+		// 用户点停止、上游报错、预算收尾都会从循环里直接 return，
+		// 那些路径的 done 事件同样要带 runId——否则「点停止后抽屉空着」。
+		res.RunID = sc.RunID()
+	}
+
 	// 审批闸门（见 ai_approval.go）。同样挂 ctx、同样只挂顶层执行：
 	// 子 agent 用 dbSink 跑在后台，没有「人」在等它，审批事件发出去只会等到超时
 	// 然后自动拒绝，把 code 角色整个废掉。子 agent 的约束是工具面
@@ -478,7 +518,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 也就没人能往里插话。
 	var injects *injectQueue
 	if !req.Fresh {
-		gate := newApprovalGate(sink, res.ConvID, a.App.DB, a.loadApprovalRules(), effPermission == aiPermissionFull)
+		gate := newApprovalGate(sink, res.ConvID, a.App.DB, a.loadApprovalRules(), effPermission == aiPermissionFull, a.loadApprovalGrants(), cwd)
 		a.registerGate(res.ConvID, gate)
 		defer a.unregisterGate(res.ConvID, gate)
 		ctx = withApprovalGate(ctx, gate)
@@ -579,6 +619,30 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			filter.NoSpawn = true
 		}
 	}
+	// 第 5 层：技能声明（WP10）。只在这条对话**明确只选了一个技能**、
+	// 且那个技能写了 allowed-tools 时生效（见 skillAllowNames 的取舍）。
+	//
+	// 子 agent（Fresh）压根不建也不读会话行，conv 必为 nil：它的工具面由角色
+	// 限定，不吃父会话的技能声明。这里必须先判空——直接取 conv.Skills 会让
+	// 每次 spawn_agent 在子 agent 启动到这里时空指针崩溃。
+	//
+	// 用 MaxLevel=-1（跳过等级判定）而不是 0：零值等于只读，会把技能声明的
+	// 写类工具一起撤掉——那是这个字段最容易踩的坑（见 ToolFilter.MaxLevel）。
+	if conv != nil {
+		if allow, skillName := skillAllowNames(conv.Skills); allow != nil {
+			if filter == nil {
+				filter = &ToolFilter{MaxLevel: -1, AllowNames: allow}
+			} else {
+				filter.AllowNames = allow
+			}
+			// 明说一句：模型看不到的工具会表现为「它说它没有这个能力」，
+			// 而用户刚才明明看见技能里写着能改文件——没有这条提示就无从解释。
+			sink.Event("notice", map[string]any{
+				"message": fmt.Sprintf("已按技能「%s」的 allowed-tools 收窄可用工具（%d 个）。", skillName, len(allow)),
+			})
+			logger.I("[ai] 技能 %s 收窄工具面: %d 个", skillName, len(allow))
+		}
+	}
 	// 装配一次，后续执行复用同一个 Surface（见 withToolSurface）：
 	// 模型看到的工具面与「能调什么」必须是同一份对象。
 	sf := a.aiSurface(mode, effPermission, aiConversationLegacyScene(conv), filter)
@@ -605,11 +669,23 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	if hasToolPayload(tools, "plan_update") {
 		baseSystem += planHint
 	}
+	// WP18 / WP19：两条行为约束，同样按「这次到底挂上了什么」决定说不说。
+	//   - 有工作目录 + 有写权限才讲「辅助文件放 quickdock/」（否则是噪音）；
+	//   - 挂了 spawn_agent 才讲「大任务怎么拆」（否则模型会对着看不见的工具重试）。
+	baseSystem += workdirHintFor(cwd, tools)
+	baseSystem += scaleHintFor(tools)
 	// 项目规则（AGENTS.md / .quickdock/rules*）：读一次，贯穿本次 run。
 	// 压缩后重建复用的是同一份，不重新读盘——那次重建此刻正被超窗逼着做，
 	// 多加一次 IO 没有收益，还可能读到用户正在编辑的半截文件。
 	rules := a.loadAIRules(cwd, aiMentionPaths(req.Mentions))
 	baseSystem = withRules(baseSystem, rules)
+	// WP17：把「上次做到哪」交给模型。
+	//
+	// 没有未完成清单时是空串，零开销；有则分两种语气（见 resumeHintFor）：
+	// 纯「继续」要求更新原清单，有新内容时只提醒有旧清单在。
+	if resumeHint := resumeHintFor(conv, message); resumeHint != "" {
+		baseSystem += resumeHint
+	}
 	if extTrimmed {
 		// 外部工具因名额被截：必须说，否则模型在下一轮看到 server 报
 		// 「未知工具」时会一遍遍重试同一个名字。
@@ -636,9 +712,11 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 子 agent 跳过：它的上下文只有角色提示 + 一条 task（见 subAgentMessages），
 	// 没有历史可压，压了反而会去读父会话——正是 Fresh 要避免的事。
 	if !req.Fresh {
-		// 留 15% 余量：我们按「字数 ÷ 1.6」估 token，中文与 JSON 的真实
-		// 分词普遍更贵，贴着天花板发等于赌分词器的心情。
-		const preflightMargin = 85
+		// 留 15% 余量（默认 85，可按档案覆盖，见 WP4c）：我们按「字数 ÷ 1.6」
+		// 估 token，中文与 JSON 的真实分词普遍更贵，贴着天花板发等于赌分词器的心情。
+		preflightMargin := preflightMarginOf(cfg)
+		// WP4c 预警档：一次 run 只提示一次。
+		usageWarned := false
 		prevUsed := 0
 		for pass := 0; pass < 2; pass++ {
 			lim := contextLimitsOf(cfg)
@@ -650,6 +728,25 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 				used = lim.Measured
 			}
 			ceiling := lim.Ceiling * preflightMargin / 100
+			// 70% 预警：只提示、不压缩。
+			//
+			// 为什么要这条：用户第一次遇到「AI 忽然不记得前文」时，如果没有
+			// 任何前兆，第一反应是「这软件有 bug」。而压缩本身是对的，
+			// 缺的只是那句「马上要压了」。
+			//
+			// 阈值取 70% 而不是贴着 85%：留出十几个百分点的缓冲，
+			// 用户看到提示时还有余量，不至于「提示即压缩」变成噪音。
+			if !usageWarned && ceiling > 0 && used*100 >= ceiling*70 {
+				usageWarned = true
+				pct := used * 100 / ceiling
+				if pct > 99 {
+					pct = 99
+				}
+				sink.Event("notice", map[string]any{
+					"level":   "warn",
+					"message": compactWarningText(pct, preflightMargin),
+				})
+			}
 			// 上一轮压完体积几乎没降：说明大头不在历史里（超大的工具定义、
 			// 超长 @ 引用，或者窗口本身就小于固定开销）。再压一次只是白付
 			// 一次摘要调用的钱和几秒等待，直接让它发出去。
@@ -687,6 +784,19 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 一整段话，分轮存反而要在前端再拼一次（而且拼错的顺序没人会发现）。
 	var reasoningBuf strings.Builder
 	var assistantBuf strings.Builder
+	// WP20：推理分段统计。
+	//
+	// reasoningBuf 是跨轮累加的（一条回复由多轮组成），于是 N 轮的思考会被
+	// 拼成一整段，用户看到的像「只思考了一次」。这两个计数加上下面的分隔符，
+	// 把「确实只思考了一轮」与「被合并成一段」两种成因分开——
+	// 前者不是 bug（很多模型只在首轮给 reasoning），后者是。
+	reasonRounds := 0
+	reasonChars := 0
+	roundHasReasoning := false
+	// 按轮拆开的思考：roundReason 是已经结束的轮，roundReasonBuf 是当前轮累积。
+	// 两者合起来交给 SaveAssistantTurn 的 ReasoningRounds 字段。
+	var roundReason []aiReasoningRound
+	var roundReasonBuf strings.Builder
 	var totalUsage db.TokenUsage
 	var records []aiToolRecord
 	// 本次提问内已成功执行的调用，跨轮复用做去重（见 ai_tools.go 的 toolCallKey）。
@@ -721,9 +831,15 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			logger.W("[ai] 模型未产出内容，跳过落库助手回复 conv=%s mode=%s stopped=%v", res.ConvID, mode, stopped)
 			return
 		}
+		// 这一段结束：还没收口的当前轮思考先记下来。
+		if roundReasonBuf.Len() > 0 {
+			roundReason = append(roundReason, aiReasoningRound{Round: countRounds(recs), Text: roundReasonBuf.String()})
+			roundReasonBuf.Reset()
+		}
 		if _, e := a.App.DB.SaveAssistantTurn(res.ConvID, db.AssistantTurn{
 			Content:          content,
 			ReasoningContent: reasoningBuf.String(),
+			ReasoningRounds:  encodeReasoningRounds(roundReason),
 			Model:            cfg.Model,
 			Usage:            segUsage,
 			Stopped:          stopped,
@@ -735,12 +851,20 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		}
 		segStart = len(records)
 		segUsage = db.TokenUsage{}
+		// 分轮思考跟着这一段一起交出去，下一段重新计。
+		roundReason = roundReason[:0]
 	}
 
 	var reasonCb func(text string)
 	if cfg.ThinkingEnabled {
 		reasonCb = func(text string) {
 			reasoningBuf.WriteString(text)
+			roundReasonBuf.WriteString(text)
+			reasonChars += len([]rune(text))
+			if !roundHasReasoning {
+				roundHasReasoning = true
+				reasonRounds++
+			}
 			// 下游断开由 sink 自己触发 ctx 取消，这里不必再判 failed()。
 			sink.Push("reasoning", text)
 		}
@@ -760,14 +884,19 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 收尾那一轮不带 tools：轮次用尽还允许调工具的话，用户会看到卡片一路往外冒、
 	// 就是等不到答案。
 	loopBudget := aiLoopBudget(cfg)
-	// 工具总轮次预算：默认仍是 120 轮（病态兜底），无人值守入口可以传更紧的值。
+	// WP5：轮次预算按入口分档（人工 12/120、定时 8/48、子 agent 8/48、只读 8/40）。
+	// 只收不放：任何一档都不超过原来的 120 轮。
+	rb := aiRoundBudgetFor(mode, req.ScheduledNoTools || req.ScheduledReadOnly, req.ScheduledReadOnly, sc.depth)
+	// 工具总轮次预算：无人值守入口还可以再传更紧的值。
 	// 只收窄不放大，脏参数不会把预算撑得比默认还高；limit 是「这一批」的上界，
 	// 初值同样不能越过总预算，否则下面所有 limit > maxRounds 的收敛都白写。
-	maxRounds := aiToolMaxTotalRounds
+	maxRounds := rb.Total
 	if req.MaxToolRounds > 0 && req.MaxToolRounds < maxRounds {
 		maxRounds = req.MaxToolRounds
 	}
-	limit := aiToolMaxRounds
+	// batchRounds 「一批」多少轮：下面所有「再给一批」的地方都用它。
+	batchRounds := rb.Batch
+	limit := batchRounds
 	if limit > maxRounds {
 		limit = maxRounds
 	}
@@ -780,26 +909,91 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			chatBudget = b * req.TurnBudgetFactor
 		}
 	}
+	// chatBudgetHard 自动续期的硬顶：3 倍初始预算。
+	//
+	// 为什么要续：预算本来是为了挡住「看着一直在动、其实在原地空转」，
+	// 但它也在正常的大任务上误伤——写长文档、跑多轮测试，很快就撞线，
+	// 表现就是「活儿干到一半自己断了」。判据换成「这一批有没有新动作」之后，
+	// 空转照样会被挡住（madeProgress 会 false），有进展就给。
+	chatBudgetHard := chatBudget * 3
+	budgetMark := 0
 	budgetClosed := false
+
+	// loopCompactShown 本次 run 是否已经出过「循环内折叠」的卡片（见循环里）。
+	loopCompactShown := false
+	// 日志同样只记一次：折叠是长任务里每轮都会发生的常态，原实现每轮
+	// 都打一条 I 日志，用户看到的就是「一直在提示超预算」，误以为是故障。
+	loopCompactLogged := false
+
+	// WP4a：进循环前先给已有消息（系统提示 + 历史 + 本轮用户消息）打上第 0 轮。
+	// 之后每轮在 append 完 assistant + tool 批次时再打一次（见循环内）。
+	tagMessagesRound(messages, 0)
+
+	// WP15 尾巴：把「正在重试」送到界面上。
+	//
+	// 挂在 ctx 上而不是加参数：只有对话这一条路径有 sink，其余调用方
+	// （问答、测试）不需要这条提示，也不该被迫多传一个 nil。
+	ctx = withRetryNotice(ctx, func(attempt int, wait time.Duration, status int) {
+		reason := "网络错误"
+		if status > 0 {
+			reason = fmt.Sprintf("HTTP %d", status)
+		}
+		sink.Event("notice", map[string]any{
+			"level": "warn",
+			"message": fmt.Sprintf("上游暂时不可用（%s），%.0f 秒后重试（第 %d/%d 次）。这是可恢复的，不用点停止。",
+				reason, wait.Seconds(), attempt, aiRetryMax),
+		})
+	})
 
 	for turnIdx := 1; turnIdx <= limit+1; turnIdx++ {
 		// 预算兜底放在这一轮的最前面：必须在 applySystemHints 之前撤工具，
 		// 否则 system 里那段「可用工具」还留着，模型会把调用写成正文（DSML 标记）。
+		//
+		// 与轮次预算同一条思路：**有进展就再给一段**，而不是到了就收尾。
+		// 之前一撞预算就收尾，用户看到的就是「活儿干到一半自己断了」，
+		// 然后被迫再打一句「继续」——那句话还会被当成新的用户诉求记进记忆。
+		// 硬顶（3 倍）兜住病态空转：真在原地打转的话 madeProgress 很快就是 false。
 		if !budgetClosed && chatBudget > 0 && tokensOf(totalUsage) >= chatBudget {
-			budgetClosed = true
-			tools = nil
-			// limit 收到本轮：万一模型在没有 tools 的情况下仍返回工具调用，
-			// 底下 `turnIdx > limit` 那条兜底会忽略并跳出，不会再花一次工具的钱。
-			limit = turnIdx - 1
-			sink.Event("notice", map[string]any{
-				"message": fmt.Sprintf("本次提问已消耗约 %d token，达到单次预算，先收尾；没做完说一声「接着做」就行", tokensOf(totalUsage)),
-			})
-			logger.I("[ai] 主循环达到 token 预算 conv=%s 已用=%d 预算=%d 轮次=%d",
-				res.ConvID, tokensOf(totalUsage), chatBudget, turnIdx)
+			if madeProgress(records[budgetMark:]) && chatBudget < chatBudgetHard {
+				chatBudget += aiChatTurnBudget(cfg) / 2
+				if chatBudget > chatBudgetHard {
+					chatBudget = chatBudgetHard
+				}
+				budgetMark = len(records)
+				logger.I("[ai] 主循环超出 token 预算但有进展，自动续到 %d conv=%s 已用=%d",
+					chatBudget, res.ConvID, tokensOf(totalUsage))
+			} else {
+				budgetClosed = true
+				tools = nil
+				// limit 收到本轮：万一模型在没有 tools 的情况下仍返回工具调用，
+				// 底下 `turnIdx > limit` 那条兜底会忽略并跳出，不会再花一次工具的钱。
+				limit = turnIdx - 1
+				sink.Event("notice", map[string]any{
+					"message": fmt.Sprintf("本次提问已消耗约 %d token，达到单次预算，先收尾；没做完说一声「接着做」就行", tokensOf(totalUsage)),
+				})
+				logger.I("[ai] 主循环达到 token 预算 conv=%s 已用=%d 预算=%d 轮次=%d",
+					res.ConvID, tokensOf(totalUsage), chatBudget, turnIdx)
+			}
 		}
 		// 每轮按「本轮到底有没有工具」重建 system（覆盖式，见 applySystemHints）。
 		// 这一句和上面撤 tools 是一对：只撤 tools 不撤提示，模型会把调用写成正文。
 		applySystemHints(messages, baseSystem, toolHint, cwd, len(tools) > 0, modeHasTools && len(tools) == 0)
+
+		// WP20：新的一轮开始，把上一轮的思考归档。
+		//
+		// 分轮只靠 reasoning_round 事件（前端据此把已完成那轮单独收起），
+		// 不再往 reasoning 正文里写「——— 第 N 轮 ———」：正文是给用户点开读的，
+		// 里面夹轮次编号会把一段思考切得七零八落，用户明确要求去掉。
+		if roundReasonBuf.Len() > 0 {
+			// 上一轮的思考到这里结束，记进列表（轮次是 turnIdx-1）。
+			finished := roundReasonBuf.String()
+			roundReason = append(roundReason, aiReasoningRound{Round: turnIdx - 1, Text: finished})
+			roundReasonBuf.Reset()
+			// 实时视图也按轮分段：前端收到它就把已完成那轮归档、清空当前缓冲。
+			// 不发的话，界面上十几轮的思考会实时糊成一段——与落库后的分轮显示不一致。
+			sink.Event("reasoning_round", map[string]any{"round": turnIdx - 1, "text": finished})
+		}
+		roundHasReasoning = false
 
 		// 每轮开头压一次上下文：工具结果是在循环中间长出来的，
 		// buildAIMessages 里那次摘要压缩管不到这里。
@@ -808,7 +1002,34 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		// 窗口的三分之一算的，那是个静态值——长会话里上一发可能已经占掉八成，
 		// 再按三分之一往里塞工具结果，这一发就撞线了。上游报过 prompt_tokens
 		// 之后，这一轮能给工具结果留的空间就是「上限 - 已用」，比固定值准。
-		compactLoopMessages(messages, aiLoopBudgetThisTurn(cfg, res.ConvID, loopBudget, estimateLoopTokens(messages)))
+		loopBudgetNow := aiLoopBudgetThisTurn(cfg, res.ConvID, loopBudget, estimateLoopTokens(messages))
+		if cr := compactLoopMessages(messages, loopBudgetNow); cr.Folded+cr.Summarized > 0 {
+			// 每次折叠都要更新压缩状态（前端弹框读的是最新数字），但日志
+			// 一次 run 只记一条就够了——数字每轮都在变，逐条刷只会制造噪音。
+			if !loopCompactLogged {
+				loopCompactLogged = true
+				logger.I("[ai] 循环内上下文超预算：折叠 %d 条、摘要 %d 条（%d → %d tok）",
+					cr.Folded, cr.Summarized, cr.Before, cr.After)
+			}
+			// 记一笔给弹框的「压缩状态」（WP2）：用户看不到任何痕迹时，
+			// 「AI 忽然不记得前文」只会被当成 bug。
+			rememberCompaction(res.ConvID, cr.Before, cr.After, cr.Folded, cr.Summarized, false)
+			// 与历史摘要压缩共用 compact 事件，但多带 folded ids——
+			// §8 的「压缩后重查率」就是用这些 id 去比对「之后有没有重查同一调用」。
+			// start/done 成对发（虽然这里几乎是瞬时的）：前端按 phase 成对消费，
+			// 只发一条会让那张卡片永远停在「正在压缩」。
+			lim := contextLimitsOf(cfg)
+			// 一次 run 只在第一次折叠时出一张卡。
+			//
+			// 折叠是每轮都可能发生的常态操作（几毫秒、不花钱），每轮都发一对
+			// start/done 会让界面看起来「一直在压缩」，而用户根本无从判断
+			// 哪一次是严重事件。后续折叠只记日志，数字仍在 context 统计里更新。
+			if !loopCompactShown {
+				loopCompactShown = true
+				sink.Event("compact", loopCompactEvent("start", cr, lim, loopBudgetNow))
+				sink.Event("compact", loopCompactEvent("done", cr, lim, loopBudgetNow))
+			}
+		}
 
 		// 后台任务结束的通知：在下一轮模型调用前递过去。
 		//
@@ -840,7 +1061,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 				}
 				// 轮次预算同理补一批：上一问跑满的是上一问的事，不该卡住新提的这句。
 				if turnIdx > limit {
-					limit = turnIdx + aiToolMaxRounds
+					limit = turnIdx + batchRounds
 					if limit > maxRounds {
 						limit = maxRounds
 					}
@@ -971,7 +1192,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			// for 的上界，刚插进来的那句话就永远接不走了。
 			if injects != nil && injects.consumeInterrupt() {
 				if turnIdx >= limit {
-					limit += aiToolMaxRounds
+					limit += batchRounds
 					if limit > maxRounds {
 						limit = maxRounds
 					}
@@ -992,7 +1213,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			// 是上一问的事，不该卡住用户新提的这一句。
 			if injects != nil && injects.pending() {
 				if turnIdx >= limit {
-					limit += aiToolMaxRounds
+					limit += batchRounds
 					if limit > maxRounds {
 						limit = maxRounds
 					}
@@ -1034,10 +1255,19 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		// 前端因此能在步骤之间实时打勾，而不是等整轮结束看一段静态文字。
 		toolCtx = aitools.WithPlanHook(toolCtx, func(u aitools.PlanUpdate) {
 			sink.Event("plan", map[string]any{"items": u.Items, "note": u.Note})
+			// WP17：同一份清单再落一次库。
+			//
+			// SSE 那条是给"正在看屏幕的人"的：刷新、切走、进程重启就没了。
+			// 而清单要回答的是"中断后接着做"，所以必须持久化——
+			// 双写而不是改成只落库：实时打勾的体验不能再等一次往返。
+			a.saveConversationPlan(res.ConvID, u)
 		})
 		toolMsgs, recs := a.runToolCalls(toolCtx, turn.ToolCalls, turnIdx, turn.Content, seenCalls, cwd)
 		records = append(records, recs...)
 		messages = append(messages, toolMsgs...)
+		// WP4a：assistant(tool_calls) + 这批 tool 消息归入本轮。
+		// 标记只活在内存里，发请求前会被 stripInternalMessageKeys 剥掉。
+		tagMessagesRound(messages, turnIdx)
 		for _, r := range recs {
 			sink.Event("tool_result", map[string]any{
 				"id": r.ID, "name": r.Name, "ok": r.Error == "", "ms": r.Ms,
@@ -1080,7 +1310,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 				// 一整批都没有新动作：再给多少批也是同一个结果，早停省下来的
 				// 是十几次全额计费。要说一声——不然界面上的答案是凭空结束的。
 				sink.Event("notice", map[string]any{
-					"message": fmt.Sprintf("连续 %d 轮工具调用没有新进展（在重复或未获授权），先收尾", aiToolMaxRounds),
+					"message": fmt.Sprintf("连续 %d 轮工具调用没有新进展（在重复或未获授权），先收尾", batchRounds),
 				})
 				tools = nil
 			} else if limit >= maxRounds {
@@ -1089,16 +1319,15 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 				})
 				tools = nil
 			} else {
-				limit += aiToolMaxRounds
+				limit += batchRounds
 				if limit > maxRounds {
 					limit = maxRounds
 				}
-				logger.I("[ai] 工具轮次已用满 %d 轮，仍有新调用，自动延长到 %d conv=%s",
-					turnIdx, limit, res.ConvID)
-				// 必须说一声：界面上看着像「AI 自己又开了一轮」，不说清楚会以为是卡住了。
-				sink.Event("notice", map[string]any{
-					"message": fmt.Sprintf("已连续执行 %d 轮工具，工作还没做完，自动继续（本次预算 %d 轮）", turnIdx, limit),
-				})
+				// 静默续期：这件事不需要告诉用户。
+				//
+				// 原来这里会插一条「已连续执行 12 轮工具，自动继续（本次预算 24 轮）」，
+				// 但用户读到的不是「它在努力」，而是「怎么又弹一句、还没做完」。
+				// 真正需要被告知的只有两种：没进展了要收尾、或者到了硬顶要停。
 				continue
 			}
 			// 收尾：不额外塞一条 user 提示——tool 结果后面跟 user 消息在部分网关
@@ -1115,6 +1344,10 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	res.Usage = totalUsage
 	res.Rounds = rounds
 	res.ToolCount = len(records)
+	// WP1 修复：把 runID 带回结果层。
+	//
+	// 原来只有 spawn_agent 会在工具结果里写 run_id，于是「没派过活的对话」
+	// 前端永远拿不到 runId，轨迹抽屉恒空——这个功能对最常见的用法等于不存在。
 
 	if lastErr != nil {
 		if ctx.Err() != nil {
@@ -1125,7 +1358,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			// 工具调用不需要在这里额外打断：支持 ctx 的工具在取消那一刻就已经
 			// 停下了（见 ai_tools.go 的 callToolWithTimeout）。
 			saveSegment(assistant, true)
-			sink.Event("done", doneEvent(res.ConvID, firstTokenAt, totalUsage, cfg.Model, rounds, len(records)))
+			sink.Event("done", withRunID(doneEvent(res.ConvID, firstTokenAt, totalUsage, cfg.Model, rounds, len(records), reasonRounds, reasonChars), res.RunID))
 			res.Text = allText
 			res.Stopped = true
 			res.Err = lastErr
@@ -1156,7 +1389,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	}
 	logger.I("[ai] 流式结束 conv=%s 首字=%dms 轮次=%d 工具=%d in=%d out=%d cached=%d",
 		res.ConvID, firstTokenAt.Milliseconds(), rounds, len(records), totalUsage.Prompt, totalUsage.Completion, totalUsage.Cached)
-	sink.Event("done", doneEvent(res.ConvID, firstTokenAt, totalUsage, cfg.Model, rounds, len(records)))
+	sink.Event("done", withRunID(doneEvent(res.ConvID, firstTokenAt, totalUsage, cfg.Model, rounds, len(records), reasonRounds, reasonChars), res.RunID))
 
 	// 自动写项目每日记忆：确定性提取「用户要了什么、改了哪些文件、跑了几轮」，
 	// 不调模型所以一定存在，让下一轮/下一会话不必重读整个项目。

@@ -203,8 +203,9 @@ func contextLimitsOf(cfg AIProfile) aiContextLimits {
 	// 只取七成：我们自己的 token 估算与真实分词器之间有 1.5 倍以上的差距，
 	// 压到边上等于每轮都撞 400。
 	history := ceiling * 7 / 10
-	if history > aiContextSoftCap {
-		history = aiContextSoftCap
+	// WP4c：软上限可按档案覆盖（0 = 默认 120000）。
+	if soft := softCapOf(cfg); history > soft {
+		history = soft
 	}
 	if history < aiContextMinBudget {
 		history = aiContextMinBudget
@@ -317,10 +318,17 @@ func aiPayloadTokens(messages []map[string]interface{}, tools []map[string]any) 
 // aiLoopBudget 本轮工具循环内的工具结果预算。
 //
 // 与 aiContextBudget 是两件事：那个管「库里历史有多长」，这个管「这一轮循环
-// 里工具结果堆了多少」。工具结果就地折叠（不调模型、几毫秒）比摘要便宜得多，
-// 所以阈值可以给得比历史更松——按历史预算的三分之一，且不低于原来的 24K。
+// 里工具结果堆了多少」。**不能按历史软上限的 1/3 来算**：软上限默认 120K
+// 是为了压住库里历史、控制每发重发的成本，可循环内的工具结果是另一套账。
+// 1M 窗口上旧公式恒等于 40K，模型读三四个文件就撞线、工具结果被折叠，
+// 它发现「刚读的内容被摘要掉了」就重读——实测能连转 30 轮不落一个文件。
+//
+// 改成按物理窗口的 1/5（有 200K 封顶）：128K 窗口仍约 24K，行为不变；
+// 1M 窗口给到 ~198K，长任务读一整个项目的源码也不会被过早折叠。
+// 真正的 400 风险仍由 aiLoopBudgetThisTurn 的 85% 余量守卫兜着，这里只放宽
+// 「本次循环内允许多少工具结果」，不会把请求推过出站上限。
 func aiLoopBudget(cfg AIProfile) int {
-	b := aiContextBudget(cfg) / 3
+	b := contextLimitsOf(cfg).Ceiling / 5
 	if b < 24000 {
 		b = 24000
 	}

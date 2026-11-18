@@ -152,6 +152,13 @@ export function useAiRuns(deps: AiRunsDeps) {
    * 页面自己也有一份同规则的 computed（它还要喂模板与输入框的 streaming 判断）。
    * 规则实现只有 utils/aiRuns 里那一份，两边不会各算各的。
    */
+  // 会话 → 最近一次轨迹 runId（done 事件带回）。
+  //
+  // 为什么不能只挂在 run 对象上：这一轮结束时 run 会被从 runs 里摘掉，
+  // 而 Vue 的 watch 是异步的——等它跑起来，run 已经没了，runId 也一起没了。
+  // 用户看到的就是「刚跑完，轨迹入口又变回空的」。
+  const runIds = ref<Record<string, string>>({})
+
   const activeRun = computed<AIRun | null>(
     () => pickActiveRun(runs.value, activeId.value, draftRunId.value) || null,
   )
@@ -474,6 +481,8 @@ export function useAiRuns(deps: AiRunsDeps) {
       tickTimer: null,
       ctrl: null,
       done: false,
+      runId: '',
+      reasonRounds: [],
       model: streamModel,
     })
     // 必须取回响应式代理再改：push 进去的是原始对象，直接改原始对象不会触发界面更新。
@@ -602,6 +611,17 @@ export function useAiRuns(deps: AiRunsDeps) {
           case 'reasoning':
             if (data.text) { run.reasonBuf += data.text; scheduleStreamFlush(run) }
             break
+          case 'reasoning_round': {
+            // 一轮思考结束：归档到 reasonRounds，当前缓冲清空。
+            // 不归档的话十几轮的思考会实时糊成一段，而落库后是按轮贴的——
+            // 「生成时看到的」与「刷新后看到的」必须是同一件事。
+            const text = typeof data.text === 'string' ? data.text : ''
+            if (!text) break
+            run.reasonRounds.push({ round: Number(data.round) || 0, text })
+            run.reasoning = ''
+            run.reasonBuf = ''
+            break
+          }
           case 'tool':
             // 清单更新不画工具卡片：它已经有自己那张清单卡片了，
             // 再挂一条「调用 plan_update」只会让人以为 AI 在刷工具。
@@ -734,6 +754,10 @@ export function useAiRuns(deps: AiRunsDeps) {
             // 而点完恰好吃掉一条正要写库的摘要。
             const num = (v: unknown) => (Number(v) || 0)
             const patch = {
+              // 缺 kind 时按 history 处理：老版本事件里没有这个字段，
+              // 而那时唯一会发 compact 的就是历史摘要。
+              kind: data.kind === 'loop' ? ('loop' as const) : ('history' as const),
+              attempted: data.attempted !== false,
               before: num(data.before),
               after: num(data.after),
               dropped: num(data.dropped),
@@ -819,6 +843,13 @@ export function useAiRuns(deps: AiRunsDeps) {
           case 'done':
             if (data.convId) {
               run.done = true
+              // 轨迹 runId（WP1 修复）：普通对话没有 spawn_agent，工具结果里
+              // 永远不带 run_id，只能由 done 事件把它带回来。
+              if (typeof data.runId === 'string' && data.runId) {
+                run.runId = data.runId
+                // 同时记进会话映射：run 马上就要被摘掉，这张表才是持久的那个。
+                runIds.value = { ...runIds.value, [data.convId]: data.runId }
+              }
               // 这一轮里可能刚起了后台任务（模型往往「起完就收尾」）。徽标是 20s 轮询的，
               // 不等下一次：否则用户刚看完「已在后台启动」，抬头却看不到那个数字。
               void refreshJobBadge()
@@ -1062,6 +1093,7 @@ export function useAiRuns(deps: AiRunsDeps) {
   }
 
   return {
+    runIds,
     send,
     stop,
     /** 把一句话插进正在跑的那一轮（发第二句时用） */

@@ -183,6 +183,11 @@ func (sc *agentScope) ensureRun() (runID, nodeID string, err error) {
 	if sc.svc == nil || sc.svc.App == nil || sc.svc.App.DB == nil {
 		return "", "", errors.New("数据库尚未就绪，无法记录编排运行")
 	}
+	// 灰度开关（WP1 §9）：关掉时**一条记录都不建**。
+	// 留半条记录（run 建了、事件不写）会让「这次任务到底跑过没有」永远查不清。
+	if !sc.svc.traceEnabled() {
+		return "", "", nil
+	}
 	run, err := sc.svc.App.DB.CreateAgentRun(db.NewAgentRun{
 		ConvID:       sc.convID,
 		Goal:         sc.goal,
