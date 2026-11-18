@@ -4,8 +4,7 @@
  *
  * 父级 AIPage 用 v-if="!isNewTask" 控制：落地页不渲染，进入对话后才出现——
  * 没进对话时没有 run 可看，轨迹入口挂在那里只会点出空抽屉。
- * 因此这里拿到的 newTask 恒为 false；右侧动作组的 v-if 保留着，方便日后
- * 若要改回常驻时不必改组件内部。
+ * 所以组件本身不存在「落地页」态，早先那个 newTask prop 恒为 false、纯属死代码，已删。
  *
  * 这里是纯视图，所有状态归 AIPage，动作通过 emit 回传。
  *
@@ -34,8 +33,6 @@ const props = defineProps<{
   runningJobs: number
   /** 最近起的那个运行中任务的开始时间，用于在按钮上显示已运行时长 */
   runningJobStartedAt: string
-  /** 是否停在落地页（还没进入任何任务）：只收起右侧动作组，左侧轨迹入口保留 */
-  newTask: boolean
   /** 轨迹入口文案（父级按运行态算好，如「轨迹」/「12 步 · 3m20s」） */
   traceLabel: string
   /** 轨迹入口状态：决定圆点颜色与是否脉冲 */
@@ -106,7 +103,7 @@ const startedClock = computed(() => {
         <span class="ai-trace-name">{{ t('aiSubtasksTitle') }}</span>
       </button>
     </div>
-    <div v-if="!props.newTask" class="ai-toolbar-right">
+    <div class="ai-toolbar-right">
       <button v-if="props.activeId" class="ai-icon-btn" :title="t('aiRegenTitle')" :aria-label="t('aiRegenTitle')" @click="emit('regen-title')">
         <RefreshCw :size="13" />
       </button>
@@ -156,6 +153,7 @@ const startedClock = computed(() => {
         class="ai-icon-btn"
         :class="{ 'is-armed': props.scratchArmed }"
         :title="t(props.scratchArmed ? 'aiScratchCleanConfirm' : 'aiScratchClean')"
+        :aria-label="t(props.scratchArmed ? 'aiScratchCleanConfirm' : 'aiScratchClean')"
         @click="emit('clean-scratch')"
       >
         <Eraser :size="13" />

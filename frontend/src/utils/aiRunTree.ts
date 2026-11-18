@@ -262,7 +262,7 @@ export function summarizeEvent(e: RunEvent): EventSummary {
  * 这里按 id 把它们合成一步——「做了什么 + 结果如何」在一张卡片上说完。
  */
 export interface RunStep {
-  kind: 'tool' | 'think' | 'done' | 'note'
+  kind: 'tool' | 'think' | 'done' | 'note' | 'compact'
   /** 稳定 key：工具用 call id，其余用事件 id */
   key: string
   name: string
@@ -279,12 +279,18 @@ export interface RunStep {
   path: string
   message: string
   reasoningChars: number
+  /** compact 步骤专用：压缩前后 token 与类型（history 摘要 / loop 折叠）。 */
+  compactBefore: number
+  compactAfter: number
+  compactKind: string
 }
 
 /** 哪些事件是「上下文注入」而非动作——不进时间线，避免淹没真正的步骤。 */
+// compact 不在此列：它要在回放里留一条分隔痕迹，否则「卡几秒后 AI 忽然失忆」
+// 在抽屉里完全看不见。只在 eventsToSteps 里把 start 那条折掉、done 那条留痕。
 const META_KINDS = new Set([
   'conv', 'rules', 'cwd', 'start', 'project_memory',
-  'inject_ack', 'approval', 'plan', 'compact', 'tool_output',
+  'inject_ack', 'approval', 'plan', 'tool_output',
 ])
 
 /**
@@ -300,11 +306,28 @@ export function eventsToSteps(events: RunEvent[]): { steps: RunStep[]; hidden: n
   for (const e of events) {
     const s = summarizeEvent(e)
     if (META_KINDS.has(e.kind)) { hidden++; continue }
+    if (e.kind === 'compact') {
+      // start 与 done 是同一次压缩的两条事件；回放只留 done 一条，避免重复。
+      // done 那条带 before/after，能还原「压缩了多少」这条唯一有价值的痕迹。
+      const p = parseEventPayload(e)
+      if (strField(p, 'phase') === 'done') {
+        steps.push({
+          kind: 'compact', key: e.id, name: 'compact', args: '', ok: true, ms: 0,
+          added: 0, removed: 0, text: '', error: '', result: '', output: '',
+          diff: '', path: '', message: '', reasoningChars: 0,
+          compactBefore: numField(p, 'before'),
+          compactAfter: numField(p, 'after'),
+          compactKind: strField(p, 'kind'),
+        })
+      }
+      continue
+    }
     if (e.kind === 'tool') {
       const step: RunStep = {
         kind: 'tool', key: s.id || e.id, name: s.name, args: s.args,
         ok: true, ms: 0, added: 0, removed: 0, text: '', error: '',
         result: '', output: '', diff: '', path: '', message: '', reasoningChars: 0,
+        compactBefore: 0, compactAfter: 0, compactKind: '',
       }
       steps.push(step)
       if (step.key) byId.set(step.key, step)
@@ -322,6 +345,7 @@ export function eventsToSteps(events: RunEvent[]): { steps: RunStep[]; hidden: n
           ok: s.ok, ms: s.ms, added: s.added, removed: s.removed, text: '',
           error: s.error, result: s.result, output: s.output, diff: s.diff,
           path: s.path, message: '', reasoningChars: 0,
+          compactBefore: 0, compactAfter: 0, compactKind: '',
         })
       }
       continue
@@ -331,6 +355,7 @@ export function eventsToSteps(events: RunEvent[]): { steps: RunStep[]; hidden: n
         kind: 'think', key: e.id, name: '', args: '', ok: true, ms: 0,
         added: 0, removed: 0, text: s.text, error: '', result: '', output: '',
         diff: '', path: '', message: '', reasoningChars: s.reasoningChars,
+        compactBefore: 0, compactAfter: 0, compactKind: '',
       })
       continue
     }
@@ -340,6 +365,7 @@ export function eventsToSteps(events: RunEvent[]): { steps: RunStep[]; hidden: n
       args: '', ok: e.kind !== 'error', ms: 0, added: 0, removed: 0,
       text: '', error: '', result: '', output: '', diff: '', path: '',
       message: s.message, reasoningChars: 0,
+      compactBefore: 0, compactAfter: 0, compactKind: '',
     })
   }
   return { steps, hidden }

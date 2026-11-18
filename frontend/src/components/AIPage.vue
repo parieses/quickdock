@@ -477,7 +477,7 @@ async function approveTool(tc: AIToolCall, decision: 'allow' | 'deny', remember 
   // 「已拒绝」而不是一条普通的红色报错。
   if (decision === 'deny') tc.denied = true
   try {
-    await AIApproveToolCall(tc.approvalConvId || activeId.value, tc.id, decision, remember)
+    unwrap(await AIApproveToolCall(tc.approvalConvId || activeId.value, tc.id, decision, remember))
   } catch (e) {
     tc.approval = 'pending'
     tc.denied = false
@@ -3272,7 +3272,6 @@ onUnmounted(() => {
         :jobs-open="jobsOpen"
         :running-jobs="runningJobs"
         :running-job-started-at="runningJobList[0]?.startedAt || ''"
-        :new-task="isNewTask"
         :trace-label="traceLabel"
         :trace-state="traceState"
         :can-clean-scratch="!!convCwd"

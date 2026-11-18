@@ -14,6 +14,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { X } from '@lucide/vue'
 import { AICompactConversation, AIContextStats } from '../../bindings/quickdock/services/ai/aiservice'
+import { useDialogFocus } from '../composables/useDialogFocus'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
@@ -59,6 +60,9 @@ const emit = defineEmits<{
 }>()
 
 const { t, n } = useI18n()
+
+const dialogEl = ref<HTMLElement | null>(null)
+useDialogFocus(() => props.open, dialogEl)
 
 const stats = ref<ContextStats | null>(null)
 const loading = ref(false)
@@ -149,8 +153,9 @@ async function compactNow() {
     unwrap(await AICompactConversation(props.convId))
     await load()
   } catch (e) {
+    // 压缩失败保留旧统计：面板整块清空会让人以为数据丢了，
+    // 而失败本身已由 load 的 toast/logErr 记下（这里不重复弹框）。
     logErr('AiContextDialog.compact', e)
-    stats.value = null
   } finally {
     compacting.value = false
   }
@@ -192,7 +197,7 @@ void n // 保留 i18n 的数字格式化入口，后续要按语言显示千分�
   <Teleport to="body">
     <template v-if="props.open">
       <div class="ctx-backdrop" @click="close" />
-      <section class="ctx-dialog" role="dialog" aria-modal="true" :aria-label="t('aiCtxTitle')">
+      <section ref="dialogEl" class="ctx-dialog" role="dialog" aria-modal="true" tabindex="-1" :aria-label="t('aiCtxTitle')">
         <header class="ctx-head">
           <span class="ctx-title">{{ t('aiCtxTitle') }}</span>
           <button class="ctx-close" :title="t('aiCtxClose')" @click="close"><X :size="14" /></button>

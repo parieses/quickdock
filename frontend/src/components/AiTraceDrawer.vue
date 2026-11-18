@@ -13,6 +13,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Activity, ChevronDown, ChevronRight, X } from '@lucide/vue'
 import { AIAgentRunTree, AISessionTimeline } from '../../bindings/quickdock/services/ai/aiservice'
+import { useDialogFocus } from '../composables/useDialogFocus'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
@@ -46,6 +47,9 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'update:open', v: boolean): void }>()
 
 const { t } = useI18n()
+
+const dialogEl = ref<HTMLElement | null>(null)
+useDialogFocus(() => props.open, dialogEl)
 
 const tree = ref<RunTree | null>(null)
 const loading = ref(false)
@@ -162,10 +166,6 @@ function toggleChild(id: string) {
   childOpen.value = { ...childOpen.value, [id]: !childOpen.value[id] }
 }
 
-function childSteps(events: RunEvent[], id: string) {
-  return eventsToSteps(events.filter((e) => e.node_id === id))
-}
-
 /**
  * 抽屉顶部那一份子任务列表，两种模式共用：
  *   - 本次运行：这棵 run 树里的子节点；
@@ -190,6 +190,30 @@ const topChildModel = computed(() => {
   return null
 })
 
+/**
+ * 每个子 agent 的步骤预先算好，避免 v-for 里重复 filter + eventsToSteps。
+ *
+ * 原来三处模板（步骤列表 / 空态 / 隐藏计数）各对每条事件全量 filter 一次，
+ * 会话回放几十 run、上百事件时是 O(节点数 × 事件数)。这里一次扫描按 node_id
+ * 分桶，复杂度降到 O(事件数)，topChildModel 变化时重算。
+ */
+const childStepsByNode = computed<Map<string, ReturnType<typeof eventsToSteps>>>(() => {
+  const buckets = new Map<string, RunEvent[]>()
+  for (const e of topChildModel.value?.events ?? []) {
+    if (!e.node_id) continue
+    let list = buckets.get(e.node_id)
+    if (!list) buckets.set(e.node_id, list = [])
+    list.push(e)
+  }
+  const out = new Map<string, ReturnType<typeof eventsToSteps>>()
+  for (const [id, events] of buckets) out.set(id, eventsToSteps(events))
+  return out
+})
+
+function stepsForChild(id: string) {
+  return childStepsByNode.value.get(id) ?? { steps: [], hidden: 0 }
+}
+
 /** 步骤详情是否展开（key 用 step.key，跨 run 不冲突）。 */
 const stepOpen = ref<Record<string, boolean>>({})
 function toggleStep(key: string) {
@@ -200,6 +224,7 @@ function toggleStep(key: string) {
 function stepTitle(step: RunStep): string {
   if (step.kind === 'think') return t('aiThought')
   if (step.kind === 'tool') return toolVerb(step.name, t)
+  if (step.kind === 'compact') return step.compactKind === 'loop' ? t('aiCompactFolded') : t('aiCompacted')
   return step.name
 }
 
@@ -213,6 +238,7 @@ function stepTarget(step: RunStep): string {
 function stepBadge(step: RunStep): string {
   const bits: string[] = []
   if (step.kind === 'think') return t('aiThoughtChars', { n: step.reasoningChars })
+  if (step.kind === 'compact') return `${fmtTokens(step.compactBefore)} → ${fmtTokens(step.compactAfter)}`
   if (step.ms > 0) bits.push(fmtElapsed(step.ms))
   if (step.added || step.removed) bits.push(t('aiTraceEventLines', { added: step.added, removed: step.removed }))
   if (step.kind === 'done') bits.push(t('aiTraceEventDone'))
@@ -279,6 +305,25 @@ function stopPolling() {
   }
 }
 
+/**
+ * 还要继续轮询吗。
+ *
+ * 「数据还没到」也算要继续：timer 刚启动时 tree / timeline 都为空，
+ * 若把空当成终态会立刻停表，run 视图就永远停在加载态。
+ * 只有拿到了明确的终态、且当前视图的数据源已经加载，才停。
+ */
+function shouldKeepPolling(): boolean {
+  if (props.view === 'children' || mode.value === 'session') {
+    // 这个视图只看 timeline：没加载或最新一条还在跑就继续。
+    const last = timeline.value[timeline.value.length - 1]
+    if (!last) return true
+    return last.run.status === 'running'
+  }
+  // run 视图看本次 run 树：没加载到、或树里还没有 run 就继续等。
+  if (!tree.value?.run) return true
+  return tree.value.run.status === 'running'
+}
+
 function startPolling() {
   stopPolling()
   pollTimer = setInterval(() => {
@@ -286,18 +331,14 @@ function startPolling() {
       stopPolling()
       return
     }
-    // 顶部子任务来自整段会话，两种入口都要静默跟着刷新。
+    // 每个 tick 只拉一次 timeline：session 子和顶部子任务共用这一份数据，
+    // 原来 session 模式一秒拉两次（顶部一次 + 分支一次），pure IO 浪费。
     void loadTimeline(true)
-    if (props.view === 'children') return
-    // 已有终态就停：跑完的 run 不会再变，继续拉只是白花 IO。
-    const status = tree.value?.run?.status
-    const running = !status || status === 'running'
-    if (mode.value === 'session') {
-      void loadTimeline(true)
-    } else if (running) {
-      void load(true)
-    }
-    if (mode.value !== 'session' && !running) stopPolling()
+    // 当前视图所需的数据：children 视图只用 timeline，run 视图还要拉 run 树。
+    if (props.view !== 'children' && mode.value === 'run') void load(true)
+    // 当前视图的数据源拿到终态就停表：跑完的 run 不会再变，继续每秒拉只是白花 IO。
+    // run 终态现在由后端统一写库（finalRunStatus），这里能真正收到 done。
+    if (!shouldKeepPolling()) stopPolling()
   }, 1000)
 }
 
@@ -358,7 +399,7 @@ onBeforeUnmount(() => {
   <Teleport to="body">
     <template v-if="props.open">
       <div class="trace-backdrop" @click="close" />
-      <aside class="trace-drawer" role="dialog" aria-modal="true" :aria-label="t(props.view === 'children' ? 'aiSubtasksTitle' : 'aiTraceTitle')">
+      <aside ref="dialogEl" class="trace-drawer" role="dialog" aria-modal="true" tabindex="-1" :aria-label="t(props.view === 'children' ? 'aiSubtasksTitle' : 'aiTraceTitle')">
         <header class="trace-head">
           <Activity :size="14" class="trace-head-ico" />
           <span class="trace-title">{{ t(props.view === 'children' ? 'aiSubtasksTitle' : 'aiTraceTitle') }}</span>
@@ -416,7 +457,7 @@ onBeforeUnmount(() => {
                 </template>
                 <ol class="trace-timeline trace-child-task-steps">
                   <li
-                    v-for="(step, si) in childSteps(topChildModel.events, c.id).steps"
+                    v-for="(step, si) in stepsForChild(c.id).steps"
                     :key="step.key"
                     class="trace-step"
                     :class="`is-${step.kind}`"
@@ -446,11 +487,11 @@ onBeforeUnmount(() => {
                       </div>
                     </div>
                   </li>
-                  <li v-if="!childSteps(topChildModel.events, c.id).steps.length" class="trace-event is-empty">
+                  <li v-if="!stepsForChild(c.id).steps.length" class="trace-event is-empty">
                     {{ t('aiTraceNodeNoEvents') }}
                   </li>
-                  <li v-if="childSteps(topChildModel.events, c.id).hidden > 0" class="trace-step-hidden">
-                    {{ t('aiTraceHiddenMeta', { n: childSteps(topChildModel.events, c.id).hidden }) }}
+                  <li v-if="stepsForChild(c.id).hidden > 0" class="trace-step-hidden">
+                    {{ t('aiTraceHiddenMeta', { n: stepsForChild(c.id).hidden }) }}
                   </li>
                 </ol>
               </div>
