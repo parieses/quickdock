@@ -861,9 +861,17 @@ func taskFolderName(uri string) string {
 	if err != nil || u.Host == "" {
 		return ""
 	}
-	name := path.Base(u.Path)
-	if decoded, e := url.PathUnescape(name); e == nil {
-		name = decoded
+	// 先取「转义后」路径的末段，再解码一次。
+	//
+	// 直接用 u.Path 是错的：url.Parse 会把 %2F 解成 "/"，于是
+	// path.Base("/dl/..%2Fetc.iso") 得到 "etc.iso" —— 被编码的路径分隔符本是
+	// 文件名的一部分（服务端就是这么存的名字），当成目录层级后名字就错了，
+	// 还会让两个不同的 URL 撞进同一个目录。
+	raw := path.Base(u.EscapedPath())
+	name, err := url.PathUnescape(raw)
+	if err != nil {
+		// 转义非法（罕见）：用原样末段，交给下面的清洗兜住。
+		name = raw
 	}
 	// nameFromURL 解析失败时会把整条 URL 原样返回，不能拿它当目录名。
 	if name == "" || name == "." || name == "/" || strings.Contains(name, "://") {

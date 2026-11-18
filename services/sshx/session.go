@@ -7,6 +7,7 @@ import (
 	"io"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -289,8 +290,40 @@ func (s *SshService) ListSessions() *services.ApiResult {
 	}
 	// 按建连时间正序：前端取「最后一条」当恢复目标，顺序必须稳定，
 	// 否则每次重开窗口恢复到的会话都不一样。
-	sort.Slice(out, func(i, j int) bool { return out[i].Started < out[j].Started })
+	//
+	// 只比 Started 不够：它是毫秒精度，批量重连 / 本地测试里三条会话落在同一
+	// 毫秒是常事；而 manager.List 的输入来自 map 遍历（顺序随机），
+	// 于是相等键 + 非稳定排序 = 每次调用返回的顺序都可能不同。
+	// 次级键取 ID 尾部的建连序号，最后用 ID 兜底，保证是全序。
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Started != out[j].Started {
+			return out[i].Started < out[j].Started
+		}
+		ai, aok := sessionStartSeq(out[i].ID)
+		bi, bok := sessionStartSeq(out[j].ID)
+		if aok && bok && ai != bi {
+			return ai < bi
+		}
+		return out[i].ID < out[j].ID
+	})
 	return services.Ok(out)
+}
+
+// sessionStartSeq 取会话 ID 尾部的建连序号（形如 ssh-<毫秒>-<序号>）。
+//
+// 只用来给「同一毫秒」的会话定序：ID 里那个序号是单调递增的，
+// 而按整串比较会把 "-10" 排到 "-2" 前面。解析不出来时返回 false，
+// 由调用方退回 ID 字典序——那仍然是一个确定的全序。
+func sessionStartSeq(id string) (int64, bool) {
+	i := strings.LastIndexByte(id, '-')
+	if i < 0 || i+1 >= len(id) {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(id[i+1:], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // Replay 取某会话的历史输出，用于窗口重开后恢复画面。

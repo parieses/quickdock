@@ -51,7 +51,13 @@ import (
 
 const (
 	// memoryDirName 项目记忆目录名（就在工作目录下，跟着项目走）。
-	memoryDirName = ".quickDock"
+	// memoryDirName 项目记忆目录。
+	//
+	// **必须与 ai_rules.go / hooks.go 的 .quickdock 完全一致（含大小写）**：
+	// 曾经这里是 ".quickDock" 而规则是 ".quickdock"，Windows 上两者是同一个
+	// 目录（大小写不敏感）所以问题被掩盖了；Linux/macOS 上它们是两个目录，
+	// 表现为「记忆写在 A、规则从 B 读」，谁都不报错。
+	memoryDirName = ".quickdock"
 	// assistantMemoryDirName 无空间任务共用的助手记忆目录名（在数据目录下）。
 	// 为什么不复用 <数据目录>/.quickDock：那是宿主自己的数据（db、logs、plugins），
 	// 记忆混进去以后「哪些是机器在用的、哪些是 AI 的记忆」就分不清了。
@@ -230,6 +236,14 @@ func appendDailyMemory(convID, cwd, title, userMsg string, files []string, round
 	if sc.root == "" {
 		return
 	}
+	// 纯问答轮次（没调工具、没改文件）不进活动记录。
+	//
+	// 原来的判据只有「有工作目录」，于是「你好」「这个按钮在哪」也会留一条
+	// 「用户：你好 / 工具：0 轮 / 0 次调用」——一天下来日志被这类条目填满，
+	// 真正的工作反而要翻着找。这正是「每日记忆记得很垃圾」的直接来源。
+	if rounds == 0 && len(files) == 0 {
+		return
+	}
 	root := sc.root
 	if err := os.MkdirAll(filepath.Join(root, "memory"), 0o755); err != nil {
 		logger.W("[ai] 创建记忆目录失败 root=%s: %v", root, err)
@@ -263,44 +277,187 @@ func appendDailyMemory(convID, cwd, title, userMsg string, files []string, round
 		at:     now.Format("15:04"),
 	})
 
+	// 一天里一个任务只占一个小节，后续续跑往同一个小节里追加一行活动。
+	//
+	// 原来的格式是「每轮一个新 `## 日期 时:分`」：一次长任务下来日志变成八个小节，
+	// 每节只有一句「用户：继续」加一大串绝对路径——用户的原话是「这记忆根本不能用」。
+	// 换成「按任务分节 + 节内按时间追加」之后，同一件事的进展是连续的。
+	secTitle := clipRunes(collapseSpaces(label), dailyFocusLabelRune)
+	if secTitle == "" {
+		secTitle = key
+	}
+	if !sc.project && key != "" {
+		// 共享日志里所有任务写同一个文件：不标来源就分不清「这条是谁问的」。
+		secTitle = key + " · " + secTitle
+	}
+
+	// 一行活动：时间 · 用户诉求（续跑省略） · 投入 · 改动文件。
+	var act strings.Builder
+	act.WriteString("- ")
+	act.WriteString(now.Format("15:04"))
+	if q := strings.TrimSpace(userMsg); q != "" && !isContinuationText(q) {
+		act.WriteString(" · ")
+		act.WriteString(clipRunes(collapseSpaces(q), dailyActivityUserRune))
+	}
+	fmt.Fprintf(&act, " · %d 轮 / %d 次调用", rounds, tools)
+	if fs := formatDailyFiles(root, sc.project, files); len(fs) > 0 {
+		act.WriteString(" · 文件：")
+		act.WriteString(strings.Join(fs, "、"))
+	}
+
+	merged, found := appendDailyActivity(body, secTitle, act.String())
+	if !found {
+		// 没有这个任务的小节：开一个，标题用任务名（比时间戳有用得多）。
+		if strings.TrimSpace(merged) != "" && !strings.HasSuffix(merged, "\n") {
+			merged += "\n"
+		}
+		merged += "\n## " + secTitle + "\n" + act.String() + "\n"
+	}
+
 	var b strings.Builder
 	b.WriteString(buildDailyHead(now.Format("2006-01-02"), items))
 	b.WriteString("\n")
-	if s := strings.TrimSpace(body); s != "" {
+	if s := strings.TrimSpace(merged); s != "" {
 		b.WriteString(s)
 		b.WriteString("\n")
 	}
-
-	headTime := now.Format("2006-01-02 15:04")
-	if !sc.project {
-		// 共享日志里所有任务写同一个文件：不标来源的话，看回日志根本分不清
-		// 「这条是谁问的」，而「记得问过什么」正是这份记忆存在的理由。
-		headTime += " · " + key
-	}
-	fmt.Fprintf(&b, "\n## %s\n", headTime)
-	if q := strings.TrimSpace(userMsg); q != "" {
-		b.WriteString("- 用户：")
-		b.WriteString(clipRunes(q, 300))
-		b.WriteString("\n")
-	}
-	if uniq := dedupKeepOrder(files); len(uniq) > 0 {
-		b.WriteString("- 改动文件：")
-		b.WriteString(strings.Join(uniq, "、"))
-		b.WriteString("\n")
-	}
-	if rounds > 0 || tools > 0 {
-		fmt.Fprintf(&b, "- 工具：%d 轮 / %d 次调用\n", rounds, tools)
-	}
-	// 一天下来活动记录能堆很长：超了从**最旧**的小节丢起，重点块在文件顶部不受影响
-	// （trimMemoryToCap 保留第一个 "## " 之前的内容）。
 	content := trimMemoryToCap(b.String(), dailyMemoryFileCap)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		logger.W("[ai] 写每日记忆失败 root=%s: %v", root, err)
 	}
 }
 
-// ---- 每日记忆：工作重点块 ----
+// appendDailyActivity 把一行活动追加到指定小节的末尾；没有该小节时原样返回。
+//
+// 按「整行等于 `## 标题`」匹配而不是子串匹配：任务名互相包含（「扫描项目」与
+// 「扫描项目文档」）时，子串匹配会把活动写进别人的小节里。
+func appendDailyActivity(body, secTitle, line string) (string, bool) {
+	if strings.TrimSpace(body) == "" {
+		return body, false
+	}
+	lines := strings.Split(body, "\n")
+	start := -1
+	for i, l := range lines {
+		if strings.TrimRight(l, " \r") == "## "+secTitle {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return body, false
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "## ") {
+			end = i
+			break
+		}
+	}
+	// 插到这一节最后一个非空行之后（保持小节内紧凑，不留空行）。
+	insert := end
+	for insert > start+1 && strings.TrimSpace(lines[insert-1]) == "" {
+		insert--
+	}
+	out := make([]string, 0, len(lines)+1)
+	out = append(out, lines[:insert]...)
+	out = append(out, line)
+	out = append(out, lines[insert:]...)
+	return strings.Join(out, "\n"), true
+}
 
+// formatDailyFiles 把改动文件整理成「相对项目根的短列表」。
+//
+// 三条规则，都是为了让它**可读**：
+//   - 相对路径：原来写的是 `D:\project\quickdock-v3\.tmp_scan\stats.ps1` 这种全路径，
+//     一条就占掉半行，十条就把日志变成一堵墙；
+//   - 丢掉辅助目录（`.quickdock/`）里的文件：那是 AI 自己的临时脚本，不是项目改动，
+//     记进去只会让人以为项目被改了一堆东西；
+//   - 最多 6 条，其余折成「…等 N 个」：记忆的用途是「想起来做过什么」，
+//     不是提交清单。
+func formatDailyFiles(root string, project bool, files []string) []string {
+	if len(files) == 0 {
+		return nil
+	}
+	base := root
+	if project {
+		// 项目作用域下 root 是 <cwd>/.quickdock，相对路径的基准是 cwd。
+		base = filepath.Dir(root)
+	}
+	out := make([]string, 0, len(files))
+	seen := make(map[string]bool, len(files))
+	skipped := 0
+	for _, f := range dedupKeepOrder(files) {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		rel := f
+		if base != "" {
+			if r, err := filepath.Rel(base, f); err == nil && !strings.HasPrefix(r, "..") {
+				rel = filepath.ToSlash(r)
+			} else {
+				rel = filepath.Base(f)
+			}
+		}
+		if isScratchPath(rel) {
+			continue
+		}
+		if seen[rel] {
+			continue
+		}
+		seen[rel] = true
+		if len(out) < dailyFilesMax {
+			out = append(out, rel)
+		} else {
+			skipped++
+		}
+	}
+	if skipped > 0 {
+		out = append(out, fmt.Sprintf("…等 %d 个", skipped))
+	}
+	return out
+}
+
+// isScratchPath 判断一个相对路径是不是 AI 的辅助文件。
+func isScratchPath(rel string) bool {
+	rel = strings.TrimPrefix(filepath.ToSlash(rel), "./")
+	return strings.HasPrefix(rel, memoryDirName+"/") || rel == memoryDirName
+}
+
+// isContinuationText 这句是不是「接着说」而不是新任务。
+//
+// 只认几种极短的口语：长了就可能是新需求（「继续，不过这次改用 pnpm」）。
+func isContinuationText(s string) bool {
+	s = strings.TrimSpace(strings.ToLower(s))
+	s = strings.Trim(s, "。.!！?？~ ")
+	switch s {
+	case "继续", "接著做", "接着做", "继续做", "往下", "continue", "go on", "keep going", "ok", "好", "好的", "嗯":
+		return true
+	}
+	return false
+}
+
+// hasDailySectionFor 今天的日志里有没有这个会话的小节。
+//
+// 判据是「小节标题里带会话短 id」：项目作用域下标题只有时间（不带 id），
+// 所以这里对项目日志恒为 false —— 那种情况不值得为「续跑多一条」做特判，
+// 而共享日志（不带项目目录）正是最容易堆重复的地方。
+func hasDailySectionFor(content, key string) bool {
+	if key == "" || content == "" {
+		return false
+	}
+	for _, line := range strings.Split(content, "\n") {
+		if !strings.HasPrefix(line, "## ") {
+			continue
+		}
+		if strings.Contains(line, key) {
+			return true
+		}
+	}
+	return false
+}
+
+// ---- 每日记忆：工作重点块 ----
 const (
 	// dailyFocusMaxLines 重点块最多记几条：一天做了十几件事已经很满，
 	// 再细的追查交给下面的活动记录。
@@ -312,6 +469,11 @@ const (
 	dailyMemoryFileCap = 20000
 	// focusLineSep 重点行的分隔符。选 " · " 而不是 " | "：中文行里它更像分隔符。
 	focusLineSep = " · "
+	// dailyActivityUserRune 活动行里用户诉求的截断长度。
+	// 记忆要的是「这次干了什么」，不是原话存档。
+	dailyActivityUserRune = 60
+	// dailyFilesMax 活动行里最多列几个改动文件，其余折成「…等 N 个」。
+	dailyFilesMax = 6
 )
 
 // dailyMemoryMu 同一时刻只改一份每日记忆（见 appendDailyMemory）。

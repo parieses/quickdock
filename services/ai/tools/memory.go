@@ -2,7 +2,7 @@ package aitools
 
 // 记忆工具：让内置 AI 主动读写自己那份长期记忆，而不是反复重读整个项目。
 // 目录由宿主决定（project_memory 见 services/ai/ai_memory.go 的包注释）：
-// 项目任务在 <cwd>/.quickDock，无空间任务在数据目录下跨任务共享的 ai_memory/。
+// 项目任务在 <cwd>/.quickdock，无空间任务在数据目录下跨任务共享的 ai_memory/。
 //
 // 分工：MEMORY.md（整体记忆）由 AI 通过本工具维护——需要「判断哪些值得长期记住」
 // 的事实机器归纳不了；memory/ 每日日志由系统自动追加，本工具只让 AI 读、不让它写，
@@ -27,7 +27,7 @@ func registerMemory(d Deps) {
 			"action=read：返回整体记忆(MEMORY.md)与最近几天的每日活动日志，让你快速了解项目现状与已做的事；"+
 			"action=write：用给定 content 整体覆盖 MEMORY.md；action=append：向 MEMORY.md 追加一段。"+
 			"每日活动日志由系统自动维护，不要手动写它（会破坏自动日志口径）。"+
-			"项目任务写入 <cwd>/.quickDock；没有绑定项目目录的任务写入数据目录下跨任务共享的助手记忆。",
+			"项目任务写入 <cwd>/.quickdock；没有绑定项目目录的任务写入数据目录下跨任务共享的助手记忆。",
 		[]string{"action"},
 		map[string]any{
 			"action":  str("read=读取记忆；write=整体覆盖 MEMORY.md；append=向 MEMORY.md 追加"),
@@ -40,9 +40,9 @@ func projectMemory(d Deps, args map[string]any) (any, error) {
 	if cwd == "" {
 		return nil, errors.New("当前对话没有绑定工作目录，无法读写记忆；请先把任务建在有效的空间里")
 	}
-	// 记忆目录由宿主决定（项目任务在 <cwd>/.quickDock，无空间任务在数据目录下共享）。
+	// 记忆目录由宿主决定（项目任务在 <cwd>/.quickdock，无空间任务在数据目录下共享）。
 	// 工具只拿得到 cwd，判断不了这个 cwd 是不是系统给任务临时建的目录，所以不自己推。
-	rootAbs := filepath.Join(cwd, ".quickDock")
+	rootAbs := filepath.Join(cwd, quickdockDirName)
 	if d.MemoryRoot != nil {
 		if r := strings.TrimSpace(d.MemoryRoot(cwd)); r != "" {
 			rootAbs = r
@@ -106,7 +106,7 @@ func projectMemory(d Deps, args map[string]any) (any, error) {
 
 func writeMemoryFile(path, content string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("创建 .quickDock 目录失败：%v", err)
+		return fmt.Errorf("创建 .quickdock 目录失败：%v", err)
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("写入 MEMORY.md 失败：%v", err)
@@ -116,7 +116,7 @@ func writeMemoryFile(path, content string) error {
 
 func appendMemoryFile(path, content string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("创建 .quickDock 目录失败：%v", err)
+		return fmt.Errorf("创建 .quickdock 目录失败：%v", err)
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
@@ -129,7 +129,7 @@ func appendMemoryFile(path, content string) error {
 	return nil
 }
 
-// recentMemoryDailyPaths 返回 .quickDock/memory 下最近的 n 个每日记忆文件（按日期倒序）。
+// recentMemoryDailyPaths 返回 .quickdock/memory 下最近的 n 个每日记忆文件（按日期倒序）。
 func recentMemoryDailyPaths(rootAbs string, n int) []string {
 	dir := filepath.Join(rootAbs, "memory")
 	entries, err := os.ReadDir(dir)

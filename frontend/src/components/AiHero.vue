@@ -99,7 +99,7 @@ const emit = defineEmits<{
   (e: 'drop', ev: DragEvent): void
   (e: 'confirm-url'): void
   (e: 'remove-attachment', i: number): void
-  (e: 'pick-dir', mode: 'new' | 'plain'): void
+  (e: 'pick-dir'): void
   (e: 'open-file-picker'): void
   (e: 'toggle-url'): void
   (e: 'fill-tip', key: string): void
@@ -156,16 +156,13 @@ function isSchedSpace(s: AISpace): boolean {
 function pickSpace(v: string) {
   spacePickOpen.value = false
   emit('update:newTaskSpace', v)
-  // 「新建空间…」= 选一个目录（空间按目录唯一）：选中就当场上目录选择器，
-  // 而不是让下拉先停在「新建空间…」等用户再点一次右边的按钮。
-  if (v === props.newSpace) emit('pick-dir', 'new')
 }
 
-/** 普通任务也能指定工作目录：不选就仍由后端在 ai_tasks 下建专属目录。 */
+/** 选工作目录 = 建空间任务：目录是空间的唯一键（后端按目录幂等复用）。 */
 function pickPlainDir() {
   spacePickOpen.value = false
-  emit('update:newTaskSpace', '')
-  emit('pick-dir', 'plain')
+  emit('update:newTaskSpace', props.newSpace)
+  emit('pick-dir')
 }
 
 function onSpaceDocDown(e: MouseEvent) {
@@ -336,28 +333,20 @@ function onModelSelect(e: Event) {
                   <span class="ai-space-pick-name">{{ s.name }}</span>
                 </button>
                 <div class="ai-space-pick-sep"></div>
-                <!-- 普通任务也能指定工作目录：以前选「普通任务」之后没有任何入口，
-                     任务只能落在后端自动建的 ai_tasks/<id> 里，用户想让它改哪个项目
-                     都得等发完第一句再切。 -->
+                <!-- 选目录 = 建空间。以前这里另有「普通任务也能指定目录」一项，
+                     但它和「新建空间…」挨在同一菜单里，用户点了前者选完目录，
+                     任务却落在侧栏「普通任务」组——反馈就是「选了目录没建成空间任务」。
+                     合成一个入口：目录就是空间的唯一键，不存在「有目录但不建空间」这回事。 -->
                 <button
                   type="button"
                   class="ai-space-pick-item"
-                  :class="{ 'is-sel': !props.newTaskSpace && !!props.newTaskDir }"
+                  :class="{ 'is-sel': props.newTaskSpace === props.newSpace }"
                   :title="props.newTaskDir || t('aiNewTaskPickDirHint')"
                   @click="pickPlainDir"
                 >
                   <span class="ai-space-pick-ico"><FolderOpen :size="12" /></span>
                   <span class="ai-space-pick-name">{{ t('aiNewTaskPickDir') }}</span>
                   <span v-if="props.newTaskDir" class="ai-space-pick-cwd">{{ t('aiNewTaskDirPicked') }}</span>
-                </button>
-                <button
-                  type="button"
-                  class="ai-space-pick-item"
-                  :class="{ 'is-sel': props.newTaskSpace === props.newSpace }"
-                  @click="pickSpace(props.newSpace)"
-                >
-                  <span class="ai-space-pick-ico"><Plus :size="12" /></span>
-                  <span class="ai-space-pick-name">{{ t('aiNewTaskSpaceNew') }}</span>
                 </button>
               </div>
             </div>

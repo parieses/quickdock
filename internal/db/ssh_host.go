@@ -292,7 +292,7 @@ func (d *Database) SaveSshHost(in SshHost) (*SshHost, error) {
 			 post_login_command, auto_reply_sudo, proxy_command, proxy_command_enabled,
 			 keepalive_interval, parent_id, is_folder, sort, remark,
 			 last_connected_at, created_at, updated_at)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			in.ID, in.Name, in.Host, in.Port, in.User, in.AuthType, encPw, in.KeyPath, encPass,
 			b2i(in.LegacyAlgorithms), in.Env, in.JumpHostID,
 			b2i(in.MCPAllowed), in.Tags, in.Color, in.Icon, in.PostLoginCommand,

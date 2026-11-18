@@ -421,6 +421,18 @@ var baseTables = []string{
 		-- 两者都是 0 / '' 起步，存量会话升级后行为完全不变。
 		unread INTEGER NOT NULL DEFAULT 0,
 		schedule_id TEXT NOT NULL DEFAULT '',
+		-- 任务状态（WP17）：让「清单」和「继续」有落点。
+		--
+		-- 此前 plan_update 只走 SSE 事件，前端一刷新就没了，中断后更是无从恢复；
+		-- 而「继续」只是一条普通 user 消息，模型只好从零重新规划。
+		-- 这三个字段把「这条对话在做什么、做到哪了」变成可持久化的事实：
+		--   goal        当前目标（一句，取首条用户消息）
+		--   plan        最近一次清单的完整 JSON（形状同 tools.PlanUpdate）
+		--   plan_status running（还有未完成项）/ done（全打勾）/ ''（从未规划过）
+		-- 默认值全部不改变升级前行为：没有任何清单的会话就是 ''。
+		goal TEXT NOT NULL DEFAULT '',
+		plan TEXT NOT NULL DEFAULT '',
+		plan_status TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`,
@@ -1026,6 +1038,11 @@ func (d *Database) migrate() error {
 		table, col, colType string
 	}
 	columnMigrations := []colMig{
+		// 任务状态（WP17）：老库补成空串 —— 没有清单的会话行为与升级前完全一致，
+		// 不会凭空多出一段「续跑」提示。
+		{"ai_conversations", "goal", "TEXT NOT NULL DEFAULT ''"},
+		{"ai_conversations", "plan", "TEXT NOT NULL DEFAULT ''"},
+		{"ai_conversations", "plan_status", "TEXT NOT NULL DEFAULT ''"},
 		// 后台任务归属会话：老库补成空串（未归属），升级后面板按当前会话过滤时
 		// 这些历史行自然不再出现，但行本身与日志都保留，仍由 PurgeAIJobs 到期清理。
 		{"ai_jobs", "conv_id", "TEXT NOT NULL DEFAULT ''"},
@@ -1091,6 +1108,8 @@ func (d *Database) migrate() error {
 		{"todos", "status", "TEXT DEFAULT 'todo'"},
 		// ai_messages: reasoning_content（思考过程）
 		{"ai_messages", "reasoning_content", "TEXT DEFAULT ''"},
+		// ai_messages: 按轮拆开的思考（JSON 数组，见 AIMessage.ReasoningRounds）
+		{"ai_messages", "reasoning_rounds", "TEXT DEFAULT ''"},
 		// ai_messages: images（图片引用 JSON 数组，仅 user 消息；字节落盘不落库）
 		{"ai_messages", "images", "TEXT DEFAULT ''"},
 		// ai_conversations: token 用量统计

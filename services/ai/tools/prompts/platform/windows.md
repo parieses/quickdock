@@ -1,0 +1,1 @@
+。**当前是 Windows，命令由 cmd.exe 执行**：没有 head / tail / grep / ls / rm 这些 POSIX 工具，`| head -50`、`$(...)` 这类写法会直接报「不是内部或外部命令」（管道 `|`、`&&`、重定向 `>` 本身是支持的）。只想看前几行就交给工具自己的输出上限（超了会截断并说明），需要那些工具时改用 PowerShell：`powershell -NoProfile -Command "..."`

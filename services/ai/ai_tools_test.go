@@ -205,8 +205,11 @@ func TestRunToolCallsSkipsDuplicate(t *testing.T) {
 	}
 }
 
-// compactLoopMessages：超预算时折叠最早的工具结果，最后一轮必须原样保留——
-// 模型正要用它，折了等于逼它重查一次（多花一轮的钱）。
+// compactLoopMessages：超预算时折叠**较早**轮次的工具结果，最近两轮必须原样保留
+// ——模型正要用最近的结果，折了等于逼它重查一次（多花一轮的钱）。
+//
+// 这条测试随 WP4b 从「只保护最后一轮」改成「保护最近两轮」：
+// 只留最后一轮时，倒数第二轮的结果也在被折，而模型常常还要回头看它一眼。
 func TestCompactLoopMessagesFoldsOldestOnly(t *testing.T) {
 	big := strings.Repeat("x", 20000) // 单条约 12500 token，两条即超 24000 预算
 	msgs := []map[string]interface{}{
@@ -216,19 +219,30 @@ func TestCompactLoopMessagesFoldsOldestOnly(t *testing.T) {
 		{"role": "tool", "tool_call_id": "a", "content": big},
 		{"role": "assistant", "content": "", "tool_calls": []any{map[string]any{"id": "b"}}},
 		{"role": "tool", "tool_call_id": "b", "content": big},
+		{"role": "assistant", "content": "", "tool_calls": []any{map[string]any{"id": "c"}}},
+		{"role": "tool", "tool_call_id": "c", "content": big},
 	}
-	if n := compactLoopMessages(msgs, 24000); n != 1 {
-		t.Fatalf("应只折叠 1 条最早的，实际 %d", n)
+	cr := compactLoopMessages(msgs, 24000)
+	if cr.Folded+cr.Summarized != 1 {
+		t.Fatalf("应只处理最早那 1 条，实际 折叠=%d 摘要=%d", cr.Folded, cr.Summarized)
 	}
 	if got := len([]rune(msgs[3]["content"].(string))); got > aiToolFoldRune+200 {
 		t.Fatalf("最早那条未被折叠，长度 %d", got)
 	}
+	// 最近两轮（b、c）必须原样。
 	if got := len([]rune(msgs[5]["content"].(string))); got != 20000 {
+		t.Fatalf("倒数第二轮不该被折叠，长度 %d", got)
+	}
+	if got := len([]rune(msgs[7]["content"].(string))); got != 20000 {
 		t.Fatalf("最后一轮不该被折叠，长度 %d", got)
 	}
 	// 折叠后必须仍带提示，否则模型会以为自己当时只拿到了 600 字。
 	if !strings.Contains(msgs[3]["content"].(string), "已折叠") {
 		t.Fatal("折叠后缺少说明文字")
+	}
+	// 事件要能说出「压了哪几条」。
+	if len(cr.FoldedIDs) != 1 || cr.FoldedIDs[0] != "a" {
+		t.Fatalf("folded_ids 不对: %v", cr.FoldedIDs)
 	}
 }
 

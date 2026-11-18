@@ -26,6 +26,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'allow'): void
   (e: 'remember'): void
+  (e: 'remember-always'): void
   (e: 'deny'): void
   (e: 'open-rules'): void
 }>()
@@ -58,7 +59,7 @@ const command = computed(() => {
 const target = computed(() => (command.value ? '' : toolTarget(props.call)))
 
 interface Opt {
-  id: 'allow' | 'remember' | 'deny'
+  id: 'allow' | 'remember' | 'rememberAlways' | 'deny'
   label: string
   danger?: boolean
   run: () => void
@@ -81,6 +82,23 @@ const opts = computed<Opt[]>(() => {
         : t('aiApprovalRemember'),
       run: () => emit('remember'),
     })
+    // 沉淀（WP6）：跨会话记住这一族 / 这个目录。
+    //
+    // 只在有 grantScope 时给：那个值就是「这一族」的标识（run_command 是命令首词）。
+    // 没有它的工具（例如任意路径写）沉淀不出一个安全的粒度，给了按钮反而会
+    // 骗用户点一个「以后都不问」的近似物。
+    //
+    // 文案要明确写出作用域是「以后」，与上一项「本次会话」区分开——
+    // 两项挨在一起、只差几个字，是这类 UI 最容易点错的地方。
+    if (props.call.grantScope) {
+      list.push({
+        id: 'rememberAlways',
+        label: props.call.name === 'run_command'
+          ? t('aiApprovalRememberAlwaysCmd', { scope: props.call.grantScope })
+          : t('aiApprovalRememberAlwaysDir'),
+        run: () => emit('remember-always'),
+      })
+    }
   }
   list.push({ id: 'deny', label: t('aiApprovalDeny'), danger: true, run: () => emit('deny') })
   return list

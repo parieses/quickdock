@@ -213,10 +213,23 @@ type agentLinked interface {
 // MaxLevel 用 -1 表示不限：LevelRead 是 0，用 0 当「不限」会把 explore
 // 的只读约束悄悄变成一个不生效的开关。
 type ToolFilter struct {
+	// MaxLevel 本次允许的最高危险等级。**零值不是「不限」，而是 LevelRead（0）**：
+	// 只留只读工具。想要「不收窄」就传 nil 的 *ToolFilter（keep 里 f == nil 直接放行）。
+	//
+	// 为什么要写这一条：`&ToolFilter{}` 看起来很自然是「空过滤器 = 不过滤」，
+	// 实际会把 file_write / run_command / spawn_agent 全撤掉——症状是
+	// 「模型说它没有写权限」，而装配代码一行都没错。
+	// 负数表示跳过等级判定。
 	MaxLevel   int
 	Categories map[string]bool
 	// NoSpawn 撤下 spawn_agent（子 agent 不能再派活）。
 	NoSpawn bool
+	// AllowNames 只留这些工具（WP10：技能的 allowed-tools 声明）。
+	//
+	// nil = 不按名字收窄（默认）。非 nil 时**只收不放**：它只能在上面的等级/
+	// 域过滤之后再筛掉，永远加不回被策略撤掉的工具——否则一个技能文件就能
+	// 把用户关掉的危险工具重新打开。
+	AllowNames map[string]bool
 }
 
 // keep 把角色约束翻译成 mcpsrv.Resolve 的 Keep 回调。nil 表示不收窄。
@@ -233,6 +246,12 @@ func (f *ToolFilter) keep(t mcpsrv.Tool) bool {
 		return false
 	}
 	if f.Categories != nil && !f.Categories[t.Domain] {
+		return false
+	}
+	// 技能声明（WP10）放在最后：先让策略与场景把不该有的撤掉，再看技能
+	// 想留下的那批里还剩什么。顺序反过来会出现「技能声明了 run_command，
+	// 于是它绕过了只读档」。
+	if f.AllowNames != nil && !f.AllowNames[t.Name] {
 		return false
 	}
 	return true
@@ -405,10 +424,46 @@ func skillReadPath(args map[string]any) string {
 // 读文件时是安全的，和 file_edit 同轮就不安全。这种判断只有调度处（这里）
 // 知道，让工具自己声明迟早会出现「两个都标了可并发、结果互相踩」。
 //
-// 目前只有 spawn_agent：它天然是「派出去各干各的」，且子 agent 之间不共享
-// 上下文；同目录写操作由 agent_spawn.go 的目录闸串行。
+// 每加一个名字前必须回答两个问题，答不上来就别加：
+//  1. 它有没有**写盘 / 写库 / 改共享状态**？LevelRead 不代表只读（见 parallelUnsafeReadTools）。
+//  2. 它和同轮其它调用之间有没有真实依赖？有依赖的并发就是随机结果。
 var parallelSafeTools = map[string]bool{
+	// 派活天然各干各的：子 agent 之间不共享上下文，同目录写操作由
+	// agent_spawn.go 的目录闸串行。
 	spawnAgentToolName: true,
+
+	// —— 只读检索：只打开文件/索引读，不写盘、不改库、无包级缓存 ——
+	"file_read":     true, // 单文件读
+	"file_grep":     true, // 目录内正则搜索（有命中数/时间预算）
+	"file_search":   true, // Everything 按文件名检索，只读索引
+	"dir_list":      true, // 目录列举
+	"git_status":    true, // git status --porcelain，只读
+	"git_diff":      true, // git diff，只读（无临时文件）
+	"check_workdir": true, // stat 一下目录，纯探测
+
+	// —— 网络只读：只发请求，不落盘、不共享缓存 ——
+	"web_fetch": true,
+	"web_head":  true,
+	"web_links": true,
+
+	// —— 后台任务查询：打开日志文件读头/尾，不消费、不推进任何游标 ——
+	"job_status": true,
+	"job_output": true,
+}
+
+// parallelUnsafeReadTools 名字/等级像只读、**实际不能并发**的工具，以及原因。
+//
+// 这张表的存在就是为了下面这句话：**LevelRead 不等于无副作用**。
+// 没有它，下一个人按「LevelRead 就能加进白名单」办事，会静默踩到这些：
+//   - project_memory 的 action=write 真的 MkdirAll + WriteFile 写 MEMORY.md，
+//     两个并发写同一份文件就是后写者覆盖前写者，而它长得完全像个读工具；
+//   - plan_update 是「整份覆盖」语义（见 tools/plan.go），并发时后写者赢，
+//     用户看到的清单会随机少几步。
+//
+// 这张表不参与调度，它只被测试用来自证「排除是刻意的，不是漏了」。
+var parallelUnsafeReadTools = map[string]string{
+	"project_memory": "action=write 会 MkdirAll + 写 MEMORY.md，并发写互相覆盖",
+	"plan_update":    "整份覆盖会话清单，并发时后写者赢，清单会错乱",
 }
 
 // canRunParallel 判断这一轮要不要并发执行。
@@ -431,6 +486,13 @@ func canRunParallel(calls []aiToolCall) bool {
 		if !parallelSafeTools[c.Name] {
 			return false
 		}
+		// 排除表在调度处也生效，不只是文档：白名单是人工审计的，会漂；
+		// 哪天有人把 project_memory 加进白名单（它确实是 LevelRead，很容易被
+		// 当成只读），这里立刻把整轮退回串行，而不是让两份 MEMORY.md 互相覆盖。
+		if why, unsafe := parallelUnsafeReadTools[c.Name]; unsafe {
+			_ = why
+			return false
+		}
 		// 解析后再比：toolCallKey 在 args 为空时会统一归一成 "{}"，
 		// 直接传空 map 会让所有同名调用都被判成重复。
 		args, err := parseToolArgs(c.Args)
@@ -445,6 +507,61 @@ func canRunParallel(calls []aiToolCall) bool {
 		seenKeys[k] = true
 	}
 	return true
+}
+
+// parallelGroups 把一轮工具切成「连续可并发段」，返回每段在 calls 里的下标。
+//
+// 为什么不是 canRunParallel 那种「整轮全安全才并发」：一轮里 [spawn, spawn,
+// spawn, run_command, run_command] 是最常见的形态——模型派完活顺手跑几条校验。
+// 只要混进一条 run_command，整轮就退回串行，三个子 agent 一个接一个跑，
+// 用户看到的就是「派了三个子任务，比一个主任务还慢」（实机 2026-11-18）。
+//
+// 切段后段内并发、段间严格保序：spawn 之间仍可同时跑，命令仍在它们之后执行；
+// 而 [file_edit, spawn] 这类有依赖的混轮依然是两段串行，不会制造随机结果。
+// 同段内重复调用（判重键相同）也单独成段，让 execOneToolCall 的 seen 去重照常生效。
+func parallelGroups(calls []aiToolCall) [][]int {
+	groups := make([][]int, 0, len(calls))
+	var cur []int
+	flush := func() {
+		if len(cur) > 0 {
+			groups = append(groups, cur)
+			cur = nil
+		}
+	}
+	seen := make(map[string]bool, len(calls))
+	for i, c := range calls {
+		key := ""
+		ok := parallelSafeTools[c.Name]
+		if ok {
+			_, unsafe := parallelUnsafeReadTools[c.Name]
+			ok = !unsafe
+		}
+		if ok {
+			var args map[string]any
+			args, err := parseToolArgs(c.Args)
+			if err != nil {
+				ok = false
+			} else {
+				key = toolCallKey(c.Name, args, c.Args)
+				if seen[key] {
+					ok = false
+				}
+			}
+		}
+		if !ok {
+			flush()
+			// 段被打断后判重集合也重置：下一段从空状态重新判断重复。
+			seen = make(map[string]bool, len(calls))
+		}
+		if ok {
+			seen[key] = true
+			cur = append(cur, i)
+		} else {
+			groups = append(groups, []int{i})
+		}
+	}
+	flush()
+	return groups
 }
 
 // runToolCalls 执行一轮里的全部工具调用，返回要追加到 messages 的消息与记录。
@@ -497,11 +614,17 @@ func (a *AIService) runToolCalls(ctx context.Context, calls []aiToolCall, round 
 		records[i], contents[i] = a.execOneToolCall(ctx, calls[i], round, seen, &seenMu, cwd)
 	}
 
-	if canRunParallel(calls) {
+	// 段内并发、段间保序（见 parallelGroups）：一条 run_command 不该把
+	// 同一轮里三条派活全拖成串行；但写工具后面的派活仍要等它做完。
+	for _, group := range parallelGroups(calls) {
+		if len(group) < 2 {
+			exec(group[0])
+			continue
+		}
 		sem := make(chan struct{}, agentMaxParallel)
 		var wg sync.WaitGroup
-		for i := range calls {
-			i := i
+		for _, idx := range group {
+			i := idx
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -514,10 +637,6 @@ func (a *AIService) runToolCalls(ctx context.Context, calls []aiToolCall, round 
 			}()
 		}
 		wg.Wait()
-	} else {
-		for i := range calls {
-			exec(i)
-		}
 	}
 
 	for i := range calls {
@@ -526,30 +645,34 @@ func (a *AIService) runToolCalls(ctx context.Context, calls []aiToolCall, round 
 	return out, records
 }
 
-// execOneToolCall 执行单个工具调用，返回记录与要回给模型的文本。
+// toolCallPrep 一次调用在执行前的准备结果（WP13：把准备阶段从主流程里拆出来）。
 //
-// 抽出来是为了让「串行一轮」与「并发一轮」走完全相同的逻辑：两份实现迟早
-// 会在去重、超时、错误整形上分叉，而分叉的那一半是跑得少的那一半。
-func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int, seen map[string]aiToolRecord, seenMu *sync.Mutex, cwd string) (aiToolRecord, string) {
-	rec := aiToolRecord{ID: c.ID, Name: c.Name, Round: round}
+// 拆出来的理由不是为了整洁：这一段里有四条「必须先做」的事（解析参数、
+// 清掉模型伪造的宿主参数、注入真实 cwd/scope、给技能目录开读白名单），
+// 顺序错了就是安全洞（模型编一个 _cwd 就能多出一个写根）。放成独立函数后，
+// 它有了自己的名字与测试入口，而不必读完整条 200 行的主流程才能确认顺序。
+type toolCallPrep struct {
+	// Args 注入宿主参数之后的参数表（工具真正拿到的就是它）。
+	Args map[string]any
+	// ArgsText 卡片上显示的参数摘要。
+	ArgsText string
+	// SkillRead 这次读的是技能目录：不需要越界确认（内容由提示词点名要求）。
+	SkillRead bool
+	// Err 参数解析失败；此时 Args 不可用。
+	Err error
+	// Raw 模型给的原始参数串（解析失败时回显给模型）。
+	Raw string
+}
 
-	// 用户点了停止：把剩余调用标记为未执行照常回给模型（协议要求每条
-	// tool_call 都有对应的 tool 消息），但不真的去跑。
-	if err := ctx.Err(); err != nil {
-		rec.Error = "用户已停止，未执行"
-		return rec, rec.Error
-	}
-
-	// 本次调用的 id 挂到 ctx：写盘前的快照要能与「哪一步改的」对上。
-	// 在参数解析之前就设置——参数写坏也要能对应到卡片上的那条记录。
-	ctx = aitools.WithToolCallID(ctx, c.ID)
-
+// prepareToolCall 解析参数并注入宿主侧参数。
+func prepareToolCall(ctx context.Context, c aiToolCall, cwd string) toolCallPrep {
+	prep := toolCallPrep{Raw: c.Args}
 	args, aerr := parseToolArgs(c.Args)
-	rec.Args = formatToolArgs(args, c.Args)
+	prep.Args = args
+	prep.ArgsText = formatToolArgs(args, c.Args)
 	if aerr != nil {
-		// 参数不是合法 JSON：原样回给模型，它看得懂自己写坏了什么。
-		rec.Error = aerr.Error()
-		return rec, "参数解析失败：" + rec.Error + "\n原始参数：" + c.Args
+		prep.Err = aerr
+		return prep
 	}
 
 	// 工作目录与读取范围都由宿主注入，不信任模型传的值：这些键不在任何工具的
@@ -581,10 +704,51 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 	// 把 skills 根注入 _allow，让执行层的 scoped 读取放行（与下面跳过越界确认卡
 	// 成对，缺一就会变成「不弹卡但静默读取失败」）。只认绝对路径，且只对读类
 	// 工具生效；模型伪造的 _allow 已在上面 delete，这里重新按真实目标决定。
-	skillRead := pathReadTools[c.Name] && skillReadPath(args) != ""
-	if skillRead {
+	prep.SkillRead = pathReadTools[c.Name] && skillReadPath(args) != ""
+	if prep.SkillRead {
 		args["_allow"] = []string{skillsRoot()}
 	}
+	return prep
+}
+
+// execOneToolCall 执行单个工具调用，返回记录与要回给模型的文本。
+//
+// 抽出来是为了让「串行一轮」与「并发一轮」走完全相同的逻辑：两份实现迟早
+// 会在去重、超时、错误整形上分叉，而分叉的那一半是跑得少的那一半。
+//
+// WP13：这条主流程现在是**有名字的六个阶段**，顺序不可调换：
+//  1. 停止判定（ctx 已取消 → 不执行，但仍要回一条 tool 消息）；
+//  2. 参数准备（prepareToolCall：解析 + 宿主参数注入）；
+//  3. 去重（seen，命中就把上次结果递回）；
+//  4. 越界判定（只读工具读目录外时要求点名同意）；
+//  5. 审批 + 执行（toolApprover + callToolWithTimeout）；
+//  6. 结果整形（shapeToolResult：diff 摘除、截断、产物路径、编排链接）。
+func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int, seen map[string]aiToolRecord, seenMu *sync.Mutex, cwd string) (aiToolRecord, string) {
+	rec := aiToolRecord{ID: c.ID, Name: c.Name, Round: round}
+
+	// 阶段 1：用户点了停止。
+	//
+	// 把剩余调用标记为未执行照常回给模型（协议要求每条 tool_call 都有对应的
+	// tool 消息），但不真的去跑。
+	if err := ctx.Err(); err != nil {
+		rec.Error = "用户已停止，未执行"
+		return rec, rec.Error
+	}
+
+	// 本次调用的 id 挂到 ctx：写盘前的快照要能与「哪一步改的」对上。
+	// 在参数解析之前就设置——参数写坏也要能对应到卡片上的那条记录。
+	ctx = aitools.WithToolCallID(ctx, c.ID)
+
+	// 阶段 2：参数准备。
+	prep := prepareToolCall(ctx, c, cwd)
+	rec.Args = prep.ArgsText
+	if prep.Err != nil {
+		// 参数不是合法 JSON：原样回给模型，它看得懂自己写坏了什么。
+		rec.Error = prep.Err.Error()
+		return rec, "参数解析失败：" + rec.Error + "\n原始参数：" + prep.Raw
+	}
+	args := prep.Args
+	skillRead := prep.SkillRead
 
 	// 同一次提问内，同一个工具 + 完全相同的参数只真执行一次。
 	//
@@ -651,24 +815,19 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 	// 被拒绝的调用也写进 seen（见上面命中分支）：拒绝是本次提问内的一道墙。
 	// seen 只活在这一次提问里，重新发问仍然会重新征求同意——所以「用户可能改主意」
 	// 的机会并没有丢，丢掉的只是「同一句话问两遍」。
-	gate := approvalGateFrom(ctx)
-	ap := approverFunc(func(actx context.Context, req mcpsrv.ApprovalRequest) (bool, string) {
-		// 越界读取没有闸门可问（子 agent 无人值守）：直接拒绝，不让循环自己决定跨目录。
-		if outsideAbs != "" && gate == nil {
-			return false, outsideAbs + " 不在当前目录内，这个执行上下文无法向用户确认权限。" +
-				"请只用当前目录里的内容，或让用户把该目录设为工作目录。"
-		}
-		if gate == nil {
-			// 子 agent 没有交互通道，写类边界的收窄靠角色（ToolFilter），不靠这里。
-			return true, ""
-		}
-		allow, note := gate.await(actx, c.ID, c.Name, mcpsrv.ToolLevel(c.Name), args, outsideAbs != "", outsideNote)
-		if allow && outsideAbs != "" {
-			// 只放行这一次调用：_allow 跟着 args 走，工具执行完就没了。
-			args["_allow"] = []string{filepath.Dir(outsideAbs)}
-		}
-		return allow, note
-	})
+	// 阶段 5：审批 + 执行。
+	//
+	// 审批作为 Approver 注入统一的 Invoke 闸门链（锁 → 成员 → 审批 → Handler）。
+	//
+	// 位置刻意在去重与参数校验之后：
+	//   - 去重命中的是「同一轮里第二次一模一样的调用」，那时工具根本没跑，
+	//     问用户等于同一件事问两遍；
+	//   - 参数坏了的调用执行必然报错，问也没有意义。
+	//
+	// 被拒绝的调用也写进 seen（见上面命中分支）：拒绝是本次提问内的一道墙。
+	// seen 只活在这一次提问里，重新发问仍然会重新征求同意——所以「用户可能改主意」
+	// 的机会并没有丢，丢掉的只是「同一句话问两遍」。
+	ap := a.toolApprover(ctx, c, args, outsideAbs, outsideNote)
 
 	// 工具面从 ctx 取：与模型看到的那份 tools[] 是同一个 Surface。
 	// 取不到时用一个空面，Invoke 会回「本次未开放」而不是静默执行。
@@ -693,9 +852,56 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 		return rec, rec.Result
 	}
 
-	// diff 先摘出来，再序列化结果给模型：
-	// 模型刚写过这段内容，把 diff 再塞回它的上下文纯属浪费 token
-	// （一次 file_edit 的 diff 可能几百行，而对它没有任何新信息）。
+	// 阶段 6：结果整形。
+	text := shapeToolResult(ctx, &rec, val, cerr)
+	if seen != nil && cerr == nil {
+		seenMu.Lock()
+		seen[key] = rec
+		// 写类成功之后，读类的缓存全部作废（见 dropStaleReads）。
+		// 写类自己的条目要留着：同一句写重放一遍是第二次副作用，必须继续挡。
+		if mcpsrv.ToolLevel(c.Name) > mcpsrv.LevelRead {
+			dropStaleReads(seen)
+		}
+		seenMu.Unlock()
+	}
+	return rec, text
+}
+
+// toolApprover 把审批闸门包成 Approver（WP13 抽出）。
+//
+// 两条「无人值守」的语义必须留在这里，而不是散在调用点：
+//   - 子 agent 没有交互通道（gate == nil）：写类边界的收窄靠角色过滤器，
+//     所以直接放行；但**越界读取**例外——没有闸门可问时宁可拒绝，
+//     也不让子 agent 自己决定跨目录读。
+//   - 用户同意越界读取后，_allow 只跟着这一次调用的 args 走，执行完就没了。
+func (a *AIService) toolApprover(ctx context.Context, c aiToolCall, args map[string]any, outsideAbs, outsideNote string) mcpsrv.Approver {
+	gate := approvalGateFrom(ctx)
+	return approverFunc(func(actx context.Context, req mcpsrv.ApprovalRequest) (bool, string) {
+		// 越界读取没有闸门可问（子 agent 无人值守）：直接拒绝，不让循环自己决定跨目录。
+		if outsideAbs != "" && gate == nil {
+			return false, outsideAbs + " 不在当前目录内，这个执行上下文无法向用户确认权限。" +
+				"请只用当前目录里的内容，或让用户把该目录设为工作目录。"
+		}
+		if gate == nil {
+			// 子 agent 没有交互通道，写类边界的收窄靠角色（ToolFilter），不靠这里。
+			return true, ""
+		}
+		allow, note := gate.await(actx, c.ID, c.Name, mcpsrv.ToolLevel(c.Name), args, outsideAbs != "", outsideNote)
+		if allow && outsideAbs != "" {
+			// 只放行这一次调用：_allow 跟着 args 走，工具执行完就没了。
+			args["_allow"] = []string{filepath.Dir(outsideAbs)}
+		}
+		return allow, note
+	})
+}
+
+// shapeToolResult 把工具返回值整理成记录 + 回给模型的文本（WP13 抽出）。
+//
+// 这里有个容易被当成 bug 的取舍：**diff 不进模型上下文**。模型刚写过那段内容，
+// 把 diff 再塞回去纯属浪费 token（一次 file_edit 的 diff 可能几百行，
+// 对它没有任何新信息），所以先摘到 rec.Diff 给卡片用，再序列化剩下的部分。
+func shapeToolResult(ctx context.Context, rec *aiToolRecord, val any, cerr error) string {
+	// diff 先摘出来，再序列化结果给模型。
 	rec.Diff = takeToolDiff(val)
 
 	text := mcpsrv.JSON(val)
@@ -707,27 +913,17 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 		// 失败时没有结构化结果可压，交给纯文本兜底（见 truncateToolResult）。
 		val = nil
 	}
-	rec.Result = truncateToolResult(val, text, c.Name)
-	rec.Output = toolOutputText(c.Name, val)
+	rec.Result = truncateToolResult(ctx, val, text, rec.Name, rec.ID)
+	rec.Output = toolOutputText(rec.Name, val)
 	rec.Added, rec.Removed = toolDiffLines(val)
 	// 产物路径（file_write / file_edit）：回答产物条与文件预览的依据。
-	rec.Path = toolResultPath(c.Name, val)
+	rec.Path = toolResultPath(rec.Name, val)
 	// 编排类工具（spawn_agent）额外带回它建的 run/node：前端据此在这条回复下面
 	// 挂出 run 树。其余工具走不到这里，字段留空、落库时被 omitempty 省掉。
 	if al, ok := val.(agentLinked); ok {
 		rec.RunID, rec.NodeID = al.AgentLink()
 	}
-	if seen != nil && cerr == nil {
-		seenMu.Lock()
-		seen[key] = rec
-		// 写类成功之后，读类的缓存全部作废（见 dropStaleReads）。
-		// 写类自己的条目要留着：同一句写重放一遍是第二次副作用，必须继续挡。
-		if mcpsrv.ToolLevel(c.Name) > mcpsrv.LevelRead {
-			dropStaleReads(seen)
-		}
-		seenMu.Unlock()
-	}
-	return rec, rec.Result
+	return rec.Result
 }
 
 // toolTimeoutFor 单个工具的超时上限。
@@ -978,11 +1174,24 @@ func toolMessage(callID, content string) map[string]interface{} {
 // 自己在看半个数组，于是照样按「这就是全部」下结论。
 // 所以超限时先按结构压：长字符串缩短、长数组保留前 N 项并补一条 _dropped，
 // 短字段（计数、标记、路径）原样留着；结构压不下去才退回头部截断。
-func truncateToolResult(val any, text, tool string) string {
+func truncateToolResult(ctx context.Context, val any, text, tool, callID string) string {
 	n := len([]rune(text))
 	if n <= aiToolResultMaxRune {
 		return text
 	}
+	// WP3：先把原文落盘，再截断。
+	//
+	// 顺序不能反：截断之后原文就没了，模型要细节只能重调一次工具（又付一遍钱）。
+	// 落盘失败不算错误——外置是省钱的优化，退回纯截断仍然能跑。
+	refID := ""
+	if convID := aitools.ConvIDFrom(ctx); convID != "" && strings.TrimSpace(callID) != "" {
+		if id, serr := aitools.SaveToolResult(convID, callID, tool, text); serr != nil {
+			logger.W("[ai-tool] %s 结果外置失败，退回纯截断: %v", tool, serr)
+		} else {
+			refID = id
+		}
+	}
+
 	// 纯文本结果（工具直接返回字符串）不走结构压缩：那一趟会把它 marshal 成
 	// 带引号的 JSON 字符串，模型看到的是多了一层转义的正文。
 	_, plainText := val.(string)
@@ -990,11 +1199,24 @@ func truncateToolResult(val any, text, tool string) string {
 		if shrunk, ok := shrinkToolJSON(val, aiToolResultMaxRune); ok {
 			logger.W("[ai-tool] %s 结果过长（%d 字），已按字段压缩到 %d 字",
 				tool, n, len([]rune(shrunk)))
+			if refID != "" {
+				// 压缩后的版本已经够用，但原文仍然留着：模型想核对细节时不必重调工具。
+				shrunk += fmt.Sprintf("\n\n[完整原文已存为 result #%s（约 %d 字），需要未被压缩的字段时用 tool_result_read(id=%q) 读取。]",
+					refID, n, refID)
+			}
 			return shrunk
 		}
 	}
 	logger.W("[ai-tool] %s 结果过长（%d 字），已截断喂给模型；头部：%s", tool, n, logger.Trunc(text, 300))
 	head := string([]rune(text)[:aiToolResultMaxRune])
+	if refID != "" {
+		// offset 用**字节**：读取工具按字节切片，而这里的 head 是按字符切的。
+		// 直接把字符数当 offset 传过去，遇到中文就会从半个字中间开始。
+		return head + fmt.Sprintf(
+			"\n\n[结果过长：原文 %d 字，这里只给前 %d 字。\n"+
+				" 完整内容已存为 result #%s，可用 tool_result_read(id=%q, offset=%d) 接着读后半段（也可以从 0 开始分段读）。]",
+			n, aiToolResultMaxRune, refID, refID, len(head))
+	}
 	return head + fmt.Sprintf("\n\n[结果过长，已截断：原文 %d 字，这里只给出前 %d 字。需要更多请缩小范围（比如加 glob 过滤、减少 limit）。]", n, aiToolResultMaxRune)
 }
 
@@ -1116,47 +1338,164 @@ func estimateLoopTokens(messages []map[string]interface{}) int {
 // 是白白折叠（本可以塞进更多文件原文），对 8K 模型则根本压不住。
 //
 // 就地修改 messages 里的 map（同一个 map 会被后续轮次复用）。
-func compactLoopMessages(messages []map[string]interface{}, budget int) int {
+
+// 两种 compact 事件（前端按 kind 分开渲染）。
+const (
+	compactKindHistory = "history"
+	compactKindLoop    = "loop"
+)
+
+// loopCompactEvent 循环内压缩的事件载荷。
+//
+// 复用 compactEvent 的字段（前端那张卡已经在读 before/after/window…），
+// 额外带三个：
+//   - folded / summarized：这一轮压了几条、各自什么手段；
+//   - folded_ids：被处理的 tool_call id，用于「压缩后重查率」这个指标。
+func loopCompactEvent(phase string, cr compactResult, lim aiContextLimits, budget int) map[string]any {
+	after := cr.After
+	if phase == "start" {
+		// start 只表达「开始了」：此时还没压完，after 给 0 会让卡片显示
+		// 「90k → 0」，看起来像把上下文清空了。
+		after = 0
+	}
+	// kind=loop + attempted=false：这不是摘要，也不会失败。
+	// 前端据此显示「已折叠 N 条较早结果」，而不是「摘要失败，已直接截断」。
+	ev := compactEvent(compactKindLoop, phase, cr.Before, after, cr.Folded+cr.Summarized, compactKeepRecentRounds, lim, budget, false, false)
+	ev["folded"] = cr.Folded
+	ev["summarized"] = cr.Summarized
+	ev["folded_ids"] = cr.FoldedIDs
+	return ev
+}
+
+// compactResult 一次循环内压缩的结果。
+//
+// 为什么要回结构而不是一个 int：`compact` 事件要带 `folded_ids`（§8 的
+// 「压缩后重查率」全靠它算），还要区分「折叠」与「摘要」两种动作——
+// 只回一个数字的话，这些信息在函数里就丢了，事后只能靠时间窗口猜。
+type compactResult struct {
+	// Before / After 压缩前后的估算 token（给事件卡显示 90k → 40k）。
+	Before int
+	After  int
+	// Folded 折叠到 aiToolFoldRune 的条数。
+	Folded int
+	// Summarized 只留一行的条数（更早的轮次）。
+	Summarized int
+	// FoldedIDs 被处理过的工具调用 id（含折叠与摘要）。
+	FoldedIDs []string
+}
+
+// compactTier 压缩分层（WP4b）。
+//
+// 三层的边界用「离最后一轮多远」表示，而不是绝对轮次：
+// 任务可能跑 3 轮也可能跑 60 轮，只有「最近的还热、早的先冷」这件事是恒定的。
+const (
+	// compactKeepRecentRounds 最近几轮原样保留（含最后一轮）。
+	compactKeepRecentRounds = 2
+	// compactSummarizeAfter 超过这么多轮之前的一律只留一行。
+	compactSummarizeAfter = 8
+	// compactSummaryRune 摘要层每条保留多少字（够认出「做过什么」）。
+	compactSummaryRune = 120
+)
+
+// compactLoopMessages 压住循环内的上下文增长，返回压缩明细。
+//
+// 三层策略（全部就地处理，**不调摘要模型**，所以成本不变）：
+//
+//	最近 2 轮   不动：模型正要用它们，折了等于让它重查一次（多花一轮的钱）；
+//	3–8 轮      折叠到 compactFoldRune：留工具名 + 结论首段；
+//	更早        只留一行：正文全部走 WP3 的 result id（或重新调用）。
+//
+// budget 由 aiLoopBudget 按模型窗口算出来传进来：固定 24000 对 1M 窗口的模型
+// 是白白折叠（本可以塞进更多文件原文），对 8K 模型则根本压不住。
+//
+// 就地修改 messages 里的 map（同一个 map 会被后续轮次复用）。
+func compactLoopMessages(messages []map[string]interface{}, budget int) compactResult {
+	res := compactResult{Before: estimateLoopTokens(messages), After: estimateLoopTokens(messages)}
 	if budget <= 0 {
 		budget = 24000
 	}
-	if estimateLoopTokens(messages) <= budget {
-		return 0
-	}
-	// 先算出最后一轮 tool 消息的起点：它和它之后的一律不动。
-	lastRoundStart := len(messages)
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i]["role"] == "tool" {
-			continue
-		}
-		// 走到一条带 tool_calls 的 assistant，说明它之后那批 tool 就是最后一轮。
-		if _, ok := messages[i]["tool_calls"]; ok {
-			lastRoundStart = i + 1
-			break
-		}
+	if res.Before <= budget {
+		return res
 	}
 
-	folded := 0
-	for i := 0; i < lastRoundStart && i < len(messages); i++ {
+	// WP4a：用显式轮次索引代替「反向扫数组」。
+	rounds := resolveMessageRounds(messages)
+	lastRound := lastRoundOf(rounds)
+	// 从最老的轮次开始处理：先压最冷的，够用就停。
+	for i := 0; i < len(messages); i++ {
+		if rounds[i] > lastRound-compactKeepRecentRounds {
+			// 最近两轮（含最后一轮）原样保留。
+			continue
+		}
 		m := messages[i]
-		if m["role"] != "tool" {
+		if m == nil || m["role"] != "tool" {
 			continue
 		}
 		s, ok := m["content"].(string)
-		if !ok || len([]rune(s)) <= aiToolFoldRune {
+		if !ok {
 			continue
 		}
-		m["content"] = string([]rune(s)[:aiToolFoldRune]) +
-			fmt.Sprintf("\n\n[较早的工具结果已折叠：原文 %d 字，只保留前 %d 字。若确实需要完整内容，请重新调用该工具并缩小范围。]", len([]rune(s)), aiToolFoldRune)
-		folded++
+		n := len([]rune(s))
+		if n <= compactSummaryRune {
+			// 已经够短了，再折没有收益。
+			continue
+		}
+		name := toolNameOfCall(messages, argString(m, "tool_call_id"))
+		// compactSummarizeAfter 之前的轮次只留一行；其后的折叠到 fold 上限。
+		older := rounds[i] <= lastRound-compactSummarizeAfter
+		if older {
+			m["content"] = fmt.Sprintf("[更早的工具结果已摘要：%s 原文 %d 字。要细节请重新调用该工具（缩小范围），或从上下文里的 result id 读原文。]", name, n)
+			res.Summarized++
+		} else if n > aiToolFoldRune {
+			m["content"] = string([]rune(s)[:aiToolFoldRune]) +
+				fmt.Sprintf("\n\n[较早的工具结果已折叠：%s 原文 %d 字，只保留前 %d 字。若确实需要完整内容，请重新调用该工具并缩小范围。]", name, n, aiToolFoldRune)
+			res.Folded++
+		} else {
+			// 在摘要层与折叠层之间但已经不长：不动，也不算进统计。
+			continue
+		}
+		if id := argString(m, "tool_call_id"); id != "" {
+			res.FoldedIDs = append(res.FoldedIDs, id)
+		}
 		if estimateLoopTokens(messages) <= budget {
 			break
 		}
 	}
-	if folded > 0 {
-		logger.I("[ai] 循环内上下文超预算，已折叠 %d 条较早的工具结果", folded)
+	res.After = estimateLoopTokens(messages)
+	// 日志交给调用点按 run 去重：这里每轮都会被调用，逐条记 I 日志会让
+	// 长任务的日志全是同一句「超预算」，反而看不出真正的问题。
+	return res
+}
+
+// toolNameOfCall 从 assistant 的 tool_calls 里反查某个 callID 的工具名。
+//
+// tool 消息自己不带工具名（协议里只有 tool_call_id），而折叠/摘要文案里
+// 「file_read 原文 40KB」比「某条工具结果」有用得多——用户与模型都要靠它
+// 判断「这条要不要重读」。找不到时回落成 "工具"。
+func toolNameOfCall(messages []map[string]interface{}, callID string) string {
+	if callID == "" {
+		return "工具"
 	}
-	return folded
+	for _, m := range messages {
+		if m == nil || m["role"] != "assistant" {
+			continue
+		}
+		calls, ok := m["tool_calls"].([]map[string]any)
+		if !ok {
+			continue
+		}
+		for _, c := range calls {
+			if argString(c, "id") != callID {
+				continue
+			}
+			if fn, ok := c["function"].(map[string]any); ok {
+				if name := argString(fn, "name"); name != "" {
+					return name
+				}
+			}
+		}
+	}
+	return "工具"
 }
 
 // toolOutputText 把工具结果渲染成「人看的」文本（只给卡片，不喂模型）。

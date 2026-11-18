@@ -113,8 +113,8 @@ func TestKeepRecentCount(t *testing.T) {
 		return out
 	}
 	// 预算充裕时保留更多条，预算紧张时至少留 8 条（「上一轮说过什么」得看得见）。
-	lots := keepRecentCount(mk(100, 400), 200000)
-	tight := keepRecentCount(mk(100, 400), 6000)
+	lots := keepRecentCount(mk(100, 400), 200000, AIProfile{})
+	tight := keepRecentCount(mk(100, 400), 6000, AIProfile{})
 	if lots <= tight {
 		t.Fatalf("预算大时应保留更多: lots=%d tight=%d", lots, tight)
 	}
@@ -125,7 +125,7 @@ func TestKeepRecentCount(t *testing.T) {
 		t.Fatalf("保留条数超过上限: %d", lots)
 	}
 	// 历史本身比下限还短时不能越界。
-	if got := keepRecentCount(mk(3, 100), 200000); got != 3 {
+	if got := keepRecentCount(mk(3, 100), 200000, AIProfile{}); got != 3 {
 		t.Fatalf("短历史保留条数应为 3，实际 %d", got)
 	}
 }
@@ -154,5 +154,19 @@ func TestLoopBudgetNotSmallerThanLegacy(t *testing.T) {
 		if b := aiLoopBudget(AIProfile{Model: m}); b < 24000 {
 			t.Fatalf("%s 的循环预算低于历史的 24000: %d", m, b)
 		}
+	}
+}
+
+func TestLoopBudgetScalesWithWindow(t *testing.T) {
+	// 大窗口不能用历史软上限 1/3 算：120K 软上限会把 1M 窗口的循环预算
+	// 卡死在 40K，模型读几份源码就折叠，然后不停重读（实测 30 轮零产出）。
+	// 现在按物理窗口算，1M 应拿到接近 200K 的封顶值。
+	big := aiLoopBudget(AIProfile{ContextWindow: 1000000, ContextSoftCap: 120000})
+	if big < 150000 {
+		t.Fatalf("1M 窗口的循环预算过小: %d", big)
+	}
+	small := aiLoopBudget(AIProfile{ContextWindow: 128000, ContextSoftCap: 120000})
+	if small < 24000 || small > 40000 {
+		t.Fatalf("128K 窗口应保持 24K~40K 旧量级，实际 %d", small)
 	}
 }

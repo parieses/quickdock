@@ -275,6 +275,11 @@ func (d *Database) ListClipboardEntriesByType(limit int, contentType string) ([]
 // 剪贴板历史（按时间倒序）。逻辑同 ListClipboardEntriesByType，只是把过滤下推到 text_type
 // 列（content_type 固定为 text）——这样智能分类标签也和 image/file 一样走 SQL 下推，
 // 既是 O(索引) 查询，又不受「只载入前 N 条」限制，旧的历史条目也能被筛出来。
+//
+// smartType 为空时只保留 content_type='text'：语义是「所有文本」，而不是
+// 「text_type 为空串的文本」。两者写出来只差一个谓词，含义却完全相反——后者会把
+// 已分类的 url/email/json/code/phone 条目全部漏掉，于是「不带标签」这个入口反而
+// 只剩没分过类的零星几条。与 SearchClipboardEntries 的「空 = 不过滤」同一口径。
 func (d *Database) ListClipboardEntriesBySmartType(limit int, smartType string) ([]ClipboardEntry, error) {
 	if limit <= 0 || limit > MAX_CLIPBOARD_ROWS {
 		limit = MAX_CLIPBOARD_ROWS
@@ -282,10 +287,16 @@ func (d *Database) ListClipboardEntriesBySmartType(limit int, smartType string) 
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	rows, err := d.conn.Query(
-		"SELECT "+clipboardSelectCols+" FROM clipboard_entries WHERE content_type = 'text' AND text_type = ? ORDER BY is_pinned DESC, created_at DESC LIMIT ?",
-		smartType, limit,
-	)
+	sqlText := "SELECT " + clipboardSelectCols + " FROM clipboard_entries WHERE content_type = 'text'"
+	args := make([]interface{}, 0, 2)
+	if smartType = strings.TrimSpace(smartType); smartType != "" {
+		sqlText += " AND text_type = ?"
+		args = append(args, smartType)
+	}
+	sqlText += " ORDER BY is_pinned DESC, created_at DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := d.conn.Query(sqlText, args...)
 	if err != nil {
 		return nil, err
 	}

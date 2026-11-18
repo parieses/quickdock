@@ -55,6 +55,11 @@ type aiSkill struct {
 	Enabled bool `json:"enabled"`
 	// Error 非空表示这个目录认得出来但读不出内容（缺 front-matter 之类）。
 	Error string `json:"error,omitempty"`
+	// AllowedTools `allowed-tools` 声明（WP10）：这个技能只该用哪些工具。
+	//
+	// 空表示不限制。**只收不放**：它只能在一轮对话里收窄工具面，永远
+	// 不能把用户已经关掉的工具重新打开（见 ToolFilter.AllowNames）。
+	AllowedTools []string `json:"allowedTools,omitempty"`
 }
 
 // skillsDataDir QuickDock 数据目录（skills/ 与 skills.json 都在它下面）。
@@ -126,7 +131,7 @@ func writeSkillManifest(enabled map[string]bool) error {
 // 只认 front-matter 里的单行 `key: value`：技能是给人写给模型看的，
 // 不是配置文件；真需要多行描述的用 YAML 块语法反而让人写不对。
 // 取不到 name 时回落到目录名——目录名本来就是作者起的那一个。
-func parseSkillMeta(content, dirName string) (name, desc string) {
+func parseSkillMeta(content, dirName string) (name, desc string, allowed []string) {
 	name, desc = dirName, ""
 	body := content
 	if strings.HasPrefix(strings.TrimLeft(content, " \t\r\n"), "---") {
@@ -150,6 +155,8 @@ func parseSkillMeta(content, dirName string) (name, desc string) {
 					}
 				case "description":
 					desc = v
+				case "allowed-tools", "allowed_tools", "allowedtools":
+					allowed = parseAllowedTools(v)
 				}
 			}
 			body = strings.TrimSpace(s[i+4:])
@@ -170,7 +177,86 @@ func parseSkillMeta(content, dirName string) (name, desc string) {
 	if r := []rune(desc); len(r) > skillDescMax {
 		desc = string(r[:skillDescMax]) + "…"
 	}
-	return name, desc
+	return name, desc, allowed
+}
+
+// parseAllowedTools 解析 `allowed-tools:` 的取值。
+//
+// 支持三种常见写法（都按「分隔符切成名字」处理）：
+//
+//	allowed-tools: file_read, file_grep
+//	allowed-tools: [file_read, file_grep]
+//	allowed-tools: file_read file_grep
+//
+// 只保留形如工具名的 token：出现路径、参数、shell 片段一律丢掉——那是写坏了
+// 的声明，猜它的意图不如忽略它（工具面不变，至少不会误收窄到「一个都不剩」）。
+func parseAllowedTools(v string) []string {
+	v = strings.TrimSpace(v)
+	v = strings.TrimPrefix(v, "[")
+	v = strings.TrimSuffix(v, "]")
+	fields := strings.FieldsFunc(v, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == ';'
+	})
+	out := make([]string, 0, len(fields))
+	seen := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		name := strings.Trim(strings.TrimSpace(f), `"'`)
+		if name == "" || seen[name] {
+			continue
+		}
+		// 工具名只允许字母/数字/下划线/连字符：带别的字符说明这一项不是工具名。
+		if !validToolName(name) {
+			logger.W("[skills] 忽略非法的 allowed-tools 项 %q", f)
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
+}
+
+// validToolName 工具名允许的字符集。
+//
+// 必须以字母开头：这一条挡的是 `--force`、`-rf` 这类参数被当成工具名——
+// 它们在对空格切分时和工具名长得一样，而混进白名单会让「按名字收窄」
+// 少筛掉一个真工具（更糟的是它永远匹配不上任何工具，白名单就成了摆设）。
+func validToolName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
+		case i > 0 && (r >= '0' && r <= '9' || r == '_' || r == '-'):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// skillAllowNames 决定这次对话要不要按技能声明收窄工具面，返回白名单。
+//
+// 规则（保守优先）：
+//   - 只在**明确选中了恰好一个技能**时收窄。多个技能同时生效时各自声明的是
+//     「我需要什么」，取交集会让两个技能互相废掉，取并集等于没有限制——
+//     两种都不对，所以这一档干脆不做；
+//   - 全局默认（没选过技能）不收窄：那种情况下用户根本没表达「只要这些」；
+//   - 该技能没声明 allowed-tools 时也不收窄。
+func skillAllowNames(raw string) (map[string]bool, string) {
+	picked, global := convSkillList(raw)
+	if global || len(picked) != 1 {
+		return nil, ""
+	}
+	tools := picked[0].AllowedTools
+	if len(tools) == 0 {
+		return nil, ""
+	}
+	allow := make(map[string]bool, len(tools))
+	for _, t := range tools {
+		allow[t] = true
+	}
+	return allow, picked[0].Name
 }
 
 // scanSkills 扫一遍技能目录（按名字排序）。单个技能坏掉只标记它自己，
@@ -196,7 +282,7 @@ func scanSkills() []aiSkill {
 			out = append(out, sk)
 			continue
 		}
-		sk.Name, sk.Description = parseSkillMeta(string(data), e.Name())
+		sk.Name, sk.Description, sk.AllowedTools = parseSkillMeta(string(data), e.Name())
 		sk.Enabled = enabled[sk.Name] || enabled[e.Name()]
 		out = append(out, sk)
 	}

@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"quickdock/internal/aiutil"
 	"quickdock/internal/db"
 	"quickdock/internal/logger"
 )
@@ -101,7 +102,16 @@ func (s *dbSink) Event(kind string, data map[string]any) {
 			logger.W("[ai] 事件序列化失败 run=%s kind=%s: %v", s.runID, kind, err)
 			payload = `{"marshal_error":true}`
 		} else {
-			payload = string(b)
+			// WP8：落库前脱敏。
+			//
+			// 事件表是 WP1 新开的「持久化面」：工具参数里可能带 `--token xxx`、
+			// 命令输出里可能有 PEM 私钥、URL 里可能内嵌凭据。这些内容进库之后
+			// 会被轨迹抽屉原样显示，也会随备份出到别处——而它本来只该在这一次
+			// 对话里存在。
+			//
+			// 复用 aiutil 那套规则而不是另写一份：SSH 屏显那边已经用它挡住了
+			// 同类内容，两份规则一旦漂移，会出现「屏显里遮住了、轨迹里漏出来」。
+			payload = aiutil.RedactSecrets(string(b))
 		}
 	}
 	if _, err := s.db.AppendAgentEvent(s.runID, s.nodeID, kind, payload); err != nil {
@@ -112,3 +122,53 @@ func (s *dbSink) Event(kind string, data map[string]any) {
 // Failed 恒为 false：后台执行没有「下游断开」这回事，
 // 是否该停由 ctx 决定（用户点停止 / run 超预算）。
 func (s *dbSink) Failed() bool { return false }
+
+// multiSink 把同一批事件依次转发给多个下游。
+//
+// 为什么需要它：顶层对话此前只有 sseSink——事件发完就没了，于是 run 树里只有
+// 子 agent 的步骤，主 agent「为什么派活、派之前试过什么」无从回看。dbSink 本来
+// 就是为这件事准备的（见本文件开头），只是此前只给了子 agent。
+//
+// 顺序固定为传入顺序（SSE 在前、落库在后）：用户看到的那一刻，库里已经有一份；
+// 断线也不会丢掉已经发生的事。
+type multiSink struct {
+	sinks []EventSink
+}
+
+// Push 原样转发。文本碎片对 dbSink 是空实现，转发没有代价。
+func (m *multiSink) Push(kind, text string) {
+	for _, s := range m.sinks {
+		s.Push(kind, text)
+	}
+}
+
+// Event 逐个转发。单个下游写失败由它自己消化（dbSink 只记 W），不中断其它下游。
+func (m *multiSink) Event(kind string, data map[string]any) {
+	for _, s := range m.sinks {
+		s.Event(kind, data)
+	}
+}
+
+// Failed 任一下游断开即视为断开——与 sseSink 的语义一致：
+// SSE 断了就没必要继续跑，而 dbSink 恒为 false，所以组合体的行为等同 SSE。
+func (m *multiSink) Failed() bool {
+	for _, s := range m.sinks {
+		if s.Failed() {
+			return true
+		}
+	}
+	return false
+}
+
+// SetConvID 透传给实现了 convIDSetter 的下游。
+//
+// 现在 runAgent 是在会话 id 确定之后才包 multiSink（见 agent_run.go），所以这条
+// 透传暂时用不上；但它必须存在——否则将来把包裹点前移，SSE 帧会静默丢掉 convId，
+// 前端失去会话归属，而症状是「消息跑到别的会话里」这种极难定位的怪事。
+func (m *multiSink) SetConvID(id string) {
+	for _, s := range m.sinks {
+		if c, ok := s.(convIDSetter); ok {
+			c.SetConvID(id)
+		}
+	}
+}

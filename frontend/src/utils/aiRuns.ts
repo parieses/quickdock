@@ -32,6 +32,8 @@ export interface AIRun extends RunLike {
   buf: string
   reasoning: string
   reasonBuf: string
+  /** 已归档的各轮思考（后端在轮次边界推 reasoning_round）。 */
+  reasonRounds: Array<{ round: number; text: string }>
   tools: AIToolCall[]
   rules: AIRuleFile[]
   /** 这一轮的上下文压缩记录（通常 0～2 行） */
@@ -46,6 +48,8 @@ export interface AIRun extends RunLike {
   ctrl: AbortController | null
   /** 收到过 done：收尾时不必再补一条「中断」气泡 */
   done: boolean
+  /** 本次运行对应的轨迹 runId（done 事件带回；WP1 修复） */
+  runId: string
   /** 用户自己点了停止。
    *
    *  收尾时要靠它区分「用户停的」和「流断了」：两者都是没收到 done 就结束，
@@ -70,6 +74,14 @@ export interface AIRun extends RunLike {
 export interface AICompact {
   /** v-for 的稳定 key（递增序号，不随 DOM 重建而变） */
   id: number
+  /**
+   * 压缩类型：history = 真调模型做摘要（贵、可能失败）；
+   * loop = 循环内折叠较早的工具结果（几毫秒、不会失败）。
+   * 两者共用一张卡，但文案必须分开——不然一次折叠会被显示成「摘要失败」。
+   */
+  kind: 'history' | 'loop'
+  /** 是否真的发起过摘要调用（false 时失败文案不该出现） */
+  attempted: boolean
   phase: 'start' | 'done'
   /** 压缩前的历史估算 token */
   before: number

@@ -109,6 +109,15 @@ func structToMap(v interface{}) map[string]interface{} {
 		if !field.IsExported() {
 			continue
 		}
+		// db:"-"：只读 / 计算字段，不落库。
+		//
+		// 这类字段必须留在结构体上——它们要随 ApiResult 回到前端（如 AISpace.TaskGone
+		// 只由 ListAISpaces 计算），但表里没有对应列，写进去就是「非法列名」，
+		// 整条 INSERT 回滚。没有这个标记时，唯一的解法是给字段改名或去 validColumns
+		// 里登记一个永远不存在的列，前者伤 JSON 契约、后者伤白名单语义。
+		if field.Tag.Get("db") == "-" {
+			continue
+		}
 		key := field.Tag.Get("json")
 		if key != "" {
 			// json tag 是 camelCase，但数据库列是 snake_case，需要转换

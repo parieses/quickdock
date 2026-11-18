@@ -15,39 +15,10 @@ import { ChevronDown, Network } from '@lucide/vue'
 import { AIAgentRunTree } from '../../bindings/quickdock/services/ai/aiservice'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { fmtElapsed, groupEventsByNode, summarizeEvent, type RunEvent, type RunTree } from '../utils/aiRunTree'
 
-// 与 internal/db/agent_run.go 的 json tag 对齐（snake_case）。
-interface RunNode {
-  id: string
-  run_id: string
-  parent_id: string
-  seq: number
-  role: string
-  task: string
-  status: string
-  cwd: string
-  model: string
-  result: string
-  prompt_tokens: number
-  completion_tokens: number
-  started_at: string
-  ended_at: string
-}
-interface RunHead {
-  id: string
-  status: string
-  goal: string
-  used_tokens: number
-  budget_tokens: number
-  error: string
-}
-interface RunTree {
-  run: RunHead | null
-  nodes: RunNode[]
-  events: unknown[]
-  last_seq: number
-}
-
+// 结构定义在 utils/aiRunTree.ts：轨迹抽屉（AiTraceDrawer.vue）用的是同一份。
+// 两处各写一遍接口时，字段一旦对不上就是「一处正常、另一处静默空白」，没有任何报错可看。
 const props = defineProps<{ runId: string }>()
 const { t } = useI18n()
 
@@ -109,6 +80,28 @@ const rows = computed(() =>
 
 const nodeCount = computed(() => rows.value.length)
 
+/** 每个节点自己的事件，展开时按 seq 顺序铺开。 */
+const eventsByNode = computed(() => groupEventsByNode(tree.value?.events ?? []))
+
+/**
+ * 事件的一行文案（这里空间小，只给「工具名 · 耗时」或一句错误）。
+ *
+ * 完整的工具参数、diff 行数在左侧轨迹抽屉里看——那里有横向空间。
+ * 两处共用 utils/aiRunTree.ts 的 summarizeEvent，字段口径不会分叉。
+ */
+function eventLine(e: RunEvent): string {
+  const s = summarizeEvent(e)
+  if (e.kind === 'tool') return s.name
+  if (e.kind === 'tool_result') {
+    const parts = [s.name]
+    if (s.ms > 0) parts.push(fmtElapsed(s.ms))
+    if (!s.ok) parts.push(t('aiTraceEventFail'))
+    return parts.join(' · ')
+  }
+  if (e.kind === 'notice' || e.kind === 'error') return s.message || e.kind
+  return e.kind
+}
+
 const statusText = computed(() => {
   const s = tree.value?.run?.status
   if (s === 'running') return t('aiRunStatusRunning')
@@ -153,6 +146,17 @@ function fmtTokens(n: number): string {
           <details v-if="n.result" class="qd-run-result">
             <summary>{{ t('aiRunResult') }}</summary>
             <pre>{{ n.result }}</pre>
+          </details>
+          <!-- 这个节点执行过的每一步（tool / tool_result / notice / error）。
+               默认折叠：这里是「派活的结果」视图，细节要的人才会展开。
+               想看完整参数与 diff 行数去左侧轨迹抽屉——那里有横向空间。 -->
+          <details v-if="(eventsByNode.get(n.id) ?? []).length" class="qd-run-events">
+            <summary>{{ t('aiRunEvents', { n: (eventsByNode.get(n.id) ?? []).length }) }}</summary>
+            <ul class="qd-run-event-list">
+              <li v-for="e in eventsByNode.get(n.id) ?? []" :key="e.id" class="qd-run-event">
+                {{ eventLine(e) }}
+              </li>
+            </ul>
           </details>
         </div>
         <div v-if="!rows.length" class="qd-run-hint">{{ t('aiRunEmpty') }}</div>

@@ -48,6 +48,12 @@ var capabilityWant = map[Runtime][]string{
 	RuntimeTraefik:    {"ServiceController", "LogProvider", "WebConsoleProvider", "ConfigProvider", "ConfigPortsProvider"},
 	RuntimeWebDAV:     {"ServiceController", "ConfigProvider", "ConfigPortsProvider"},
 	RuntimeEverything: {"ServiceController"},
+	// aria2：下载器引擎由环境管理托管（安装 / 启停 / 状态）。它刻意不实现 LogProvider
+	// 与 ConfigProvider——日志走 aria2 自己的 --log 文件、配置走 internal/aria2.Config，
+	// 两边都不经过能力接口。
+	RuntimeAria2: {"ServiceController"},
+	// OpenList：服务端 + Web 控制台，导出目录与配置路径都在它自己的 config 里。
+	RuntimeOpenList: {"ServiceController", "LogProvider", "WebConsoleProvider", "DataDirProvider", "ConfigProvider"},
 }
 
 // capOf 用类型断言实测某适配器实现了哪些可选能力接口。

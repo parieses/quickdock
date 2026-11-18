@@ -31,6 +31,12 @@ type ptyRecorder struct {
 	winCount int
 	winW     int
 	winH     int
+	// winSizes 记录收到过的每一个窗口尺寸（不去重、保序）。
+	//
+	// 为什么需要它：window-change 是**按 channel** 发的，多个标签共用一条 TCP
+	// 时，服务端收到它们的先后顺序没有任何保证。只记「最后一次」会得到一个
+	// 随调度变化的断言——测试因此随机红，而产品其实是对的。
+	winSizes [][2]int
 
 	input bytes.Buffer
 
@@ -102,6 +108,18 @@ func (r *ptyRecorder) setWin(w, h int) {
 	defer r.mu.Unlock()
 	r.winCount++
 	r.winW, r.winH = w, h
+	r.winSizes = append(r.winSizes, [2]int{w, h})
+}
+
+// winSet 返回收到过的尺寸集合（顺序无关）。
+func (r *ptyRecorder) winSet() map[[2]int]bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[[2]int]bool, len(r.winSizes))
+	for _, s := range r.winSizes {
+		out[s] = true
+	}
+	return out
 }
 
 func (r *ptyRecorder) addInput(b []byte) {

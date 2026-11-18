@@ -17,6 +17,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"strings"
+	"time"
 )
 
 // run / node 的状态取值。
@@ -113,9 +114,42 @@ type AgentEvent struct {
 const (
 	agentEventMaxPayload   = 32 << 10 // 32 KB
 	agentEventPreviewBytes = 2 << 10  // 截断后保留 2 KB 预览
-	agentEventKeepPerRun   = 2000     // 每个 run 最多保留的事件条数
-	agentEventPruneEvery   = 500      // 每追加这么多条才修剪一次（避免每条都 COUNT/DELETE）
+	// agentEventKeepPerRun 单个 run 保留的事件条数。
+	//
+	// 从 2000 提到 8000：一次真实的编码任务（读十几个文件、改几处、跑测试）
+	// 打到 3000～5000 条很常见，2000 会让「最早那几步」在中途就被剪掉——
+	// 而用户回头查「它一开始到底读了什么」正是最需要的那一段。
+	// 上限仍然存在：它是防止某个话痨工具把整张表撑爆的最后一道闸。
+	agentEventKeepPerRun = 8000
+	agentEventPruneEvery = 500 // 每追加这么多条才修剪一次（避免每条都 COUNT/DELETE）
 )
+
+// AgentRunRetentionDays agent_runs 的保留天数。
+//
+// 与回滚点（7 天）不同：轨迹是排障材料，「上周那次为什么失败」的复查需要它还在；
+// 而它比快照小两个数量级（事件只存元数据，正文在消息表）。30 天覆盖
+// 「这个月出的问题」这个最常见的追问范围。
+const AgentRunRetentionDays = 30
+
+// PurgeAgentRunsBefore 删掉创建时间早于 before 的 run，返回删掉的行数。
+//
+// 只删 agent_runs：agent_nodes 与 agent_events 的 run_id 外键都是
+// ON DELETE CASCADE，一步到底，不必（也不该）分三张表各写一条删除——
+// 那样一旦某次只删了一半，就会留下永远查不到的孤儿事件。
+func (d *Database) PurgeAgentRunsBefore(before time.Time) (int64, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	// 与 PurgeAIApprovals 同一口径：用 julianday 比，避免 RFC3339 字符串
+	// 在夏令时/不同时区偏移下按字典序比较出错。
+	res, err := d.conn.Exec(
+		`DELETE FROM agent_runs WHERE julianday(created_at) < julianday(?)`,
+		before.Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
 
 func mapToAgentRun(m map[string]interface{}) AgentRun {
 	return AgentRun{

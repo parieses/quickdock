@@ -400,9 +400,21 @@ func appendOverallMemory(root string, bullets []string) error {
 	if !strings.HasSuffix(cur, "\n") {
 		cur += "\n"
 	}
+	// 同一天共用一个 `## 日期` 小节。
+	//
+	// 原来每整理一次就追加一个 `## 日期 15:04`，一天下来 MEMORY.md 变成几十个
+	// 小节、每节一两条——「记忆记得很垃圾」的观感有一半来自这里。合并之后同一天
+	// 的事实聚在一起，去重也在这一个范围内做。
+	day := time.Now().Format("2006-01-02")
+	if merged, ok := appendBulletsToDaySection(cur, day, bullets); ok {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(p, []byte(trimMemoryToCap(merged, memoryAutoFileCap)), 0o644)
+	}
 	var b strings.Builder
 	b.WriteString(cur)
-	fmt.Fprintf(&b, "\n## %s\n", time.Now().Format("2006-01-02 15:04"))
+	fmt.Fprintf(&b, "\n## %s\n", day)
 	for _, l := range bullets {
 		b.WriteString("- " + l + "\n")
 	}
@@ -411,6 +423,41 @@ func appendOverallMemory(root string, bullets []string) error {
 		return err
 	}
 	return os.WriteFile(p, []byte(content), 0o644)
+}
+
+// appendBulletsToDaySection 把条目追加进已有的 `## day` 小节；没有该小节时返回 false。
+//
+// 插入位置是该小节的末尾（下一个 `## ` 之前），而不是文件末尾：否则「今天的记忆」
+// 会被后来的其它日期小节隔开，人读的时候要来回跳。
+func appendBulletsToDaySection(content, day string, bullets []string) (string, bool) {
+	head := "\n## " + day
+	idx := strings.Index(content, head)
+	if idx < 0 {
+		return content, false
+	}
+	start := idx + len(head)
+	nl := strings.Index(content[start:], "\n")
+	if nl < 0 {
+		return content, false
+	}
+	bodyStart := start + nl + 1
+	bodyEnd := len(content)
+	if next := strings.Index(content[bodyStart:], "\n## "); next >= 0 {
+		bodyEnd = bodyStart + next + 1
+	}
+	section := content[bodyStart:bodyEnd]
+	var add strings.Builder
+	for _, l := range bullets {
+		// 同一天内去重：模型换个说法重复同一件事很常见。
+		if strings.Contains(section, l) {
+			continue
+		}
+		add.WriteString("- " + l + "\n")
+	}
+	if add.Len() == 0 {
+		return content, true
+	}
+	return content[:bodyEnd] + add.String() + content[bodyEnd:], true
 }
 
 // trimMemoryToCap 超出 cap 时丢掉**最旧**的 `## ` 段，保留开头那段说明与最新的几节。

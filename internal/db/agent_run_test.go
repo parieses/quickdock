@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestAgentRunNodeEventRoundTrip 三张编排表的往返：
@@ -131,5 +132,79 @@ func TestAgentEventPayloadTruncated(t *testing.T) {
 	}
 	if !json.Valid([]byte(evs[0].Payload)) {
 		t.Fatalf("截断后的载荷不是合法 JSON: %s", evs[0].Payload[:80])
+	}
+}
+
+// PurgeAgentRunsBefore：按天清理只删过老的 run，节点与事件靠级联一起走。
+//
+// 为什么值得一条测试：清理是唯一的「删数据」路径，写错一步的后果不是报错，
+// 而是「上周那次失败的执行树悄悄不见了」——没人会立刻发现。
+// 同时钉住三件事：只删过老的、级联真的生效、新 run 不受牵连。
+func TestPurgeAgentRunsBefore(t *testing.T) {
+	d := openTestDB(t)
+
+	conv, err := d.CreateAIConversation(NewAIConversation{Title: "清理测试"})
+	if err != nil {
+		t.Fatalf("建会话失败: %v", err)
+	}
+	oldRun, err := d.CreateAgentRun(NewAgentRun{ConvID: conv.ID, Goal: "很久以前的任务"})
+	if err != nil {
+		t.Fatalf("建老 run 失败: %v", err)
+	}
+	newRun, err := d.CreateAgentRun(NewAgentRun{ConvID: conv.ID, Goal: "刚刚的任务"})
+	if err != nil {
+		t.Fatalf("建新 run 失败: %v", err)
+	}
+
+	node, err := d.CreateAgentNode(NewAgentNode{RunID: oldRun.ID, Role: "lead", Task: "老会话的步骤"})
+	if err != nil {
+		t.Fatalf("建节点失败: %v", err)
+	}
+	if _, err := d.AppendAgentEvent(oldRun.ID, node.ID, "tool", `{"name":"file_read"}`); err != nil {
+		t.Fatalf("追加事件失败: %v", err)
+	}
+	if _, err := d.AppendAgentEvent(newRun.ID, "", "tool", `{"name":"file_read"}`); err != nil {
+		t.Fatalf("追加新 run 事件失败: %v", err)
+	}
+
+	// 把老 run 推到保留期之外：CreateAgentRun 用的是 now()，只能直接改。
+	backdated := time.Now().AddDate(0, 0, -(AgentRunRetentionDays + 10)).Format(time.RFC3339)
+	if err := d.ExecuteParams(`UPDATE agent_runs SET created_at = ? WHERE id = ?`,
+		[]interface{}{backdated, oldRun.ID}); err != nil {
+		t.Fatalf("回填创建时间失败: %v", err)
+	}
+
+	n, err := d.PurgeAgentRunsBefore(time.Now().AddDate(0, 0, -AgentRunRetentionDays))
+	if err != nil {
+		t.Fatalf("清理失败: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("应只删掉 1 条过期 run，实际 %d", n)
+	}
+
+	// 老 run 本体、节点、事件全部消失。
+	if got, gerr := d.GetAgentRun(oldRun.ID); gerr != nil {
+		t.Fatalf("查老 run 失败: %v", gerr)
+	} else if got != nil {
+		t.Errorf("过期的 run 没被删掉: %+v", got)
+	}
+	if nodes, _ := d.ListAgentNodes(oldRun.ID); len(nodes) != 0 {
+		t.Errorf("节点应随 run 级联删除，仍有 %d 个", len(nodes))
+	}
+	if evs, _ := d.ListAgentEvents(oldRun.ID, 0, 100); len(evs) != 0 {
+		t.Errorf("事件应随 run 级联删除，仍有 %d 条", len(evs))
+	}
+
+	// 新 run 必须完好：清理不能把「刚跑完的那次」也带走。
+	if got, gerr := d.GetAgentRun(newRun.ID); gerr != nil || got == nil {
+		t.Errorf("误删了未过期的 run: %v %+v", gerr, got)
+	}
+	if evs, _ := d.ListAgentEvents(newRun.ID, 0, 100); len(evs) != 1 {
+		t.Errorf("新 run 的事件被误删，剩 %d 条", len(evs))
+	}
+
+	// 保留期本身也要守住：调小它等于悄悄缩短可回放的历史。
+	if AgentRunRetentionDays < 7 {
+		t.Errorf("AgentRunRetentionDays = %d，短于回滚点的 7 天，轨迹会比快照先消失", AgentRunRetentionDays)
 	}
 }

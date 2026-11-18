@@ -376,15 +376,22 @@ func TestMultiTabShareConnectionEndToEnd(t *testing.T) {
 		}
 	}
 	waitSvcUntil(t, "三个窗口尺寸请求都到达", func() bool {
-		_, _, open := rec.counts()
-		_ = open
 		n, _, _ := rec.win()
 		return n >= 3
 	})
-	if _, w, hgt := rec.win(); w != 80 || hgt != 24 {
-		t.Fatalf("最后改尺寸的应是第 3 个标签 80x24，实际 %dx%d", w, hgt)
+	// 断言「三个尺寸都到了」，而不是「最后到的那个是 80x24」。
+	//
+	// window-change 是按 channel 发的：三个标签共用一条 TCP，服务端收到它们的
+	// 先后顺序由 SSH 多路复用与调度决定，没有跨 channel 的 FIFO 保证。
+	// 原来那条「最后一条必须是第 3 个标签」的断言因此会随机红，
+	// 而它想验证的东西（每个标签的尺寸都独立、都真的发到了服务端）
+	// 用集合判定就够了。
+	got := rec.winSet()
+	for i, s := range sizes {
+		if !got[[2]int{s[0], s[1]}] {
+			t.Fatalf("第 %d 个标签的尺寸 %dx%d 没有到达服务端（已收到 %v）", i, s[0], s[1], got)
+		}
 	}
-
 	// 关掉中间那个，另外两个必须还活着。
 	if r := svc.Disconnect(sids[1]); r.Code != 0 {
 		t.Fatalf("关闭中间标签失败: %s", r.Msg)

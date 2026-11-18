@@ -69,6 +69,22 @@ export interface AIApprovalRuleView {
   editable: boolean
 }
 
+// 一条沉淀下来的放行规则（对应 Go 端 services/ai.AIGrantView，WP6）。
+//
+// 与上面那个的区别：上面是「每个工具的默认策略」，这里是「用户点过一次
+// 『以后都允许』留下的具体放行」。scope=workspace 时只在 workspace 目录下生效。
+export interface AIGrantView {
+  tool: string
+  // prefix（命令首词）/ path（目录）/ exact（这一具体调用）
+  kind: 'prefix' | 'path' | 'exact'
+  value: string
+  scope: 'global' | 'workspace'
+  workspace: string
+  created_at: string
+  // note 一句话说明这条规则放行了什么。
+  note: string
+}
+
 // 消息正文搜索的一条命中（对应 Go 端 db.AIMessageHit）。
 export interface AIMessageHit {
   msg_id: string
@@ -155,6 +171,15 @@ export interface AIConversation {
   // schedule_id 是产出它的定时任务 id，手工会话没有。
   unread?: boolean
   schedule_id?: string
+  // 任务状态（WP17）：目标 / 清单 / 清单状态。
+  //
+  // plan 是最近一次 plan_update 的完整 JSON（形状同 PlanCardState），
+  // plan_status 是 running / done / ''。三者都由后端在写清单时落库，
+  // 这里读回来是为了「刷新、重启、切走再回来，清单还在」——
+  // 此前清单只活在 SSE 事件里，页面一刷新就没了。
+  goal?: string
+  plan?: string
+  plan_status?: string
 }
 
 // 空间 = 一个目录 + 挂在这个目录下的若干任务。
@@ -218,6 +243,10 @@ export interface AIMsgImage { kind: 'file' | 'url'; url?: string; path?: string;
 export interface AIMessage {
   id: string; conv_id: string; role: string; content: string; created_at: string
   reasoning_content?: string; images?: string; imgList?: AIMsgImage[]
+  // 按轮拆开的思考（JSON 数组 `[{round,text}]`，空 = 没有分轮信息）。
+  // 界面用它把「第 N 轮在想什么」摆到第 N 轮的工具卡片上方；
+  // 没有它时回落到 reasoning_content 那一段整块。
+  reasoning_rounds?: string
   // 这条用户消息发出时挂上的技能名（JSON 数组字符串，空 = 没挂）。
   // 只用于在聊天里标出「这条用到了哪个技能」——技能本身只活在提示词里。
   skills?: string
