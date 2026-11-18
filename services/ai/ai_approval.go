@@ -32,6 +32,7 @@ import (
 	"quickdock/internal/db"
 	"quickdock/internal/logger"
 	mcpsrv "quickdock/internal/mcp"
+	"quickdock/services"
 )
 
 const (
@@ -484,10 +485,13 @@ func (a *AIService) gateFor(convID string) *approvalGate {
 //
 // decision 只认 "allow" / "deny"，不把前端字符串直接转 bool：拼错一个字母会被
 // 当成 false（拒绝），而那种 bug 表现为「点了允许但什么也没发生」，极难查。
-func (a *AIService) AIApproveToolCall(convID, callID, decision string, remember bool) error {
+//
+// 与其它 bound 方法一样返回 *services.ApiResult：全包唯一一个返回裸 error 的
+// 方法不该破坏契约——bindings 会据此生成统一的解包签名，前端调用方式才一致。
+func (a *AIService) AIApproveToolCall(convID, callID, decision string, remember bool) *services.ApiResult {
 	callID = strings.TrimSpace(callID)
 	if callID == "" {
-		return fmt.Errorf("缺少 callId")
+		return services.FailMsg("缺少 callId")
 	}
 	var allow bool
 	switch strings.TrimSpace(decision) {
@@ -496,20 +500,20 @@ func (a *AIService) AIApproveToolCall(convID, callID, decision string, remember 
 	case "deny":
 		allow = false
 	default:
-		return fmt.Errorf("未知决定 %q（只接受 allow / deny）", decision)
+		return services.FailMsg(fmt.Sprintf("未知决定 %q（只接受 allow / deny）", decision))
 	}
 
 	g := a.gateFor(strings.TrimSpace(convID))
 	if g == nil {
-		// 这个会话没有在等审批：已结束、已停止，或卡片残留。返回 nil 而不是错误
+		// 这个会话没有在等审批：已结束、已停止，或卡片残留。返回成功而不是失败
 		// ——前端点一张已经失效的卡片时，弹一个红框只会让人以为软件坏了。
 		logger.W("[ai-approval] 会话没有待审批的调用 conv=%s call=%s", convID, callID)
-		return nil
+		return services.Ok(nil)
 	}
 	if !g.decide(callID, allow, remember) {
 		logger.W("[ai-approval] 没有在等这个调用 conv=%s call=%s（可能已超时或已停止）", convID, callID)
 	}
-	return nil
+	return services.Ok(nil)
 }
 
 // aiApprovalLevelName 等级的英文标识（前端据此选配色，不用数字）。

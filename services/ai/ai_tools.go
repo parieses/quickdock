@@ -564,6 +564,29 @@ func parallelGroups(calls []aiToolCall) [][]int {
 	return groups
 }
 
+// wireToolArguments 把模型给出的参数串整理成上游一定接受的合法 JSON。
+//
+// 流式输出常在 tool_calls.arguments 上被截断（半截 JSON），模型也偶尔会吐一段
+// 解释文字当参数。本地执行层本来就容忍这种坏参数：prepareToolCall 把解析错误
+// 当成工具结果回给模型，让它自己改。但回传上游时 assistant.tool_calls[].function.
+// arguments 必须是合法 JSON，原样回传半截串会让整轮请求直接 400
+// "Assistant tool call xxx.arguments must be valid JSON."——本地明明处理好了，
+// 却死在下一发请求上；而报错里的工具名还常被网关打码成 ***，无从定位。
+//
+// 归一成 `{}`（"这次没拿到可用参数"）：模型会从紧随其后的 tool 消息里读到
+// 真实原因（原始串已被回显）并重试，不损失自我纠正的机会。
+func wireToolArguments(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "{}"
+	}
+	var args map[string]any
+	if err := json.Unmarshal([]byte(s), &args); err == nil && args != nil {
+		return raw // 合法就原样回传，含前后空白也不影响上游校验
+	}
+	return "{}"
+}
+
 // runToolCalls 执行一轮里的全部工具调用，返回要追加到 messages 的消息与记录。
 //
 // assistantText 是这一轮模型在调工具之前说的话（「我先查一下环境」）。
@@ -589,12 +612,20 @@ func (a *AIService) runToolCalls(ctx context.Context, calls []aiToolCall, round 
 	// content 用空串而不是 nil：个别网关会把 null 当成「这不是一条合法消息」。
 	wireCalls := make([]map[string]any, 0, len(calls))
 	for _, c := range calls {
+		// 模型写坏的 arguments 不能原样回传：上游会校验 JSON 合法性，
+		// 半截串会让整轮请求 400（见 wireToolArguments）。本地仍按原始串
+		// 执行、把错误回给模型；这里只收拾"回传上游那一刻"的表示。
+		wireArgs := wireToolArguments(c.Args)
+		if wireArgs != c.Args {
+			logger.W("[ai] 工具参数不是合法 JSON，回传前已置空 id=%s name=%s raw=%s",
+				c.ID, c.Name, logger.Trunc(c.Args, 160))
+		}
 		wireCalls = append(wireCalls, map[string]any{
 			"id":   c.ID,
 			"type": "function",
 			"function": map[string]any{
 				"name":      c.Name,
-				"arguments": c.Args,
+				"arguments": wireArgs,
 			},
 		})
 	}

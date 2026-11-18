@@ -230,6 +230,14 @@ func (sc *agentScope) reserveNode(role, task, cwd, model string) (*db.AgentNode,
 	if sc.nodes >= agentMaxNodes {
 		return nil, errAgentNodeLimit
 	}
+	// 轨迹关闭时 ensureRun 返回空 runID（一条记录都不建，见它的注释）。
+	// 这时绝不能拿空 runID 去插 agent_nodes：run_id 是 NOT NULL 外键，
+	// 插入必失败，连带把子 agent 整个废掉——关掉轨迹不该关掉派活。
+	// 返回一个内存态节点（ID 为空），spawn 侧据此跳过所有 DB 回填。
+	if runID == "" {
+		sc.nodes++
+		return &db.AgentNode{Role: role, Task: task, Cwd: cwd, Model: model}, nil
+	}
 	node, err := sc.svc.App.DB.CreateAgentNode(db.NewAgentNode{
 		RunID:    runID,
 		ParentID: parentID,

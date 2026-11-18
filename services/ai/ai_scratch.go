@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"quickdock/internal/fsguard"
 	"quickdock/services"
 )
 
@@ -46,14 +47,21 @@ func (a *AIService) AICleanScratch(cwd string) *services.ApiResult {
 	if err != nil || !info.IsDir() {
 		return services.FailMsg("工作目录不可用")
 	}
-	dir := filepath.Join(abs, aiScratchDirName, aiScratchSubDir)
-	// 再核一次：清理目标必须正好是 `<cwd>/.quickdock/tmp`，不能被 cwd 里的 `..`
-	// 或软链接带到别处（尤其不能变成 `.quickdock` 本身——那会删掉记忆与规则）。
-	want := filepath.Join(filepath.Clean(abs), aiScratchDirName, aiScratchSubDir)
-	if filepath.Clean(dir) != want {
-		return services.FailMsg("清理目标不合法")
+	// 解引用到真实路径再判边界：`.quickdock` 或 `tmp` 任一段是指向项目外的软链时，
+	// 字符串 Clean 看不出来，而 os.Stat 会跟着它指向外部目录——RemoveAll 就会
+	// 删掉工作目录之外的东西（注释里一直承诺「不能被软链接带到别处」）。
+	// 与写工具的 fsguard 共用同一份解引用实现，口径不再分叉。
+	realCwd := fsguard.ResolveExisting(filepath.Clean(abs))
+	dir := filepath.Join(realCwd, aiScratchDirName, aiScratchSubDir)
+	realDir := fsguard.ResolveExisting(dir)
+	// 目标必须正好是 `<cwd>/.quickdock/tmp`，既不能是 `.quickdock` 本身
+	// （那会删掉记忆与规则），也不能解引用后跑到 cwd 之外。
+	want := filepath.Join(realCwd, aiScratchDirName, aiScratchSubDir)
+	if realDir != want || !fsguard.IsWithin(realDir, realCwd) {
+		return services.FailMsg("清理目标不合法：辅助目录指向了工作目录之外")
 	}
-	st, serr := os.Stat(dir)
+	// Lstat 而非 Stat：软链本身在判边界时已被拒，这里只认真实目录。
+	st, serr := os.Lstat(realDir)
 	if serr != nil {
 		if errors.Is(serr, os.ErrNotExist) {
 			return services.OkMsg(nil, "没有需要清理的辅助文件")
@@ -63,7 +71,7 @@ func (a *AIService) AICleanScratch(cwd string) *services.ApiResult {
 	if !st.IsDir() {
 		return services.FailMsg("同名路径不是目录，已跳过")
 	}
-	if rerr := os.RemoveAll(dir); rerr != nil {
+	if rerr := os.RemoveAll(realDir); rerr != nil {
 		return services.Fail(rerr)
 	}
 	return services.OkMsg(nil, "已清理辅助文件目录")

@@ -460,3 +460,15 @@ func within(p, root string) bool {
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
+
+// ResolveExisting 是 expandExisting 的导出版：把已存在的路径段解引用成真实路径。
+//
+// 给「删除前判边界」这类场景用——删除目标若是指向别处的软链，字符串 Clean
+// 看不出来，os.Stat 还会跟着它指向外部。解引用后再判 within 才是真边界。
+// 与包内共用同一份实现，避免两处软链口径漂移。
+func ResolveExisting(abs string) string { return expandExisting(abs) }
+
+// IsWithin 是 within 的导出版：判断 p 是否等于 root 或在其子目录下。
+//
+// 与 ResolveExisting 配套：先把两边解引用，再用它判归属。
+func IsWithin(p, root string) bool { return within(p, root) }

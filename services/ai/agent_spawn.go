@@ -184,7 +184,10 @@ func (a *AIService) handleSpawnAgent(ctx context.Context, args map[string]any) (
 		case gate <- struct{}{}:
 			defer func() { <-gate }()
 		case <-ctx.Done():
-			_ = a.App.DB.UpdateAgentNodeResult(node.ID, db.AgentStatusCanceled, "", db.TokenUsage{})
+			// 轨迹关闭时 node 是内存态（ID 为空），没有记录可回填。
+			if node.ID != "" {
+				_ = a.App.DB.UpdateAgentNodeResult(node.ID, db.AgentStatusCanceled, "", db.TokenUsage{})
+			}
 			return nil, errors.New("用户已停止，子 agent 未执行")
 		}
 	}
@@ -218,13 +221,17 @@ func (a *AIService) handleSpawnAgent(ctx context.Context, args map[string]any) (
 	} else if res.Err != nil {
 		status = db.AgentStatusFailed
 	}
-	if err := a.App.DB.UpdateAgentNodeResult(node.ID, status, res.Text, res.Usage); err != nil {
-		logger.W("[ai] 回填子 agent 结果失败 node=%s: %v", node.ID, err)
-	}
 	tokens := res.Usage.Prompt + res.Usage.Completion
-	if tokens > 0 {
-		if err := a.App.DB.AddAgentRunUsage(node.RunID, tokens); err != nil {
-			logger.W("[ai] 累加 run 用量失败 run=%s: %v", node.RunID, err)
+	// 轨迹关闭时 node 是内存态（ID 为空）：没有节点/事件表记录要回填，
+	// 但用量与预算统计照常——关掉轨迹只是不落录像，不是不干活。
+	if node.ID != "" {
+		if err := a.App.DB.UpdateAgentNodeResult(node.ID, status, res.Text, res.Usage); err != nil {
+			logger.W("[ai] 回填子 agent 结果失败 node=%s: %v", node.ID, err)
+		}
+		if tokens > 0 {
+			if err := a.App.DB.AddAgentRunUsage(node.RunID, tokens); err != nil {
+				logger.W("[ai] 累加 run 用量失败 run=%s: %v", node.RunID, err)
+			}
 		}
 	}
 	sc.addUsage(res.Usage)

@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"quickdock/internal/aiutil"
 	"quickdock/internal/logger"
 	mcpsrv "quickdock/internal/mcp"
 	"quickdock/services"
@@ -182,22 +183,15 @@ func pathWithin(target, dir string) bool {
 	return strings.HasPrefix(target, dir+string(filepath.Separator))
 }
 
-// commandFamily 取命令首词（去掉常见的前缀包装与路径）。
+// commandFamily 取命令首词，作为族级放行的匹配键。
+//
+// 必须委托 aiutil.CommandFamily，不能在本地另写一份「取首词」：那份实现只对
+// 多段命令（&& / ; / | / 换行）返回空、对 cmd/powershell/python 这类解释器也
+// 不给族，而沉淀规则与「本次会话都允许」（见 tools/code.go）读的是同一套口径。
+// 两份一旦漂移，`npm install && curl …` 就会命中已沉淀的 npm 规则跳过审批——
+// 用户当初批准的只是「跑 npm」，不是「顺带执行任意命令」。
 func commandFamily(cmd string) string {
-	fields := strings.Fields(strings.TrimSpace(cmd))
-	for _, f := range fields {
-		f = strings.ToLower(f)
-		// 跳过 `sudo`/`env` 之类的前缀与 VAR=val 赋值。
-		if f == "sudo" || f == "env" || strings.Contains(f, "=") {
-			continue
-		}
-		// 取 basename：`/usr/bin/npm` 与 `npm` 是同一族。
-		if i := strings.LastIndexAny(f, `/\`); i >= 0 {
-			f = f[i+1:]
-		}
-		return f
-	}
-	return ""
+	return aiutil.CommandFamily(cmd)
 }
 
 func argString(args map[string]any, key string) string {
