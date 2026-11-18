@@ -145,6 +145,72 @@ type AgentRunReq struct {
 }
 
 // AgentRunResult 一次运行的结果。
+// finalRunStatus 把一次运行的收口状态翻译成 agent_runs 的终态。
+//
+// 抽成纯函数是为了能单测：终态必须由结果本身决定，而不是散在各条 return 分支里
+// 各写一遍——那正是这次漏网的根因（三条收口只发事件、没人写库）。
+// Canceled 优先于 Failed：用户主动停下来的普通错误（上游返回半截后 ctx 取消）
+// 不该在回放里被标成「失败」。
+func finalRunStatus(res AgentRunResult) (status, errMsg string) {
+	if res.Stopped {
+		return db.AgentStatusCanceled, ""
+	}
+	if res.Err != nil {
+		return db.AgentStatusFailed, res.Err.Error()
+	}
+	return db.AgentStatusDone, ""
+}
+
+// toolArgErrorHint 上游因 tool_calls 参数非法报 400 时，补一句只有本地才知道的线索。
+//
+// 上游报文里的工具名/调用 id 常被网关打码成 ***，用户盯着 "arguments must be
+// valid JSON" 根本不知道是哪一步写坏了。本轮 records 里恰好留着每个调用的
+// 名字和参数错误（prepareToolCall 的原文回显），拼出来即可定位，不必翻日志。
+func toolArgErrorHint(err error, records []aiToolRecord) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "must be valid json") && !strings.Contains(msg, "invalid json") {
+		return ""
+	}
+	names := make([]string, 0, len(records))
+	for _, r := range records {
+		if strings.Contains(r.Error, "参数解析失败") {
+			names = append(names, r.Name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("\n\n本轮有 %d 个工具调用的参数不是合法 JSON（%s）。通常是模型输出被截断；已按空参数回传，模型会看到原始参数并重试。", len(names), strings.Join(names, "、"))
+}
+
+// composeBaseSystem 把一段「干净 system」（firstSystem 的结果，含模式提示/摘要/记忆/技能）
+// 补上所有运行期行为约束，得到完整的 baseSystem。
+//
+// 初始装配与两处压缩后重建必须走同一处：重建出来的 messages 里 system 是干净的，
+// 只贴 rules 会丢掉 planHint（怎么拆任务）、workdirHint（临时文件往哪写）、
+// scaleHint（能不能派子 agent）、resumeHint（上次做到哪）、extToolsOverflowHint
+// （外部工具被截）——表现是长对话一压缩，AI 就突然不懂规矩了。
+// 这些约束都按「这次到底挂了什么」决定说不说，所以参数是 tools/cwd/extTrimmed 本身。
+func composeBaseSystem(clean string, rules aiRules, tools []map[string]any, cwd string, conv *db.AIConversation, message string, extTrimmed bool) string {
+	out := clean
+	if hasToolPayload(tools, "plan_update") {
+		out += planHint
+	}
+	out += workdirHintFor(cwd, tools)
+	out += scaleHintFor(tools)
+	out = withRules(out, rules)
+	if resumeHint := resumeHintFor(conv, message); resumeHint != "" {
+		out += resumeHint
+	}
+	if extTrimmed {
+		out += extToolsOverflowHint
+	}
+	return out
+}
+
 type AgentRunResult struct {
 	ConvID  string
 	Text    string
@@ -506,6 +572,19 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 		// 用户点停止、上游报错、预算收尾都会从循环里直接 return，
 		// 那些路径的 done 事件同样要带 runId——否则「点停止后抽屉空着」。
 		res.RunID = sc.RunID()
+		// run 终态统一在这里收口：本函数后面每一条 return（落用户消息失败、
+		// 组装上下文失败、取消、上游报错、正常结束）都会经过这个 defer。
+		// 此前只在建根节点失败时写过一次状态，正常路径的 run 永远停在 running，
+		// 于是轨迹抽屉按 status==='running' 无限轮询、回放里每条历史都显示运行中。
+		// 轨迹关闭时 runID 为空，defer 直接跳过——那条路本就不落表。
+		if runID := res.RunID; runID != "" {
+			defer func() {
+				status, errMsg := finalRunStatus(res)
+				if uerr := a.App.DB.UpdateAgentRunStatus(runID, status, errMsg); uerr != nil {
+					logger.W("[ai] 回填 run 终态失败 run=%s: %v", runID, uerr)
+				}
+			}()
+		}
 	}
 
 	// 审批闸门（见 ai_approval.go）。同样挂 ctx、同样只挂顶层执行：
@@ -663,34 +742,11 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 	// system 的原始正文（还没贴任何提示段）。工具说明与目录说明改成每轮重建
 	// 而不是一次追加：收尾轮撤下 tools 之后，system 里那段「你可以调用 file_read」
 	// 也必须一起撤掉，否则模型会把这次调用输出成纯文本标记（见 ai_dsml.go）。
-	baseSystem := firstSystem(messages)
-	// 清单工具挂上了才说这一句：工具没挂却说「用 plan_update」，模型会对着
-	// 一个不存在的名字反复重试（与 extToolsOverflowHint 是同一类问题）。
-	if hasToolPayload(tools, "plan_update") {
-		baseSystem += planHint
-	}
-	// WP18 / WP19：两条行为约束，同样按「这次到底挂上了什么」决定说不说。
-	//   - 有工作目录 + 有写权限才讲「辅助文件放 quickdock/」（否则是噪音）；
-	//   - 挂了 spawn_agent 才讲「大任务怎么拆」（否则模型会对着看不见的工具重试）。
-	baseSystem += workdirHintFor(cwd, tools)
-	baseSystem += scaleHintFor(tools)
 	// 项目规则（AGENTS.md / .quickdock/rules*）：读一次，贯穿本次 run。
 	// 压缩后重建复用的是同一份，不重新读盘——那次重建此刻正被超窗逼着做，
 	// 多加一次 IO 没有收益，还可能读到用户正在编辑的半截文件。
 	rules := a.loadAIRules(cwd, aiMentionPaths(req.Mentions))
-	baseSystem = withRules(baseSystem, rules)
-	// WP17：把「上次做到哪」交给模型。
-	//
-	// 没有未完成清单时是空串，零开销；有则分两种语气（见 resumeHintFor）：
-	// 纯「继续」要求更新原清单，有新内容时只提醒有旧清单在。
-	if resumeHint := resumeHintFor(conv, message); resumeHint != "" {
-		baseSystem += resumeHint
-	}
-	if extTrimmed {
-		// 外部工具因名额被截：必须说，否则模型在下一轮看到 server 报
-		// 「未知工具」时会一遍遍重试同一个名字。
-		baseSystem += extToolsOverflowHint
-	}
+	baseSystem := composeBaseSystem(firstSystem(messages), rules, tools, cwd, conv, message, extTrimmed)
 	applySystemHints(messages, baseSystem, toolHint, cwd, modeHasTools, false)
 	// 让用户看见「这次用上了哪些规则」：改了不生效又没有任何提示，
 	// 是这类功能最常见的抱怨，而用户没法自己看出 AI 到底读没读到。
@@ -769,10 +825,9 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 				logger.W("[ai] 请求前压缩无果 conv=%s: %v", res.ConvID, berr)
 				break
 			}
-			// system / 规则 / @ 引用要重新贴回去：压缩换掉的是整个消息列表，
-			// 而这三样只存在于内存里（与下面超窗兜底里那段是同一份处理）。
-			baseSystem = firstSystem(newMsgs)
-			baseSystem = withRules(baseSystem, rules)
+			// system / 规则 / 行为约束 / @ 引用要重新贴回去：压缩换掉的是整个
+			// 消息列表，这些都只存在于内存里（与下面超窗兜底走同一个 helper）。
+			baseSystem = composeBaseSystem(firstSystem(newMsgs), rules, tools, cwd, conv, message, extTrimmed)
 			applySystemHints(newMsgs, baseSystem, toolHint, cwd, len(tools) > 0, modeHasTools && len(tools) == 0)
 			applyMentionBlock(newMsgs, mentionBlock)
 			messages = newMsgs
@@ -1153,11 +1208,10 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 				break
 			}
 			// 新组装的上下文里 system 是干净的（没贴提示），base 要跟着换：
-			// 它可能已经带上了这次新算出的摘要。
-			baseSystem = firstSystem(newMsgs)
-			// 规则跟着一起贴回去：buildAIMessagesWithin 组出来的 system 是干净的。
-			// 漏了这一句的症状是「长对话聊到一半突然不认项目约定」，极难复现。
-			baseSystem = withRules(baseSystem, rules)
+			// 它可能已经带上了这次新算出的摘要。规则、清单/目录/派活/续跑等
+			// 行为约束全部由 composeBaseSystem 重贴，和请求前压缩走同一处——
+			// 漏贴的症状是「长对话压缩后 AI 突然不懂规矩」，极难复现。
+			baseSystem = composeBaseSystem(firstSystem(newMsgs), rules, tools, cwd, conv, message, extTrimmed)
 			applySystemHints(newMsgs, baseSystem, toolHint, cwd, len(tools) > 0, modeHasTools && len(tools) == 0)
 			// 引用材料同样要贴回去：重建出来的 messages 里那条 user 消息是库里的原文，
 			// @ 的内容只存在于内存。漏了这步，超窗重试之后 AI 会对着「照这个改」发愣。
@@ -1372,6 +1426,10 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 		saveSegment(assistant, true)
 		msg := lastErr.Error()
 		if hint := a.imageErrorHint(lastErr, req.Images); hint != "" {
+			msg += hint
+		}
+		// 上游把工具名/id 打码成 *** 时，这条是唯一能告诉用户"坏在哪个工具"的线索。
+		if hint := toolArgErrorHint(lastErr, records); hint != "" {
 			msg += hint
 		}
 		sink.Event("error", map[string]any{"message": msg})
