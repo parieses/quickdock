@@ -358,6 +358,21 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">AI 运行轨迹能回看了，长对话压缩不再「失忆」，工具调用更稳</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>AI 工具栏新增「轨迹」抽屉：一次回答跑了哪些工具、各自耗时与改动行数、派出去的子 agent 都按运行树列出来，跑完的会话也能回看；「子任务」视图汇总本次会话的所有 agent。运行中每秒刷新，跑完自动停，不再一直空转。长对话的上下文压缩现在会在正文和轨迹里都留痕，看得到压缩前后的体积。</li>
+          <li>长对话压缩后 AI 不再突然「不懂规矩」：拆任务、临时文件放哪、能不能派子 agent、上次做到哪这些约定，压缩后会一并贴回，不会一压就忘。工具栏的上下文统计弹框能实时看本会话占了多少 token、离窗口和预算还有多远、压缩过几次，也能手动压一次。</li>
+          <li>工具审批更严：以前批准过 <code>npm</code> 后，<code>npm install &amp;&amp; curl …</code> 这类拼接命令会蒙混过关跳过确认，现在多段命令一律重新问。模型偶尔把工具参数写坏（半截 JSON）时，本地能纠正，但回传上游会导致整轮请求报 400，现在会在发出前收拾成合法格式，不再无端失败；报错时也会说清是哪个工具的参数出了问题。</li>
+          <li>修掉一批稳定性问题：清理 AI 辅助文件时，目录里若有软链指向外面，不会再误删到工作目录之外；关掉轨迹后子 agent 照常干活但一条记录都不留；历史会话回放不再把已结束的运行显示成「进行中」。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.51</span>
+          <span class="log-date">2026-11-16</span>
           <span class="log-title">网盘和跨机迁移上线，AI 权限收成三档、下载历史不再重启即丢</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -412,25 +427,6 @@
           <li>下载器与 Git 页的「去安装」现在直接落在对应运行时上。原来跳到环境管理后停在默认选中的 node，还得自己在三十多个运行时里翻。</li>
         </ul>
       </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.48</span>
-          <span class="log-date">2026-11-11</span>
-          <span class="log-title">知识库导入 PDF 后搜不到的问题修好了，语义检索可以单配供应商</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>导入 PDF 后「搜什么都搜不到」修好了：WPS / Word 导出的 PDF 把每个汉字、每个数字都当独立文本块摆放，解析时「间距大于字号就补一个空格」的启发式因此必然误触发，整页中文被插成「项 目 立 项」、「6 0 分」。索引里存的是带空格的串，检索按三字滑窗匹配，于是任何查询都 0 命中——文件本身索引是成功的，坏的是文本。现在汉字、数字、百分号相邻不再插空格（中英文之间的空格保留），已入库的文档点一次重建即可恢复。</li>
-          <li>检索能听懂多词与整句提问：以前整句被包成一个短语，要求原文逐字连续出现——带空格的多词查询必挂，问答里把整个自然语言问句当检索词更是几乎必然空结果。现在按词切分、中文按三字滑窗取「或」，词与词之间用「且」，全不中时自动放宽为「或」，问「60分以下绩效怎么发」也能召回对应段落。</li>
-          <li>「60分」「80分」「70%」这类数字加中文的混合词以前会被按中英文切碎、每段都不足三字而整词丢弃，查询变成空串，现在整词兜底。</li>
-          <li>知识库设置终于真的生效了：app_state 的键白名单漏了 <code>kb_settings</code>，保存直接报 <code>invalid app_state key</code>、读取静默回退默认值，于是设置页填的语义检索模型从来没被用上，重建索引也不走向量，还不留错误痕迹。</li>
-          <li>语义检索可以单独配供应商：embedding 支持独立的接口地址与密钥，留空仍沿用当前 AI 档案。DeepSeek 和不少中转站只提供聊天、没有 <code>/embeddings</code> 端点，现在单独填一家（如硅基流动的 <code>BAAI/bge-m3</code>）即可，密钥读写全程掩码。</li>
-          <li>配好 embedding 后，问答从纯关键词升级为「关键词 + 语义」双路召回并按 RRF 融合，口语化提问的命中率明显提升。</li>
-        </ul>
-      </details>
-
-
 
     </div>
 

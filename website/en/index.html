@@ -358,6 +358,21 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">AI runs are now replayable, long chats stop forgetting themselves, tool calls get steadier</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>The AI toolbar has a new "Trace" drawer: see every tool an answer ran, how long each took, what it changed, and which sub-agents it spawned, laid out as a run tree you can replay after the fact. The "Subtasks" view collects all agents in a session. It refreshes each second while running and stops when the run finishes. Long-chat context compression now leaves a visible trace in both the answer and the trace, with before/after sizes.</li>
+          <li>After a long conversation is compressed, the AI no longer suddenly "forgets the rules": how to split work, where to put temp files, whether it may spawn agents, and where it left off are all re-attached. The new context panel shows how many tokens this session uses, how close it is to the window and budget, and how many times it compressed — with a button to compress manually.</li>
+          <li>Tool approval is stricter. Previously, allowing <code>npm</code> also let chained commands like <code>npm install &amp;&amp; curl …</code> slip through without asking; multi-part commands now always prompt again. When a model writes a broken tool argument (half-finished JSON), it used to fail the whole round with a 400 on the way back to the provider; it is now normalized to valid JSON first, and errors name the tool whose arguments were bad.</li>
+          <li>A batch of stability fixes: cleaning AI scratch files no longer follows a symlink out of the working directory; sub-agents still run with tracing off but leave no records; and replayed sessions no longer show finished runs as "in progress".</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.51</span>
+          <span class="log-date">2026-11-16</span>
           <span class="log-title">Cloud drive and cross-machine migration arrive; AI permissions collapse to three levels, downloads survive restarts</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -413,22 +428,6 @@
         </ul>
       </details>
 
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.48</span>
-          <span class="log-date">2026-11-11</span>
-          <span class="log-title">PDF search in the knowledge base works again; embeddings can use their own provider</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>Fixed "search returns nothing" after importing a PDF: WPS / Word exports place every Chinese character and every digit as a separate text block, so the "insert a space when the gap exceeds the font size" heuristic fired on every single gap and turned a page into "項 目 立 項" or "6 0 分". The index stored those space-riddled strings while queries match three-character windows, so nothing ever hit. The file was indexed fine — the text was broken. Spaces are no longer inserted between CJK characters, digits and percent signs (spaces between CJK and Latin text are kept), and already-indexed documents recover with one rebuild.</li>
-          <li>Search now understands multi-word and full-sentence queries: the whole query used to be wrapped in one phrase, requiring a verbatim contiguous match — multi-word queries with spaces failed outright, and asking a natural-language question (which Q&amp;A passes straight through) almost always came back empty. Queries are now split into terms, Chinese terms match on three-character windows joined by OR, terms are joined by AND, and when the strict pass finds nothing it falls back to OR.</li>
-          <li>Mixed tokens such as "60分", "80分" and "70%" used to be split by script, each fragment dropped for being under three characters, leaving an empty query — now the whole token is used as a fallback.</li>
-          <li>Knowledge base settings actually persist now: the app_state key whitelist was missing <code>kb_settings</code>, so saving failed with <code>invalid app_state key</code> and reading silently fell back to defaults — the embedding model typed into the settings dialog was never used and rebuilds never produced vectors, without leaving a trace.</li>
-          <li>Embeddings can use a dedicated provider: a separate endpoint and key can be set for the embedding model, falling back to the active AI profile when left empty. DeepSeek and several relays only serve chat models without an <code>/embeddings</code> endpoint, so pointing the knowledge base at a provider like SiliconFlow's <code>BAAI/bge-m3</code> is now enough. The key is masked on every read.</li>
-          <li>With an embedding model configured, Q&amp;A upgrades from keyword-only to keyword + semantic retrieval fused with RRF, which noticeably improves hits for conversational questions.</li>
-        </ul>
-      </details>
 
 
 
