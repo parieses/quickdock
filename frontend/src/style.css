@@ -566,9 +566,13 @@ body {
    材质只从三处透出：主侧栏、内容区的留白、卡片与面板之间的缝隙。
    html / body 自身必须透明，否则 WebView2 的透明底被盖住，DWM 材质根本看不到。
 
-   alpha：深色窗口底 0.50 / 侧栏 0.58，浅色 0.72 / 0.80。两档不同是因为容错方向
-   相反——深色是浅字压深壁纸，多透一点只损失背景厚度；浅色是深字压亮壁纸，
-   壁纸一深（很多人深色壁纸配浅色主题）整页就没对比度，实测 0.4 档连正文都读不清。
+   alpha：深色窗口底 0.50 / 侧栏 0.58，浅色 0.72 / 0.80。这是最初那一档，
+   材质最明显。当初觉得「壁纸抢正文、空页散」是个误判 —— 真正难看的不是这层
+   窗口底，而是若干页面自己在 L3/L4 又铺了不透明 bg-* 大色块，压在半透明底上
+   形成「比周围更深的死黑板」。那些块已在下面按类让开，全页统一只剩这一层底，
+   0.50 反而通透又统一。中途试过的 0.66 / 0.80 和 0.80 / 0.88 都是拿全局透明度
+   掩盖局部色块问题，材质越调越看不见，别再走回头路。
+   浅色容错方向仍相反——深字压亮壁纸，壁纸一深就没对比度，所以比深色更实。
    Acrylic 浮窗另用更实的一档（深 0.90 / 浅 0.94）；设置面板保持实色，原因见下方。 */
 html.qd-backdrop,
 html.qd-backdrop body {
@@ -588,8 +592,8 @@ html.qd-backdrop {
   /* 文本选中在材质档要更实一点：半透明蓝压在亮壁纸上会被冲淡到看不出选区。 */
   --color-text-selection: rgba(91, 140, 255, 0.44);
   --color-text-selection-dim: rgba(91, 140, 255, 0.22);
-  /* 终端比内容区更实一档：文字多、要压住亮壁纸，但仍留出 45% 透过率。
-     与 .ssh-page 那层窗口底叠完约 22% 材质可见，不再是整块死黑。 */
+  /* 终端比内容区再压一档：文字多、要盖住亮壁纸。窗口底 0.50 下这里取 0.55，
+     两层叠完约 22% 材质可见，既能看出材质，也不会让满屏文字压在彩色壁纸上。 */
   --color-terminal-bg: rgba(15, 17, 22, 0.55);
 }
 
@@ -600,7 +604,7 @@ html.qd-backdrop[data-theme="light"] {
   --color-select-bg: #e4eaf9;
   --color-text-selection: rgba(91, 140, 255, 0.34);
   --color-text-selection-dim: rgba(91, 140, 255, 0.16);
-  /* 浅色是深字压亮壁纸，容错小，终端底比深色档更实（0.72）。 */
+  /* 浅色是深字压亮壁纸，容错小；终端比深色档更实，叠完约 7.8% 材质可见。 */
   --color-terminal-bg: rgba(255, 255, 255, 0.72);
 }
 
@@ -654,7 +658,7 @@ html.qd-backdrop .ssh-term {
 
 /* SSH 左栏刻意保留两层：终端区是「窗口底 0.50 + xterm 0.55」≈ 22% 透过，
    左栏若跟着 transparent 就只剩一层（50%），会明显比右侧亮。这里补回一层
-   窗口底，让左右都落在 22~25%，与上轮修完的终端材质对得上。 */
+   窗口底，让左右都落在 22~25%，与终端材质对得上。 */
 html.qd-backdrop .ssh-standalone .ssh-side {
   background: var(--color-window-bg);
 }
@@ -692,6 +696,40 @@ html.qd-backdrop .app-content .ai-sidebar,
 html.qd-backdrop .app-content .kb-side,
 html.qd-backdrop .app-content .onboarding {
   background: transparent;
+}
+
+/* 第二轮：内容区 / 列表区的大色块。它们处在 L3/L4，两级子代选择器够不到，
+   自己又铺了不透明 bg-primary/secondary，把 .app-content 那层半透明窗口底切断，
+   形成「比周围更深的死黑板」—— 这正是「开了材质反而难看」的真凶，跟 alpha 无关。
+   这些层不是文字承载控件：行头、选中态、输入框、卡片都由自己的实色 bg-* 兜底，
+   让开后统一透出 .app-content 那一层，全页只剩一层底，材质连贯。
+   ⚠️ 不要顺手让开 .qd-page-header / .qd-panel-header（通栏结构条）和
+   .ne-editor / 各类 overlay（文字承载 / 需盖住底下的浮层），它们是刻意的实色。 */
+html.qd-backdrop .app-content .scene-rail,
+html.qd-backdrop .app-content .collection-list,
+html.qd-backdrop .app-content .item-list,
+html.qd-backdrop .app-content .qd-guide,
+html.qd-backdrop .app-content .ws-guide,
+html.qd-backdrop .app-content .ne-preview,
+html.qd-backdrop .app-content .nh-preview,
+html.qd-backdrop .app-content .kb-preview,
+html.qd-backdrop .app-content .nd-list,
+html.qd-backdrop .app-content .nd-jobs {
+  background: transparent;
+}
+
+/* 网盘预览是带阴影的浮层，底下压着文件列表：不能跟内容区一样全透明，
+   否则列表文字会透上来。改用 Acrylic 那档近实底，与命令面板 / 插件窗口同一档。 */
+html.qd-backdrop .app-content .nd-pv {
+  background: var(--color-acrylic-bg);
+}
+
+/* 剪贴板选中项：材质档的 --color-select-bg 是实色深蓝，在透壁纸的列表里
+   像贴了一块黑板（截图里最突兀的那条）。改成左侧蓝竖条 + 一圈内描边标识选中，
+   不再铺整条色块；左侧 3px 竖条由 :selected::before 提供，保留。 */
+html.qd-backdrop .app-content .clipboard-item.selected {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--color-accent-border);
 }
 
 /* 设置面板保持**实色**。
