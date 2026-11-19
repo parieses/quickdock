@@ -31,14 +31,29 @@ func dailyTestRoot(t *testing.T) string {
 	return root
 }
 
-// 纯问答轮次（0 轮工具、0 个文件）不进日志。
-func TestAppendDailyMemorySkipsChatOnly(t *testing.T) {
+// 纯问答轮次：**要留下记忆文件**，但不写「0 轮 / 0 次调用」这种空统计。
+//
+// 这条测试的契约变过一次，原因值得记下：早先为了治好「记忆很垃圾」，
+// 纯问答直接 return——结果新用户跑几天都看不到任何记忆文件，整条链路
+// 看起来「没生效」（用户实测反馈）。现在的口径是「记，但只记有意义的部分」。
+func TestAppendDailyMemoryChatOnlyWritesWithoutStats(t *testing.T) {
 	root := dailyTestRoot(t)
 	appendDailyMemory("conv-chat", filepath.Dir(root), "随便问问", "这个按钮在哪", nil, 0, 0)
 	dir := filepath.Join(root, "memory")
 	entries, _ := os.ReadDir(dir)
-	if len(entries) != 0 {
-		t.Fatalf("纯问答不该产生每日记忆，实际 %d 个文件", len(entries))
+	if len(entries) != 1 {
+		t.Fatalf("纯问答也应留下当日记忆文件（否则看起来功能没生效），实际 %d 个", len(entries))
+	}
+	data, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	if err != nil {
+		t.Fatalf("读记忆文件失败: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, "这个按钮在哪") {
+		t.Error("应记下用户诉求")
+	}
+	if strings.Contains(s, "0 轮 / 0 次调用") {
+		t.Errorf("不该写空统计（这正是「垃圾记忆」的来源）:\n%s", s)
 	}
 }
 
@@ -78,7 +93,7 @@ func TestFormatDailyFiles(t *testing.T) {
 	root := dailyTestRoot(t)
 	cwd := filepath.Dir(root)
 
-	got := formatDailyFiles(root, true, []string{
+	got := formatDailyFiles(cwd, []string{
 		filepath.Join(cwd, "src", "main.go"),
 		filepath.Join(cwd, memoryDirName, "tmp", "scan.js"), // 辅助文件，不该记
 		filepath.Join(cwd, "src", "main.go"),                // 重复
@@ -99,7 +114,7 @@ func TestFormatDailyFiles(t *testing.T) {
 	for _, n := range []string{"a", "b", "c", "d", "e", "f", "g", "h"} {
 		many = append(many, filepath.Join(cwd, n+".go"))
 	}
-	got = formatDailyFiles(root, true, many)
+	got = formatDailyFiles(cwd, many)
 	if len(got) != dailyFilesMax+1 {
 		t.Fatalf("超量应折叠成 %d+1 项，实际 %d: %v", dailyFilesMax, len(got), got)
 	}

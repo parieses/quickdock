@@ -106,6 +106,24 @@ var codeAgentSupplyChainRules = []struct {
 	{regexp.MustCompile(`(?i)\b(gem\s+push|dotnet\s+nuget\s+push)\b`), "发布会把包推到公共仓库，撤不回"},
 }
 
+// fileDirGrantKey 文件类工具的放行粒度：目标文件所在目录。
+//
+// 返回的键既是「这个工具能不能沉淀规则」的开关（nil = 不允许），也是审批卡上
+// 「以后都允许 <目录>」那句里的粒度来源（见 aiApprovalGrantScope）。
+//
+// 为什么用目录而不是文件：用户点「以后都允许」时想说的是「这个项目里别再问了」，
+// 不是「只允许这一个文件」——后者点一次只省一次。匹配侧是 pathWithin，
+// 一条目录规则覆盖它下面的所有文件。
+func fileDirGrantKey(args map[string]any) (string, bool) {
+	p := strings.TrimSpace(mcpsrv.Arg(args, "path"))
+	if p == "" {
+		return "", false
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	return "path:" + filepath.Dir(filepath.Clean(p)), true
+}
 func registerCode(d Deps) {
 	r := registrar{d: d, domain: mcpsrv.CategoryCode}
 	str := mcpsrv.Str
@@ -122,7 +140,12 @@ func registerCode(d Deps) {
 			"old_string":  str("要被替换的原文，必须与文件内容逐字符一致（含缩进）。建议带 2-3 行上下文保证唯一"),
 			"new_string":  str("替换成的新内容；要删除这段就传空字符串"),
 			"replace_all": boolp("可选。old_string 出现多次时是否全部替换，默认 false（此时多处会报错）"),
-		})
+		},
+		// 目录级放行（WP6）：没有这个声明，审批卡就不会出现「以后都允许」，
+		// 而 AIAddApprovalGrant 也会以「该工具不允许沉淀规则」拒绝——文件类工具
+		// 的路径授权等于从未生效。粒度是**目标文件所在目录**，与 run_command 的
+		// 命令族是同一层的抽象。
+		withGrantKey(fileDirGrantKey))
 
 	r.addCtx(fileWrite, mcpsrv.LevelWrite, "file_write",
 		"创建新文件并写入完整内容——**新建文件一律用它**。"+
@@ -135,7 +158,8 @@ func registerCode(d Deps) {
 			"path":      str("文件路径：绝对路径，或相对当前工作目录"),
 			"content":   str("要写入的完整文本内容（含换行）。写空文件也要显式传空字符串"),
 			"overwrite": boolp("可选。文件已存在时是否整份覆盖，默认 false（此时报错并提示改用 file_edit）"),
-		})
+		},
+		withGrantKey(fileDirGrantKey))
 
 	// 平台提示必须写进描述：模型习惯性地用 bash 语法，Windows 上由 cmd.exe 执行时
 	// 一句 `go vet ./... | head -50` 就会直接报「'head' 不是内部或外部命令」，

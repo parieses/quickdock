@@ -13,6 +13,7 @@
  * 面板骨架与分段渲染复用通用组件 AiPanel.vue（与 SSH 场景共用），
  * 本文件只负责剪贴板特有的部分：动作按钮、上下文引用条、请求调用。
  */
+import { aiActionLabelKey } from '../utils/aiActions'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { FileText, Sparkles } from '@lucide/vue'
@@ -66,8 +67,8 @@ onMounted(() => {
 
 /** 三个预置动作。顺序按使用频率排：翻译最常用。 */
 const actions = computed(() => [
-  { key: 'translate', label: t('clipboardAiTranslate'), icon: Sparkles },
-  { key: 'summarize', label: t('clipboardAiSummarize'), icon: FileText },
+  { key: 'translate', label: t(aiActionLabelKey('translate')), icon: Sparkles },
+  { key: 'summarize', label: t(aiActionLabelKey('summarize')), icon: FileText },
   { key: 'format', label: t('clipboardAiFormat'), icon: FileText },
 ])
 

@@ -430,34 +430,48 @@ func appendOverallMemory(root string, bullets []string) error {
 // 插入位置是该小节的末尾（下一个 `## ` 之前），而不是文件末尾：否则「今天的记忆」
 // 会被后来的其它日期小节隔开，人读的时候要来回跳。
 func appendBulletsToDaySection(content, day string, bullets []string) (string, bool) {
-	head := "\n## " + day
-	idx := strings.Index(content, head)
-	if idx < 0 {
+	// 按**整行**匹配 `## 日期`，不能用前缀匹配：旧格式的小节标题是
+	// `## 2026-11-18 09:12`，前缀匹配会把新条目塞进当天**最旧**那一节，
+	// 而 trimMemoryToCap 恰恰从最旧开始丢——升级当天写进去的记忆最先被裁掉。
+	lines := strings.Split(content, "\n")
+	start := -1
+	for i, l := range lines {
+		if strings.TrimRight(l, " \r") == "## "+day {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
 		return content, false
 	}
-	start := idx + len(head)
-	nl := strings.Index(content[start:], "\n")
-	if nl < 0 {
-		return content, false
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "## ") {
+			end = i
+			break
+		}
 	}
-	bodyStart := start + nl + 1
-	bodyEnd := len(content)
-	if next := strings.Index(content[bodyStart:], "\n## "); next >= 0 {
-		bodyEnd = bodyStart + next + 1
-	}
-	section := content[bodyStart:bodyEnd]
-	var add strings.Builder
+	section := strings.Join(lines[start+1:end], "\n")
+	add := make([]string, 0, len(bullets))
 	for _, l := range bullets {
 		// 同一天内去重：模型换个说法重复同一件事很常见。
 		if strings.Contains(section, l) {
 			continue
 		}
-		add.WriteString("- " + l + "\n")
+		add = append(add, "- "+l)
 	}
-	if add.Len() == 0 {
+	if len(add) == 0 {
 		return content, true
 	}
-	return content[:bodyEnd] + add.String() + content[bodyEnd:], true
+	insert := end
+	for insert > start+1 && strings.TrimSpace(lines[insert-1]) == "" {
+		insert--
+	}
+	out := make([]string, 0, len(lines)+len(add))
+	out = append(out, lines[:insert]...)
+	out = append(out, add...)
+	out = append(out, lines[insert:]...)
+	return strings.Join(out, "\n"), true
 }
 
 // trimMemoryToCap 超出 cap 时丢掉**最旧**的 `## ` 段，保留开头那段说明与最新的几节。
@@ -482,12 +496,61 @@ func trimMemoryToCap(content string, cap int) string {
 	kept := make([]string, 0, len(parts))
 	used := utf8.RuneCountInString(head)
 	for i := len(parts) - 1; i >= 0; i-- {
-		n := utf8.RuneCountInString(parts[i])
-		if used+n > cap && len(kept) > 0 {
-			break
+		sec := parts[i]
+		n := utf8.RuneCountInString(sec)
+		if used+n > cap {
+			if len(kept) > 0 {
+				break
+			}
+			// 最新这一节自己就超了 cap：不能整节丢（那是刚记住的东西），
+			// 也不能整节留（文件会无界增长、注入时被从头截掉）。
+			// 按**条目**裁：保留小节标题 + 最新的若干条，从最旧那条删起。
+			sec = trimSectionToCap(sec, cap-used)
+			n = utf8.RuneCountInString(sec)
 		}
-		kept = append([]string{parts[i]}, kept...)
+		kept = append([]string{sec}, kept...)
 		used += n
 	}
 	return head + "\n" + strings.Join(kept, "\n")
+}
+
+// trimSectionToCap 把单个小节裁到 budget 字以内：保留标题行 + 最新的条目行。
+//
+// 为什么从最旧那条删：记忆的价值随时间递减，而这一节的最后几条正是刚刚
+// 发生的事——注入时被截掉的恰恰是它们（原实现只做整节丢弃，碰到「单节超限」
+// 就无处可裁）。
+func trimSectionToCap(section string, budget int) string {
+	if budget <= 0 {
+		return ""
+	}
+	lines := strings.Split(section, "\n")
+	if len(lines) == 0 {
+		return clipRunes(section, budget)
+	}
+	header := lines[0]
+	if !strings.HasPrefix(header, "## ") {
+		// 结构不认识：退回整体截断，至少不破坏文件。
+		return clipRunes(section, budget)
+	}
+	body := lines[1:]
+	// 从尾部（最新）往前收，直到放得下。
+	kept := make([]string, 0, len(body))
+	used := utf8.RuneCountInString(header) + 1
+	for i := len(body) - 1; i >= 0; i-- {
+		l := body[i]
+		n := utf8.RuneCountInString(l) + 1
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		if used+n > budget && len(kept) > 0 {
+			break
+		}
+		kept = append([]string{l}, kept...)
+		used += n
+	}
+	out := header
+	if len(kept) > 0 {
+		out += "\n" + strings.Join(kept, "\n")
+	}
+	return out
 }

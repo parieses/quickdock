@@ -84,3 +84,47 @@ func TestDbDashFieldsAreExcluded(t *testing.T) {
 		}
 	}
 }
+
+// 插进表里的每一列，都必须真的存在于那张表。
+//
+// 为什么单靠上面的白名单检查不够：`validColumns` 是**全局**集合、不按表分，
+// 只要某个通用词（kind / count / title / content / note …）在别处登记过，
+// 新表加同名字段就能通过白名单，但运行时该表**所有** INSERT 都会因为
+// `no such column` 整条回滚——表现与 reasoning_rounds 那次一模一样，
+// 而上面的守卫全绿。所以这里补一条「结构体字段 ⊆ 目标表实际列」。
+func TestModelColumnsExistInTheirTables(t *testing.T) {
+	d := openTestDB(t)
+	pairs := []struct {
+		table  string
+		sample interface{}
+	}{
+		{"ai_messages", &AIMessage{}},
+		{"ai_conversations", &AIConversation{}},
+		{"ai_spaces", &AISpace{}},
+		{"agent_runs", &AgentRun{}},
+		{"agent_nodes", &AgentNode{}},
+		{"agent_events", &AgentEvent{}},
+		{"items", &CollectionItem{}},
+		{"collections", &Collection{}},
+		{"workspaces", &Workspace{}},
+		{"scenes", &Scene{}},
+		{"tools", &OpenTool{}},
+		{"snapshots", &Snapshot{}},
+	}
+	for _, p := range pairs {
+		for col := range structToMap(p.sample) {
+			if !d.hasColumn(p.table, col) {
+				t.Errorf("%s 的字段 %q 在表 %s 里不存在列：该表的所有 INSERT 都会失败（no such column）",
+					reflectTypeName(p.sample), col, p.table)
+			}
+		}
+	}
+}
+
+// reflectTypeName 只用于报错信息，避免打出一长串指针地址。
+func reflectTypeName(v interface{}) string {
+	if v == nil {
+		return "<nil>"
+	}
+	return reflect.TypeOf(v).Elem().Name()
+}

@@ -11,6 +11,7 @@
  * 任何一环出问题都表现为"点了没反应"，且各窗口 JS 状态互不可见，极难排查。
  * 现在上下文随请求走，一次调用拿回答案。
  */
+import { aiActionLabelKey } from '../utils/aiActions'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlignLeft, Languages, ListTree, PenLine, CornerDownLeft, Plus, Replace } from '@lucide/vue'
@@ -68,10 +69,10 @@ onMounted(() => {
 
 /** 四个预置动作：覆盖笔记场景的绝大多数诉求。 */
 const actions = computed(() => [
-  { key: 'summarize', label: t('noteAiSummarize'), icon: ListTree },
+  { key: 'summarize', label: t(aiActionLabelKey('summarize')), icon: ListTree },
   { key: 'polish', label: t('noteAiPolish'), icon: PenLine },
   { key: 'continue', label: t('noteAiContinue'), icon: AlignLeft },
-  { key: 'translate', label: t('noteAiTranslate'), icon: Languages },
+  { key: 'translate', label: t(aiActionLabelKey('translate')), icon: Languages },
 ])
 
 /** 待处理内容的预览：只给前两行，别把整篇铺满弹层。 */

@@ -5,8 +5,8 @@ import { Events } from '@wailsio/runtime'
 import { KEEP_ALIVE } from '../pages/keepAlive'
 import {
   Copy, Image as ImageIcon, X, Download, MessageSquare,
-  Languages, FileText, GraduationCap, Lightbulb, Check,
-  ChevronDown, ListChecks,
+  Languages, FileText, ScanSearch, Lightbulb, Check,
+  ChevronDown, ListChecks, CircleHelp,
 } from '@lucide/vue'
 import { Marked } from 'marked'
 import { unwrap } from '../utils/api'
@@ -15,6 +15,7 @@ import AiConversationSidebar from './AiConversationSidebar.vue'
 import AiToolbar from './AiToolbar.vue'
 import AiTraceDrawer from './AiTraceDrawer.vue'
 import AiContextDialog from './AiContextDialog.vue'
+import AiSessionStatsDialog from './AiSessionStatsDialog.vue'
 import AiDigestPanel from './AiDigestPanel.vue'
 import AiJobsPanel from './AiJobsPanel.vue'
 import AiHero from './AiHero.vue'
@@ -68,7 +69,9 @@ import type {
   AIRuleFile, AISkill, AISpace, AIToolCall, OutlineItem, AIPrompt, AIMentionItem,
 } from '../types/ai'
 import { artifactsFromCalls, artifactsOf, shortPath, toolList } from '../utils/aiTools'
+import { AI_ACTION_CHIPS, AI_QUICK_PROMPTS, AI_HELP_FILL_KEY, QUICK_PROMPT_FILL_KEYS } from '../utils/aiActions'
 
+import { AIContextStats } from '../../bindings/quickdock/services/ai/aiservice'
 import {
   AIListProfiles,
   AISetActiveProfile,
@@ -496,7 +499,10 @@ async function rememberGrantAndAllow(tc: AIToolCall) {
   if (tc.approval !== 'pending') return
   const isCmd = tc.name === 'run_command'
   const dir = (convCwd.value || '').trim()
-  const value = isCmd ? (tc.grantScope || '').trim() : dir
+  // 命令类：粒度是命令族（npm）；文件类：粒度是**目标目录**（后端 GrantKey 给的
+  // grantScope）。后者为空才回落到会话工作目录——早先这里一律用 dir，导致审批卡
+  // 上写的是「以后都允许 <子目录>」、实际存的是整个工作目录，两处说法不一致。
+  const value = isCmd ? (tc.grantScope || '').trim() : ((tc.grantScope || '').trim() || dir)
   if (!value) {
     logErr('ai:rememberAlways', new Error(`缺少可沉淀的粒度 name=${tc.name} scope=${tc.grantScope || ''}`))
     await approveTool(tc, 'allow', true)
@@ -595,25 +601,28 @@ const hasKey = computed(() => {
   // 不要拿「有没有 Key」当对话开关（否则本地模型永远提示去配 Key）。
   return !!p.apiKey || !profileNeedsKey(p)
 })
-// 任务的五种类型。icon/desc 跟着类型走，落地页那一排 pill 与侧栏的任务图标都读这一份——
-// 两处各写一遍的话，加一个类型就要在两个地方各补一次，漏一处就是「类型选不了」。
-//
-// 「计划」不再是一个可选类型：它变成了 AI 自己的行为——任务太大、一次说不完时，
-// 它自己把步骤拆出来、按顺序做、做完一项勾一项（规则写在 chat 模式的提示词里），
-// 而不是让用户先切进一个「只读、只交清单」的模式。留着那个入口的副作用是：
-// 用户以为自己在规划，实际只是拿到一份清单，还得再点一次「开始执行」。
-const modes = [
-  { key: 'chat', label: 'aiModeChat', desc: 'aiModeChatDesc', icon: MessageSquare },
-  { key: 'explain', label: 'aiModeExplain', desc: 'aiModeExplainDesc', icon: Lightbulb },
-  { key: 'translate', label: 'aiModeTranslate', desc: 'aiModeTranslateDesc', icon: Languages },
-  { key: 'summarize', label: 'aiModeSummarize', desc: 'aiModeSummarizeDesc', icon: FileText },
-  { key: 'tutorial', label: 'aiModeTutorial', desc: 'aiModeTutorialDesc', icon: GraduationCap },
-]
+// 侧栏任务图标仍按历史 mode 值取（老会话可能是 explain/translate...），所以 actionIcons 保留全量。
+// 落地页的「模式」按一期方案收口：只保留对话一个入口。解释/翻译/总结/审阅不再是模式，
+// 改在聊天页以快捷提示词胶囊出现（见下方 actionChips）。变量名仍叫 modes 是因为
+// AiHero 的 prop 名如此，改名要一起改子组件。
+const actionIcons: Record<string, typeof MessageSquare> = {
+  chat: MessageSquare,
+  explain: Lightbulb,
+  translate: Languages,
+  summarize: FileText,
+  review: ScanSearch,
+}
+const modes = AI_ACTION_CHIPS.filter((a) => a.key === 'chat').map((a) => ({
+  key: a.key,
+  label: a.labelKey,
+  desc: a.descKey,
+  fillKey: a.fillKey,
+  icon: actionIcons[a.key] || MessageSquare,
+}))
 
 // 侧栏任务行前面的小图标：不标出来，「这条任务是翻译还是闲聊」只能点进去看内容。
 function modeIcon(m?: string) {
-  const hit = modes.find((x) => x.key === (m || 'chat'))
-  return hit ? hit.icon : MessageSquare
+  return actionIcons[m || 'chat'] || MessageSquare
 }
 
 // —— 图片附件 ——
@@ -1012,7 +1021,6 @@ async function selectConv(id: string, msgId?: string) {
   hydratePlanOf(conv)
   // 轨迹入口也要补：刷新页面后手上没有 done 事件，只能从库里取最近一次 run。
   // 不 await——它只影响那个小圆点，不该让切会话等一次往返。
-  void loadLatestRunId(id)
   // 定时任务在后台跑完的会话带未读点：人已经切进来了就消。
   // 先改本地数组再发请求，避免后端往返期间点还在闪；写失败只留日志，
   // 不弹 toast——未读只是提示，不该打断一次正常的切会话。
@@ -1136,13 +1144,12 @@ async function copyPath(dir: string) {
 // ---- 新建任务（落地页，不是弹窗）----
 //
 // 原来点「新建任务」弹一个框让你先定类型再定目录，定完才出现输入框，等于把
-// 「提一个问题」拆成三步。现在改成主区直接变成落地页：上面选类型（一排 pill）、
+// 「提一个问题」拆成三步。现在改成主区直接变成落地页：上面一排快捷提示词 pill、
 // 输入框、下面一行选归属空间/模型——边选边打字，回车就走。
 //
-// 类型和空间仍然是这条任务的属性（首次发送时随请求带过去并落库），
-// 只是把它们从「创建前的必答项」降级成「发送前顺手改的两个开关」：
-// 不改就是默认（对话 + 普通任务），想改就在输入框下面改。
-const newTaskMode = ref('chat')
+// 那排 pill 不再是「模式」：解释/翻译/总结/审阅点一下是把指令前缀填进输入框，
+// 所有任务一律按普通对话发出（提示词就在正文里，所见即所得）。空间仍随首条
+// 请求带过去落库；不改就是默认（普通任务）。
 // 归属空间：'' = 普通任务；已有空间的 id = 直接用它；NEW_SPACE = 新建（这时才要选目录）。
 //
 // 下拉优先而不是「一律选目录」：空间按目录唯一，重复选同一个目录后端也只是返回
@@ -1634,7 +1641,11 @@ function disarmScratch() {
   }
 }
 
+const scratchBusy = ref(false)
 async function cleanScratch() {
+  // 请求期间禁止重入：连点四下（两次上膛）会并发发两个删除请求，
+  // 第二个通常返回「目录不存在」，用户看到一次莫名其妙的失败 toast。
+  if (scratchBusy.value) return
   if (!scratchArmed.value) {
     disarmScratch()
     scratchArmed.value = true
@@ -1642,12 +1653,15 @@ async function cleanScratch() {
     return
   }
   disarmScratch()
+  scratchBusy.value = true
   try {
     const msg = unwrap<string>(await AICleanScratch(convCwd.value))
     toast.success(msg || t('aiScratchCleanDone'))
   } catch (e) {
     toast.error(getErrorMessage(e))
     logErr('ai:cleanScratch', e)
+  } finally {
+    scratchBusy.value = false
   }
 }
 
@@ -1677,29 +1691,168 @@ function lastRunIdOf(raw: string | undefined): string {  if (!raw) return ''
 const liveRunId = computed(() => (activeId.value ? runIds.value[activeId.value] ?? '' : ''))
 const lastRunId = ref('')
 
+// 代次守卫：快速切会话时后返回的旧请求不许覆盖新的结果。
+// 与 loadMessages 的 messagesGen 同一个理由（见那里的注释）。
+let latestRunGen = 0
 async function loadLatestRunId(convId: string) {
-  lastRunId.value = ''
-  if (!convId) return
+  const gen = ++latestRunGen
+  if (!convId) {
+    lastRunId.value = ''
+    return
+  }
+  // 不在 await 前清空：清空会让「本来有 run 的会话」在请求期间闪成空入口。
   try {
     const run = unwrap<{ id?: string } | null>(await AILatestRun(convId))
+    if (gen !== latestRunGen) return
     lastRunId.value = run?.id ?? ''
   } catch (e) {
+    if (gen === latestRunGen) lastRunId.value = ''
     logErr('ai:latestRun', e)
   }
 }
 
-const traceRunId = computed(() => {  const runTools = activeRun.value?.tools ?? []
+// 上下文占用百分比：与弹框同一套口径（实测优先，分母用出站上限）。
+//
+// stored 是「最近一次算出来的值」：切会话时清空，跑完一轮后刷新。
+// 用代次守卫防快速切会话时旧响应覆盖新会话的结果。
+const ctxPercent = ref(0)
+let ctxGen = 0
+async function refreshCtxPercent(convId: string) {
+  const gen = ++ctxGen
+  if (!convId) {
+    ctxPercent.value = 0
+    return
+  }
+  try {
+    const s = unwrap<Record<string, number> | null>(await AIContextStats(convId) as never)
+    if (gen !== ctxGen) return
+    const used = Number(s?.measured_tokens) > 0 ? Number(s?.measured_tokens) : Number(s?.estimated_tokens) || 0
+    const total = Number(s?.ceiling) || Number(s?.window) || 0
+    ctxPercent.value = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0
+  } catch (e) {
+    if (gen === ctxGen) ctxPercent.value = 0
+    logErr('ai:ctxStatus', e)
+  }
+}
+watch(activeId, (id) => { void refreshCtxPercent(id || '') }, { immediate: true })
+// 一轮跑完（runs 数量变化）后重算：上下文是「这一轮结束时」的大小。
+watch(() => runs.value.length, () => { if (activeId.value) void refreshCtxPercent(activeId.value) })
+// 输入框下方的会话状态：轮 / 步 / token / 缓存命中。
+//
+// 数据全部来自已加载的消息，不额外请求；缺字段的旧消息按 0 算，
+// 整条算不出来（新任务、空会话）就返回空串，界面上不留空行。
+const convStatus = computed(() => {
+  let rounds = 0
+  let steps = 0
+  let tokens = 0
+  let cached = 0
+  for (const m of messages.value) {
+    rounds += Number((m as any).tool_rounds) || 0
+    const raw = (m as any).tool_calls
+    if (typeof raw === 'string' && raw) {
+      try {
+        const list = JSON.parse(raw)
+        if (Array.isArray(list)) steps += list.length
+      } catch {
+        // 坏数据：不计步数，别让一行统计把整块界面弄崩
+      }
+    }
+    tokens += (Number((m as any).prompt_tokens) || 0) + (Number((m as any).completion_tokens) || 0)
+    cached += Number((m as any).cached_tokens) || 0
+  }
+  if (!rounds && !steps && !tokens) return ''
+  const parts: string[] = []
+  if (rounds || steps) parts.push(t('aiStatusRounds', { rounds, steps }))
+  if (tokens) parts.push(t('aiStatusTokens', { n: fmtTokens(tokens) }))
+  if (cached && tokens) parts.push(t('aiStatusCache', { n: Math.round((cached / Math.max(1, tokens)) * 100) }))
+  // 输出速度：只算「首字之后的生成时间」，否则等工具的时间会把速度拉低到失真。
+  let genMs = 0
+  let outTok = 0
+  for (const m of messages.value) {
+    const st = statMap.get(m.id)
+    if (!st || st.completionTokens <= 0) continue
+    outTok += st.completionTokens
+    genMs += Math.max(0, st.elapsedMs - st.firstTokenMs)
+  }
+  if (outTok > 0 && genMs >= 1000) {
+    parts.push(t('aiStatusSpeed', { n: Math.round(outTok / (genMs / 1000)) }))
+  }
+  if (ctxPercent.value > 0) parts.push(t('aiStatusCtx', { n: ctxPercent.value }))
+  return parts.join(' · ')
+})
+
+// 底部状态栏胶囊（对齐 DSH）：会话统计 / Token 用量 / 上下文，三个都留。
+// 每个标签从上面的聚合里取，避免重复遍历消息；详情数字交给弹框从后端拉。
+// 「本轮用量」是第四处入口，挂在每条 assistant 回复末尾（openMessageUsage），不占状态栏。
+const statusPills = computed(() => {
+  let rounds = 0, steps = 0, tokens = 0, cached = 0
+  for (const m of messages.value) {
+    rounds += Number((m as any).tool_rounds) || 0
+    const raw = (m as any).tool_calls
+    if (typeof raw === 'string' && raw) {
+      try {
+        const list = JSON.parse(raw)
+        if (Array.isArray(list)) steps += list.length
+      } catch { /* 坏数据不计步数 */ }
+    }
+    tokens += (Number((m as any).prompt_tokens) || 0) + (Number((m as any).completion_tokens) || 0)
+    cached += Number((m as any).cached_tokens) || 0
+  }
+  // 流式期间当前 run 的工具还没落库，先把它算进来——否则「轮/步」要等回答
+  // 结束才跳一下，看起来像卡住。
+  const live = activeRun.value
+  if (live) {
+    steps += live.tools.length
+  }
+  const hit = tokens > 0 ? Math.round((cached / Math.max(1, tokens)) * 100) : 0
+  return {
+    session: t('aiStatusRounds', { rounds, steps }),
+    tokens: t('aiSessionPillTokens', { n: fmtTokens(tokens), pct: hit }),
+    ctx: t('aiStatusCtx', { n: ctxPercent.value }),
+  }
+})
+
+// 统计弹框：会话统计 / 本轮用量两页共用。
+const statsOpen = ref(false)
+const statsTab = ref<'session' | 'tokens'>('session')
+// 从某条回复末尾「本轮用量」点开时带上这一条的 token 快照；
+// 从底部「会话统计」胶囊点开时为 null（弹框按 convId 拉整段会话）。
+const statsUsage = ref<{ model: string; total: number; uncached: number; cacheRead: number; output: number } | null>(null)
+function openStats(tab: 'session' | 'tokens') {
+  statsTab.value = tab
+  statsUsage.value = null
+  statsOpen.value = true
+}
+function openMessageUsage(m: AIMessage) {
+  const st = msgStat(m)
+  const prompt = st?.promptTokens ?? m.prompt_tokens ?? 0
+  const completion = st?.completionTokens ?? m.completion_tokens ?? 0
+  const cached = st?.cachedTokens ?? m.cached_tokens ?? 0
+  statsUsage.value = {
+    model: m.model || '',
+    total: prompt + completion,
+    uncached: Math.max(0, prompt - cached),
+    cacheRead: cached,
+    output: completion,
+  }
+  statsTab.value = 'tokens'
+  statsOpen.value = true
+}
+const traceRunId = computed(() => {
+  const runTools = activeRun.value?.tools ?? []
   for (let i = runTools.length - 1; i >= 0; i--) {
     const id = runTools[i]?.run_id
     if (id) return id
   }
+  // 本次生成（done 事件）带来的 runId 优先于历史消息里的旧 run_id。
+  //
+  // 顺序反过来的后果：只要这个会话里用过一次 spawn_agent，之后每一轮点轨迹
+  // 看到的都是那条**旧** run——用户想看的恰恰是眼前这次。
+  if (liveRunId.value) return liveRunId.value
   for (let i = messages.value.length - 1; i >= 0; i--) {
     const id = lastRunIdOf(messages.value[i].tool_calls)
     if (id) return id
   }
-  // 本次生成的 done 事件带来的 runId（WP1 修复）：普通对话不派活，
-  // 上面两条永远取不到值——这正是「轨迹入口恒空」的根因。
-  if (liveRunId.value) return liveRunId.value
   // 最后兜底：从库里补（刷新页面 / 切回会话时手上没有 done 事件）。
   return lastRunId.value
 })
@@ -1728,7 +1881,6 @@ function openNewTask() {
   // 不是把上一轮砍掉。发送时如果那条还在跑，会给一句明确提示（见 send）。
   // 下拉要列当前还存在的空间：从回收站恢复/删掉空间之后，挂载时那份列表就过期了。
   void loadSpaces()
-  newTaskMode.value = 'chat'
   newTaskSpace.value = ''
   newTaskDir.value = ''
   beginBlankTask()
@@ -1900,6 +2052,12 @@ async function heroSend() {
   if (!hasKey.value) return
   // 正文为空（只有空白、或只有一个正在叫技能菜单的 `/`）：不该发出一条空消息
   if (!canSendText.value && !attachments.value.length) return
+  // 只点了快捷提示词没填内容：先挡在落地页，别等建完会话才空转一轮。
+  if (isEmptyQuickPrompt(input.value)) {
+    toast.error(t('aiQuickFillContentFirst'))
+    heroRef.value?.focus?.()
+    return
+  }
   // 从落地页发起后 hero 会卸载、composer 挂载，面板状态是同一份——
   // 不收起的话，一进对话就顶着一个没被要求的弹层。
   plusOpen.value = false
@@ -1907,7 +2065,8 @@ async function heroSend() {
     const target = await resolveNewTaskTarget()
     pendingSpaceId.value = target.spaceId
     convCwd.value = target.dir
-    mode.value = newTaskMode.value
+    // 快捷提示词模式下，落地页发出的都是普通对话——指令已在正文里，模式恒为 chat。
+    mode.value = 'chat'
     revealSpace(target.spaceId)
   } catch (e) {
     toast.error(getErrorMessage(e))
@@ -1931,9 +2090,8 @@ function beginBlankTask() {
   pageError.value = ''
   // 落地页的报错只属于上一次那条草稿，别带到这一条上。
   setConvError('', '')
-  // 回到落地页时必须是「干净的默认态」：沿用上一次选过的类型和空间，
+  // 回到落地页时必须是「干净的默认态」：沿用上一次选过的空间，
   // 下一条消息就会莫名其妙落进另一个项目的目录里（删掉一条任务后尤其容易中招）。
-  newTaskMode.value = 'chat'
   newTaskSpace.value = ''
   newTaskDir.value = ''
   // 工作目录也要清：convCwd 是「开着的那条会话」的目录，回到落地页就没人认它了。
@@ -2114,6 +2272,8 @@ async function delConv(id: string) {
   if (runOf(id)) stop(id)
   try {
     unwrap(await AIDeleteConversation(id))
+    // 会话没了，它那条 runId 映射也该跟着消失（见 forgetRun 的说明）。
+    forgetRun(id)
     delete convRunState.value[id]
     if (activeId.value === id) beginBlankTask()
     await loadConversations()
@@ -2657,33 +2817,6 @@ function msgStat(m: AIMessage): AIStreamStat | null {
   }
 }
 
-// 会话底部用量汇总：整个对话调用了哪些模型、各几次、共多少 Token。
-// 每条已落库的助手回复就是一次模型调用（按 model 归并），token 取 msgStat 的口径
-// （本次会话内存优先、回落到消息自带字段，刷新/换会话回来仍在）。
-// 只统计「对话记录」里已有的回复：正在生成的那一轮等它落库后再计入，
-// 否则第一条回复流式期间会一直显示「0 Token」，看着像 bug。
-// 不含积分：用量只以 Token 计，不引入任何积分/点数概念。
-const sessionUsage = computed(() => {
-  const map = new Map<string, { calls: number; tokens: number }>()
-  let total = 0
-  for (const m of messages.value) {
-    if (m.role !== 'assistant') continue
-    const model = m.model || t('aiUnknownModel')
-    let e = map.get(model)
-    if (!e) { e = { calls: 0, tokens: 0 }; map.set(model, e) }
-    e.calls += 1
-    const st = msgStat(m)
-    if (st) {
-      e.tokens += st.promptTokens + st.completionTokens
-      total += st.promptTokens + st.completionTokens
-    }
-  }
-  const models = [...map.entries()]
-    .map(([model, v]) => ({ model, calls: v.calls, tokens: v.tokens }))
-    .sort((a, b) => b.tokens - a.tokens || b.calls - a.calls)
-  return { totalTokens: total, models, modelCount: models.length, hasAny: models.length > 0 }
-})
-
 // 毫秒 → 人类可读：<1s 用 ms，否则一位小数的秒
 // 用时格式化：按量级分段，避免长任务一直堆「几百秒」不直观。
 //   <1s   → 「540ms」（短暂任务，精确）
@@ -2707,12 +2840,37 @@ function formatDuration(ms: number): string {
 // send / 停止 / 运行中插入 / 收尾固化都在 useAiRuns 里（P4 从本文件搬出去，
 // 原先占着下面七百多行）。runs 与 activeRun / streaming 留在这一页：模板与
 // 输入框的 streaming 判断在 setup 阶段就要读它们，绕出去再传回来反而更绕。
+
+// chip 行：解释/翻译/总结/审阅四个快捷提示词（chat 只是落地页入口，不再放这里）。
+// 定义在 utils/aiActions.ts，与剪贴板/便签面板复用同一份 label 与 fillKey。
+const actionChips = AI_QUICK_PROMPTS
+
+/**
+ * 点 chip = 把模板填进输入框，光标留在末尾等用户补内容（同 Cursor 快捷 prompt）。
+ * 不再有「选中某动作」的隐藏状态——提示词就在正文里，所见即所得。
+ * 只读由权限徽标（AiPermissionBadge / onChangePermission）统一切换，动作栏不放锁按钮。
+ */
+function pickAction(a: (typeof AI_QUICK_PROMPTS)[number]) {
+  if (!a.fillKey) {
+    input.value = ''
+    void nextTick(() => composerRef.value?.focus?.())
+    return
+  }
+  composerRef.value?.insertPromptText(t(a.fillKey))
+}
+
+/** 帮助：填入一句完整问题，可直接发送；用户愿意也可再补充具体问题。 */
+function askHelp() {
+  composerRef.value?.insertPromptText(t(AI_HELP_FILL_KEY))
+}
+
 const {
   send,
   stop,
   pendingInjectsHere,
   rushInject,
   runIds,
+  forgetRun,
 } = useAiRuns({
   activeId, conversations, messages, runs, draftRunId,
   input, attachments, mentions, lastMentions, pickedSkills, lastSkills, stripSkillTokens,
@@ -2729,6 +2887,36 @@ const {
   ensureStreamInfo, aiStreamPort, aiStreamToken,
   toast, t, openSettings: () => emit('open-settings', 'ai:model'), retryPending, pageActive, plusOpen,
 })
+
+/**
+ * 空模板拦截：点了「翻译」但没填内容就把模板发出去，模型只会照着模板空转，
+ * 用户就看到「点了翻译却没翻译」。判据是「去掉技能胶囊后的正文恰好等于某个
+ * 快捷模板」，不靠隐藏 action；只要补了任意内容就放行。帮助是一句完整问题，
+ * 不在 QUICK_PROMPT_FILL_KEYS 里，点了直接发，不要提示用户「丰富内容」。
+ * 历史重试/重新生成走 send 原函数——它们用的是已落库正文，不该被这里拦。
+ */
+function isEmptyQuickPrompt(text: string): boolean {
+  const body = stripSkillTokens(text).trim()
+  if (!body) return false
+  return QUICK_PROMPT_FILL_KEYS.some((key) => {
+    const tpl = t(key).trim()
+    return !!tpl && body === tpl
+  })
+}
+
+function focusActiveComposer() {
+  if (isNewTask.value) heroRef.value?.focus?.()
+  else void nextTick(() => composerRef.value?.focus?.())
+}
+
+function sendChecked(opts?: Parameters<typeof send>[0]) {
+  if (isEmptyQuickPrompt(input.value)) {
+    toast.error(t('aiQuickFillContentFirst'))
+    focusActiveComposer()
+    return
+  }
+  return send(opts)
+}
 
 // ---- 保活（KeepAlive）后的可见性 ----
 // 本页被 App 的 KeepAlive 白名单留住：切到别的导航页时组件只是 deactivate，
@@ -3177,6 +3365,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  // 上膛的 3 秒定时器要跟着组件一起收：否则它会对着已卸载的 ref 赋值。
+  disarmScratch()
   Events.Off('ai:conv')
   Events.Off('ai:profiles-updated')
   offScheduleRunUpdated?.(); offScheduleRunUpdated = null
@@ -3310,12 +3500,11 @@ onUnmounted(() => {
         @jump="jumpToMsg"
       />
 
-      <!-- 空态落地页：新建任务不走弹窗，直接在这一页选类型、选空间、提问。
-           类型与空间仍是这条任务的属性，首次发送时随请求落库。 -->
+      <!-- 空态落地页：新建任务不走弹窗，直接在这一页点快捷提示词/选空间/提问。
+           空间随首条请求落库；那排 pill 只是往输入框填指令，不再是任务类型。 -->
       <AiHero
         v-if="isNewTask"
         ref="heroRef"
-        v-model:new-task-mode="newTaskMode"
         v-model:url-draft="urlDraft"
         v-model:input="input"
         v-model:new-task-space="newTaskSpace"
@@ -3440,6 +3629,7 @@ onUnmounted(() => {
         @restore-checkpoint="restoreCheckpoint"
         @open-jobs="openJobsAt"
         @run-plan="runPlan"
+        @open-usage="openMessageUsage"
         @retry="retryLast"
         @regenerate="regenerateLast"
         @edit="editAndResend"
@@ -3593,33 +3783,23 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 会话用量汇总：整个对话调用了哪些模型、各几次、共多少 Token。
-             不放积分——用量只以 Token 计。置在输入框正上方，始终可见。
-             放进 .ai-dock 是为了和 composer 共用同一个定位上下文：
-             两者都套 --ai-column-w 居中，左边缘才落在同一条竖线上——
-             留在外层通栏渲染时，窄窗口外它会贴死窗口左边缘，
-             与居中的输入框错开半栏，看起来像掉到版式外面。 -->
-        <!-- 会话用量：这行现在是「上下文详情」的入口（WP2）。
-             原来它只是静态文字，用户看完「一共烧了 12.3k」还是不知道余量、
-             花在哪、上限从哪来——那三个问题要一个弹框才答得清。
-             button 而不是 div：它可点，键盘与读屏都该能到。 -->
-        <button
-          v-if="sessionUsage.hasAny"
-          class="ai-session-usage"
-          :title="t('aiCtxOpenTip')"
-          @click="ctxOpen = true"
-        >
-          <span class="ai-su-total">{{ t('aiSessionUsageTotal', { tokens: fmtTokens(sessionUsage.totalTokens) }) }}</span>
-          <span class="ai-su-sep">·</span>
-          <span class="ai-su-models">
-            <template v-for="(e, i) in sessionUsage.models" :key="e.model">
-              <span v-if="i > 0" class="ai-su-sep">·</span>
-              <span class="ai-su-model">{{ e.model }} <em class="ai-su-calls">×{{ e.calls }}</em></span>
-            </template>
-          </span>
-        </button>
-
         <!-- 输入区 -->
+        <!-- 快捷提示词 chip 行：点一下把指令前缀填进输入框，可编辑再发。
+             没有隐藏的「动作状态」——提示词就在正文里，所见即所得。 -->
+        <div class="ai-action-bar">
+          <button
+            v-for="a in actionChips"
+            :key="a.key"
+            type="button"
+            class="ai-action-chip"
+            :title="t(a.descKey)"
+            @click.prevent="pickAction(a)"
+          >{{ t(a.labelKey) }}</button>
+          <button type="button" class="ai-action-help" :title="t('aiActionHelpTip')" @click.prevent="askHelp">
+            <CircleHelp :size="13" />{{ t('aiActionHelpLabel') }}
+          </button>
+        </div>
+
         <AiComposer
         ref="composerRef"
         v-model:input="input"
@@ -3669,8 +3849,8 @@ onUnmounted(() => {
         @confirm-url="confirmUrlImage"
         @remove-mention="removeMention"
         @pick-mention="pickMention"
-        @composer-key="onComposerKey($event, send)"
-        @send="send"
+        @composer-key="onComposerKey($event, sendChecked)"
+        @send="sendChecked"
         @stop="stop"
         @paste="onInputPaste"
         @drop="onInputDrop"
@@ -3690,7 +3870,20 @@ onUnmounted(() => {
         <!-- 固定免责声明：贴在整个输入停靠区的最下方，不随消息滚动。
              放在 Composer 之后而非其圆角框内——框内是输入区，塞一行静态文字会
              挤占输入空间、看起来也像可编辑内容的一部分。与输入框同宽居中。 -->
-        <div class="ai-disclaimer">{{ t('aiDisclaimer') }}</div>
+        <!-- 新任务页：免责声明（没有对话内容，放状态栏没有意义）。
+             对话页：输入框下方的会话状态栏，常驻显示。 -->
+        <div v-if="!activeId" class="ai-disclaimer">{{ t('aiDisclaimer') }}</div>
+        <div v-else-if="convStatus" class="ai-status-bar">
+          <button class="ai-status-pill" :title="t('aiSStatOpenTip')" @click="openStats('session')">
+            {{ statusPills.session }}
+          </button>
+          <button class="ai-status-pill" :title="t('aiSessionPillTip')" @click="openStats('tokens')">
+            {{ statusPills.tokens }}
+          </button>
+          <button v-if="ctxPercent > 0" class="ai-status-pill" :title="t('aiCtxOpenTip')" @click="ctxOpen = true">
+            {{ statusPills.ctx }}
+          </button>
+        </div>
       </div>
       </template>
     </section>
@@ -3726,6 +3919,14 @@ onUnmounted(() => {
       :conv-id="activeId"
       @open-trace="openTrace('trace')"
     />
+
+    <!-- 会话统计（整段对话）/ 本轮用量（单条回复）：从下方胶囊或消息末尾点开。 -->
+    <AiSessionStatsDialog
+      v-model:open="statsOpen"
+      v-model:tab="statsTab"
+      :conv-id="activeId || ''"
+      :usage="statsUsage"
+    />
   </div>
 </template>
 
@@ -3755,45 +3956,6 @@ onUnmounted(() => {
   position: relative; flex-shrink: 0; display: flex; flex-direction: column;
   padding: 0 var(--space-6);
 }
-
-/* 会话用量汇总：浮在消息区与输入框之间的一行，始终可见。
-   只报 Token 与「哪些模型 × 几次」，不引入积分/点数概念。
-   与 composer 同套 --ai-column-w 居中（同样住在 .ai-dock 里，
-   窄窗口的 100% 兜底参照物也一致），分隔线只压在这条栏上，
-   不再通栏贯穿窗口——否则和下方居中的圆角输入框不是一套版式。 */
-.ai-session-usage {
-  flex-shrink: 0;
-  width: var(--ai-column-w);
-  margin: 0 auto;
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-  padding: var(--space-2) var(--space-5);
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  border-top: 1px solid var(--color-border);
-  user-select: none;
-  -webkit-user-select: none;
-  /* 它现在是个 button（点开上下文详情）：把浏览器的默认外观清掉，
-     再补上可点的反馈。不清的话会出现灰底 + 黑边 + 系统字重。 */
-  border-left: none;
-  border-right: none;
-  border-bottom: none;
-  background: transparent;
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: color var(--transition-fast), background-color var(--transition-fast);
-}
-.ai-session-usage:hover { background: var(--color-bg-hover); }
-.ai-session-usage:hover .ai-su-total { color: var(--color-text-primary); }
-.ai-session-usage:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
-.ai-su-total { color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
-.ai-su-sep { color: var(--color-text-disabled); }
-.ai-su-models { display: inline-flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
-.ai-su-model { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
-.ai-su-calls { font-style: normal; color: var(--color-text-secondary); font-weight: 500; }
 
 /* 输入区最下方的固定免责声明：与输入框同宽居中、次级文字色、比正文小一号。
    只占一行且 flex-shrink:0，不随消息滚动、不挤占输入区高度。 */
@@ -4097,5 +4259,67 @@ onUnmounted(() => {
   cursor: default;
 }
 
-</style>
+/* 输入框下方的会话状态栏：与免责声明同一个位置，同样不随消息滚动。 */
+.ai-status-bar {
+  /* 输入框自带 12px 下边距（AiComposer .ai-input-area），再叠 4px 会显得
+     三个胶囊离输入框很远。这里用负 margin 抵掉大部分，让状态栏贴着输入框。 */
+  margin-top: -6px;
+  /* 它是最底部元素：与窗口底边留一点空隙，别让胶囊贴死底边。 */
+  margin-bottom: var(--space-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.ai-status-pill {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-full);
+  background: transparent;
+  padding: 2px var(--space-2);
+  font-size: inherit;
+  font-variant-numeric: inherit;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.ai-status-pill:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }/* 动作 chip 行：贴在输入框上方。一行放得下就不换行——换行会把输入区往下挤。 */
+.ai-action-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+/* 与落地页 .ai-hero-mode 同一套浅色 pill 语言：secondary 描边 + 透明底，
+   hover 提亮到 primary + muted 边框。这些都是「点一下填提示词」的按钮，
+   没有选中态（提示词直接进正文，所见即所得）。
+   字号/内边距保留聊天页自己的紧凑值（chip 比 hero 按钮小一圈，属正常层级差）。 */
+.ai-action-chip {
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+.ai-action-chip:hover { color: var(--color-text-primary); border-color: var(--color-text-muted); }
+.ai-action-help {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+.ai-action-help:hover { color: var(--color-text); border-color: var(--color-accent); }</style>
 

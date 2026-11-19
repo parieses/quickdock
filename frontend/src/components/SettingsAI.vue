@@ -186,6 +186,34 @@ async function loadOllamaLocalModels() {
 // fetchApiModels 从兼容接口拉取模型列表（OpenAI 兼容 GET /models）。
 // 直接把「编辑中的草稿」传给后端：用户刚填好 BaseURL/Key、尚未保存时也能拉取；
 // 若 Key 是回填的掩码，后端会回退到库里该档案解密后的 Key（见 AIFetchModels）。
+/** 这个模型是否已在这条档案的启用列表里。 */
+function isModelEnabled(id: string): boolean {
+  const d = aiEditDraft.value
+  if (!d) return false
+  return (d.models || []).some((m) => m.id === id)
+}
+
+/**
+ * 勾选 / 取消勾选一个模型。
+ *
+ * 只存 id：窗口与输出上限留空 = 自动（按模型名查能力表）。让用户手填 384K
+ * 这类值既没依据，也容易把输入空间挤掉——这是上一轮刚统一的口径。
+ */
+function toggleModel(id: string, ev: Event) {
+  const d = aiEditDraft.value
+  if (!d) return
+  const on = (ev.target as HTMLInputElement).checked
+  const list = [...(d.models || [])]
+  if (on) {
+    if (!list.some((m) => m.id === id)) list.push({ id } as (typeof list)[number])
+    if (!d.modelId) d.modelId = id
+  } else {
+    const i = list.findIndex((m) => m.id === id)
+    if (i >= 0) list.splice(i, 1)
+    if (d.modelId === id) d.modelId = list[0]?.id || ''
+  }
+  d.models = list
+}
 async function fetchApiModels() {
   const d = aiEditDraft.value
   if (!d || modelOptionsLoading.value) return
@@ -226,13 +254,16 @@ function newAIProfile(): AIProfile {
   const provider = 'openai'
   return {
     id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
+    // 多模型档案（方案 A）：新档案先空着，勾选「拉取」到的模型后才填。
+    modelId: '',
+    models: [],
     name: '',
     provider,
     baseURL: aiPresets[provider] || '',
     apiKey: '',
     model: 'gpt-4o-mini',
     temperature: 0.7,
-    maxTokens: 8192,
+    maxTokens: 0, // 0 = 按模型自动（见 services/ai/ai_model_caps.go）
     systemPrompt: '',
     topP: 0,
     frequencyPenalty: 0,
@@ -1225,7 +1256,27 @@ function onAIProviderChange() {
 }
 async function saveAIProfiles() {
   try {
-    unwrap(await AISaveProfiles({ active: aiActive.value, profiles: aiProfiles.value }))
+    // 数字字段先归一成整数再提交。
+    //
+    // 为什么必须做：输入框是 `v-model.number` + `type="number"`，用户按提示
+    // **清空**时拿到的是 ''（Vue 的 looseToNumber 在 NaN 时保留原值），而 Go 侧
+    // 字段是 int——JSON 反序列化直接失败，**整个档案**（含 API Key、模型名）
+    // 都存不进去，界面只提示「保存失败」，用户根本定位不到是哪个框。
+    // 语义与后端一致：<=0 一律当「用默认值」（见 ai_config.go 的 clampInt）。
+    const asInt = (v: unknown): number => {
+      const n = Number(v)
+      if (!Number.isFinite(n) || n <= 0) return 0
+      return Math.round(n)
+    }
+    const profiles = aiProfiles.value.map((p) => ({
+      ...p,
+      cheapModel: String(p.cheapModel || ''),
+      contextSoftCap: asInt(p.contextSoftCap),
+      preflightMargin: asInt(p.preflightMargin),
+      keepRecentMin: asInt(p.keepRecentMin),
+      keepRecentMax: asInt(p.keepRecentMax),
+    }))
+    unwrap(await AISaveProfiles({ active: aiActive.value, profiles }))
     Events.Emit('ai:profiles-updated')
     showAIMsg(t('saved'))
   } catch (e) {
@@ -1987,7 +2038,19 @@ function saveAIModal() {
             </span>
           </div>
         </label>
-        <!-- Ollama：chip 快捷选择（与下拉等价，鼠标不用移来移去） -->
+        <!-- 多模型（方案 A）：同一条接入下可启用多个模型。
+             只影响「这条档案能用哪些模型」，当前用哪个仍由上面的输入框决定
+             （选中项写入 modelId）；一个都不勾时行为与旧版完全一致。 -->
+        <div v-if="modelOptions.length > 1" class="field">
+          <span class="field-label">{{ t('aiModelsEnabled') }}</span>
+          <div class="model-enable-list">
+            <label v-for="m in modelOptions" :key="'en-' + m" class="model-enable-item">
+              <input type="checkbox" :checked="isModelEnabled(m)" @change="toggleModel(m, $event)" />
+              <span class="model-enable-name">{{ m }}</span>
+            </label>
+          </div>
+          <p class="ai-field-hint">{{ t('aiModelsEnabledHint') }}</p>
+        </div>
         <div v-if="aiEditDraft.provider === 'ollama'" class="ollama-model-picks">
           <template v-if="modelOptions.length">
             <span class="picks-label">{{ t('aiOllamaLocalModels') }}</span>
@@ -2008,11 +2071,12 @@ function saveAIModal() {
             <span class="field-label">{{ t('aiTemperature') }}</span>
             <input v-model.number="aiEditDraft.temperature" type="number" min="0" max="2" step="0.1" class="num-input" />
           </label>
-          <label class="field field-half">
-            <span class="field-label">{{ t('aiMaxTokens') }}</span>
-            <input v-model.number="aiEditDraft.maxTokens" type="number" min="0" max="131072" step="1" class="num-input" placeholder="0" />
-          </label>
         </div>
+        <!-- 最大输出 token 已从界面移除：主流 agent 工具都按模型自动取（见
+             services/ai/ai_model_caps.go 的能力表 + 运行期修正），让用户手填一个
+             384K 既没依据也容易把输入空间挤掉。字段仍留在档案里（0 = 自动），
+             显式配置过的老档案行为不变。 -->
+        <p class="ai-field-hint">{{ t('aiMaxTokensAutoHint') }}</p>
         <label class="field field-textarea">
           <span class="field-label">{{ t('aiSystemPrompt') }}</span>
           <textarea v-model="aiEditDraft.systemPrompt" class="field-input" rows="3" :placeholder="t('aiSystemPromptPh')"></textarea>
@@ -2264,4 +2328,30 @@ function saveAIModal() {
 /* 单条费用开关：插在用量面板标题行下方，补一点上间距免得贴着标题。
    只写在本 SFC 的 scoped 块里，不改全局 settings.css。 */
 .ai-cost-pref { margin-top: var(--space-4); }
-</style>
+/* 多模型勾选列表：模型名可能几十个且很长（open_/trae- 前缀），
+   不限高就是截图里那种一片乱麻。限高 + 滚动 + 两列。 */
+.model-enable-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-1) var(--space-3);
+  max-height: 180px;
+  overflow-y: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2);
+}
+.model-enable-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  cursor: pointer;
+}
+.model-enable-name {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}</style>

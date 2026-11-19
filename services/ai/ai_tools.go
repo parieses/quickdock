@@ -325,7 +325,8 @@ func applySystemHints(messages []map[string]interface{}, base, hint, cwd string,
 const planHint = "\n\n[任务清单]\n" +
 	"- 三步以上才能做完的任务，动手前先用 plan_update 列一份步骤清单（全部 todo，当前那条 doing），每完成一步立刻更新并把那条标成 done。\n" +
 	"- 清单会实时显示在用户界面上，必须与实际进度一致：没做的事不要标 done，也不要用正文里的 `- [ ]` 代替它。\n" +
-	"- 更新清单后直接继续做下一步，不要在正文里复述整份清单。两步以内的事不用清单。\n"
+	"- 更新清单后不要在正文里复述整份清单；哪些条目自己推进、哪些派出去，按下面的 [任务规模] 判断。" +
+	"两步以内的事不用清单。\n"
 
 // hasToolPayload 判断本次挂给模型的工具里有没有某个名字。
 //

@@ -247,7 +247,8 @@ var baseTables = []string{
 		label TEXT NOT NULL DEFAULT '',
 		description TEXT NOT NULL DEFAULT '',
 		count INTEGER NOT NULL DEFAULT 1,
-		last_used TEXT NOT NULL
+		last_used TEXT NOT NULL,
+		input TEXT NOT NULL DEFAULT ''
 	)`,
 
 	`CREATE TABLE IF NOT EXISTS todos (
@@ -259,7 +260,15 @@ var baseTables = []string{
 		note TEXT DEFAULT '',
 		sort INTEGER NOT NULL DEFAULT 0,
 		created_at TEXT NOT NULL,
-		completed_at TEXT DEFAULT ''
+		completed_at TEXT DEFAULT '',
+		start_time TEXT DEFAULT '',
+		end_time TEXT DEFAULT '',
+		reminder_time TEXT DEFAULT '',
+		reminder_sent INTEGER DEFAULT 0,
+		tags TEXT DEFAULT '',
+		recurrence TEXT DEFAULT '',
+		parent_id TEXT DEFAULT '',
+		status TEXT DEFAULT 'todo'
 	)`,
 
 	`CREATE TABLE IF NOT EXISTS scheduled_tasks (
@@ -341,7 +350,10 @@ var baseTables = []string{
 		http_headers TEXT NOT NULL DEFAULT '',
 		http_body TEXT NOT NULL DEFAULT '',
 		sort INTEGER NOT NULL DEFAULT 0,
-		created_at TEXT NOT NULL
+		created_at TEXT NOT NULL,
+		deleted_at TEXT DEFAULT '',
+		maintenance_until INTEGER NOT NULL DEFAULT 0,
+		mute_until INTEGER NOT NULL DEFAULT 0
 	)`,
 
 	`CREATE TABLE IF NOT EXISTS monitor_logs (
@@ -434,7 +446,11 @@ var baseTables = []string{
 		plan TEXT NOT NULL DEFAULT '',
 		plan_status TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL,
-		updated_at TEXT NOT NULL
+		updated_at TEXT NOT NULL,
+		prompt_tokens INTEGER DEFAULT 0,
+		completion_tokens INTEGER DEFAULT 0,
+		model TEXT NOT NULL DEFAULT '',
+		request_count INTEGER NOT NULL DEFAULT 0
 	)`,
 	// ai_messages: tool_calls 是这一条回复期间发生的工具调用（JSON 数组，由
 	// services/ai 写入，db 只当中转）。tool_rounds 是「用了几轮」——
@@ -452,6 +468,11 @@ var baseTables = []string{
 		stopped INTEGER NOT NULL DEFAULT 0,
 		tool_calls TEXT NOT NULL DEFAULT '',
 		tool_rounds INTEGER NOT NULL DEFAULT 0,
+		reasoning_content TEXT NOT NULL DEFAULT '',
+		reasoning_rounds TEXT NOT NULL DEFAULT '',
+		images TEXT NOT NULL DEFAULT '',
+		skills TEXT NOT NULL DEFAULT '',
+		action TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL
 	)`,
 
@@ -1110,6 +1131,8 @@ func (d *Database) migrate() error {
 		{"ai_messages", "reasoning_content", "TEXT DEFAULT ''"},
 		// ai_messages: 按轮拆开的思考（JSON 数组，见 AIMessage.ReasoningRounds）
 		{"ai_messages", "reasoning_rounds", "TEXT DEFAULT ''"},
+		// ai_messages: 一次性动作名（空 = 普通对话）
+		{"ai_messages", "action", "TEXT DEFAULT ''"},
 		// ai_messages: images（图片引用 JSON 数组，仅 user 消息；字节落盘不落库）
 		{"ai_messages", "images", "TEXT DEFAULT ''"},
 		// ai_conversations: token 用量统计

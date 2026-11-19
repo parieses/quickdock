@@ -7,9 +7,9 @@
  * （都在 AIPage），所以两边能无缝接上：在落地页贴了一张图，发出去之后
  * 聊天区那排缩略图显示的是同一张。
  */
-import { computed, onBeforeUnmount, onMounted, ref, type Component } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlarmClock, ArrowUp, ChevronDown, Folder, FolderOpen, GitBranch, Image as ImageIcon, Link2, Plus } from '@lucide/vue'
+import { AlarmClock, ArrowUp, CircleHelp, ChevronDown, Folder, FolderOpen, GitBranch, Image as ImageIcon, Link2, Plus } from '@lucide/vue'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { AIConnector, AIMentionItem, AIPrompt, AISkill, AISpace } from '../types/ai'
 import type { PendingImage } from '../types'
@@ -26,11 +26,12 @@ interface HeroMode {
   label: string
   desc: string
   icon: Component
+  /** 点击填入输入框的指令前缀 i18n key；chat 为空 = 复位（清空输入） */
+  fillKey: string
 }
 
 const props = defineProps<{
   modes: HeroMode[]
-  newTaskMode: string
   urlInputOpen: boolean
   urlDraft: string
   attachments: PendingImage[]
@@ -87,7 +88,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'update:newTaskMode', v: string): void
   (e: 'update:urlDraft', v: string): void
   (e: 'update:input', v: string): void
   (e: 'update:newTaskSpace', v: string): void
@@ -153,6 +153,24 @@ function isSchedSpace(s: AISpace): boolean {
   return s.kind === 'schedule' || !!s.task_id
 }
 
+/**
+ * 落地页模式入口现在只有「对话」：点击 = 清空输入回到普通对话。
+ * 快捷提示词（解释/翻译/总结/审阅）不在这里，已移到聊天页输入区；
+ * 帮助按钮仍在这里，但它同样只是往输入框插模板，不是模式。
+ */
+function pickMode(m: HeroMode) {
+  if (!m.fillKey) {
+    emit('update:input', '')
+    return
+  }
+  heroInputEl.value?.insertPromptText(t(m.fillKey))
+}
+
+/** 帮助：填入一句完整问题，可直接发送；用户愿意也可再补充具体问题。 */
+function fillHelp() {
+  heroInputEl.value?.insertPromptText(t('aiActionHelpAsk'))
+}
+
 function pickSpace(v: string) {
   spacePickOpen.value = false
   emit('update:newTaskSpace', v)
@@ -196,17 +214,22 @@ function onModelSelect(e: Event) {
     <div class="ai-hero-inner">
       <h1 class="ai-hero-title">{{ t('aiHeroTitle') }}</h1>
 
-      <!-- 一排类型 pill：默认对话，点一下换成本次任务的类型 -->
+      <!-- 落地页模式入口：只保留对话。解释/翻译/总结/审阅已移到聊天页作为快捷提示词 -->
       <div class="ai-hero-modes">
         <button
           v-for="m in props.modes"
           :key="m.key"
-          :class="['ai-hero-mode', { active: props.newTaskMode === m.key }]"
+          class="ai-hero-mode"
           :title="t(m.desc)"
-          @click="emit('update:newTaskMode', m.key)"
+          @click="pickMode(m)"
         >
           <component :is="m.icon" :size="13" />
           {{ t(m.label) }}
+        </button>
+        <!-- 帮助：填入一句完整问题，可直接发送。
+             只读不在这里放锁按钮——权限徽标已能切，避免两处入口重复。 -->
+        <button type="button" class="ai-hero-mode" :title="t('aiActionHelpTip')" @click="fillHelp">
+          <CircleHelp :size="13" />{{ t('aiActionHelpLabel') }}
         </button>
       </div>
 
@@ -462,6 +485,10 @@ function onModelSelect(e: Event) {
 
 .ai-hero-modes { display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; }
 
+/* 落地页与聊天页动作 chip（.ai-action-chip）统一为同一套浅色 pill 语言：
+   描边 + 透明底 + 选中 accent 浅底 + accent 字/边，与底栏 git 分支 /
+   空间下拉 / 提示 chip 等同一套低饱和语言。
+   只保留落地页自己的图标与稍大尺寸（hero 区主视觉）。 */
 .ai-hero-mode {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 5px var(--space-5);
@@ -478,6 +505,8 @@ function onModelSelect(e: Event) {
 
 .ai-hero-mode.active { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
 
+/* 模式排末尾的帮助按钮：与 .ai-hero-mode 同一套浅色 pill 语言，
+   尺寸跟着模式 pill 走，视觉上是同一排控件。 */
 .ai-hero-box {
   width: 100%;
   border: 1px solid var(--color-border);

@@ -97,7 +97,13 @@ func camelToSnake(s string) string {
 func structToMap(v interface{}) map[string]interface{} {
 	result := make(map[string]interface{})
 	rv := reflect.ValueOf(v)
-	if rv.Kind() == reflect.Ptr {
+	for rv.Kind() == reflect.Ptr {
+		// nil 指针必须在这里停住：Elem() 得到的是 Invalid，NumField() 会 panic，
+		// 而旧写法会返回空 map，让 BulkInsert 拼出 `INSERT INTO t () VALUES ()`
+		// ——一句语法错误，报错信息完全指不到「你传了个 nil」。
+		if rv.IsNil() {
+			return result
+		}
 		rv = rv.Elem()
 	}
 	if rv.Kind() != reflect.Struct {
@@ -107,6 +113,17 @@ func structToMap(v interface{}) map[string]interface{} {
 	for i := 0; i < rv.NumField(); i++ {
 		field := t.Field(i)
 		if !field.IsExported() {
+			continue
+		}
+		// 匿名字段与 `json:"-"` 一律跳过。
+		//
+		// 匿名字段被当成一列时，它的值是**整个结构体**，落库出来是一坨 %v；
+		// `json:"-"` 表示「不进 JSON」，它同样不该进 SQL——`kb.go` 的 RowID
+		// 就是这种字段，只是目前没走这条路。两者都是「看起来能用、写进去就坏」。
+		if field.Anonymous {
+			continue
+		}
+		if strings.TrimSpace(field.Tag.Get("json")) == "-" {
 			continue
 		}
 		// db:"-"：只读 / 计算字段，不落库。

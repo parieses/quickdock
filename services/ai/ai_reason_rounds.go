@@ -21,6 +21,26 @@ type aiReasoningRound struct {
 	Text  string `json:"text"`
 }
 
+// appendReasoningRound 把一轮思考收口进列表。
+//
+// 同一轮重复收口时**合并**而不是新增一条：轮次边界和段落收尾都可能触发，
+// 若各写一条，前端按 round 关联时就会出现两条同号条目，`.find` 只认第一条，
+// 后一条（往往是最关键的作答轮）直接被丢掉。
+func appendReasoningRound(list []aiReasoningRound, round int, text string) []aiReasoningRound {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return list
+	}
+	if round < 1 {
+		round = 1
+	}
+	if n := len(list); n > 0 && list[n-1].Round == round {
+		list[n-1].Text = strings.TrimSpace(list[n-1].Text + "\n" + text)
+		return list
+	}
+	return append(list, aiReasoningRound{Round: round, Text: text})
+}
+
 // encodeReasoningRounds 把按轮的思考编码成 JSON；没有内容时返回空串。
 //
 // 空串而不是 "[]"：旧数据与「模型没给思考」都走空串，前端只有一个判据。

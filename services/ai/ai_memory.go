@@ -236,14 +236,13 @@ func appendDailyMemory(convID, cwd, title, userMsg string, files []string, round
 	if sc.root == "" {
 		return
 	}
-	// 纯问答轮次（没调工具、没改文件）不进活动记录。
+	// 纯问答轮次（没调工具、没改文件）只记「这次问过什么」，不记工具统计。
 	//
-	// 原来的判据只有「有工作目录」，于是「你好」「这个按钮在哪」也会留一条
-	// 「用户：你好 / 工具：0 轮 / 0 次调用」——一天下来日志被这类条目填满，
-	// 真正的工作反而要翻着找。这正是「每日记忆记得很垃圾」的直接来源。
-	if rounds == 0 && len(files) == 0 {
-		return
-	}
+	// 早先这里是直接 return：后果是**新用户跑几天也看不到任何记忆文件**——
+	// 目录是惰性创建的，一次纯聊天就让整条链路看起来「没生效」。现在改成
+	// 「照写，但不写 0 轮 0 次调用那种空统计」（统计行由 formatDailyActivity 决定），
+	// 既不再被垃圾条目填满，也不会看起来什么都没发生。
+	chatOnly := rounds == 0 && len(files) == 0
 	root := sc.root
 	if err := os.MkdirAll(filepath.Join(root, "memory"), 0o755); err != nil {
 		logger.W("[ai] 创建记忆目录失败 root=%s: %v", root, err)
@@ -286,9 +285,13 @@ func appendDailyMemory(convID, cwd, title, userMsg string, files []string, round
 	if secTitle == "" {
 		secTitle = key
 	}
-	if !sc.project && key != "" {
-		// 共享日志里所有任务写同一个文件：不标来源就分不清「这条是谁问的」。
-		secTitle = key + " · " + secTitle
+	// 小节标题一律带短 id。
+	//
+	// 只按标题分节时，两个会话同名（默认标题、都叫「继续」、或长标题被截成同一
+	// 前缀）就会写进同一节：一个任务的历史里混进别人的「用户：…/文件：…」，
+	// 而文件顶部的重点块是按会话 id 去重的——两处口径就对不上了。
+	if key != "" {
+		secTitle = secTitle + " · " + key
 	}
 
 	// 一行活动：时间 · 用户诉求（续跑省略） · 投入 · 改动文件。
@@ -299,8 +302,12 @@ func appendDailyMemory(convID, cwd, title, userMsg string, files []string, round
 		act.WriteString(" · ")
 		act.WriteString(clipRunes(collapseSpaces(q), dailyActivityUserRune))
 	}
-	fmt.Fprintf(&act, " · %d 轮 / %d 次调用", rounds, tools)
-	if fs := formatDailyFiles(root, sc.project, files); len(fs) > 0 {
+	// 纯问答不写「0 轮 / 0 次调用」——那正是用户说的「垃圾记忆」。
+	// 只记时间与诉求，信息量足够回答「那天我问过什么」。
+	if !chatOnly {
+		fmt.Fprintf(&act, " · %d 轮 / %d 次调用", rounds, tools)
+	}
+	if fs := formatDailyFiles(cwd, files); len(fs) > 0 {
 		act.WriteString(" · 文件：")
 		act.WriteString(strings.Join(fs, "、"))
 	}
@@ -374,15 +381,17 @@ func appendDailyActivity(body, secTitle, line string) (string, bool) {
 //     记进去只会让人以为项目被改了一堆东西；
 //   - 最多 6 条，其余折成「…等 N 个」：记忆的用途是「想起来做过什么」，
 //     不是提交清单。
-func formatDailyFiles(root string, project bool, files []string) []string {
+func formatDailyFiles(cwd string, files []string) []string {
 	if len(files) == 0 {
 		return nil
 	}
-	base := root
-	if project {
-		// 项目作用域下 root 是 <cwd>/.quickdock，相对路径的基准是 cwd。
-		base = filepath.Dir(root)
-	}
+	// 基准一律是**任务的工作目录**（不是记忆根目录）。
+	//
+	// 原来共享作用域用记忆根做 base，而任务文件永远在项目里 → Rel 必然失败，
+	// 全部退化成 basename：`src/a.go` 与 `test/a.go` 会被去重成一条，
+	// 子目录信息全丢。项目作用域原来传的是 root，再由 project 标志换算成 cwd，
+	// 绕了一圈还容易传错；现在直接传 cwd。
+	base := strings.TrimSpace(cwd)
 	out := make([]string, 0, len(files))
 	seen := make(map[string]bool, len(files))
 	skipped := 0
@@ -421,7 +430,11 @@ func formatDailyFiles(root string, project bool, files []string) []string {
 // isScratchPath 判断一个相对路径是不是 AI 的辅助文件。
 func isScratchPath(rel string) bool {
 	rel = strings.TrimPrefix(filepath.ToSlash(rel), "./")
-	return strings.HasPrefix(rel, memoryDirName+"/") || rel == memoryDirName
+	// Windows 上大小写不敏感：旧版目录名是 `.quickDock`，写成大写时也要认出来，
+	// 否则那些临时脚本会被当成「项目改动」记进每日记忆。
+	lower := strings.ToLower(rel)
+	dir := strings.ToLower(memoryDirName)
+	return strings.HasPrefix(lower, dir+"/") || lower == dir
 }
 
 // isContinuationText 这句是不是「接着说」而不是新任务。

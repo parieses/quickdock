@@ -7,17 +7,22 @@ package ai
 // 配了时必须只换模型名（其它参数跟着主模型走）；
 // 必须关掉 thinking（廉价模型多半不支持，报错信息还很难懂）。
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestCheapProfileDefaultUnchanged(t *testing.T) {
 	cfg := AIProfile{Model: "main-model", Temperature: 0.7, ThinkingEnabled: true, MaxTokens: 8000}
 	got := aiCheapProfile(cfg)
-	if got != cfg {
+	// 用 DeepEqual 而不是 ==：AIProfile 现在带 Models 切片（多模型档案），
+	// 结构体不再可比较。
+	if !reflect.DeepEqual(got, cfg) {
 		t.Errorf("没配廉价模型时必须原样返回: %+v", got)
 	}
 	// 填成和主模型一样也算没配：那种配置只会让人以为省了钱。
 	cfg.CheapModel = "main-model"
-	if got := aiCheapProfile(cfg); got != cfg {
+	if got := aiCheapProfile(cfg); !reflect.DeepEqual(got, cfg) {
 		t.Errorf("廉价模型与主模型相同时应原样返回: %+v", got)
 	}
 }

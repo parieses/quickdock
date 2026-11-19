@@ -186,8 +186,10 @@ type aiContextLimits struct {
 
 // contextLimitsOf 算出某个档案当前的上下限。
 func contextLimitsOf(cfg AIProfile) aiContextLimits {
-	w := contextWindowOf(cfg)
-	out := cfg.MaxTokens
+	// 用「有效值」：多模型档案里每个模型可以各自声明窗口与输出上限
+	// （见 ai_model_entry.go），没声明才回落到按模型名推断。
+	w := modelContextWindowOf(cfg)
+	out := modelMaxOutputOf(cfg)
 	if out <= 0 {
 		out = aiDefaultMax
 	}

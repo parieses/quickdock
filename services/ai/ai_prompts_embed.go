@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-//go:embed prompts/modes/*.md
+//go:embed prompts/modes/*.md prompts/actions/*.md
 var aiModePromptFS embed.FS
 
 // loadModePrompt 读一个模式提示词。
@@ -26,6 +26,22 @@ func loadModePrompt(name string) string {
 	s := strings.TrimRight(string(b), "\r\n")
 	if strings.TrimSpace(s) == "" {
 		panic("提示词文件为空 prompts/modes/" + name + ".md")
+	}
+	return s
+}
+
+// loadActionPrompt 读一个动作提示词（prompts/actions/<name>.md）。
+//
+// 缺失或为空一律 panic：动作提示词是行为本身，静默退化成「没有约束」会让
+// 「翻译」变成普通聊天，而界面上看不出任何异常——这种失败必须在启动时炸掉。
+func loadActionPrompt(name string) string {
+	data, err := aiModePromptFS.ReadFile("prompts/actions/" + name + ".md")
+	if err != nil {
+		panic("缺少动作提示词 prompts/actions/" + name + ".md: " + err.Error())
+	}
+	s := strings.TrimSpace(string(data))
+	if s == "" {
+		panic("动作提示词为空: prompts/actions/" + name + ".md")
 	}
 	return s
 }

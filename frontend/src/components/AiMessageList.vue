@@ -203,6 +203,8 @@ const emit = defineEmits<{
   /** 点「查看」：打开后台任务面板并定位到这条任务 */
   (e: 'open-jobs', id: string): void
   (e: 'run-plan', m: AIMessage): void
+  /** 点某条回复末尾的「本轮用量」：打开这条消息自己的 token 明细弹框 */
+  (e: 'open-usage', m: AIMessage): void
   (e: 'retry'): void
   /** 重新生成上一条回答 */
   (e: 'regenerate'): void
@@ -360,6 +362,24 @@ function reasoningBefore(m: AIMessage, i: number): string {
   if (i > 0 && prev === cur) return ''
   const hit = rounds.find((x) => x.round === cur)
   return hit ? hit.text : ''
+}
+
+/**
+ * 没有被任何工具卡片消费掉的思考（通常是最后一轮作答的推理）。
+ *
+ * 为什么要单独算：分轮思考是按 `round` 往工具卡片上方挂的，而作答轮往往没有
+ * 工具调用，它的 round 落不到任何卡片上——不补这一块，那一段思考就永远不显示，
+ * 而顶部整段又因为「有分轮信息」被隐藏了（用户看到的就是「思考丢了」）。
+ */
+function trailingReasoning(m: AIMessage): string {
+  const rounds = reasonRoundsOf(m)
+  if (!rounds.length) return ''
+  const used = new Set<number>()
+  for (const tc of toolsOf(m)) used.add(Number(tc.round) || 0)
+  return rounds
+    .filter((r) => !used.has(r.round))
+    .map((r) => r.text)
+    .join('\n\n')
 }
 
 // 空数组常量：没有分轮信息时返回同一个引用，避免每次渲染都造新数组
@@ -800,6 +820,12 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
               </template>
             </div>
           </details>
+          <!-- 没被任何工具卡片消费掉的思考：通常是最后一轮（作答轮）的推理，
+               它没有对应的工具调用，挂在工具列表之后、正文之前。 -->
+          <details v-if="trailingReasoning(m)" class="ai-reasoning">
+            <summary>{{ t('aiThought') }} · {{ t('aiThoughtChars', { n: trailingReasoning(m).length }) }}</summary>
+            <div class="ai-reasoning-content">{{ trailingReasoning(m) }}</div>
+          </details>
           <!-- 编排 run 树：这条回复派出去的子 agent。只有带 run_id 的回复才渲染，
                否则每一句普通回答下面都会多一个空面板。展开时才拉数据。 -->
           <AgentRunTree v-if="runIDOf(m)" :run-id="runIDOf(m)" />
@@ -896,6 +922,14 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
             <span v-if="msgStat(m)" class="ai-msg-stat">
               {{ formatStat(statWithoutCost(msgStat(m)!)) }}
             </span>
+            <!-- 本轮用量：这条回复自己的 token 明细（提供方/模型、命中率、缓存读写）。
+                 点开弹框，数据由父组件从这条消息的 usage 现取，不走会话级聚合。 -->
+            <button
+              v-if="m.role === 'assistant' && msgStat(m)"
+              class="ai-copy ai-msg-usage"
+              :title="t('aiMsgUsageTip')"
+              @click="emit('open-usage', m)"
+            >{{ t('aiMsgUsageTitle') }}</button>
           </div>
           <!-- 气泡尾部：这一轮的费用（模型名 + 金额 + token）。文案由 costLines
                预生成，这里只查一次表；关掉设置里的开关后整行不渲染。 -->

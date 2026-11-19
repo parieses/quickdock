@@ -220,6 +220,14 @@ function toggleStep(key: string) {
   stepOpen.value = { ...stepOpen.value, [key]: !stepOpen.value[key] }
 }
 
+/** 状态徽标：库里存的是英文 run/node 状态，界面一律走 i18n；pending / 缺省按「进行中」显示。 */
+function statusText(s?: string): string {
+  if (s === 'done') return t('aiRunStatusDone')
+  if (s === 'failed') return t('aiRunStatusFailed')
+  if (s === 'canceled') return t('aiRunStatusCanceled')
+  return t('aiRunStatusRunning')
+}
+
 /** 步骤标题：工具用人话动词，思考用固定文案，结论用事件名。 */
 function stepTitle(step: RunStep): string {
   if (step.kind === 'think') return t('aiThought')
@@ -438,7 +446,7 @@ onBeforeUnmount(() => {
                 <span class="trace-child-task-metrics">
                   <span v-if="c.tokens">{{ fmtTokens(c.tokens) }} tok</span>
                   <span v-if="c.elapsedMs">{{ fmtElapsed(c.elapsedMs) }}</span>
-                  <span class="trace-node-status" :class="`is-${c.status}`">{{ c.status }}</span>
+                  <span class="trace-node-status" :class="`is-${c.status}`">{{ statusText(c.status) }}</span>
                 </span>
                 <!-- 右箭头沿用 DSH 子任务面板的读法：整行可点，箭头只提示「还能展开」。 -->
                 <ChevronRight :size="12" class="trace-child-task-arrow" :class="{ 'is-open': childOpen[c.id] }" />
@@ -515,7 +523,7 @@ onBeforeUnmount(() => {
               <div v-key-click class="trace-run-head" @click="toggleRun(r.run.id)">
                 <component :is="openRuns[r.run.id] ? ChevronDown : ChevronRight" :size="11" class="trace-node-caret" />
                 <span class="trace-run-goal2">{{ r.run.goal || t('aiTraceNoGoal') }}</span>
-                <span class="trace-node-status" :class="`is-${r.run.status}`">{{ r.run.status }}</span>
+                <span class="trace-node-status" :class="`is-${r.run.status}`">{{ statusText(r.run.status) }}</span>
               </div>
               <div class="trace-run-meta trace-run-meta2">
                 <span>{{ t('aiTraceSteps', { n: r.nodes.length }) }}</span>
@@ -580,7 +588,7 @@ onBeforeUnmount(() => {
             <div v-if="tree.run" class="trace-run">
               <div class="trace-run-goal">{{ tree.run.goal || t('aiTraceNoGoal') }}</div>
               <div class="trace-run-meta">
-                <span>{{ tree.run.status }}</span>
+                <span>{{ statusText(tree.run.status) }}</span>
                 <span class="trace-sep">·</span>
                 <span>{{ t('aiTraceSteps', { n: tree.nodes.length }) }}</span>
                 <span class="trace-sep">·</span>
@@ -594,7 +602,7 @@ onBeforeUnmount(() => {
                   <component :is="expanded[n.id] ? ChevronDown : ChevronRight" :size="11" class="trace-node-caret" />
                   <span class="trace-node-role">{{ n.role }}</span>
                   <span class="trace-node-task">{{ n.task }}</span>
-                  <span class="trace-node-status" :class="`is-${n.status}`">{{ n.status }}</span>
+                  <span class="trace-node-status" :class="`is-${n.status}`">{{ statusText(n.status) }}</span>
                 </div>
                 <ol v-if="expanded[n.id]" class="trace-timeline">
                   <li

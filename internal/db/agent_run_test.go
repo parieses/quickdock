@@ -208,3 +208,33 @@ func TestPurgeAgentRunsBefore(t *testing.T) {
 		t.Errorf("AgentRunRetentionDays = %d，短于回滚点的 7 天，轨迹会比快照先消失", AgentRunRetentionDays)
 	}
 }
+
+// TestAddAgentRunUsage 锁住 run 用量累加的行为。
+//
+// 顶层 run 的 token 从主循环写回（子 agent 走 handleSpawnAgent），
+// 有进展的 run 若这一列恒为 0，「整段会话」回放头行就会显示假的 0 tok。
+// 这里验证累加语义：多次相加、以及 0/负数被忽略（别把用量冲掉）。
+func TestAddAgentRunUsage(t *testing.T) {
+	d := openTestDB(t)
+	conv, err := d.CreateAIConversation(NewAIConversation{Title: "用量测试"})
+	if err != nil {
+		t.Fatalf("建会话失败: %v", err)
+	}
+	run, err := d.CreateAgentRun(NewAgentRun{ConvID: conv.ID, Goal: "g", Trigger: "chat"})
+	if err != nil {
+		t.Fatalf("建 run 失败: %v", err)
+	}
+
+	for _, n := range []int{1200, 0, -5, 380} {
+		if err := d.AddAgentRunUsage(run.ID, n); err != nil {
+			t.Fatalf("累加 %d 失败: %v", n, err)
+		}
+	}
+	got, err := d.GetAgentRun(run.ID)
+	if err != nil {
+		t.Fatalf("读 run 失败: %v", err)
+	}
+	if got.UsedTokens != 1580 {
+		t.Errorf("累计用量应为 1200+380=1580（0/负数忽略），实际 %d", got.UsedTokens)
+	}
+}

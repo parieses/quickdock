@@ -155,7 +155,11 @@ type AIMessage struct {
 	// Skills 这条用户消息发出时真正挂上的技能名（JSON 数组字符串），空 = 没挂。
 	// 只为了在聊天里标出「这条用到了哪个技能」——在此之前技能只存在于提示词里，
 	// 模型读了 SKILL.md 也只留一条普通工具行，用户看不出自己选的技能生效没有。
-	Skills    string `json:"skills"`
+	Skills string `json:"skills"`
+	// Action 这条回复是一次性动作产出的（explain / translate / summarize / review），
+	// 空串 = 普通对话。落库的意义：回放时能标出「这条是翻译」，也能统计用量；
+	// 不落的话同一会话里翻译和对话在历史里毫无区别。
+	Action    string `json:"action"`
 	CreatedAt string `json:"created_at"`
 }
 
@@ -214,6 +218,7 @@ func mapToAIMessage(m map[string]interface{}) AIMessage {
 		Content:          str(m["content"]),
 		ReasoningContent: str(m["reasoning_content"]),
 		ReasoningRounds:  str(m["reasoning_rounds"]),
+		Action:           str(m["action"]),
 		Images:           str(m["images"]),
 		Model:            str(m["model"]),
 		PromptTokens:     integer(m["prompt_tokens"]),
@@ -1216,12 +1221,12 @@ func (d *Database) LastAIMessage(convID string) (*AIMessage, error) {
 // 按 base64 字符数会高估三个数量级。
 func (d *Database) AIMessageTextStats(convID string) (count int, chars int, err error) {
 	row, err := d.QueryOne(
-		`SELECT COUNT(*), COALESCE(SUM(LENGTH(content) + LENGTH(tool_calls)), 0)
+		`SELECT COUNT(*) AS cnt, COALESCE(SUM(LENGTH(COALESCE(content,'')) + LENGTH(COALESCE(tool_calls,''))), 0) AS chars
 		   FROM ai_messages WHERE conv_id = ?`, strings.TrimSpace(convID))
 	if err != nil {
 		return 0, 0, err
 	}
-	return integer(row["COUNT(*)"]), integer(row["COALESCE(SUM(LENGTH(content) + LENGTH(tool_calls)), 0)"]), nil
+	return integer(row["cnt"]), integer(row["chars"]), nil
 }
 
 // TruncateAIMessagesFrom 删除 targetID 及其之后的所有消息，并重算会话累计 token。
@@ -1322,6 +1327,8 @@ type AssistantTurn struct {
 	ToolRounds int
 	// ReasoningRounds 按轮拆开的思考（JSON 数组，见 AIMessage.ReasoningRounds）。
 	ReasoningRounds string
+	// Action 一次性动作名（空 = 普通对话），见 services/ai/ai_actions.go。
+	Action string
 }
 
 // SaveAssistantTurn 追加一条助手回复，并记下这一次调用自己的用量。
@@ -1344,6 +1351,7 @@ func (d *Database) SaveAssistantTurn(convID string, t AssistantTurn) (*AIMessage
 		ToolCalls:        t.ToolCalls,
 		ToolRounds:       t.ToolRounds,
 		ReasoningRounds:  t.ReasoningRounds,
+		Action:           t.Action,
 		CreatedAt:        now(),
 	}
 	if err := d.BulkInsert("ai_messages", []map[string]interface{}{structToMap(m)}); err != nil {

@@ -136,6 +136,33 @@ func resolveMessageRounds(messages []map[string]interface{}) []int {
 	return rounds
 }
 
+// retagMessagesByStructure 消息列表被整体重建后，按结构重新推导轮次标记。
+//
+// 为什么必须有：超窗兜底会用 buildAIMessagesWithin 从库里重建整个列表，那份
+// 消息是纯净的 `{role, content}`——原来的标记随旧切片一起丢了。而循环里下一次
+// `tagMessagesRound(messages, turnIdx)` 会把「所有未标记消息」（system、全部历史、
+// 本轮用户消息）统统打成当前轮。结果：所有消息轮次相同，`compactLoopMessages`
+// 的保护条件对全表成立，本次运行剩下的轮次里循环内折叠彻底失效。
+func retagMessagesByStructure(messages []map[string]interface{}) {
+	for _, m := range messages {
+		if m != nil {
+			delete(m, aiMsgRoundKey)
+		}
+	}
+	cur := 0
+	for _, m := range messages {
+		if m == nil {
+			continue
+		}
+		if m["role"] == "assistant" {
+			if _, ok := m["tool_calls"]; ok {
+				cur++
+			}
+		}
+		m[aiMsgRoundKey] = cur
+	}
+}
+
 // lastRoundOf 返回最大轮次（没有消息时返回 0）。
 func lastRoundOf(rounds []int) int {
 	last := 0

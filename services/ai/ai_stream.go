@@ -142,6 +142,13 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ConvID string `json:"convId"`
 		Mode   string `json:"mode"`
+		// PromptAction 一次性动作（explain/translate/summarize/review）与它的参数。
+		//
+		// 为什么不叫 action：上面那个 `action` 已经被「regen / edit」占用了
+		// （重新生成、改写重发），两个语义混在一个字段里会互相覆盖。
+		// 这个字段只影响**这一条消息**的提示词，见 ai_actions.go。
+		PromptAction       string            `json:"promptAction"`
+		PromptActionParams map[string]string `json:"promptActionParams"`
 		// SpaceID 只在新建任务时用：把这条对话直接放进某个空间。
 		// 已有会话的归属不能被一次请求改掉——那会让「随便说句话就把任务搬了家」。
 		SpaceID string        `json:"spaceId"`
@@ -258,8 +265,14 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	defer fl.close()
 
 	res := s.svc.runAgent(ctx, AgentRunReq{
-		ConvID:         req.ConvID,
-		Mode:           req.Mode,
+		ConvID: req.ConvID,
+		Mode:   firstTurnMode(req.ConvID, req.Mode),
+		// 落地页的快捷方式（还没建会话时选了「翻译/解释/总结」）：
+		// 旧实现把它当成会话级 mode 存进库，于是**之后每一轮都被翻译**。
+		// 新语义下这些是一次性动作，所以新建会话时改写成 action + mode=chat，
+		// 动作只作用于这条消息；老会话（已有 ConvID）仍走 mode 回填。
+		Action:         firstTurnAction(req.ConvID, req.Mode, req.PromptAction),
+		ActionParams:   req.PromptActionParams,
 		SpaceID:        req.SpaceID,
 		Message:        req.Message,
 		Cwd:            req.Cwd,
@@ -673,4 +686,34 @@ func (s *aiStreamServer) notifyAIDone(convID, question, answer string) {
 	// ID 带时间戳：同一会话连问两次，相同 ID 会被系统按同一条通知就地替换、不重弹。
 	s.svc.App.NotifyDesktop("ai-done-"+convID+"-"+time.Now().Format("150405"),
 		title, logger.Trunc(body, 120))
+}
+
+// firstTurnMode / firstTurnAction 把「新建会话时的快捷方式」翻译成一次性动作。
+//
+// 背景：落地页的 4 个卡片其实是动作（解释/翻译/总结），旧实现写成了会话级
+// mode，导致「选了翻译 → 后面每一句都被翻译」。新语义下新建会话一律落 chat，
+// 动作随第一条消息走；老会话（已有 ConvID）保持原样，靠 aiActionNameFor 回填。
+func firstTurnMode(convID, mode string) string {
+	if strings.TrimSpace(convID) != "" {
+		return mode
+	}
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case aiActionExplain, aiActionTranslate, aiActionSummarize:
+		return "chat"
+	}
+	return mode
+}
+
+func firstTurnAction(convID, mode, action string) string {
+	if strings.TrimSpace(convID) != "" {
+		return action
+	}
+	if strings.TrimSpace(action) != "" {
+		return action
+	}
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case aiActionExplain, aiActionTranslate, aiActionSummarize:
+		return strings.ToLower(strings.TrimSpace(mode))
+	}
+	return ""
 }

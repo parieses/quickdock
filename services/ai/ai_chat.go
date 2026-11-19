@@ -94,6 +94,11 @@ type chatTurn struct {
 	Content   string
 	Usage     db.TokenUsage
 	ToolCalls []aiToolCall
+	// FinishReason 是上游 SSE 给的收尾原因（stop / length / tool_calls / content_filter）。
+	// 必须解析：thinking 模型把 max_tokens 花在 reasoning 上会被 length 截断，
+	// 此时 Content 和 ToolCalls 都是空的——不带上它，调用方只能看到「空回复」，
+	// 分不清是模型不想答、还是被截断了，自然也谈不上对症重试。
+	FinishReason string
 }
 
 // streamAIChat 流式调用模型。
@@ -160,6 +165,7 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 	if cfg.ThinkingEnabled {
 		body["enable_thinking"] = true
 	}
+	applyReasoningLevel(body, cfg)
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return chatTurn{}, err
@@ -274,6 +280,9 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 	defer resp.Body.Close()
 
 	var sb strings.Builder
+	// 收尾原因（stop / length / tool_calls / …）：thinking 模型被 max_tokens
+	// 掐断时它是最直接的证据，必须一路带回给 agent 主循环。
+	var finishReason string
 	// tool_calls 是分片下发的：第一片带 index/id/name，后续分片只带
 	// arguments 的字符串片段、不再带 id。必须按 index 累积，最后才是一条完整调用。
 	// 直接按片 append 会得到一堆半截 JSON，且各网关分片粒度不同，本地很难复现。
@@ -294,7 +303,7 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 			sb.WriteString(dsml.Finish())
 			logger.I("[ai] 已取消 model=%s conv=%s 耗时=%v 已输出=%d字",
 				cfg.Model, convID, time.Since(startedAt).Round(time.Millisecond), len([]rune(sb.String())))
-			return chatTurn{Content: sb.String(), Usage: usage, ToolCalls: flushToolCalls(pendingTools)}, ctx.Err()
+			return chatTurn{Content: sb.String(), Usage: usage, ToolCalls: flushToolCalls(pendingTools), FinishReason: finishReason}, ctx.Err()
 		default:
 		}
 		line := strings.TrimSpace(scanner.Text())
@@ -307,8 +316,9 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 		}
 		var chunk struct {
 			Choices []struct {
-				Index int `json:"index"`
-				Delta struct {
+				Index        int    `json:"index"`
+				FinishReason string `json:"finish_reason"`
+				Delta        struct {
 					Content          string `json:"content"`
 					ReasoningContent string `json:"reasoning_content"` // Agnes/DeepSeek thinking 模式
 					ToolCalls        []struct {
@@ -343,6 +353,9 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 		chunkN++
 		lastChunkAt = nowChunkAt
 		delta := chunk.Choices[0].Delta
+		if fr := chunk.Choices[0].FinishReason; fr != "" {
+			finishReason = fr
+		}
 		if delta.Content != "" {
 			// 先过 DSML 过滤器：工具调用段落不推给前端，也不进 sb（那是要被展示与落库的正文）。
 			if vis := dsml.Feed(delta.Content); vis != "" {
@@ -400,17 +413,17 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 		logger.W("[ai] 上游超过 %v 无任何数据，判定空闲超时 model=%s conv=%s 耗时=%v 已输出=%d字",
 			aiStreamIdleGap, cfg.Model, convID, time.Since(startedAt).Round(time.Millisecond), len([]rune(sb.String())))
 		// 半截正文照常返回：调用方会落库，与「用户停止」同一口径处理。
-		return chatTurn{Content: sb.String(), Usage: usage, ToolCalls: calls},
+		return chatTurn{Content: sb.String(), Usage: usage, ToolCalls: calls, FinishReason: finishReason},
 			fmt.Errorf("上游超过 %v 没有返回任何数据，连接可能已被中间层断开（模型 %s）", aiStreamIdleGap, cfg.Model)
 	}
 	if err := scanner.Err(); err != nil {
 		logger.E("[ai] 流读取中断 model=%s conv=%s 耗时=%v 已输出=%d字: %v",
 			cfg.Model, convID, time.Since(startedAt).Round(time.Millisecond), len([]rune(sb.String())), err)
-		return chatTurn{Content: sb.String(), Usage: usage, ToolCalls: calls}, err
+		return chatTurn{Content: sb.String(), Usage: usage, ToolCalls: calls, FinishReason: finishReason}, err
 	}
 	out := sb.String()
 	logDone(len([]rune(out)), len(calls))
-	return chatTurn{Content: out, Usage: usage, ToolCalls: calls}, nil
+	return chatTurn{Content: out, Usage: usage, ToolCalls: calls, FinishReason: finishReason}, nil
 }
 
 // flushToolCalls 把按 index 累积的调用整理成有序切片。
@@ -612,7 +625,9 @@ func (a *AIService) buildAIMessagesWithin(ctx context.Context, cfg AIProfile, co
 		}
 	}
 
-	system := aiModePrompts[mode]
+	// 旧 mode（explain/translate/summarize）已降级为一次性动作，
+	// 这里统一拿 chat 的提示词，约束由 aiActionInstruction 拼在 user 消息尾部。
+	system := aiPromptFor(mode)
 	if cfg.SystemPrompt != "" {
 		system = cfg.SystemPrompt + "\n\n" + system
 	}
@@ -740,6 +755,7 @@ func (a *AIService) callAIOnce(ctx context.Context, cfg AIProfile, messages []ma
 	if cfg.ThinkingEnabled {
 		body["enable_thinking"] = true
 	}
+	applyReasoningLevel(body, cfg)
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return "", db.TokenUsage{}, err

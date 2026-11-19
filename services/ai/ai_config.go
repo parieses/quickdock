@@ -54,6 +54,17 @@ type AIProfile struct {
 	// 场景需要手填：自建网关起了个看不出门道的模型名，或者厂商偷偷改了窗口
 	// 而表还没更新。
 	ContextWindow int `json:"contextWindow"`
+	// ModelID 当前选中的模型（指向 Models 里的某一项）；空 = 用 Model 字段。
+	//
+	// 为什么保留 Model：老档案、以及「只想改模型名」的调用点都在用它，
+	// 直接换掉会让所有 loadAIProfile 的调用方同时需要改。解析顺序是
+	// ModelID → Model → Models[0]（见 activeModelEntry）。
+	ModelID string `json:"modelId"`
+	// Models 这条接入下启用的多个模型（同一 baseURL / apiKey 可以多选）。
+	//
+	// 每项自带能力覆盖：上下文窗口、输出上限、输入类型、推理档位。
+	// 空 = 老档案，行为与只有 Model 时完全一致。
+	Models []AIModelEntry `json:"models"`
 	// CheapModel 廉价模型（WP11）：起标题、摘要历史、压缩上下文时用它。
 	//
 	// 空 = 全部用主模型（默认）。这些调用的共同点是「输入长、输出短、失败不致命」，
@@ -290,7 +301,9 @@ func (a *AIService) buildAIProfile(s AIProfile) (AIProfile, bool) {
 		cfg.APIKey = dec
 	}
 	if cfg.MaxTokens <= 0 {
-		cfg.MaxTokens = aiDefaultMax
+		// 缺省不再写死 8192：按模型给（见 ai_model_caps.go）。
+		// 认不出来的模型仍回落到 aiDefaultMax，行为与以前一致。
+		cfg.MaxTokens = autoMaxTokensOf(cfg.Model, contextWindowOf(cfg))
 	}
 	if cfg.Temperature == 0 {
 		cfg.Temperature = aiDefaultTemp

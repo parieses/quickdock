@@ -49,6 +49,22 @@ func withRunID(ev map[string]any, runID string) map[string]any {
 	return ev
 }
 
+// withReasoningRounds 把分轮思考挂到事件载荷上（P0 修复）。
+//
+// 为什么必须带：前端在 done 时会把这一轮「冻结」成一条本地消息（不回库重拉，
+// 否则整段会闪一下）。而本地只有 run.reasonRounds 这种流式期结构 —— 不把后端
+// 权威的那份 JSON 递过去，冻结出来的消息就没有分轮信息，于是「刚跑完思考就没了」，
+// 刷新一次又回来。
+func withReasoningRounds(ev map[string]any, roundsJSON string) map[string]any {
+	if ev == nil {
+		return ev
+	}
+	if s := strings.TrimSpace(roundsJSON); s != "" {
+		ev["reasoningRounds"] = s
+	}
+	return ev
+}
+
 // AILatestRun 返回某个会话最近一次运行的头信息（没有则 data 为 nil）。
 //
 // 用途：刷新页面 / 切回会话时，前端手上没有 done 事件，只能靠它把轨迹入口

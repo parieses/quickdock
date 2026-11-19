@@ -375,6 +375,39 @@ export function useAiRuns(deps: AiRunsDeps) {
   // 而实际上他看到的是自己插话前后各有一截回答。
   // 后端在同一个位置做同一件事（agent_run.go 的 saveSegment），两边的段落边界
   // 必须对齐，否则刷新前后同一条对话会读成不同的顺序。
+  /**
+   * 把流式期累积的分轮思考序列化成与后端同构的 JSON。
+   *
+   * 为什么前端也要会序列化：done / 段落冻结 / 中断这三条路径都是「本地固化一条
+   * 消息」，不回库重拉（重拉会闪一下）。不带上分轮信息，冻出来的气泡就只有一整段
+   * 或干脆没有思考——用户看到的就是「刚跑完思考就没了」，刷新才回来。
+   * done 事件里带了后端权威的那份（reasoningRounds），优先用它。
+   */
+  /**
+   * 忘掉某个会话的 runId 映射。
+   *
+   * runIds 只写不删会一直涨：每个被删掉的会话都留一条短字符串，
+   * 且因为会话 id 不复用，它还永远不会被后续写入覆盖掉。
+   */
+  function forgetRun(convId: string) {
+    const id = String(convId || '').trim()
+    if (!id || !(id in runIds.value)) return
+    const next = { ...runIds.value }
+    delete next[id]
+    runIds.value = next
+  }
+  function serializeReasonRounds(run: AIRun, tail: string, serverJSON = ''): string {
+    const s = String(serverJSON || '').trim()
+    if (s) return s
+    const list = run.reasonRounds.map((r) => ({ round: r.round, text: r.text }))
+    const t = String(tail || '').trim()
+    if (t) {
+      const last = list.length ? list[list.length - 1].round : 0
+      list.push({ round: last + 1, text: t })
+    }
+    return list.length ? JSON.stringify(list) : ''
+  }
+
   function freezeSegment(run: AIRun) {
     flushStream(run)
     const content = run.text
@@ -385,7 +418,13 @@ export function useAiRuns(deps: AiRunsDeps) {
       created_at: new Date().toISOString(),
     }
     if (run.model) msg.model = run.model
-    if (run.reasoning) msg.reasoning_content = run.reasoning
+    // 拼接版（导出、复制、旧渲染读它）+ 分轮版（新渲染读它）
+    const roundsJSON = serializeReasonRounds(run, run.reasoning)
+    const allReasoning = [...run.reasonRounds.map((r) => r.text), run.reasoning]
+      .filter((s) => s && s.trim())
+      .join('\n\n')
+    if (allReasoning) msg.reasoning_content = allReasoning
+    if (roundsJSON) msg.reasoning_rounds = roundsJSON
     if (run.tools.length) {
       msg.tool_calls = serializeTools(run.tools)
       msg.tool_rounds = countToolRounds(run.tools)
@@ -547,6 +586,8 @@ export function useAiRuns(deps: AiRunsDeps) {
         body: JSON.stringify({
           convId,
           mode: mode.value,
+          // 快捷提示词（解释/翻译/总结/审阅）已改成直接填进正文的指令前缀，
+          // 不再走 promptAction 一次性动作：正文即指令，所见即所得。
           // 归属只在新建时生效：后端忽略已有会话传来的 spaceId，
           // 免得「随便发一句话」就把任务搬了家。
           spaceId: convId ? undefined : (pendingSpaceId.value || undefined),
@@ -869,7 +910,14 @@ export function useAiRuns(deps: AiRunsDeps) {
                   // 模型名由后端回传（它就是落库的那份），拿不到才退回发送时的档案
                   const usedModel = String(data.model || run.model || '').trim()
                   if (usedModel) msg.model = usedModel
-                  if (reasoning) msg.reasoning_content = reasoning
+                  // 分轮思考：优先用后端在 done 里给的权威 JSON（与库里逐字节一致），
+                  // 拿不到再按本地累积重建——否则冻结出来的气泡与刷新后长得不一样。
+                  const doneRounds = serializeReasonRounds(run, reasoning, String(data.reasoningRounds || ''))
+                  const doneAll = [...run.reasonRounds.map((r) => r.text), reasoning]
+                    .filter((s) => s && s.trim())
+                    .join('\n\n')
+                  if (doneAll) msg.reasoning_content = doneAll
+                  if (doneRounds) msg.reasoning_rounds = doneRounds
                   // 工具记录落到消息上，刷新前就不用重新拉一次会话。
                   // 序列化时丢掉 running：库里存的是「发生过什么」，不是「界面此刻什么样」。
                   if (run.tools.length) {
@@ -973,7 +1021,12 @@ export function useAiRuns(deps: AiRunsDeps) {
           if (broken) msg.interrupted = true
           // 中断时后端还没发 done，模型名用发送时记下的那份
           if (run.model) msg.model = run.model
-          if (run.reasoning) msg.reasoning_content = run.reasoning
+          const stopRounds = serializeReasonRounds(run, run.reasoning)
+          const stopAll = [...run.reasonRounds.map((r) => r.text), run.reasoning]
+            .filter((s) => s && s.trim())
+            .join('\n\n')
+          if (stopAll) msg.reasoning_content = stopAll
+          if (stopRounds) msg.reasoning_rounds = stopRounds
           if (hadTools) {
             msg.tool_calls = serializeTools(run.tools)
             msg.tool_rounds = countToolRounds(run.tools)
@@ -1094,6 +1147,7 @@ export function useAiRuns(deps: AiRunsDeps) {
 
   return {
     runIds,
+  forgetRun,
     send,
     stop,
     /** 把一句话插进正在跑的那一轮（发第二句时用） */

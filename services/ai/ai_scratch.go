@@ -29,6 +29,23 @@ const aiScratchDirName = ".quickdock"
 // aiScratchSubDir 辅助文件在 `.quickdock` 下的子目录。
 const aiScratchSubDir = "tmp"
 
+// pathWithinDir 判断 target 是否在 dir 之内（含 dir 本身）。
+//
+// 两边都先 Clean：`/a/b/../c` 与 `/a/c` 必须判成同一处，否则「清理目标」这类
+// 安全判断能被一个 `..` 绕过去。与 ai_approval_grants.go 的 pathWithin 同一语义，
+// 但那个函数在另一个文件里、且面向授权规则，这里不复用以保持各文件自解释。
+func pathWithinDir(target, dir string) bool {
+	target = filepath.Clean(strings.TrimSpace(target))
+	dir = filepath.Clean(strings.TrimSpace(dir))
+	if target == "" || dir == "" || dir == "." {
+		return false
+	}
+	if target == dir {
+		return true
+	}
+	return strings.HasPrefix(target, dir+string(filepath.Separator))
+}
+
 // AICleanScratch 清空某个项目的辅助文件目录（WP18 的清理入口）。
 //
 // 只删 `<cwd>/.quickdock/tmp/`：不做通配、不递归找同名的别处，
