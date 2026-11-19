@@ -638,7 +638,13 @@ onBeforeUnmount(() => {
             </div>
 
             <ul class="trace-nodes">
-              <li v-for="n in nodes" :key="n.id" class="trace-node" :style="{ paddingLeft: n.depth * 12 + 'px' }">
+              <li
+                v-for="n in nodes"
+                :key="n.id"
+                class="trace-node"
+                :class="{ 'is-child': n.depth > 0 }"
+                :style="{ paddingLeft: n.depth * 12 + 'px' }"
+              >
                 <div v-key-click class="trace-node-head" @click="toggleNode(n.id)">
                   <component :is="expanded[n.id] ? ChevronDown : ChevronRight" :size="11" class="trace-node-caret" />
                   <span class="trace-node-role">{{ n.role }}</span>
@@ -866,7 +872,21 @@ onBeforeUnmount(() => {
 
 .trace-nodes { list-style: none; margin: 0; padding: 0; }
 
-.trace-node { margin-bottom: var(--space-2); }
+.trace-node { margin-bottom: var(--space-2); position: relative; }
+/* 子节点左侧画一段「└」引导线，配合 depth 缩进表达父子归属。
+   纯 padding 缩进只能看出「更深」，看不出「是谁的孩子」。 */
+.trace-node.is-child::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: -4px;
+  bottom: 50%;
+  width: 6px;
+  border-left: 1px solid var(--color-border-light);
+  border-bottom: 1px solid var(--color-border-light);
+  border-bottom-left-radius: var(--radius-sm);
+  pointer-events: none;
+}
 
 .trace-node-head {
   display: flex;
@@ -875,6 +895,7 @@ onBeforeUnmount(() => {
   padding: var(--space-2);
   border-radius: var(--radius-sm);
   cursor: pointer;
+  position: relative;
 }
 
 .trace-node-head:hover { background: var(--color-bg-hover); }
@@ -906,8 +927,12 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
+/* 与气泡内 run 树（panels.css .qd-run-state）同一套口径：
+   pending 中性、running 蓝、canceled 橙，别让运行中/已停止都落灰。 */
+.trace-node-status.is-running { color: var(--color-accent); }
 .trace-node-status.is-done { color: var(--color-success); }
 .trace-node-status.is-failed { color: var(--color-danger); }
+.trace-node-status.is-canceled { color: var(--color-warning); }
 
 /* 抽屉顶部的子任务区：固定在头部下方，不随下面的 run 列表滚动。 */
 .trace-top-children {
@@ -995,8 +1020,11 @@ onBeforeUnmount(() => {
   opacity: 0;
   transition: opacity var(--transition-fast), color var(--transition-fast);
 }
-.trace-child-task-head:hover .trace-child-stop { opacity: 1; }
+.trace-child-task-head:hover .trace-child-stop,
+.trace-child-stop:focus-visible { opacity: 1; }
 .trace-child-stop:hover { color: var(--color-danger); background: var(--color-bg-hover); }
+/* 键盘用户不触发 hover：聚焦时也显形，且给个明确的焦点环。 */
+.trace-child-stop:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 .trace-child-stop:disabled { opacity: .4; cursor: default; }
 
 .trace-child-task-detail {
@@ -1146,6 +1174,13 @@ onBeforeUnmount(() => {
 }
 
 .trace-step.is-note .trace-step-title { color: var(--color-text-muted); }
+/* 失败的工具/错误事件归在 note 类里，仅靠下方红字不够醒目：
+   把序号圆点和标题一起标红，长串时间线里也能立刻定位到出错那一步。 */
+.trace-step:has(.trace-step-err) .trace-step-idx {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+.trace-step:has(.trace-step-err) .trace-step-title { color: var(--color-danger); }
 
 .trace-step-target {
   flex: 1;
@@ -1196,5 +1231,14 @@ onBeforeUnmount(() => {
   padding: var(--space-1) 0 var(--space-1) 28px;
   font-size: var(--text-2xs);
   color: var(--color-text-disabled);
+}
+
+/* 尊重系统的「减少动态效果」：箭头旋转与透明度过渡一并关掉。
+   项目里只有 AiToolbar 做了这层降级，抽屉此前遗漏。 */
+@media (prefers-reduced-motion: reduce) {
+  .trace-child-task-arrow,
+  .trace-child-stop,
+  .trace-mode { transition: none; }
+  .trace-child-task-arrow.is-open { transform: none; }
 }
 </style>

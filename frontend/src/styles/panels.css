@@ -339,6 +339,7 @@
 .qd-run-caret { transition: transform var(--transition-fast); transform: rotate(-90deg); flex-shrink: 0; }
 .qd-run[open] > .qd-run-sum .qd-run-caret { transform: rotate(0deg); }
 .qd-run-state { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-muted); }
+.qd-run-state.is-running { color: var(--color-accent); }
 .qd-run-state.is-done { color: var(--color-success); }
 .qd-run-state.is-failed { color: var(--color-danger); }
 .qd-run-state.is-canceled { color: var(--color-warning); }
@@ -352,14 +353,29 @@
 .qd-run-hint { font-size: var(--text-sm); color: var(--color-text-muted); padding: var(--space-1) 0; }
 .qd-run-hint.is-err { color: var(--color-danger); }
 
-.qd-run-node { margin: 3px 0; padding-left: var(--space-4); border-left: 2px solid var(--color-border-light); }
+.qd-run-node {
+  margin: 3px 0; padding-left: var(--space-4);
+  border-left: 2px solid var(--color-border-light);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  transition: border-color var(--transition-fast);
+}
+/* 左边框跟着状态走：一排子任务里，失败/运行中的分支一眼就能扫出来，
+   不必逐条去读那个 7px 的状态点。pending 仍是中性灰。 */
+.qd-run-node.is-running { border-left-color: var(--color-accent); }
+.qd-run-node.is-done { border-left-color: var(--color-success); }
+.qd-run-node.is-failed { border-left-color: var(--color-danger); }
+.qd-run-node.is-canceled { border-left-color: var(--color-warning); }
 /* 状态点：一眼扫出哪个子任务失败了，不用逐条读文字。 */
 .qd-run-node-head { display: flex; align-items: baseline; gap: var(--space-3); font-size: var(--text-sm); }
 .qd-run-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--color-text-disabled); flex-shrink: 0; align-self: center;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--color-text-muted); flex-shrink: 0; align-self: center;
 }
-.qd-run-dot.is-running { background: var(--color-accent); }
+.qd-run-dot.is-pending { background: var(--color-text-disabled); }
+.qd-run-dot.is-running {
+  background: var(--color-accent);
+  animation: qd-run-pulse 1.8s ease-out infinite;
+}
 .qd-run-dot.is-done { background: var(--color-success); }
 .qd-run-dot.is-failed { background: var(--color-danger); }
 .qd-run-dot.is-canceled { background: var(--color-warning); }
@@ -400,6 +416,17 @@
   color: var(--color-text-secondary); background: var(--color-bg-secondary);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   white-space: pre-wrap; word-break: break-word;
+}
+
+/* 运行中节点的呼吸光环：让「还在跑」在静止的一排子任务里自己跳出来。
+   尊重系统的减少动态效果设置——关掉后仅靠蓝点本身区分状态。 */
+@keyframes qd-run-pulse {
+  0% { box-shadow: 0 0 0 0 var(--color-accent-bg); }
+  70%, 100% { box-shadow: 0 0 0 4px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .qd-run-caret { transition: none; }
+  .qd-run-dot.is-running { animation: none; }
 }
 /* ==================== 工具改动的行级 diff ==================== */
 /* 子组件（AiDiffView.vue）不写 scoped 样式，与 run 树同一套做法：

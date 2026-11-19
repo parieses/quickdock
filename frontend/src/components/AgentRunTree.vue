@@ -104,10 +104,12 @@ function eventLine(e: RunEvent): string {
 
 const statusText = computed(() => {
   const s = tree.value?.run?.status
-  if (s === 'running') return t('aiRunStatusRunning')
   if (s === 'failed') return t('aiRunStatusFailed')
   if (s === 'canceled') return t('aiRunStatusCanceled')
-  return t('aiRunStatusDone')
+  if (s === 'done') return t('aiRunStatusDone')
+  // running / pending / 缺省都归「进行中」——与抽屉的 statusText 口径一致。
+  // pending（登记了还没开跑的节点）在这里显示「已完成」是错的。
+  return t('aiRunStatusRunning')
 })
 
 function fmtTokens(n: number): string {
