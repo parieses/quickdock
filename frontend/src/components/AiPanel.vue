@@ -19,7 +19,7 @@
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlignLeft, Check, Copy, Loader2, Send, Sparkles, Square, Trash2, Waves, X } from '@lucide/vue'
+import { AlignLeft, Brain, Check, Copy, Loader2, Send, Sparkles, Square, Trash2, Waves, X } from '@lucide/vue'
 import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { splitAiSegments } from '../utils/aiSegments'
@@ -56,6 +56,11 @@ export interface AiPanelResult {
    * 前端据此收敛本地历史数组：未压缩时=全部，压缩后=最近若干条。
    */
   historyKept?: number
+  /**
+   * 这轮问答落库到的 AI 任务 id（SSH 场景，见后端 ai_session.go）。
+   * 空表示没存（DB 未就绪 / 建任务失败），此时不显示「在 AI 中打开」。
+   */
+  convId?: string
 }
 
 const props = withDefaults(defineProps<{
@@ -115,6 +120,14 @@ const props = withDefaults(defineProps<{
   /** 思考增量（模型开了 thinking 才有）。首字之前显示在「思考中」那行，见模板。 */
   liveReason?: string
   draft?: { text: string; seq: number }
+  /**
+   * 是否允许模型思考（undefined = 不显示开关）。
+   *
+   * 只有链路真的支持这个参数时调用方才该传：SSH 面板关掉思考能让首字快上
+   * 好几秒（模型不用先想再答）。剪贴板 / 知识库没有对应入参，传了就是
+   * 一个点了没反应的假开关——比没有更糟。
+   */
+  thinking?: boolean
 }>(), {
   samples: () => [],
   emptyTip: '',
@@ -142,6 +155,8 @@ const emit = defineEmits<{
    * 那时已经来不及提示了。
    */
   'update:question': [text: string]
+  /** 思考开关：调用方传了 thinking 才有按钮，点击切换由调用方落地（存偏好）。 */
+  'update:thinking': [v: boolean]
 }>()
 
 const { t } = useI18n()
@@ -365,6 +380,18 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
         <slot name="badge" />
       </span>
       <span class="ai-panel-head-actions">
+        <!-- 思考开关：点了立刻生效（下一轮就是用新状态）。
+             放在流式开关左边 —— 流式管「怎么显示」，思考管「模型怎么答」，
+             先有答案再有显示方式，顺序与它们的影响层次一致。 -->
+        <button
+          v-if="thinking !== undefined"
+          class="ai-panel-icon ai-panel-thinking"
+          :class="{ on: thinking }"
+          :title="t(thinking ? 'aiPanelThinkingOn' : 'aiPanelThinkingOff')"
+          @click="emit('update:thinking', !thinking)"
+        >
+          <Brain :size="13" />
+        </button>
         <!--
           回答方式开关：一个图标两种状态，不做成文字标签——300px 侧栏里
           标题 + 环境徽章 + 档案徽章已经占满，再塞两个字会把标题挤没。
@@ -466,7 +493,10 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
         <Loader2 :size="14" class="spin" />
         <!-- 有思考流就显示它：首字之前的十几秒里，这一行是唯一的「它还活着」的证据。 -->
         <span v-if="liveReason" class="ai-panel-reason" :title="liveReason">{{ liveReason }}</span>
-        <span v-else>{{ t('sshAiThinking') }}</span>
+        <!-- 思考开关关掉后再说「思考中」就是自相矛盾：用户关掉开关却看到这行字，
+             会以为开关没生效。这时改成中性的「等待响应」——它描述的是「还没出字」
+             这个事实，与模型到底在排队、在思考还是在生成无关。 -->
+        <span v-else>{{ t(thinking === false ? 'aiPanelWaiting' : 'sshAiThinking') }}</span>
       </div>
     </div>
 
@@ -556,9 +586,12 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 }
 
 /* 回答方式开关：流式开启时用 accent 色点出来，不必 hover 读 title 才知道当前状态。
-   一次性返回保持默认灰——那是个"降级"状态，不该比流式更显眼。 */
+   一次性返回保持默认灰——那是个"降级"状态，不该比流式更显眼。
+   思考开关同一套：开着（模型会先想）就是 accent，关掉是灰。 */
 .ai-panel-stream.on,
-.ai-panel-stream.on:hover {
+.ai-panel-stream.on:hover,
+.ai-panel-thinking.on,
+.ai-panel-thinking.on:hover {
   color: var(--color-accent);
 }
 

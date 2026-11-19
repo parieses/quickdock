@@ -159,7 +159,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case r.URL.Path == "/mcp" && r.Method == http.MethodPost:
-		s.handleRPC(w, r)
+		s.handleRPC(w, r, s.tokenMatched(r))
 	case r.URL.Path == "/mcp" && r.Method == http.MethodDelete:
 		// 客户端显式结束会话；本实现无会话状态，直接确认。
 		w.WriteHeader(http.StatusNoContent)
@@ -187,6 +187,23 @@ func (s *Server) authTokenOK(r *http.Request) bool {
 	if !require || token == "" {
 		return true
 	}
+	return tokenMatches(r, token)
+}
+
+// tokenMatched 判断请求是否真的带了正确的令牌，**不看 requireToken 开关**。
+// 破坏性工具用它做二次闸：开关关着（兼容老客户端）只放行只读调用，
+// 想动数据就得证明自己拿得到令牌。
+func (s *Server) tokenMatched(r *http.Request) bool {
+	s.mu.Lock()
+	token := s.token
+	s.mu.Unlock()
+	if token == "" {
+		return false
+	}
+	return tokenMatches(r, token)
+}
+
+func tokenMatches(r *http.Request, token string) bool {
 	got := ""
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		got = strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
@@ -197,7 +214,7 @@ func (s *Server) authTokenOK(r *http.Request) bool {
 	return subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1
 }
 
-func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request, bearerOK bool) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, rpcResponse{JSONRPC: "2.0", ID: nil, Error: &rpcError{Code: codeParseError, Message: "读取请求体失败"}})
@@ -220,6 +237,25 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := make([]rpcResponse, 0, len(batch))
+	// 破坏性工具无条件要求令牌（见 registry.go 的 RequiresToken）：requireToken 关着
+	// 只是「为了不打断已配好的老客户端」，不等于把删除/执行/停服务也敞开。
+	// 放在 dispatch 之前，才能按 HTTP 语义回 401 而不是 200+isError。
+	if !bearerOK {
+		for _, req := range batch {
+			if req.Method != "tools/call" || len(req.Params) == 0 {
+				continue
+			}
+			var p toolCallParams
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				continue
+			}
+			if RequiresToken(p.Name) {
+				w.Header().Set("WWW-Authenticate", `Bearer realm="quickdock-mcp"`)
+				http.Error(w, "unauthorized: 破坏性工具 "+p.Name+" 需要访问令牌（Bearer / X-MCP-Token）", http.StatusUnauthorized)
+				return
+			}
+		}
+	}
 	for i := range batch {
 		req := batch[i]
 		if req.Method == "" {

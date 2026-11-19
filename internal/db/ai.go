@@ -20,7 +20,8 @@ type AISpace struct {
 	// Cwd 空间绑定的目录（绝对路径）。空串只在用户手工创建「不带目录的空间」时出现，
 	// 目前创建入口都要求选目录，所以实践中恒非空。
 	Cwd string `json:"cwd"`
-	// Kind：'' 普通空间 / 'schedule' 定时任务专属空间。前端据此换闹钟图标。
+	// Kind：'' 普通空间 / 'schedule' 定时任务专属空间 / 'ssh' SSH 助手专属空间。
+	// 前端据此换图标（闹钟 / 终端）并收起「新建任务」这类普通空间才有的入口。
 	Kind string `json:"kind"`
 	// TaskID：定时任务空间的归属任务。普通空间为空。
 	// 与 AIConversation.ScheduleID 的区别：那个记「哪次跑出来的会话」，
@@ -725,6 +726,21 @@ func (d *Database) CreateAIConversation(in NewAIConversation) (*AIConversation, 
 		return nil, err
 	}
 	return c, nil
+}
+
+// TouchAIConversation 推进会话的更新时间。
+//
+// 给「外部写入方」用：SSH 助手这类能力自己往 ai_messages 里写问答，
+// 但侧栏按 updated_at 排序，不推时间的话刚问过的任务会一直沉在列表底部。
+// 只改时间、不碰其它字段——调用方并不拥有这条任务，无权改它的标题/空间/模式。
+func (d *Database) TouchAIConversation(id string) error {
+	if strings.TrimSpace(id) == "" {
+		return nil
+	}
+	return d.ExecuteParams(
+		`UPDATE ai_conversations SET updated_at = ? WHERE id = ?`,
+		[]interface{}{now(), strings.TrimSpace(id)},
+	)
 }
 
 // SetAIConversationMode 改任务的模式（创建后仍允许改：用户可能开错了类型）。

@@ -108,17 +108,26 @@ const aiPresets: Record<string, string> = {
   azure: 'https://{resource}.openai.azure.com',
   custom: '',
 }
-const aiProviders = [
+// 厂商名里只有「本地」「自定义」是需要翻译的描述，纯品牌名保留原文。
+// 用 computed 而不是常量：切换语言时下拉选项要跟着变。
+const aiProviders = computed(() => [
   { value: 'openai', label: 'OpenAI' },
   { value: 'deepseek', label: 'DeepSeek' },
   { value: 'kimi', label: 'Kimi (Moonshot)' },
-  { value: 'qwen', label: '通义千问 (Qwen)' },
-  { value: 'ollama', label: 'Ollama (本地)' },
+  { value: 'qwen', label: t('aiProviderQwen') },
+  { value: 'ollama', label: t('aiProviderOllama') },
   { value: 'azure', label: 'Azure OpenAI' },
-  { value: 'custom', label: '自定义 / 其他' },
-]
+  { value: 'custom', label: t('aiProviderCustom') },
+])
 const aiProfiles = ref<AIProfile[]>([])
 const aiActive = ref('')
+/**
+ * 一次性问答（SSH / 剪贴板 / 笔记 / 插件）单独使用的档案 id。
+ *
+ * 空串 = 跟随上面的对话模型。以前这两类共用一个全局档案，想给面板换成
+ * 快模型就得连聊天一起换；分开之后「聊天用强模型、面板问答用快模型」才成立。
+ */
+const aiAskActive = ref('')
 const aiMsg = ref('')
 const aiMsgError = ref(false)
 const aiTesting = ref(false)
@@ -295,6 +304,8 @@ async function loadAIProfiles() {
     if (!res) return
     aiProfiles.value = res.profiles ?? []
     aiActive.value = res.active || (aiProfiles.value[0]?.id ?? '')
+    // 后端已把「指向已删档案」的脏值过滤成空串，这里直接跟着走。
+    aiAskActive.value = res.askActive || ''
     if (aiProfiles.value.length === 0) {
       const p = newAIProfile()
       aiProfiles.value = [p]
@@ -1247,6 +1258,9 @@ function addAIProfile() {
 function delAIProfile(id: string) {
   aiProfiles.value = aiProfiles.value.filter((p) => p.id !== id)
   if (aiActive.value === id) aiActive.value = aiProfiles.value[0]?.id ?? ''
+  // 被删的正好是「一次性问答」指定的那个：回落到「跟随对话模型」，
+  // 否则选择框里会留一个已经不存在的 id（后端虽然会兜底，但那要等下次保存）。
+  if (aiAskActive.value === id) aiAskActive.value = ''
 }
 function onAIProviderChange() {
   const cur = aiCurrent.value
@@ -1276,7 +1290,7 @@ async function saveAIProfiles() {
       keepRecentMin: asInt(p.keepRecentMin),
       keepRecentMax: asInt(p.keepRecentMax),
     }))
-    unwrap(await AISaveProfiles({ active: aiActive.value, profiles }))
+    unwrap(await AISaveProfiles({ active: aiActive.value, askActive: aiAskActive.value, profiles }))
     Events.Emit('ai:profiles-updated')
     showAIMsg(t('saved'))
   } catch (e) {
@@ -1292,11 +1306,11 @@ async function testAIConnection() {
     showAIMsg(t(needKey ? 'aiFillRequired' : 'aiFillRequiredNoKey'), true); return
   }
   await saveAIProfiles()
-  aiTesting.value = true; showAIMsg('测试中…')
+  aiTesting.value = true; showAIMsg(t('aiTesting'))
   try {
     const res = unwrap<{ success?: boolean; message?: string }>(await AITestConnection(cur.id))
-    if (!res) throw new Error('无响应')
-    showAIMsg(res.message || '未知', res.success !== true)
+    if (!res) throw new Error(t('aiNoResponse'))
+    showAIMsg(res.message || t('aiUnknown'), res.success !== true)
   } catch (e: any) {
     showAIMsg(t('testFailed') + ': ' + (e?.message || String(e)), true)
   } finally { aiTesting.value = false }
@@ -1443,6 +1457,27 @@ function saveAIModal() {
       <button class="ai-profile-add" @click="addAIProfile">
         <Plus :size="13" /> {{ t('aiAddProfile') }}
       </button>
+    </div>
+
+    <!-- 一次性问答的模型：SSH / 剪贴板 / 笔记面板和插件 host.ai.ask 走这条。
+         它们的诉求常与聊天不同（要快、要便宜、不要长思考），所以允许单独指定。
+         改完立即保存，不必再回去点「保存」。 -->
+    <div class="ai-ask-profile">
+      <div class="ai-ask-profile-text">
+        <span class="ai-ask-profile-label">{{ t('aiAskProfileLabel') }}</span>
+        <span class="ai-ask-profile-hint">{{ t('aiAskProfileHint') }}</span>
+      </div>
+      <select
+        v-model="aiAskActive"
+        class="ai-ask-profile-select"
+        :aria-label="t('aiAskProfileLabel')"
+        @change="saveAIProfiles"
+      >
+        <option value="">{{ t('aiAskProfileFollow') }}</option>
+        <option v-for="p in aiProfiles" :key="p.id" :value="p.id">
+          {{ p.name || p.model || p.id }}
+        </option>
+      </select>
     </div>
 
     <p v-if="aiMsg" :class="['result-hint', { error: aiMsgError }]">{{ aiMsg }}</p>
@@ -1594,7 +1629,7 @@ function saveAIModal() {
               <td class="num">{{ m.requests }}</td>
               <td class="num">
                 {{ fmtTokens(m.totalTokens) }}
-                <span v-if="entryCachePct(m) > 0" class="usage-cell-sub">缓存 {{ entryCachePct(m) }}%</span>
+                <span v-if="entryCachePct(m) > 0" class="usage-cell-sub">{{ t('aiCacheHit', { pct: entryCachePct(m) }) }}</span>
               </td>
               <td class="num" :class="{ unknown: !m.priced }">
                 {{ m.priced ? fmtCost(m.estimatedCost) : t('aiUsageNoPrice') }}
@@ -2180,8 +2215,8 @@ function saveAIModal() {
             <input v-model.number="aiEditDraft.presencePenalty" type="number" min="-2" max="2" step="0.1" class="num-input" placeholder="0" />
           </label>
           <label class="field field-half toggle-field">
-            <span class="field-label">思考模式 (thinking)</span>
-            <QdSwitch :model-value="aiEditDraft.thinkingEnabled" label="思考模式 (thinking)"
+            <span class="field-label">{{ t('aiThinkingMode') }}</span>
+            <QdSwitch :model-value="aiEditDraft.thinkingEnabled" :label="t('aiThinkingMode')"
                       @update:model-value="(v: boolean) => aiEditDraft && (aiEditDraft.thinkingEnabled = v)" />
           </label>
         </div>
@@ -2339,7 +2374,7 @@ function saveAIModal() {
   padding: var(--space-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  background: var(--color-surface-2);
+  background: var(--color-surface-elevated);
 }
 .model-enable-item {
   display: flex;

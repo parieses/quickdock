@@ -394,7 +394,8 @@ var baseTables = []string{
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL DEFAULT '',
 		cwd TEXT NOT NULL DEFAULT '',
-		-- kind：'' 普通空间 / 'schedule' 定时任务专属空间（侧栏用闹钟图标）。
+		-- kind：'' 普通空间 / 'schedule' 定时任务专属空间（侧栏用闹钟图标）
+		-- / 'ssh' SSH 助手空间（侧栏用终端图标，任务由连接产生）。
 		-- task_id：该空间归属的定时任务 id，普通空间为空。靠它精确做「改名同步」
 		-- 「删任务连带空间」「执行时把会话放回去」，不用拿空间名反查任务。
 		kind TEXT NOT NULL DEFAULT '',

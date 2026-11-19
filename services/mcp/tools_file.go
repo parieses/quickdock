@@ -11,8 +11,11 @@ package mcp
 //   - 私钥类文件直接拒（id_rsa / *.pem / *.key 等）；
 //   - 单次调用有行数、字节与时间预算，结果给模型的是「够判断」的量，不是整份文件。
 //
-// 本文件只放读工具（file_search / file_read / file_grep），且都是对外 MCP 工具：
+// 本文件只放读工具（file_search / file_find / file_read / file_grep），且都是对外 MCP 工具：
 // 「让 AI 看一个文件」是用户对这类软件的正常期待，读本身不改任何东西。
+//
+// 按名字找文件有两条路：file_find 在指定目录里递归找（不依赖任何外部程序），
+// file_search 走 Everything 全盘找（仅在 Everything 就绪时才会被挂给模型，见 withReady）。
 //
 // 写入与执行不在这个包里：改文件、跑命令、列目录、看 git 差异都在
 // services/ai/tools（agent 专用，不进 MCP）。路径策略则由 internal/fsguard 统一提供，
@@ -28,6 +31,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -52,6 +56,13 @@ const (
 	grepMaxFiles     = 4000            // 单次最多打开的文件数
 	grepMaxDepth     = 24              // 目录深度上限
 	grepBudget       = 6 * time.Second // 总体时间预算：MCP 请求是同步的，不能让客户端等到超时
+
+	findDefaultLimit = 50              // file_find 默认命中条数
+	findMaxLimit     = 200             // file_find 命中上限
+	findDefaultDepth = 8               // file_find 默认递归深度
+	findMaxDepth     = 20              // file_find 深度上限
+	findMaxEntries   = 80000           // 单次最多访问的目录项（node_modules 之流靠 SkipDir 提前剪枝）
+	findBudget       = 5 * time.Second // 总体时间预算：同 grep，同步请求不能拖到客户端超时
 )
 
 func registerFileTools(s *MCPService, r *toolRegistrar) {
@@ -59,9 +70,10 @@ func registerFileTools(s *MCPService, r *toolRegistrar) {
 	intp := mcpsrv.Int
 
 	// ---- Everything 检索（只读）----
-	// 不做「启动期绝对可用性门禁」：handler 内动态校验 EverythingRuntime().IsAvailable()，
-	// 这样即使用户在 QuickDock 启动后才装好/启动 Everything，也无需重启 MCP 即可用，
-	// 且未就绪时给出明确可执行的错误，而不是默默返回一个永远为空的工具。
+	// 两道闸：
+	//   - 装配期：withReady 不满足时这条工具**不进工具面**（模型看不见，也就不会调）；
+	//   - 执行期：handler 再校验一次——装配到调用之间可能过了几十秒，Everything 可能刚退出。
+	// 只有一道的话，前者会让状态变化后的调用撞上「未知工具」，后者会让模型白调一轮。
 	r.add(func(args map[string]any) (any, error) {
 		q := strings.TrimSpace(mcpsrv.Arg(args, "query"))
 		if q == "" {
@@ -72,7 +84,8 @@ func registerFileTools(s *MCPService, r *toolRegistrar) {
 		}
 		ev := s.App.Env.EverythingRuntime()
 		if ev == nil || !ev.IsAvailable() {
-			return nil, errors.New("文件搜索不可用：请确认已安装 Everything、es.exe 在位且 Everything 正在运行")
+			return nil, errors.New("文件搜索不可用：请确认已安装 Everything、es.exe 在位且 Everything 正在运行；" +
+				"要按文件名在某个目录里找，改用 file_find（不依赖 Everything）")
 		}
 		limit := mcpsrv.ArgInt(args, "limit", 30)
 		if limit > 200 {
@@ -96,11 +109,43 @@ func registerFileTools(s *MCPService, r *toolRegistrar) {
 			})
 		}
 		return map[string]any{"query": q, "count": len(files), "files": files}, nil
-	}, mcpsrv.LevelRead, "file_search", "通过 Everything (es.exe) 在本地全盘检索文件名，返回结构化文件列表（path/name/dir/modified）。只按名字匹配、不读内容——要读内容用 file_read，要在目录里按内容找用 file_grep。仅在 Everything 已安装、es.exe 在位且正在运行时可用；支持 Everything 检索语法（空格为与、| 为或、*.ext 按扩展名）", []string{"query"},
+	}, mcpsrv.LevelRead, "file_search", "通过 Everything (es.exe) 在本地全盘检索文件名，返回结构化文件列表（path/name/dir/modified）。只按名字匹配、不读内容——要读内容用 file_read，要在目录里按内容找用 file_grep，要在某个目录里按名字找用 file_find（不依赖 Everything）。"+
+		"**这个工具只在 Everything 已安装、es.exe 在位且正在运行时才出现**；它不在工具列表里就说明本机没有可用的 Everything，直接用 file_find。支持 Everything 检索语法（空格为与、| 为或、*.ext 按扩展名）", []string{"query"},
 		map[string]any{
 			"query": str("检索关键词，支持 Everything 语法（空格为与、| 为或、*.ext 按扩展名等）"),
 			"limit": intp("返回条数，默认 30，最大 200"),
 			"sort":  str("排序字段：name/path/size/date_modified/date_created，默认 name"),
+		},
+		withReady(
+			// 单测里 MCPService 不带宿主（s.App 为 nil），Ready 也会被求值：必须先判空，
+			// 否则一次 tools/list 就把进程带崩。
+			func() bool { return s.App != nil && s.App.Env != nil && s.App.Env.EverythingReady() },
+			func() string {
+				return "Everything 未就绪（未安装 / es.exe 缺失 / 服务未运行）——按文件名在目录里找请改用 file_find"
+			},
+		))
+
+	// ---- 按文件名搜目录（不依赖 Everything）----
+	// 为什么必须有一条不依赖 Everything 的兜底：Everything 是外部工具，用户可能没装、
+	// 没启动、或 es.exe 缺失。没有它时「找一个叫 xxx 的文件」只剩两条路——反复调
+	// file_search 撞同一个错误，或者用 dir_list 一层层手翻，都白烧轮次。
+	r.add(func(args map[string]any) (any, error) {
+		return findFiles(s, mcpsrv.PathArg(args, "path"), mcpsrv.Arg(args, "name"),
+			!mcpsrv.ArgBool(args, "caseSensitive"), mcpsrv.ArgInt(args, "limit", findDefaultLimit),
+			mcpsrv.ArgInt(args, "depth", findDefaultDepth),
+			mcpsrv.Scope(args), mcpsrv.Allowed(args))
+	}, mcpsrv.LevelRead, "file_find",
+		"在某个目录（及其子目录）里按**文件名**找文件或目录，不依赖 Everything，装了没装都能用。"+
+			"name 支持通配符（*.go / test_*.ts），不含 * ? 时按「名字里包含这段」匹配；默认不区分大小写。"+
+			"自动跳过 .git/node_modules/dist 等构建产物目录，有深度/条目数/时间预算（触发上限会在 truncatedNote 里说明原因）。"+
+			"这是「不知道文件在哪、只记得名字」时的首选；要按内容找用 file_grep，要全盘（跨项目）找用 file_search（需要 Everything 就绪）",
+		[]string{"path", "name"},
+		map[string]any{
+			"path":          str("从哪个目录开始找：绝对路径，或相对当前工作目录的路径"),
+			"name":          str("文件名模式：通配符 *.go / test_*.ts，或子串（如 config）——不含 * 和 ? 时按包含匹配"),
+			"caseSensitive": mcpsrv.Bool("可选。是否区分大小写，默认 false（Windows 习惯）"),
+			"limit":         intp("最多返回多少条，默认 50，最大 200"),
+			"depth":         intp("递归深度，默认 8，最大 20"),
 		})
 
 	r.add(func(args map[string]any) (any, error) {
@@ -179,7 +224,7 @@ func readFileText(s *MCPService, args map[string]any) (any, error) {
 			// 只说「打开失败」会让模型换个写法再读一遍同一个不存在的路径
 			// （实测：它甚至会用 run_command echo 出一个空文件再回来读）。
 			// 这里必须区分「路径写错」与「本来就要新建」两种真实意图。
-			return nil, fmt.Errorf("文件不存在：%s。若是路径写错了，先用 dir_list 看目录或 file_search 找文件；"+
+			return nil, fmt.Errorf("文件不存在：%s。若是路径写错了，先用 file_find 按名字找（或 file_grep 按内容搜）；"+
 				"若本来就要新建这个文件，直接用 file_write 一步创建（会自动建父目录）", path)
 		}
 		return nil, fmt.Errorf("打开文件失败：%w", err)
@@ -190,7 +235,7 @@ func readFileText(s *MCPService, args map[string]any) (any, error) {
 		return nil, fmt.Errorf("读取文件信息失败：%w", err)
 	}
 	if info.IsDir() {
-		return nil, fmt.Errorf("%s 是目录：读目录请用 file_grep，或先用 file_search 找到具体文件", path)
+		return nil, fmt.Errorf("%s 是目录：按名字找里面的文件用 file_find，按内容找用 file_grep", path)
 	}
 
 	// 嗅探编码/二进制：这两类读出来是一屏乱码，既浪费上下文又会让模型据此瞎猜。
@@ -329,6 +374,154 @@ func guardReadableFile(path string) error {
 		return fmt.Errorf("%s 是凭据/私钥类文件，不向 AI 开放读取；需要时请用户在本地自行查看", filepath.Base(path))
 	}
 	return nil
+}
+
+// -------- file_find --------
+
+// findFiles 在目录树里按文件名找文件或目录。
+//
+// 与 file_grep 只差最后一层判定：那边打开文件读内容，这边只看名字。所以它不受
+// 文件大小与二进制影响，但同样必须剪枝、限深、限时——一个前端项目下面几万个
+// node_modules 条目足以把同步的 MCP 请求拖到客户端超时。
+//
+// 命中目录也返回（type=dir）：用户说「找 xxx 这个目录」时，光给文件是答非所问。
+func findFiles(s *MCPService, rawPath, name string, ignoreCase bool, limit, depth int, scope string, allowed []string) (any, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, errors.New("缺少参数 name（文件名或通配符，如 *.go）")
+	}
+	if limit <= 0 {
+		limit = findDefaultLimit
+	}
+	if limit > findMaxLimit {
+		limit = findMaxLimit
+	}
+	if depth <= 0 {
+		depth = findDefaultDepth
+	}
+	if depth > findMaxDepth {
+		depth = findMaxDepth
+	}
+
+	// 与 file_read/file_grep 同一条范围策略：内置 AI 只在对话目录内，越界那一次由确认卡放行。
+	root, err := fsguard.ResolveReadScopedExtra(dbOf(s), rawPath, scope, allowed, false)
+	if err != nil {
+		return nil, err
+	}
+	info, statErr := os.Stat(root)
+	if statErr != nil {
+		return nil, fmt.Errorf("路径不可用：%w", statErr)
+	}
+
+	match := nameMatcher(name, ignoreCase)
+	deadline := time.Now().Add(findBudget)
+	files := make([]map[string]any, 0, limit)
+	visited, stopped := 0, ""
+
+	add := func(path string, d os.DirEntry) {
+		entry := map[string]any{
+			"path": path,
+			"name": d.Name(),
+			"dir":  filepath.Dir(path),
+			"type": "file",
+		}
+		if d.IsDir() {
+			entry["type"] = "dir"
+		} else if fi, infoErr := d.Info(); infoErr == nil {
+			entry["size"] = fi.Size()
+			entry["modified"] = fi.ModTime().Format(time.RFC3339)
+		}
+		files = append(files, entry)
+	}
+
+	if !info.IsDir() {
+		// 传进来的就是一个文件：按名字判一次即可，不必为「搜一个文件」再要求目录参数。
+		if match(filepath.Base(root)) {
+			add(root, fileEntry{info: info, name: filepath.Base(root)})
+		}
+	} else {
+		walkErr := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return nil // 单个目录/文件不可读（权限）时继续，别让整次搜索失败
+			}
+			visited++
+			switch {
+			case len(files) >= limit:
+				stopped = fmt.Sprintf("已到命中上限（%d 条），结果不完整；可缩小 path 或用更精确的 name", limit)
+				return filepath.SkipAll
+			case visited > findMaxEntries:
+				stopped = fmt.Sprintf("已访问 %d 个目录项仍未找全，结果不完整；请缩小 path 范围", findMaxEntries)
+				return filepath.SkipAll
+			case time.Now().After(deadline):
+				stopped = fmt.Sprintf("已达时间预算（%d 秒），结果不完整；请缩小 path 范围", int(findBudget.Seconds()))
+				return filepath.SkipAll
+			}
+			if path == root {
+				return nil
+			}
+			rel, relErr := filepath.Rel(root, path)
+			if relErr != nil {
+				rel = d.Name()
+			}
+			if d.IsDir() {
+				if fsguard.SkipDir(d.Name()) {
+					return filepath.SkipDir
+				}
+				// 深度按分隔符数量估算，与 file_grep 同一套口径
+				if strings.Count(rel, string(os.PathSeparator)) >= depth {
+					return filepath.SkipDir
+				}
+			}
+			if match(d.Name()) {
+				add(path, d)
+			}
+			return nil
+		})
+		if walkErr != nil && !errors.Is(walkErr, filepath.SkipAll) {
+			return nil, fmt.Errorf("遍历目录失败：%w", walkErr)
+		}
+		sort.Slice(files, func(i, j int) bool {
+			return files[i]["path"].(string) < files[j]["path"].(string)
+		})
+	}
+
+	logger.I("[mcp] file_find %q in %s（访问 %d 项，命中 %d）", name, root, visited, len(files))
+	return map[string]any{
+		"path":          root,
+		"name":          name,
+		"matches":       files,
+		"count":         len(files),
+		"scanned":       visited,
+		"truncated":     stopped != "",
+		"truncatedNote": stopped,
+	}, nil
+}
+
+// nameMatcher 编译文件名匹配规则。
+//
+// 有 * 或 ? 走通配符（filepath.Match 只作用于单段名字，不跨分隔符），否则按子串包含——
+// 用户说的「找 config」几乎不会写成 *config*，强求通配符只会多一轮报错。
+//
+// 大小写折叠单独做：filepath.Match 是逐字节比较，而 Windows 上 *.Go 与 *.go 指的是同一批文件。
+func nameMatcher(pattern string, ignoreCase bool) func(string) bool {
+	if strings.ContainsAny(pattern, "*?") {
+		if ignoreCase {
+			lowered := strings.ToLower(pattern)
+			return func(name string) bool {
+				ok, _ := filepath.Match(lowered, strings.ToLower(name))
+				return ok
+			}
+		}
+		return func(name string) bool {
+			ok, _ := filepath.Match(pattern, name)
+			return ok
+		}
+	}
+	if ignoreCase {
+		lowered := strings.ToLower(pattern)
+		return func(name string) bool { return strings.Contains(strings.ToLower(name), lowered) }
+	}
+	return func(name string) bool { return strings.Contains(name, pattern) }
 }
 
 // -------- file_grep --------

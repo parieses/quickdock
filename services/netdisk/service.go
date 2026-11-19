@@ -289,13 +289,23 @@ func (s *NetdiskService) runDownload(c *netdisk.Client, remotePath, destPath str
 		emit(base)
 		return
 	}
-	f, err := os.Create(destPath)
+	// 原子落盘：先写同目录下的 <dest>.part，成功后再 rename 覆盖目标文件。
+	// 直接写 destPath 的话，中途断网/杀掉进程会把用户已有的同名文件截成半截，
+	// 而覆盖语义只应在「下载完整成功」时生效。
+	partPath := destPath + ".part"
+	f, err := os.Create(partPath)
 	if err != nil {
 		base.Phase, base.Err = "error", "无法创建本地文件："+err.Error()
 		emit(base)
 		return
 	}
-	defer f.Close()
+	// 失败收尾：只删半成品，目标文件（若已存在）保持原样。
+	fail := func(msg string) {
+		_ = f.Close()
+		_ = os.Remove(partPath)
+		base.Phase, base.Err = "error", msg
+		emit(base)
+	}
 
 	// 百分比节流：Content-Length 未知（total<=0）时按每 1MB 推一次。
 	lastPercent, lastMB := -1, int64(-1)
@@ -317,9 +327,16 @@ func (s *NetdiskService) runDownload(c *netdisk.Client, remotePath, destPath str
 
 	total, err := c.Download(context.Background(), remotePath, f, onProgress)
 	if err != nil {
-		_ = os.Remove(destPath) // 半截文件比没有文件更害人
-		base.Phase, base.Err = "error", err.Error()
-		emit(base)
+		fail(err.Error()) // 只删 .part，用户已有的同名文件保持原样
+		return
+	}
+	// 落盘完成才 rename：写 .part 只保证「不破坏目标」，rename 才是原子替换。
+	if err := f.Close(); err != nil {
+		fail("写入本地文件失败：" + err.Error())
+		return
+	}
+	if err := os.Rename(partPath, destPath); err != nil {
+		fail("替换目标文件失败：" + err.Error())
 		return
 	}
 	base.Phase, base.Done, base.Total, base.Percent = "done", total, total, 100

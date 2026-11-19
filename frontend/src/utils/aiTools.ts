@@ -130,7 +130,7 @@ export function artifactsOf(m: AIMessage): AIArtifact[] {
 }
 
 const TOOL_ICON: Record<string, Component> = {
-  file_edit: PenLine, file_write: FilePlus, file_read: FileText, file_search: FileSearch, file_grep: FileSearch,
+  file_edit: PenLine, file_write: FilePlus, file_read: FileText, file_search: FileSearch, file_find: FileSearch, file_grep: FileSearch,
   dir_list: FolderTree, git_status: GitBranch, git_diff: GitBranch,
   web_fetch: Globe, web_links: LinkIcon, web_head: Globe,
   run_command: Terminal, check_workdir: FolderTree,
@@ -166,7 +166,7 @@ export function toolIcon(name: string): Component {
 
 const TOOL_VERB: Record<string, string> = {
   file_edit: 'aiToolVerbEdit', file_write: 'aiToolVerbWrite', file_read: 'aiToolVerbRead', file_search: 'aiToolVerbSearch',
-  file_grep: 'aiToolVerbSearch', dir_list: 'aiToolVerbList',
+  file_grep: 'aiToolVerbSearch', file_find: 'aiToolVerbSearch', dir_list: 'aiToolVerbList',
   git_status: 'aiToolVerbGitStatus', git_diff: 'aiToolVerbGitDiff',
   web_fetch: 'aiToolVerbFetch', web_links: 'aiToolVerbLinks', web_head: 'aiToolVerbHead',
   run_command: 'aiToolVerbRun', check_workdir: 'aiToolVerbProbe',
@@ -206,14 +206,97 @@ export function shortPath(p: string): string {
   return '…' + sep + parts.slice(-2).join(sep)
 }
 
+export interface SpawnArgs {
+  role: string
+  task: string
+}
+
+// spawn_agent 的参数解析：按字段名把值抠出来，而不是先 JSON.parse。
+//
+// 模型写 task 时经常直接把 Windows 路径塞进字符串（`"task":"… D:\project\app"`），
+// 而 `\p` 在 JSON 里是非法转义——严格解析整段失败，卡片就只能显示参数原文。
+// 这个函数对坏转义是宽容的：抠不到就返回 null，调用方退回原来的兜底路径。
+export function spawnArgs(raw?: string): SpawnArgs | null {
+  const s = (raw || '').trim()
+  if (!s) return null
+  const role = looseJSONString(s, 'role')
+  const task = looseJSONString(s, 'task')
+  if (!role && !task) return null
+  return { role: role || 'agent', task }
+}
+
+/** 摘要行用的任务短句：取第一个非空行、压掉多余空白，超过 48 字截断。 */
+export function spawnTaskBrief(task: string): string {
+  const line = (task || '').split(/\r?\n/).map((l) => l.trim()).find(Boolean) || ''
+  const flat = line.replace(/\s+/g, ' ')
+  return flat.length > 48 ? flat.slice(0, 48) + '…' : flat
+}
+
+/** 从（可能带非法转义的）JSON 文本里抠一个字符串字段值。 */
+function looseJSONString(raw: string, key: string): string {
+  const re = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`)
+  const m = re.exec(raw)
+  if (!m) return ''
+  try {
+    return JSON.parse(`"${m[1]}"`)
+  } catch {
+    // \p、\u 之类非法转义连 JSON.parse 都救不回来，就按原样交出去：
+    // 反斜杠在 Windows 路径里本来就是用户想看到的字符。
+    return m[1].replace(/\\"/g, '"')
+  }
+}
+
+// 子 agent 的结论：spawn_agent 的结果是 {run_id,node_id,role,tokens,result}，
+// 卡片上只想要 result 那段人看的文本。解析不出来（结果被截断成半截 JSON）时
+// 返回空串，让调用方退回原文，而不是显示一段假的空白。
+export function spawnResultText(tc: AIToolCall): string {
+  const raw = (tc.result || '').trim()
+  if (!raw) return ''
+  const text = looseJSONString(raw, 'result')
+  // 结论可能被截断到 2000 字且末尾没有闭合引号——那种情况下正则匹配不到，
+  // 但用户更需要看到「它到底说了什么」，所以退回原文而不是空串。
+  return text || raw
+}
+
+/**
+ * spawnPartial 这份结论是不是「残本」（子任务超时 / 被停 / 报错，只跑了一半）。
+ *
+ * 扫文本而不是 JSON.parse：结果会被截断成半截 JSON，严格解析必失败，而
+ * partial 字段被刻意排在 result 之前（见后端 spawnAgentResult 的字段顺序），
+ * 所以扫字符串一定能命中。命中就要在卡片上明写「未完成」——否则用户会把
+ * 半截结论当成完整答案。
+ */
+export function spawnPartial(tc: AIToolCall): boolean {
+  return /"partial"\s*:\s*true/.test(tc.result || '')
+}
+
 export function toolTarget(tc: AIToolCall): string {
   const raw = (tc.args || '').trim()
   if (!raw) return ''
+  // 派活单独走一条：它的参数是 {role, task}，没有 path/command 这类目标，
+  // 而且 task 里常夹着 Windows 路径（`D:\project\app`）——`\p` 是非法 JSON
+  // 转义，严格 JSON.parse 会整段失败，最后把整坨参数原文铺在摘要行上，
+  // 变成「派活 {"role":"explore","task":"项目：D:\project\…」这种读不出重点的行。
+  if (tc.name === 'spawn_agent') {
+    const s = spawnArgs(tc.args)
+    if (s) {
+      const brief = spawnTaskBrief(s.task)
+      return brief ? `${s.role} · ${brief}` : s.role
+    }
+    return raw.length > 80 ? raw.slice(0, 80) + '…' : raw
+  }
   let obj: Record<string, any> | null = null
   try { obj = JSON.parse(raw) } catch { obj = null }
   if (!obj) {
     // 参数解析失败时至少给原文的前一段：模型写坏了 JSON 也要能看出它想动谁。
     return raw.length > 80 ? raw.slice(0, 80) + '…' : raw
+  }
+  // file_find：用户关心的是「找什么」（name），path 只是搜索范围。
+  // 不特判的话会按 TOOL_TARGET_KEYS 的顺序命中 path，卡片上只剩一个目录名。
+  if (tc.name === 'file_find' && typeof obj.name === 'string' && obj.name.trim()) {
+    const want = obj.name.trim()
+    const where = typeof obj.path === 'string' && obj.path.trim() ? shortPath(obj.path.trim()) : ''
+    return where ? `${want} · ${where}` : want
   }
   for (const k of TOOL_TARGET_KEYS) {
     const v = obj[k]

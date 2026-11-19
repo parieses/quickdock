@@ -272,6 +272,12 @@ type SshAiAskRequest struct {
 	// StreamID 流式标识。非空时后端会经 Wails 事件 ai:ask-delta 逐段推送增量，
 	// 前端按此 ID 区分不同轮次；空则退化为一次性返回（插件等无前端通道的调用方）。
 	StreamID string `json:"streamId"`
+	// DisableThinking 本轮关闭模型的思考（面板头部的「思考」开关）。
+	//
+	// 关掉的主要收益是首字更快：开了 thinking 的模型在吐出第一个正文 token 前
+	// 会先把整段推理写完，SSH 场景里那几秒到十几秒完全是干等。
+	// 代价是复杂问题的推理质量下降，所以这是用户自己的选择，不在后端一刀切。
+	DisableThinking bool `json:"disableThinking"`
 }
 
 // SshAiAskResult SSH 场景 AI 问答返回。
@@ -298,6 +304,11 @@ type SshAiAskResult struct {
 	// 前端据此收敛本地历史（未压缩=全部，压缩后=最近若干条），避免本地数组无限增长；
 	// 由后端决定而不是前端硬编码，避免两侧对 keepRecent 的口径漂移。
 	HistoryKept int `json:"historyKept"`
+	// ConvID 本轮问答落库到的 AI 任务 id（见 ai_session.go）。
+	//
+	// 为空表示这次没存（DB 未就绪 / 建任务失败 / 没有 sessionId）。
+	// 前端拿它做「在 AI 里打开这条任务」，也是排查「为什么 AI 页看不到」的依据。
+	ConvID string `json:"convId"`
 }
 
 // Ask 就当前 SSH 会话向 AI 提问。
@@ -436,10 +447,30 @@ func (s *SshService) askOnce(req SshAiAskRequest, onToken, onReason func(string)
 	prompt := buildSshAiPrompt(hostLabel, hostEnv, req.ScreenText, question, recent, req.Selection, summary)
 
 	start := time.Now()
-	text, model, err := s.askStream(prompt, onToken, onReason)
+	// 顺手聚合一份思考增量：前端要边想边看，落库也要留一份（见 ai_session.go）。
+	// 包一层而不是改动调用方签名——Ask 传 nil、AskOverStream 传回调，
+	// 两条路都该把思考存进同一个任务里。
+	var reasonBuf strings.Builder
+	var innerReason = onReason
+	wrappedReason := func(d string) {
+		reasonBuf.WriteString(d)
+		if innerReason != nil {
+			innerReason(d)
+		}
+	}
+	// 任务会话先落地：这一轮的 token 用量要挂到它上面（见 AskAIFnStreamReason
+	// 的 convID 参数）。提前建的唯一副作用是「模型调用失败会留一条空任务」，
+	// 但只有用户真的提过问才走到这里，比「答完了 token 却记不到任务上」更可接受。
+	convID := s.ensureAIConv(req.SessionID, hostLabel)
+
+	text, model, err := s.askStream(convID, prompt, onToken, wrappedReason, !req.DisableThinking)
 	if err != nil {
 		return nil, err
 	}
+
+	// 落库：这次问答进「当前 SSH 会话对应的 AI 任务」。
+	// 放在答完之后：模型失败时不留半截问答（任务会话本身可能已经建好）。
+	s.recordAiTurn(convID, question, text, reasonBuf.String())
 
 	commands := aiutil.ExtractCommands(text, sshDangerRule)
 	segments := aiutil.ExtractSegments(text, sshDangerRule)
@@ -460,16 +491,18 @@ func (s *SshService) askOnce(req SshAiAskRequest, onToken, onReason func(string)
 		ElapsedMs:   time.Since(start).Milliseconds(),
 		Summary:     summary,
 		HistoryKept: len(recent),
+		ConvID:      convID,
 	}, nil
 }
 
 // askStream 优先走「带思考增量」的通道，未装配时退回只有正文的那条。
 //
 // 退回分支不是形式主义：AppService 的这两个 Fn 由 main.go 装配，测试与
-// 裁剪构建里可能只注入了旧的 AskAIFnStream。
-func (s *SshService) askStream(prompt string, onToken, onReason func(string)) (string, string, error) {
+// 裁剪构建里可能只注入了旧的 AskAIFnStream。退回时 thinking 无法生效（那条
+// 通道没有这个参数），但问答本身照常——关思考是加速手段，不是正确性前提。
+func (s *SshService) askStream(convID, prompt string, onToken, onReason func(string), thinking bool) (string, string, error) {
 	if s.App.AskAIFnStreamReason != nil {
-		return s.App.AskAIFnStreamReason(sshAiSystemPrompt, prompt, aiTimeoutSec, onToken, onReason)
+		return s.App.AskAIFnStreamReason(convID, sshAiSystemPrompt, prompt, aiTimeoutSec, thinking, onToken, onReason)
 	}
 	return s.App.AskAIFnStream(sshAiSystemPrompt, prompt, aiTimeoutSec, onToken)
 }

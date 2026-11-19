@@ -574,10 +574,47 @@ func restartApp() {
 	go func() {
 		time.Sleep(restartExitTimeout)
 		logger.W("[tray] 重启：本进程 %s 内未退出，强制结束", restartExitTimeout)
+		// 走到这里说明正常退出链路（ServiceShutdown）没跑完或卡住了，
+		// 下面这段是最后一个能停掉孤儿进程的机会：不清理就直接 os.Exit(0)，
+		// redis / caddy / 插件子进程会留在后台，下次启动还会被对账误判为「已在运行」。
+		cleanupBeforeForcedExit(forcedExitCleanupTimeout)
 		os.Exit(0)
 	}()
 
 	requestQuit()
+}
+
+// forcedExitCleanupTimeout 强杀前清理的总预算。清理本身卡住不能把强杀也拖住，
+// 否则「8 秒强退」变成「无限等待」。
+const forcedExitCleanupTimeout = 3 * time.Second
+
+// cleanupBeforeForcedExit 退出前的最后清理：停剪贴板监听、停插件、停 env 服务。
+//
+// 三个操作都幂等（ShutdownAll / StopAllOnExit 内部有 once 语义，重复调用无副作用），
+// 所以与 ServiceShutdown 的正常链路重叠也没关系。整段带超时：某个进程卡死不响应
+// 终止信号时，不能连累「强制退出」本身。
+func cleanupBeforeForcedExit(timeout time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		platform.StopClipboardListener()
+		svc := appSvc.Load()
+		if svc == nil {
+			return
+		}
+		if svc.PluginMgr != nil {
+			svc.PluginMgr.ShutdownAll()
+		}
+		if svc.Env != nil {
+			svc.Env.StopAllOnExit()
+		}
+	}()
+	select {
+	case <-done:
+		logger.I("[tray] 重启：强制退出前清理完成")
+	case <-time.After(timeout):
+		logger.W("[tray] 重启：强制退出前清理超时（%s），继续退出", timeout)
+	}
 }
 
 // waitForRestartPredecessor 若本次启动由托盘「重启」拉起（命令行带 --restart-wait=<pid>），
@@ -1221,39 +1258,48 @@ func registerAllHotkeys(app *application.App) {
 	lockAccel := modVKToAccelerator(lockMods, lockVk)
 
 	// 主窗口热键回调
+	//
+	// 注册失败 → 回退默认键再试一次，两条都失败就本次不提供该热键；
+	// 无论回退是否成功都必须 addHotkeyWarning 提示（用户设的键没生效是事实）。
+	// 回退**不写库**：写库等于把用户的配置永久改成默认值，重启后连原来设的是什么都查不到。
 	registeredAppAccel := appAccel
 	if err := app.GlobalShortcut.Register(appAccel, func() {
 		toggleMainWindow()
 	}); err != nil {
 		logger.W("热键 [%s] 注册失败: %v，回退到 Ctrl+Space", appAccel, err)
-		app.GlobalShortcut.Register("Ctrl+Space", func() { toggleMainWindow() })
-		registeredAppAccel = "Ctrl+Space"
-		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
-			svc.DB.SetSetting("hotkey", "2,32")
+		if ferr := app.GlobalShortcut.Register("Ctrl+Space", func() { toggleMainWindow() }); ferr != nil {
+			logger.W("回退热键 Ctrl+Space 同样注册失败: %v（主窗口快捷键本次不可用）", ferr)
+			registeredAppAccel = ""
+		} else {
+			registeredAppAccel = "Ctrl+Space"
 		}
+		addHotkeyWarning(appAccel)
 	} else {
 		logger.I("全局快捷键 [%s] 已注册", appAccel)
 	}
 
-	// 剪贴板窗口热键回调
+	// 剪贴板窗口热键回调（回退策略同上：判 err、提示、不写库）
+	openClipboard := func() {
+		cw := getClipboardWindow()
+		if cw == nil {
+			return
+		}
+		windowFlags.Clipboard.Store(true)
+		platform.ShowFloatingWindow(cw, clipWinWidth, clipWinHeight)
+		if a := getHotkeyApp(); a != nil {
+			a.Event.Emit("clipboard:shown")
+		}
+	}
 	registeredClipAccel := clipAccel
 	if err := app.GlobalShortcut.Register(clipAccel, toggleClipboardWindow); err != nil {
 		logger.W("剪贴板热键 [%s] 注册失败: %v，回退到 Ctrl+backquote", clipAccel, err)
-		app.GlobalShortcut.Register(CTRL_BACKQUOTE, func() {
-			cw := getClipboardWindow()
-			if cw == nil {
-				return
-			}
-			windowFlags.Clipboard.Store(true)
-			platform.ShowFloatingWindow(cw, clipWinWidth, clipWinHeight)
-			if a := getHotkeyApp(); a != nil {
-				a.Event.Emit("clipboard:shown")
-			}
-		})
-		registeredClipAccel = CTRL_BACKQUOTE
-		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
-			svc.DB.SetSetting("clipboard_hotkey", "2,192")
+		if ferr := app.GlobalShortcut.Register(CTRL_BACKQUOTE, openClipboard); ferr != nil {
+			logger.W("回退热键 %s 同样注册失败: %v（剪贴板快捷键本次不可用）", CTRL_BACKQUOTE, ferr)
+			registeredClipAccel = ""
+		} else {
+			registeredClipAccel = CTRL_BACKQUOTE
 		}
+		addHotkeyWarning(clipAccel)
 	} else {
 		logger.I("剪贴板快捷键 [%s] 已注册", clipAccel)
 	}
@@ -1293,9 +1339,14 @@ func registerAllHotkeys(app *application.App) {
 	}
 	registeredPaletteAccel := paletteAccel
 	if err := app.GlobalShortcut.Register(paletteAccel, handlePaletteHotkey); err != nil {
-		logger.W("命令面板热键 [%s] 注册失败: %v", paletteAccel, err)
-		app.GlobalShortcut.Register("Ctrl+K", handlePaletteHotkey)
-		registeredPaletteAccel = "Ctrl+K"
+		logger.W("命令面板热键 [%s] 注册失败: %v，回退到 Ctrl+K", paletteAccel, err)
+		if ferr := app.GlobalShortcut.Register("Ctrl+K", handlePaletteHotkey); ferr != nil {
+			logger.W("回退热键 Ctrl+K 同样注册失败: %v（命令面板快捷键本次不可用）", ferr)
+			registeredPaletteAccel = ""
+		} else {
+			registeredPaletteAccel = "Ctrl+K"
+		}
+		addHotkeyWarning(paletteAccel)
 	} else {
 		logger.I("命令面板快捷键 [%s] 已注册", paletteAccel)
 	}
@@ -1304,25 +1355,29 @@ func registerAllHotkeys(app *application.App) {
 	registeredNoteAccel := noteAccel
 	if err := app.GlobalShortcut.Register(noteAccel, showNoteWindow); err != nil {
 		logger.W("笔记热键 [%s] 注册失败: %v，回退到 Ctrl+Alt+N", noteAccel, err)
-		app.GlobalShortcut.Register("Ctrl+Alt+N", showNoteWindow)
-		registeredNoteAccel = "Ctrl+Alt+N"
-		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
-			svc.DB.SetSetting("note_hotkey", "3,78")
+		if ferr := app.GlobalShortcut.Register("Ctrl+Alt+N", showNoteWindow); ferr != nil {
+			logger.W("回退热键 Ctrl+Alt+N 同样注册失败: %v（笔记快捷键本次不可用）", ferr)
+			registeredNoteAccel = ""
+		} else {
+			registeredNoteAccel = "Ctrl+Alt+N"
 		}
+		addHotkeyWarning(noteAccel)
 	} else {
 		logger.I("笔记快捷键 [%s] 已注册", noteAccel)
 	}
 
 	// 截图热键（默认 F1，无修饰键）。F1 极易被前台程序占用，注册失败时
-	// 回退到 Ctrl+Shift+A，并把回退值写回设置，避免每次启动都重试失败项。
+	// 回退到 Ctrl+Shift+A（仅本次进程内存生效，不写库——写库会永久改掉用户的配置）。
 	registeredShotAccel := shotAccel
 	if err := app.GlobalShortcut.Register(shotAccel, handleScreenshotHotkey); err != nil {
 		logger.W("截图热键 [%s] 注册失败: %v，回退到 Ctrl+Shift+A", shotAccel, err)
-		app.GlobalShortcut.Register("Ctrl+Shift+A", handleScreenshotHotkey)
-		registeredShotAccel = "Ctrl+Shift+A"
-		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
-			svc.DB.SetSetting("screenshot_hotkey", "6,65")
+		if ferr := app.GlobalShortcut.Register("Ctrl+Shift+A", handleScreenshotHotkey); ferr != nil {
+			logger.W("回退热键 Ctrl+Shift+A 同样注册失败: %v（截图快捷键本次不可用）", ferr)
+			registeredShotAccel = ""
+		} else {
+			registeredShotAccel = "Ctrl+Shift+A"
 		}
+		addHotkeyWarning(shotAccel)
 	} else {
 		logger.I("截图快捷键 [%s] 已注册", shotAccel)
 	}
@@ -1339,9 +1394,9 @@ func registerAllHotkeys(app *application.App) {
 	// 语义是「唤起/前置」而不是「切换」：终端里可能正跑着命令，按一次就隐藏窗口
 	// 很容易把用户的活儿弄丢。
 	//
-	// 回退策略与截图热键同构（键位可配置后才有意义）：当前键不是默认键时先退回默认键
-	// 再试一次，仍失败才记为冲突并写回默认设置——避免用户改成一个被占用的键之后
-	// 每次启动都白试一遍，也避免把「非默认键冲突」永久留在配置里。
+	// 回退策略与前五个热键同构：当前键不是默认键时先退回默认键再试一次。
+	// 回退只在本进程内存生效，不写库——写库会把用户的键永久改成默认值。
+	// 主键注册失败即加提示（无论回退是否成功）。
 	registeredSshAccel := sshAccel
 	// 默认键的加速器串要按同一套拼接规则生成再比较——SSH_ACCEL 常量写的是
 	// "Ctrl+Alt+S"，而 modVKToAccelerator 产出 "Alt+Ctrl+S"（它固定先 Alt 后 Ctrl），
@@ -1351,13 +1406,10 @@ func registerAllHotkeys(app *application.App) {
 		logger.W("SSH 热键 [%s] 注册失败: %v，回退到 %s", sshAccel, err, SSH_ACCEL)
 		if sshAccel != defaultSshAccel && app.GlobalShortcut.Register(defaultSshAccel, showSshWindow) == nil {
 			registeredSshAccel = defaultSshAccel
-			if svc := appSvc.Load(); svc != nil && svc.DB != nil {
-				svc.DB.SetSetting("ssh_hotkey", "3,83")
-			}
 		} else {
 			registeredSshAccel = ""
-			addHotkeyWarning(sshAccel)
 		}
+		addHotkeyWarning(sshAccel)
 	} else {
 		logger.I("SSH 快捷键 [%s] 已注册", sshAccel)
 	}

@@ -41,6 +41,10 @@ interface NavBadgesResp {
   monitorDown: number
   todoDue: number
   crashFiles: number
+  /** 崩溃目录内最新 mtime（Unix 毫秒），0 = 目录为空 */
+  crashNewest: number
+  /** 崩溃目录内全部文件的 mtime（毫秒）：按 mtime > 水位 计数用 */
+  crashMtimes: number[]
 }
 
 // 一条角标源 = 展示元数据 + 计数取值方式。raw 计数由轮询统一写入 raw 表。
@@ -49,16 +53,39 @@ interface BadgeSource {
   titleKey: string
   /** 持续存在的事实（如今日到期）：打开页面也不该假装它不存在，不参与已读水位 */
   sticky?: boolean
-  /** 从后端聚合响应里取原始计数；省略则固定为 0 */
-  read?: (r: NavBadgesResp) => number
+  /**
+   * 从后端聚合响应里取原始计数；省略则固定为 0。
+   * watermark 是该源当前的已读水位（时间戳型源才有意义），其余源忽略即可。
+   */
+  read?: (r: NavBadgesResp, watermark: number) => number
+  /**
+   * 时间戳型源的「水位候选值」：markSeen 时把它写进 seen。
+   * 有 stamp 的源不参与「raw - seen」减法——read 返回的已经是「水位之后的新增数」，
+   * 再减一次就成了负数。
+   */
+  stamp?: (r: NavBadgesResp) => number
   /** 计数由前端派生、不来自后端聚合：后端请求失败时不能把它清零 */
   client?: boolean
+}
+
+// 崩溃角标按「最近查看时间」计数：崩溃目录只保留最近 20 个文件（logger.maxCrashFiles），
+// 用文件数量做水位在到顶后就再也涨不上去，角标会永远显示 0。
+function newCrashCount(r: NavBadgesResp, watermark: number): number {
+  const list = r.crashMtimes ?? []
+  let n = 0
+  for (const ts of list) if (ts > watermark) n++
+  return n
 }
 
 const SOURCES: Record<string, BadgeSource> = {
   monitor: { tone: 'danger', titleKey: 'badgeMonitorDown', read: (r) => r.monitorDown },
   todo: { tone: 'warning', titleKey: 'badgeTodoDue', sticky: true, read: (r) => r.todoDue },
-  settings: { tone: 'danger', titleKey: 'badgeNewCrash', read: (r) => r.crashFiles },
+  settings: {
+    tone: 'danger',
+    titleKey: 'badgeNewCrash',
+    read: newCrashCount,
+    stamp: (r) => r.crashNewest ?? 0,
+  },
   // 插件可更新是前端派生值（市场索引拉取后写入），不走后端聚合
   plugins: { tone: 'danger', titleKey: 'pluginUpdateBadge', client: true, read: () => pluginUpdateBadge.count },
 }
@@ -91,13 +118,16 @@ function writeSeen(map: Record<string, number>) {
 
 const raw = reactive<Record<string, number>>({})
 const seen = reactive<Record<string, number>>(readSeen())
+// 时间戳型源的水位候选（本轮响应里的最新 mtime），供 markSeen 写水位用。
+const stamps = reactive<Record<string, number>>({})
 
 /** 某个 source 当前应显示的角标；无需显示返回 null。 */
 function badgeOf(id: string): NavBadge | null {
   const s = SOURCES[id]
   if (!s) return null
   const r = raw[id] ?? 0
-  const n = s.sticky ? r : Math.max(0, r - (seen[id] ?? 0))
+  // stamp 源的 raw 已经是「水位之后的新增数」，不能再减 seen（seen 是时间戳）
+  const n = s.sticky || s.stamp ? r : Math.max(0, r - (seen[id] ?? 0))
   if (n <= 0) return null
   return { count: n, tone: s.tone, titleKey: s.titleKey }
 }
@@ -109,7 +139,14 @@ const settingsBadge = computed<NavBadge | null>(() => badgeOf('settings'))
 function markSeen(id: string) {
   const s = SOURCES[id]
   if (!s || s.sticky) return
-  seen[id] = raw[id] ?? 0
+  if (s.stamp) {
+    // 时间戳型：水位写成「当前最新 mtime」，只升不降（旧文件被清理也不回退水位）
+    const cur = stamps[id] ?? 0
+    if (cur <= (seen[id] ?? 0)) return
+    seen[id] = cur
+  } else {
+    seen[id] = raw[id] ?? 0
+  }
   writeSeen({ ...seen })
 }
 
@@ -127,8 +164,11 @@ async function refreshAggregated() {
     const r = unwrap<NavBadgesResp>(await GetNavBadges())
     if (r) {
       for (const [id, s] of Object.entries(SOURCES)) {
-        raw[id] = Math.max(0, s.read?.(r) ?? 0)
-        pullWaterLevel(id)
+        raw[id] = Math.max(0, s.read?.(r, seen[id] ?? 0) ?? 0)
+        if (s.stamp) stamps[id] = s.stamp(r)
+        // 时间戳型源不做「数据源下降就拉低水位」：它的 seen 是时间戳，
+        // 拿新增条数去比会把水位打回几十毫秒级，历史崩溃又全部冒出来。
+        else pullWaterLevel(id)
       }
       return
     }

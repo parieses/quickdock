@@ -6,7 +6,7 @@ import { KEEP_ALIVE } from '../pages/keepAlive'
 import {
   Copy, Image as ImageIcon, X, Download, MessageSquare,
   Languages, FileText, ScanSearch, Lightbulb, Check,
-  ChevronDown, ListChecks, CircleHelp,
+  ChevronDown, ListChecks,
 } from '@lucide/vue'
 import { Marked } from 'marked'
 import { unwrap } from '../utils/api'
@@ -69,7 +69,7 @@ import type {
   AIRuleFile, AISkill, AISpace, AIToolCall, OutlineItem, AIPrompt, AIMentionItem,
 } from '../types/ai'
 import { artifactsFromCalls, artifactsOf, shortPath, toolList } from '../utils/aiTools'
-import { AI_ACTION_CHIPS, AI_QUICK_PROMPTS, AI_HELP_FILL_KEY, QUICK_PROMPT_FILL_KEYS } from '../utils/aiActions'
+
 
 import { AIContextStats } from '../../bindings/quickdock/services/ai/aiservice'
 import {
@@ -601,10 +601,9 @@ const hasKey = computed(() => {
   // 不要拿「有没有 Key」当对话开关（否则本地模型永远提示去配 Key）。
   return !!p.apiKey || !profileNeedsKey(p)
 })
-// 侧栏任务图标仍按历史 mode 值取（老会话可能是 explain/translate...），所以 actionIcons 保留全量。
-// 落地页的「模式」按一期方案收口：只保留对话一个入口。解释/翻译/总结/审阅不再是模式，
-// 改在聊天页以快捷提示词胶囊出现（见下方 actionChips）。变量名仍叫 modes 是因为
-// AiHero 的 prop 名如此，改名要一起改子组件。
+// 侧栏任务图标按历史 mode 值取（老会话可能是 explain/translate...），所以表里保留全量。
+// 落地页不再摆模式入口：默认就是普通对话；解释/翻译/总结/审阅这类话术属于提示词，
+// 统一从输入框左侧 + 面板的「提示词」取（见 internal/db/prompt.go）。
 const actionIcons: Record<string, typeof MessageSquare> = {
   chat: MessageSquare,
   explain: Lightbulb,
@@ -612,13 +611,6 @@ const actionIcons: Record<string, typeof MessageSquare> = {
   summarize: FileText,
   review: ScanSearch,
 }
-const modes = AI_ACTION_CHIPS.filter((a) => a.key === 'chat').map((a) => ({
-  key: a.key,
-  label: a.labelKey,
-  desc: a.descKey,
-  fillKey: a.fillKey,
-  icon: actionIcons[a.key] || MessageSquare,
-}))
 
 // 侧栏任务行前面的小图标：不标出来，「这条任务是翻译还是闲聊」只能点进去看内容。
 function modeIcon(m?: string) {
@@ -1144,12 +1136,12 @@ async function copyPath(dir: string) {
 // ---- 新建任务（落地页，不是弹窗）----
 //
 // 原来点「新建任务」弹一个框让你先定类型再定目录，定完才出现输入框，等于把
-// 「提一个问题」拆成三步。现在改成主区直接变成落地页：上面一排快捷提示词 pill、
-// 输入框、下面一行选归属空间/模型——边选边打字，回车就走。
+// 「提一个问题」拆成三步。现在改成主区直接变成落地页：输入框、下面一行选归属
+// 空间/模型——边选边打字，回车就走。
 //
-// 那排 pill 不再是「模式」：解释/翻译/总结/审阅点一下是把指令前缀填进输入框，
-// 所有任务一律按普通对话发出（提示词就在正文里，所见即所得）。空间仍随首条
-// 请求带过去落库；不改就是默认（普通任务）。
+// 提示词（解释/翻译/总结/审阅那一批）不在落地页单独摆了：它们是提示词库里的
+// 内置条目，统一从输入框左侧的 + 面板取；所有任务一律按普通对话发出。
+// 空间仍随首条请求带过去落库；不改就是默认（普通任务）。
 // 归属空间：'' = 普通任务；已有空间的 id = 直接用它；NEW_SPACE = 新建（这时才要选目录）。
 //
 // 下拉优先而不是「一律选目录」：空间按目录唯一，重复选同一个目录后端也只是返回
@@ -2052,12 +2044,6 @@ async function heroSend() {
   if (!hasKey.value) return
   // 正文为空（只有空白、或只有一个正在叫技能菜单的 `/`）：不该发出一条空消息
   if (!canSendText.value && !attachments.value.length) return
-  // 只点了快捷提示词没填内容：先挡在落地页，别等建完会话才空转一轮。
-  if (isEmptyQuickPrompt(input.value)) {
-    toast.error(t('aiQuickFillContentFirst'))
-    heroRef.value?.focus?.()
-    return
-  }
   // 从落地页发起后 hero 会卸载、composer 挂载，面板状态是同一份——
   // 不收起的话，一进对话就顶着一个没被要求的弹层。
   plusOpen.value = false
@@ -2065,7 +2051,7 @@ async function heroSend() {
     const target = await resolveNewTaskTarget()
     pendingSpaceId.value = target.spaceId
     convCwd.value = target.dir
-    // 快捷提示词模式下，落地页发出的都是普通对话——指令已在正文里，模式恒为 chat。
+    // 落地页发出的都是普通对话——指令已在正文里，模式恒为 chat。
     mode.value = 'chat'
     revealSpace(target.spaceId)
   } catch (e) {
@@ -2327,19 +2313,6 @@ function canRetry(): boolean {
   return messages.value.some((m) => m.role === 'user')
 }
 
-/**
- * 能不能「重新生成」上一条回答。
- *
- * 判据与 canRetry 不同：这里要求**最后一条是助手回复**。失败时最后一条是用户
- * 消息（回复没落库），那是「重试」的场合；已经有一条回答躺在那里、用户想让它
- * 重说一遍才是「重新生成」。所以两个判据不能合并——合并必有一种情况消失。
- */
-const canRegenerate = computed(() => {
-  if (!activeId.value || runOf(activeId.value)) return false
-  const last = messages.value[messages.value.length - 1]
-  return !!last && last.role === 'assistant' && messages.value.some((m) => m.role === 'user')
-})
-
 function retryLast() {
   if (!canRetry()) return
   for (let i = messages.value.length - 1; i >= 0; i--) {
@@ -2353,74 +2326,6 @@ function retryLast() {
     send()
     return
   }
-}
-
-/**
- * 重新生成上一条回答。
- *
- * 与 retryLast 必须分开：失败重试时最后一条是 user（回答没落库），直接重发即可；
- * 重新生成时最后一条是 assistant，沿用重试路径会让 saveUserTurn 的幂等判据
- * （「最后一条是不是同内容 user」）失效，凭空多插一条重复提问 —— 刷新后就变成
- * 两句一样的问题。现在按 targetId 让服务端在开跑前事务截断旧回答并重算会话 token。
- */
-async function regenerateLast() {
-  if (!canRegenerate.value || !hasKey.value || !activeId.value) return
-  const convId = activeId.value
-  // 刚答完的那条 assistant 气泡是前端造的临时 id（ast-时间戳），拿它去删库会找不到行。
-  // 先从库里拉一次真实 id；用户这期间切走了就整个放弃。
-  await loadMessages(convId)
-  if (activeId.value !== convId || runOf(convId)) return
-  const last = messages.value[messages.value.length - 1]
-  if (!last || last.role !== 'assistant' || !last.id) return
-  let userIdx = -1
-  for (let i = messages.value.length - 2; i >= 0; i--) {
-    if (messages.value[i].role === 'user') { userIdx = i; break }
-  }
-  if (userIdx < 0) return
-  const m = messages.value[userIdx]
-  // 乐观收起旧回答；截断被拒（400）时把列表原样拉回来。
-  messages.value = messages.value.slice(0, userIdx + 1)
-  retryPending.value = true
-  input.value = m.content
-  attachments.value = attachmentsFromImages(m.imgList)
-  setConvError(convId, '')
-  pageError.value = ''
-  send({
-    action: 'regen',
-    targetId: last.id,
-    onFailed: () => { if (activeId.value === convId) void loadMessages(convId) },
-  })
-}
-
-/** 编辑某条历史提问并重发：这条之后的所有问答会被事务截断，且不可恢复，故先确认。 */
-async function editAndResend(m: AIMessage, content: string) {
-  const text = content.trim()
-  if (!text || !activeId.value || !hasKey.value || runOf(activeId.value)) return
-  if (!(await toast.confirm(t('aiEditResendConfirm')))) return
-  // 索引要在 reload 之前算：列表里的气泡可能是临时 id（usr-/ast-），
-  // reload 之后按 id 找会落空，但顺序与库里的行是一一对应的。
-  const idx = messages.value.findIndex((x) => x.id === m.id)
-  if (idx < 0) return
-  const convId = activeId.value
-  await loadMessages(convId)
-  if (activeId.value !== convId || runOf(convId)) return
-  const target = messages.value[idx]
-  if (!target || target.role !== 'user') {
-    toast.error(t('aiEditStale'))
-    return
-  }
-  // 后端会删掉 target 及其之后的所有行；前端先呈现同样的边界，再把新提问放进去。
-  messages.value = [...messages.value.slice(0, idx), { ...target, content: text }]
-  retryPending.value = true
-  input.value = text
-  attachments.value = attachmentsFromImages(target.imgList)
-  setConvError(convId, '')
-  pageError.value = ''
-  send({
-    action: 'edit',
-    targetId: target.id,
-    onFailed: () => { if (activeId.value === convId) void loadMessages(convId) },
-  })
 }
 
 async function regenTitle() {
@@ -2841,29 +2746,6 @@ function formatDuration(ms: number): string {
 // 原先占着下面七百多行）。runs 与 activeRun / streaming 留在这一页：模板与
 // 输入框的 streaming 判断在 setup 阶段就要读它们，绕出去再传回来反而更绕。
 
-// chip 行：解释/翻译/总结/审阅四个快捷提示词（chat 只是落地页入口，不再放这里）。
-// 定义在 utils/aiActions.ts，与剪贴板/便签面板复用同一份 label 与 fillKey。
-const actionChips = AI_QUICK_PROMPTS
-
-/**
- * 点 chip = 把模板填进输入框，光标留在末尾等用户补内容（同 Cursor 快捷 prompt）。
- * 不再有「选中某动作」的隐藏状态——提示词就在正文里，所见即所得。
- * 只读由权限徽标（AiPermissionBadge / onChangePermission）统一切换，动作栏不放锁按钮。
- */
-function pickAction(a: (typeof AI_QUICK_PROMPTS)[number]) {
-  if (!a.fillKey) {
-    input.value = ''
-    void nextTick(() => composerRef.value?.focus?.())
-    return
-  }
-  composerRef.value?.insertPromptText(t(a.fillKey))
-}
-
-/** 帮助：填入一句完整问题，可直接发送；用户愿意也可再补充具体问题。 */
-function askHelp() {
-  composerRef.value?.insertPromptText(t(AI_HELP_FILL_KEY))
-}
-
 const {
   send,
   stop,
@@ -2887,36 +2769,6 @@ const {
   ensureStreamInfo, aiStreamPort, aiStreamToken,
   toast, t, openSettings: () => emit('open-settings', 'ai:model'), retryPending, pageActive, plusOpen,
 })
-
-/**
- * 空模板拦截：点了「翻译」但没填内容就把模板发出去，模型只会照着模板空转，
- * 用户就看到「点了翻译却没翻译」。判据是「去掉技能胶囊后的正文恰好等于某个
- * 快捷模板」，不靠隐藏 action；只要补了任意内容就放行。帮助是一句完整问题，
- * 不在 QUICK_PROMPT_FILL_KEYS 里，点了直接发，不要提示用户「丰富内容」。
- * 历史重试/重新生成走 send 原函数——它们用的是已落库正文，不该被这里拦。
- */
-function isEmptyQuickPrompt(text: string): boolean {
-  const body = stripSkillTokens(text).trim()
-  if (!body) return false
-  return QUICK_PROMPT_FILL_KEYS.some((key) => {
-    const tpl = t(key).trim()
-    return !!tpl && body === tpl
-  })
-}
-
-function focusActiveComposer() {
-  if (isNewTask.value) heroRef.value?.focus?.()
-  else void nextTick(() => composerRef.value?.focus?.())
-}
-
-function sendChecked(opts?: Parameters<typeof send>[0]) {
-  if (isEmptyQuickPrompt(input.value)) {
-    toast.error(t('aiQuickFillContentFirst'))
-    focusActiveComposer()
-    return
-  }
-  return send(opts)
-}
 
 // ---- 保活（KeepAlive）后的可见性 ----
 // 本页被 App 的 KeepAlive 白名单留住：切到别的导航页时组件只是 deactivate，
@@ -3500,8 +3352,8 @@ onUnmounted(() => {
         @jump="jumpToMsg"
       />
 
-      <!-- 空态落地页：新建任务不走弹窗，直接在这一页点快捷提示词/选空间/提问。
-           空间随首条请求落库；那排 pill 只是往输入框填指令，不再是任务类型。 -->
+      <!-- 空态落地页：新建任务不走弹窗，直接在这一页选空间/提问，提示词从输入框
+           左侧的 + 面板取。空间随首条请求落库；标题下面直接是输入框，没有模式排。 -->
       <AiHero
         v-if="isNewTask"
         ref="heroRef"
@@ -3509,7 +3361,6 @@ onUnmounted(() => {
         v-model:input="input"
         v-model:new-task-space="newTaskSpace"
         v-model:ai-active="aiActive"
-        :modes="modes"
         :url-input-open="urlInputOpen"
         :attachments="attachments"
         :mentions="mentions"
@@ -3612,7 +3463,6 @@ onUnmounted(() => {
         :draft-run-id="draftRunId"
         :error-msg="errorMsg"
         :can-retry="canRetry"
-        :can-regenerate="canRegenerate"
         :render-block="renderBlock"
         :render-message-blocks="renderMessageBlocks"
         :msg-stat="msgStat"
@@ -3631,8 +3481,6 @@ onUnmounted(() => {
         @run-plan="runPlan"
         @open-usage="openMessageUsage"
         @retry="retryLast"
-        @regenerate="regenerateLast"
-        @edit="editAndResend"
         @msg-click="onMsgClick"
         @msg-mouseup="onMsgMouseUp"
         @msg-contextmenu="onMsgContextMenu"
@@ -3784,21 +3632,9 @@ onUnmounted(() => {
         </div>
 
         <!-- 输入区 -->
-        <!-- 快捷提示词 chip 行：点一下把指令前缀填进输入框，可编辑再发。
-             没有隐藏的「动作状态」——提示词就在正文里，所见即所得。 -->
-        <div class="ai-action-bar">
-          <button
-            v-for="a in actionChips"
-            :key="a.key"
-            type="button"
-            class="ai-action-chip"
-            :title="t(a.descKey)"
-            @click.prevent="pickAction(a)"
-          >{{ t(a.labelKey) }}</button>
-          <button type="button" class="ai-action-help" :title="t('aiActionHelpTip')" @click.prevent="askHelp">
-            <CircleHelp :size="13" />{{ t('aiActionHelpLabel') }}
-          </button>
-        </div>
+        <!-- 这里不再有一排「解释/翻译/总结/审阅」的 chip：它们和提示词库里的内置条目
+             是同一批东西，两处都摆着只会让人不知道点哪个。提示词统一从输入框左侧的
+             + 面板取（见 AiPlusPanel），用户自己加的也走同一条路。 -->
 
         <AiComposer
         ref="composerRef"
@@ -3849,8 +3685,8 @@ onUnmounted(() => {
         @confirm-url="confirmUrlImage"
         @remove-mention="removeMention"
         @pick-mention="pickMention"
-        @composer-key="onComposerKey($event, sendChecked)"
-        @send="sendChecked"
+        @composer-key="onComposerKey($event, send)"
+        @send="send"
         @stop="stop"
         @paste="onInputPaste"
         @drop="onInputDrop"
@@ -4285,41 +4121,5 @@ onUnmounted(() => {
   color: var(--color-text-muted);
   cursor: pointer;
 }
-.ai-status-pill:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }/* 动作 chip 行：贴在输入框上方。一行放得下就不换行——换行会把输入区往下挤。 */
-.ai-action-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-  margin-bottom: var(--space-2);
-}
-/* 与落地页 .ai-hero-mode 同一套浅色 pill 语言：secondary 描边 + 透明底，
-   hover 提亮到 primary + muted 边框。这些都是「点一下填提示词」的按钮，
-   没有选中态（提示词直接进正文，所见即所得）。
-   字号/内边距保留聊天页自己的紧凑值（chip 比 hero 按钮小一圈，属正常层级差）。 */
-.ai-action-chip {
-  padding: 2px var(--space-3);
-  border-radius: var(--radius-full);
-  border: 1px solid var(--color-border);
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  cursor: pointer;
-  transition: color var(--transition-fast), border-color var(--transition-fast);
-}
-.ai-action-chip:hover { color: var(--color-text-primary); border-color: var(--color-text-muted); }
-.ai-action-help {
-  margin-left: auto;
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 2px var(--space-3);
-  border-radius: var(--radius-full);
-  border: 1px solid var(--color-border);
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: 12px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: color var(--transition-fast), border-color var(--transition-fast);
-}
-.ai-action-help:hover { color: var(--color-text); border-color: var(--color-accent); }</style>
+.ai-status-pill:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }</style>
 

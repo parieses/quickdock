@@ -4,7 +4,7 @@ defineOptions({ name: KEEP_ALIVE.notes })
 // name 的唯一来源：pages/keepAlive.ts（与 KeepAlive 白名单共用同一常量）
 import { KEEP_ALIVE } from '../pages/keepAlive'
 import { logErr } from '../utils/logger'
-import { ref, computed, onMounted, onBeforeUnmount, inject, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, onActivated, inject, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { pendingOpenNoteId, pendingOpenTodoId, navigate, navigateTo } from '../composables/bridge'
 import { unwrap } from '../utils/api'

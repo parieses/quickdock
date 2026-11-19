@@ -282,12 +282,46 @@ func (d *Database) CreateItem(workspaceID, collectionID, name, itemType, value s
 		CreatedAt:    now(),
 		UpdatedAt:    now(),
 	}
-	// 按类型解析图标：应用/exe/lnk 提取文件图标，网页/快速链接抓取 favicon
-	if icon := resolveItemIcon(itemType, value); icon != "" {
-		item.Icon = icon
+	// 图标解析分两类：应用/exe/lnk 读的是本地文件（毫秒级，同步做）；
+	// 网页/快速链接要发网络请求，站点不可达时会把「保存条目」卡住好几秒。
+	// 后者先落库，图标在后台补——用户点保存立刻返回，图标回来再回写并通知前端。
+	needsNetIcon := itemType == "网页" || itemType == "快速链接"
+	if !needsNetIcon {
+		if icon := resolveItemIcon(itemType, value); icon != "" {
+			item.Icon = icon
+		}
 	}
 	err = d.BulkInsert("items", []map[string]interface{}{structToMap(item)})
+	if err == nil && needsNetIcon {
+		d.fillItemIconAsync(item.ID, itemType, value)
+	}
 	return item, err
+}
+
+// ItemIconUpdatedHook 图标后台回填完成后的通知。
+// 由 services 层注入（db 是叶子包，不认识 Wails 事件），前端据此就地换图标，
+// 不必重拉整张列表。
+var ItemIconUpdatedHook func(itemID, icon string)
+
+// fillItemIconAsync 后台解析并回写图标（仅网页/快速链接走这条）。
+//
+// 写回是单列 UPDATE（不碰 updated_at）：补图标不算用户编辑，不该把这行
+// 排到「最近更新」前面，也不该让正在编辑的界面看到 updated_at 变化。
+func (d *Database) fillItemIconAsync(itemID, itemType, value string) {
+	go func() {
+		defer logger.RecoverToLog("db:fillItemIcon")
+		icon := resolveItemIcon(itemType, value)
+		if icon == "" {
+			return
+		}
+		if err := d.ExecuteParams("UPDATE items SET icon = ? WHERE id = ?", []interface{}{icon, itemID}); err != nil {
+			logger.W("QuickDock: 回写条目图标失败 id=%s: %v", itemID, err)
+			return
+		}
+		if ItemIconUpdatedHook != nil {
+			ItemIconUpdatedHook(itemID, icon)
+		}
+	}()
 }
 
 // SaveUrlAsItem 将 URL 保存为「网页」项目，落入专用「剪贴板收藏」工作空间/
@@ -379,11 +413,17 @@ func (d *Database) UpdateItem(id string, updates map[string]interface{}) error {
 		}
 	}
 	// 应用/exe/lnk 类型：未显式设置图标且 value/type 变化时，尝试自动提取图标
+	var asyncIcon bool
+	var iconType, iconValue string
 	if _, iconSet := updates["icon"]; !iconSet {
-		d.autoFillItemIcon(id, updates)
+		asyncIcon, iconType, iconValue = d.autoFillItemIcon(id, updates)
 	}
 	updates["updated_at"] = now()
-	return d.updateByID("items", id, updates)
+	err := d.updateByID("items", id, updates)
+	if err == nil && asyncIcon {
+		d.fillItemIconAsync(id, iconType, iconValue)
+	}
+	return err
 }
 
 // resolveItemIcon 按类型/值解析应填充的图标：
@@ -426,10 +466,14 @@ func isAppLike(itemType, value string) bool {
 //   - 类型或值发生变化：按最新类型/值重新确定（网页→favicon，应用/exe/lnk→文件图标，其它→清空）
 //   - 无变化且已有图标：保留，不覆盖
 //   - 无变化且无图标：尝试补齐（历史/早期创建的 item）
-func (d *Database) autoFillItemIcon(id string, updates map[string]interface{}) {
+//
+// 网页/快速链接不在这里同步抓 favicon：它要发网络请求，会让「保存」按钮卡住。
+// 这种情况返回 async=true，由调用方在落库后交给 fillItemIconAsync 补图标；
+// 旧图标保持不动，避免用户只改了个名字就把图标改没了。
+func (d *Database) autoFillItemIcon(id string, updates map[string]interface{}) (async bool, iconType, iconValue string) {
 	row, err := d.QueryOne("SELECT type, value, icon FROM items WHERE id = ?", id)
 	if err != nil || row == nil {
-		return
+		return false, "", ""
 	}
 	itemType := str(row["type"])
 	value := str(row["value"])
@@ -445,10 +489,14 @@ func (d *Database) autoFillItemIcon(id string, updates map[string]interface{}) {
 	}
 	// 无变化且已有图标：保留，不覆盖
 	if !typeChanged && !valChanged && str(row["icon"]) != "" {
-		return
+		return false, "", ""
 	}
-	// 按最新类型/值重新确定图标
+	if itemType == "网页" || itemType == "快速链接" {
+		return true, itemType, value
+	}
+	// 按最新类型/值重新确定图标（本地读取，同步）
 	updates["icon"] = resolveItemIcon(itemType, value)
+	return false, "", ""
 }
 
 // DeleteItem 删除项目（先拍墓碑进回收站，再真删）。
@@ -472,26 +520,53 @@ func (d *Database) DeleteItem(id string) error {
 
 // ---- 打开项目 ----
 
-func (d *Database) OpenItem(item *CollectionItem) error {
+// OpenItem 按 id 打开条目，返回被打开的条目（供调用方记操作流水）。
+//
+// 只接受 id 是刻意的：旧签名收整个 CollectionItem，等于把「命令 / type / value / args」
+// 的解释权交给了调用方——前端（或任何能调绑定的本地进程）传一条
+// {type:"命令", value:"calc"} 就能让宿主任意执行命令，完全绕过编辑校验。
+// 现在所有字段都从库里按 id 读回，调用方只能选「打开哪一条」，不能决定「打开什么」。
+//
+// query 只用于替换条目值里的 {query} 占位符（命令面板的行内快捷项），
+// 仍然只作用在「库里读出来的那条模板」上，不能新增或改写命令结构。
+func (d *Database) OpenItem(id, query string) (*CollectionItem, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, fmt.Errorf("条目 id 不能为空")
+	}
+	row, err := d.QueryOne("SELECT * FROM items WHERE id = ?", id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("条目不存在或已被删除")
+		}
+		return nil, err
+	}
+	item := mapToItem(row)
+	if q := strings.TrimSpace(query); q != "" {
+		item.Value = strings.ReplaceAll(item.Value, "{query}", q)
+	}
+
 	var tool OpenTool
 	if item.ToolID != "" {
-		row, err := d.QueryOne("SELECT * FROM tools WHERE id = ?", item.ToolID)
-		if err == nil {
-			tool = mapToOpenTool(row)
-		} else if !errors.Is(err, sql.ErrNoRows) {
-			logger.W("QuickDock: 读取自定义打开工具失败: %v", err)
+		trow, terr := d.QueryOne("SELECT * FROM tools WHERE id = ?", item.ToolID)
+		if terr == nil {
+			tool = mapToOpenTool(trow)
+		} else if !errors.Is(terr, sql.ErrNoRows) {
+			logger.W("QuickDock: 读取自定义打开工具失败: %v", terr)
 		}
 	}
 	if tool.ID == "" {
-		row, err := d.QueryOne("SELECT * FROM tools WHERE is_default = 1 LIMIT 1")
-		if err == nil {
-			tool = mapToOpenTool(row)
+		if drow, derr := d.QueryOne("SELECT * FROM tools WHERE is_default = 1 LIMIT 1"); derr == nil {
+			tool = mapToOpenTool(drow)
 		}
 	}
 
+	if err := execOpen(&item, tool); err != nil {
+		return &item, err
+	}
+	// 只在真正打开成功后累加：打不开的条目不该在「最常用」里越排越前。
 	d.ExecuteParams("UPDATE items SET usage_count = usage_count + 1 WHERE id = ?", []interface{}{item.ID})
-
-	return execOpen(item, tool)
+	return &item, nil
 }
 
 // OpenAllInCollection 批量打开集合内全部项目。
@@ -508,12 +583,8 @@ func (d *Database) OpenAllInCollection(collectionID string) error {
 		return err
 	}
 
-	// 批量累加 usage_count：单条 UPDATE 替代 N 次逐项更新
-	if len(rows) > 0 {
-		d.ExecuteParams("UPDATE items SET usage_count = usage_count + 1 WHERE collection_id = ?", []interface{}{collectionID})
-	}
-
 	var firstErr error
+	opened := make([]string, 0, len(rows))
 	for _, row := range rows {
 		item := mapToItem(row)
 		// 仅当 item 指定自定义工具时才查库（命中），否则直接用默认工具
@@ -523,9 +594,23 @@ func (d *Database) OpenAllInCollection(collectionID string) error {
 				tool = mapToOpenTool(trow)
 			}
 		}
-		if err := execOpen(&item, tool); err != nil && firstErr == nil {
-			firstErr = err
+		if err := execOpen(&item, tool); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
+		opened = append(opened, item.ID)
+	}
+
+	// 批量累加 usage_count：只记真正打开成功的那些，仍用一条 UPDATE。
+	if len(opened) > 0 {
+		ph := strings.TrimSuffix(strings.Repeat("?,", len(opened)), ",")
+		args := make([]interface{}, len(opened))
+		for i := range opened {
+			args[i] = opened[i]
+		}
+		d.ExecuteParams("UPDATE items SET usage_count = usage_count + 1 WHERE id IN ("+ph+")", args)
 	}
 	return firstErr
 }
@@ -533,6 +618,13 @@ func (d *Database) OpenAllInCollection(collectionID string) error {
 func execOpen(item *CollectionItem, tool OpenTool) error {
 	value := expandItemVars(item.Value)
 	itemType := item.Type
+
+	// 校验前置到入口，且与「用哪个工具打开」无关：
+	// 旧实现只在 openWithSystemDefault 里校验，配了自定义工具（chrome / cmd / 终端）
+	// 就整条绕过 javascript: / ms-msdt: 的协议黑名单。
+	if err := validateOpenTarget(itemType, value); err != nil {
+		return err
+	}
 	// 项目级版本切换：条目绑定过运行时版本时，把对应 bin 目录前置到子进程 PATH。
 	// 由宿主注入的解析器算出实际目录（db 不认识 env 包）；未注入/未绑定则为空。
 	pathDirs := itemPathDirs(item)
@@ -651,10 +743,7 @@ func openCommand(value, workingDir string) error {
 }
 
 func openWithSystemDefault(value, itemType string, workingDir string) error {
-	if err := validateOpenTarget(itemType, value); err != nil {
-		return err
-	}
-
+	// 校验已在 execOpen 入口做过（与之无关的工具分支同样受管），此处不再重复。
 	switch itemType {
 	case "网页", "快速链接", "目录", "文件":
 		return openWithOSDefault(value)

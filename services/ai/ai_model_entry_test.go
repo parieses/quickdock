@@ -84,3 +84,79 @@ func TestApplyReasoningLevel(t *testing.T) {
 		t.Errorf("未配置档位时不该动请求体，实际 %v", body)
 	}
 }
+
+// 「关闭思考」必须两条路径都关：只关 ThinkingEnabled 的话，配了推理档位的模型
+// 仍会照档位思考，面板上点了关却还是先黑屏十几秒。
+func TestWithoutThinkingClearsBothSwitches(t *testing.T) {
+	cfg := AIProfile{
+		ThinkingEnabled: true,
+		ModelID:         "m1",
+		Models: []AIModelEntry{{
+			ID:             "m1",
+			ReasoningLevel: "high",
+			ReasoningLevels: []AIReasoningLevel{
+				{Name: "high", Param: "reasoning_effort", Value: "high"},
+			},
+		}},
+	}
+
+	out := withoutThinking(cfg)
+	if out.ThinkingEnabled {
+		t.Error("ThinkingEnabled 应被关掉")
+	}
+	if out.Models[0].ReasoningLevel != "" {
+		t.Errorf("推理档位应被清空，实际 %q", out.Models[0].ReasoningLevel)
+	}
+
+	// 请求体里只剩「显式关」这一个字段：老档案原本就在发 enable_thinking，
+	// 这一轮必须发 false 才算真关。什么都不发的话，默认开思考的模型（Qwen3
+	// 这类）会继续想，用户点了关闭还是能看到思考流。
+	body := map[string]any{}
+	applyThinkingSwitch(body, out)
+	applyReasoningLevel(body, out)
+	if v, ok := body["enable_thinking"]; !ok || v != false {
+		t.Errorf("关闭思考应显式发 enable_thinking=false，实际 %v", body)
+	}
+
+	// 原档案不能被改：一次性的「这轮别想」不该影响对话页的下一次提问。
+	if !cfg.ThinkingEnabled || cfg.Models[0].ReasoningLevel != "high" {
+		t.Errorf("原档案被就地修改: %+v", cfg)
+	}
+}
+
+// 档案本来就没走 enable_thinking（ThinkingEnabled=false）时，关闭思考一个字段
+// 都不该发：OpenAI 官方对不认识的 body 字段直接 400，宁可关不掉也不能报错。
+func TestWithoutThinkingSilentWhenNeverEnabled(t *testing.T) {
+	out := withoutThinking(AIProfile{Model: "gpt-4o"})
+	body := map[string]any{}
+	applyThinkingSwitch(body, out)
+	if len(body) != 0 {
+		t.Errorf("未启用过 enable_thinking 的档案不该被塞字段，实际 %v", body)
+	}
+}
+
+// 配了「关」档位就用档位自己的值（reasoning_effort=none / thinking_budget=0），
+// 这比一个通用 false 更贴近厂商语义。
+func TestWithoutThinkingUsesOffLevel(t *testing.T) {
+	cfg := AIProfile{
+		ThinkingEnabled: true,
+		ModelID:         "m1",
+		Models: []AIModelEntry{{
+			ID:             "m1",
+			ReasoningLevel: "high",
+			ReasoningLevels: []AIReasoningLevel{
+				{Name: "off", Param: "reasoning_effort", Value: "none"},
+				{Name: "high", Param: "reasoning_effort", Value: "high"},
+			},
+		}},
+	}
+	out := withoutThinking(cfg)
+	if out.Models[0].ReasoningLevel != "off" {
+		t.Fatalf("应选中 off 档位，实际 %q", out.Models[0].ReasoningLevel)
+	}
+	body := map[string]any{}
+	applyReasoningLevel(body, out)
+	if body["reasoning_effort"] != "none" {
+		t.Errorf("应带上 off 档位的值，实际 %v", body)
+	}
+}

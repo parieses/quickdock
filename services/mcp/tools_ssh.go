@@ -102,6 +102,16 @@ func registerSSHTools(s *MCPService, r *toolRegistrar) {
 		if sid == "" {
 			return nil, errors.New("缺少参数 session_id（用 ssh_list_sessions 获取）")
 		}
+		// 回放屏显同样要过主机授权：会话内容里可能有生产机输出、密钥、业务数据，
+		// 不能因为「只是只读」就绕过「这台机器是否允许 Agent 使用」这道闸。
+		// 会话 id 本身不携带主机信息，只能反查 ListSessions 拿到 hostId。
+		hostID, err := sessionHostID(s, sid)
+		if err != nil {
+			return nil, err
+		}
+		if err := authorizedHost(s, hostID); err != nil {
+			return nil, err
+		}
 		return unwrap(s.SSH.Replay(sid))
 	}, mcpsrv.LevelRead, "ssh_terminal_read",
 		"读取某个已打开 SSH 会话的屏显回放（base64 编码的终端历史输出、是否被截断、当前状态）。只读：只回看已经产生的画面，不向会话写入按键、不执行命令。session_id 取自 ssh_list_sessions。",
@@ -244,6 +254,37 @@ func sshHostMatch(h map[string]any, keyword string) bool {
 		}
 	}
 	return false
+}
+
+// sessionHostID 反查某个 SSH 会话所属的主机 id。
+//
+// 走 ListSessions 的 JSON 形态（与会话结构体解耦，字段名是对外契约 hostId）；
+// 找不到会话就报错——证明不了「这条会话属于哪台机」，就不能放行回放。
+func sessionHostID(s *MCPService, sessionID string) (string, error) {
+	data, err := unwrap(s.SSH.ListSessions())
+	if err != nil {
+		return "", err
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return "", fmt.Errorf("SSH 会话列表无法序列化: %w", err)
+	}
+	var sessions []map[string]any
+	if err := json.Unmarshal(raw, &sessions); err != nil {
+		return "", fmt.Errorf("SSH 会话列表格式异常: %w", err)
+	}
+	for _, sess := range sessions {
+		id, _ := sess["id"].(string)
+		if id != sessionID {
+			continue
+		}
+		hostID, _ := sess["hostId"].(string)
+		if strings.TrimSpace(hostID) == "" {
+			return "", fmt.Errorf("会话 %s 没有关联主机，无法核对 MCP 授权，已拒绝", sessionID)
+		}
+		return hostID, nil
+	}
+	return "", fmt.Errorf("找不到会话 %s（用 ssh_list_sessions 确认 id）", sessionID)
 }
 
 // authorizedHost 主机级授权闸门：只有 MCPAllowed==true 的主机允许被 MCP 工具访问。

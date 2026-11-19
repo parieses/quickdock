@@ -14,7 +14,7 @@
  * 本文件只负责剪贴板特有的部分：动作按钮、上下文引用条、请求调用。
  */
 import { aiActionLabelKey } from '../utils/aiActions'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { FileText, Sparkles } from '@lucide/vue'
 import { askOverStream } from '../utils/aiAskStream'
@@ -48,6 +48,36 @@ const { profile: activeProfile, model: activeModel, check: checkAI } = useAIAvai
 
 /** 回答方式：关掉「流式输出」就不再逐段渲染，等整段回来一次显示（传输仍是 SSE）。 */
 const { streamEnabled } = useAiStreamPreference()
+
+/**
+ * 思考开关：关掉之后这一轮不让模型先写推理再回答，首字明显更快。
+ *
+ * 持久化在 localStorage 而不是跟着这条剪贴板记录：它表达的是「我平时在这个
+ * 面板里想怎么问」，换一条记录又要重关一次只会让人以为开关没生效
+ * （与流式偏好、SSH / 笔记面板同一个理由）。
+ *
+ * 默认开：档案里配了 thinking 就说明用户要更细的推理，面板不擅自降级。
+ * 翻译/摘要这类直出动作嫌慢时再关掉。
+ */
+const THINKING_KEY = 'quickdock.ai.clipboard.thinking'
+function readThinking(): boolean {
+  if (typeof localStorage === 'undefined') return true
+  try {
+    // 只认显式的 '0'：首次使用（null）与存储损坏都按「开」处理。
+    return localStorage.getItem(THINKING_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+const thinking = ref(readThinking())
+watch(thinking, (v) => {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(THINKING_KEY, v ? '1' : '0')
+  } catch {
+    // 隐私模式 / 存储被禁：退化为「仅本次运行有效」，不影响功能
+  }
+})
 
 /**
  * 流式增量与它所属的那一轮。
@@ -109,6 +139,7 @@ async function run(action: string, question: string) {
       action,
       question,
       history: history.value.slice(-6),
+      disableThinking: !thinking.value,
     }, {
       // 关掉「流式输出」时只收不显示，等于回到一次性返回。
       onDelta: (s) => {
@@ -188,10 +219,12 @@ function clearAll() {
       :err-msg="errMsg"
       :live-text="liveText"
       :live-reason="liveReason"
+      :thinking="thinking"
       @ask="askFree"
       @clear="clearAll"
       @close="emit('close')"
       @copy="copyResult"
+      @update:thinking="thinking = $event"
     >
       <!-- 当前使用的 AI 档案：配置了多个 Key 时，用户能看出这一问走的是哪个。 -->
       <template #badge>

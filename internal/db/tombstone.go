@@ -196,16 +196,170 @@ func sortRowsByParentDepth(rows []map[string]interface{}) {
 	})
 }
 
+// ErrParentMissing 恢复失败：载荷里的主体所属的父记录（集合 / 场景 / 工作空间）
+// 已在删除后被单独清理，原样写回会撞外键约束，只报一句「FOREIGN KEY constraint
+// failed」用户完全不知道该怎么办。
+//
+// 把「缺哪一层」结构化地带出来，上层才能给出可操作的选项
+// （条目 → 恢复到默认集合；场景/工作空间 → 提示先恢复父级）。
+type ErrParentMissing struct {
+	Subject  string // 正在恢复的主体类型（items / collections / scenes）
+	ID       string // 主体 id
+	Missing  string // 缺失的父表名
+	ParentID string // 缺失的父 id
+}
+
+func (e *ErrParentMissing) Error() string {
+	switch e.Missing {
+	case "collections":
+		return "所属集合已删除，可恢复到默认集合"
+	case "scenes":
+		return "所属场景已删除，请先恢复该场景再恢复此项"
+	case "workspaces":
+		return "所属工作空间已删除，请先恢复该工作空间再恢复此项"
+	}
+	return "父级数据已删除，无法原样恢复"
+}
+
+// checkRestoreParents 恢复前检查父链是否存在。
+// 只查「载荷里最外层主体」的直接父级：更深的关系由更上层的父级自己把关。
+func (d *Database) checkRestoreParents(p *tombstonePayload, collection, id string) error {
+	checks := []struct {
+		table   string // 载荷里的表
+		field   string // 指向父级的列
+		parent  string // 父表
+		subject string
+	}{
+		{"items", "collection_id", "collections", RecycleItem},
+		{"collections", "scene_id", "scenes", RecycleSet},
+		{"scenes", "workspace_id", "workspaces", RecycleScene},
+	}
+	for _, c := range checks {
+		rows := p.Rows[c.table]
+		if len(rows) == 0 {
+			continue
+		}
+		for _, row := range rows {
+			pid, _ := row[c.field].(string)
+			if pid == "" {
+				continue // 历史数据没有父字段：交给外键约束兜
+			}
+			// 父级也在本次载荷里（删场景/工作空间时整棵子树一起拍）＝恢复时会先写回去，
+			// 不算缺失。只查数据库会把「级联删除后的正常恢复」误判成父链断裂。
+			if p.hasRow(c.parent, pid) || d.rowExists(c.parent, pid) {
+				continue
+			}
+			subject := c.subject
+			if collection != "" && c.table == collection {
+				subject = collection
+			}
+			return &ErrParentMissing{Subject: subject, ID: id, Missing: c.parent, ParentID: pid}
+		}
+	}
+	return nil
+}
+
+// hasRow 判断载荷里是否包含某表的某条记录（级联删除时长整棵子树一起拍）。
+func (p *tombstonePayload) hasRow(table, id string) bool {
+	for _, row := range p.Rows[table] {
+		if str(row["id"]) == id {
+			return true
+		}
+	}
+	return false
+}
+
+// rowExists 判断某表里是否还有这条记录（表名走白名单校验）。
+func (d *Database) rowExists(table, id string) bool {
+	if err := validateTable(table); err != nil {
+		return false
+	}
+	row, err := d.QueryOne("SELECT 1 FROM "+table+" WHERE id = ?", id)
+	return err == nil && row != nil
+}
+
 // RestoreTombstone 恢复一条墓碑：按载荷原样写回各行（BulkInsert 是
 // upsert，行仍在时只更新不报错），成功后删除墓碑。
 // 恢复不校验「原位置是否被新数据占用」：id 原样写回即占用，
 // 用户真在那位置建了新集合，恢复会把旧数据盖回去——这是「恢复」
 // 的本来语义，由二次确认兜底。
+//
+// 但父链存在性必须先查：父记录被删掉后，子记录原样写回必然撞外键，
+// 那时错误信息是一句 SQL 约束失败，用户既不知道原因也没有别的选择。
 func (d *Database) RestoreTombstone(collection, id string) error {
 	p, err := d.GetTombstonePayload(collection, id)
 	if err != nil {
 		return err
 	}
+	if err := d.checkRestoreParents(p, collection, id); err != nil {
+		return err
+	}
+	if err := d.restorePayload(p); err != nil {
+		return err
+	}
+	return d.DeleteTombstone(collection, id)
+}
+
+// RestoreTombstoneToDefault 恢复一条墓碑，但把主体挂到默认集合下。
+//
+// 用于「所属集合已删除」的条目：原样恢复不可能成功（父记录已经不在），
+// 直接放弃又等于让用户误删的东西彻底回不来。这里新建/复用一个
+// 「回收站恢复」集合承接，条目本身的数据一行不少。
+func (d *Database) RestoreTombstoneToDefault(collection, id string) error {
+	if collection != RecycleItem {
+		return fmt.Errorf("只有快捷项支持恢复到默认集合")
+	}
+	p, err := d.GetTombstonePayload(collection, id)
+	if err != nil {
+		return err
+	}
+	rows := p.Rows["items"]
+	if len(rows) == 0 {
+		return fmt.Errorf("墓碑载荷里没有可恢复的条目")
+	}
+	colID, err := d.ensureRestoreCollection()
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		row["collection_id"] = colID
+	}
+	// 改写父级后不再需要原父链检查：这一步的目的就是绕开已删除的集合。
+	if err := d.restorePayload(p); err != nil {
+		return err
+	}
+	return d.DeleteTombstone(collection, id)
+}
+
+// ensureRestoreCollection 返回「回收站恢复」集合的 id（不存在则在首个工作空间/场景下建一个）。
+func (d *Database) ensureRestoreCollection() (string, error) {
+	const name = "回收站恢复"
+	if row, err := d.QueryOne("SELECT id FROM collections WHERE name = ? ORDER BY created_at LIMIT 1", name); err == nil && row != nil {
+		return str(row["id"]), nil
+	}
+	ws, err := d.QueryOne("SELECT id FROM workspaces ORDER BY created_at LIMIT 1")
+	if err != nil || ws == nil {
+		return "", fmt.Errorf("没有可用的工作空间，无法恢复到默认集合")
+	}
+	wsID := str(ws["id"])
+	sceneID, err := d.ensureScene(wsID, "默认")
+	if err != nil {
+		return "", err
+	}
+	col, err := d.CreateCollection(wsID, sceneID, name, "目录集合", "", "")
+	if err != nil {
+		// 并发下另一个 goroutine 刚建好同名集合：回查一次，别把恢复判成失败
+		if row, qerr := d.QueryOne("SELECT id FROM collections WHERE name = ? ORDER BY created_at LIMIT 1", name); qerr == nil && row != nil {
+			return str(row["id"]), nil
+		}
+		return "", err
+	}
+	return col.ID, nil
+}
+
+// restorePayload 按恢复顺序把载荷写回各表（RestoreTombstone 与
+// RestoreTombstoneToDefault 共用，避免两条路径的恢复顺序/索引重建各写一遍）。
+func (d *Database) restorePayload(p *tombstonePayload) error {
 	done := make(map[string]bool, len(p.Rows))
 	for _, table := range restoreOrder {
 		rows := p.Rows[table]
@@ -250,7 +404,7 @@ func (d *Database) RestoreTombstone(collection, id string) error {
 			return fmt.Errorf("恢复后重建笔记全文索引失败: %w", rerr)
 		}
 	}
-	return d.DeleteTombstone(collection, id)
+	return nil
 }
 
 // DeleteTombstone 彻底删除一条墓碑（不可恢复）。

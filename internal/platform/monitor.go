@@ -90,6 +90,35 @@ func setWindowPosPhysical(win *application.WebviewWindow, x, y int) {
 		w32.SWP_NOSIZE|w32.SWP_NOZORDER)
 }
 
+// resizeWindowPhysical 用物理像素改窗口尺寸（与 setWindowPosPhysical 同源，绕过 DIP 转换）。
+func resizeWindowPhysical(win *application.WebviewWindow, w, h int) {
+	nw := win.NativeWindow()
+	if nw == nil {
+		return
+	}
+	w32.SetWindowPos(w32.HWND(uintptr(nw)), 0, 0, 0, w, h,
+		w32.SWP_NOMOVE|w32.SWP_NOZORDER|w32.SWP_NOACTIVATE)
+}
+
+// clampAxis 把窗口某一轴收拢进 [origin, origin+extent]。
+//
+// 窗口比工作区还大时贴原点（标题栏必须能点到），否则先按右下边界回推、再按左上兜底。
+// 两端各自夹取、互不覆盖 —— 旧实现是顺序赋值：窗口超宽时「先贴左，再按右边回推」，
+// 结果左边缘又被推到屏幕外，等于两头都露。
+func clampAxis(origin, extent, size, pos int) int {
+	max := origin + extent - size
+	if max < origin {
+		max = origin
+	}
+	if pos > max {
+		pos = max
+	}
+	if pos < origin {
+		pos = origin
+	}
+	return pos
+}
+
 // SetWindowToCursorScreen 将窗口居中到鼠标光标所在显示器的工作区。
 func SetWindowToCursorScreen(win *application.WebviewWindow, winWidth, winHeight int) {
 	if win == nil {
@@ -102,21 +131,20 @@ func SetWindowToCursorScreen(win *application.WebviewWindow, winWidth, winHeight
 	work := screen.PhysicalWorkArea
 
 	if physW, physH, ok := windowPhysicalSize(win); ok {
-		x := work.X + (work.Width-physW)/2
-		y := work.Y + (work.Height-physH)/2
-		// 收敛到工作区边界内
-		if x < work.X {
-			x = work.X
+		// 先收缩再居中：小屏 + 高 DPI（如 1366×768@125%，工作区约 1093×614 物理像素）下，
+		// 浮窗按 DIP 定尺寸、乘缩放后可能比工作区还大。不先缩小，怎么夹取都会有一截
+		// 落在屏幕外，表现为标题栏拖不到、底部按钮点不着。
+		if physW > work.Width || physH > work.Height {
+			if physW > work.Width {
+				physW = work.Width
+			}
+			if physH > work.Height {
+				physH = work.Height
+			}
+			resizeWindowPhysical(win, physW, physH)
 		}
-		if y < work.Y {
-			y = work.Y
-		}
-		if x+physW > work.X+work.Width {
-			x = work.X + work.Width - physW
-		}
-		if y+physH > work.Y+work.Height {
-			y = work.Y + work.Height - physH
-		}
+		x := clampAxis(work.X, work.Width, physW, work.X+(work.Width-physW)/2)
+		y := clampAxis(work.Y, work.Height, physH, work.Y+(work.Height-physH)/2)
 		setWindowPosPhysical(win, x, y)
 		return
 	}
@@ -124,7 +152,17 @@ func SetWindowToCursorScreen(win *application.WebviewWindow, winWidth, winHeight
 	// 兜底：无原生句柄时用框架 DIP 几何数据居中
 	// （旧实现此处误把物理坐标当 DIP 传给 SetPosition，高 DPI 下位置偏差）
 	b := screen.Bounds
-	x := b.X + (b.Width-winWidth)/2
-	y := b.Y + (b.Height-winHeight)/2
+	w, h := winWidth, winHeight
+	if w > b.Width {
+		w = b.Width
+	}
+	if h > b.Height {
+		h = b.Height
+	}
+	if w != winWidth || h != winHeight {
+		win.SetSize(w, h) // DIP 空间，直接把收缩后的尺寸交回框架
+	}
+	x := clampAxis(b.X, b.Width, w, b.X+(b.Width-w)/2)
+	y := clampAxis(b.Y, b.Height, h, b.Y+(b.Height-h)/2)
 	win.SetPosition(x, y)
 }

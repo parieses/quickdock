@@ -33,6 +33,9 @@ interface ToolRow {
   /** 被等级上限挡住：开关可以是开的，但这个工具仍然调不到 */
   gated: boolean
   agentOnly: boolean
+  /** 运行环境未就绪（Everything 没装/没跑…）：开关开着也调不到 */
+  notReady?: boolean
+  notReadyNote?: string
 }
 
 interface DomainRow {
@@ -218,6 +221,10 @@ defineExpose({ reload: load })
             {{ t('aiToolsGated') }}
           </span>
           <span v-if="tool.agentOnly" class="ai-tools-tag is-agent">{{ t('aiToolsAgentOnly') }}</span>
+          <!-- 环境未就绪：开关开着也不会被挂给模型（如 file_search 要 Everything 在跑）。 -->
+          <span v-if="tool.notReady" class="ai-tools-tag is-gated-tag" :title="tool.notReadyNote || undefined">
+            {{ t('aiToolsNotReady') }}
+          </span>
           <div class="ai-tools-row-desc">{{ tool.desc }}</div>
         </div>
         <QdSwitch

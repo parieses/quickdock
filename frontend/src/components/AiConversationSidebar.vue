@@ -8,7 +8,7 @@
 import type { Component } from 'vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlarmClock, ChevronDown, ChevronRight, Copy, Folder, FolderOpen, Loader2, Pencil, Play, Plus, Search, Star, Trash2, X } from '@lucide/vue'
+import { AlarmClock, ChevronDown, ChevronRight, Copy, Folder, FolderOpen, Loader2, Pencil, Play, Plus, Search, Star, Terminal, Trash2, X } from '@lucide/vue'
 import type { AIConvHit, AIConversation, AISpace } from '../types/ai'
 import AiConvRunDot from './AiConvRunDot.vue'
 
@@ -125,6 +125,15 @@ function isSchedSpace(s: AISpace): boolean {
   return s.kind === 'schedule' || !!s.task_id
 }
 
+// SSH 助手专属空间用终端图标（由后端在第一次 SSH 提问时自动建，见 db.EnsureSSHSpace）。
+//
+// 它和定时任务空间一样不是「目录容器」：没有 cwd、也不该让用户往里手工新建任务
+// ——里面的任务是连接行为的产物。所以行内的「+」与右键的「新建任务」都对它隐藏，
+// 否则点下去会建出一条没有目录、也不知道属于哪台机器的空任务。
+function isSshSpace(s: AISpace): boolean {
+  return s.kind === 'ssh'
+}
+
 // 三个 v-model 走 input 事件而不是 defineModel：项目 Vue 是 ^3.2，
 // defineModel 要 3.4+，这里宁可多两行也不押依赖版本。
 function onConvQueryInput(e: Event) {
@@ -228,13 +237,20 @@ const ctxItems = computed<CtxItem[]>(() => {
     ]
   }
   const sp = v.target.space
-  return [
+  const items: CtxItem[] = [
     { id: 'reveal', label: t('openInExplorer'), icon: FolderOpen, disabled: noDir, tip: dir || t('aiSpaceNoDir'), run: act(() => props.openDir(dir)) },
     { id: 'copy', label: t('actCopyPath'), icon: Copy, disabled: noDir, tip: dir || t('aiSpaceNoDir'), run: act(() => props.copyPath(dir)) },
-    { id: 'new', label: t('aiNewTaskInSpace'), icon: Plus, sep: true, run: act(() => props.newTaskInSpace(sp)) },
-    { id: 'rename', label: t('aiRename'), icon: Pencil, run: act(() => props.startRenameSpace(sp)) },
-    { id: 'del', label: t('delete'), icon: Trash2, danger: true, run: act(() => props.delSpace(sp)) },
   ]
+  // 「在这个空间里新建任务」对 SSH 空间没有意义：那个空间没有目录，
+  // 里面的任务只能由连接产生。其余动作（改名 / 删除）照常给。
+  if (!isSshSpace(sp)) {
+    items.push({ id: 'new', label: t('aiNewTaskInSpace'), icon: Plus, sep: true, run: act(() => props.newTaskInSpace(sp)) })
+  }
+  items.push(
+    { id: 'rename', label: t('aiRename'), icon: Pencil, sep: isSshSpace(sp), run: act(() => props.startRenameSpace(sp)) },
+    { id: 'del', label: t('delete'), icon: Trash2, danger: true, run: act(() => props.delSpace(sp)) },
+  )
+  return items
 })
 
 // Esc 关菜单是最容易想到的一手；滚动也关——菜单是 fixed 定位，
@@ -392,8 +408,10 @@ onBeforeUnmount(() => {
             class="ai-space-caret"
           />
           <!-- 定时任务专属空间用闹钟，和普通目录一眼分开；名字往往带
-               「任务名 · 创建时间」后缀，侧栏窄，完整名放 tooltip 里。 -->
+               「任务名 · 创建时间」后缀，侧栏窄，完整名放 tooltip 里。
+               SSH 助手空间用终端：它是连接史的归档，同样不是目录。 -->
           <AlarmClock v-if="isSchedSpace(g.space)" :size="12" class="ai-space-icon is-sched" />
+          <Terminal v-else-if="isSshSpace(g.space)" :size="12" class="ai-space-icon is-sched" />
           <Folder v-else :size="12" class="ai-space-icon" />
           <!-- 与任务标题同一套行内改名：为一个短名字弹系统对话框（window.prompt）
                不跟主题、字体也不一致，而且输入法组合中容易丢字。 -->
@@ -426,9 +444,10 @@ onBeforeUnmount(() => {
             <Loader2 v-if="spaceRunBusy.includes(g.space.task_id || '')" :size="12" class="spin" />
             <Play v-else :size="12" />
           </button>
-          <!-- 在这个空间里新建任务：否则每次都要去落地页的「归属空间」下拉里翻一遍 -->
+          <!-- 在这个空间里新建任务：否则每次都要去落地页的「归属空间」下拉里翻一遍。
+               SSH 空间不给这个入口——它没有目录，任务只能由连接产生。 -->
           <button
-            v-if="renamingSpaceId !== g.space.id"
+            v-if="renamingSpaceId !== g.space.id && !isSshSpace(g.space)"
             class="ai-conv-add"
             :title="t('aiNewTaskInSpace')"
             @click.stop="newTaskInSpace(g.space)"

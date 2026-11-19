@@ -596,11 +596,16 @@ func main() {
 
 	// 带思考增量的版本：只给面板用（SSH / 剪贴板 / 笔记走本地 SSE 时）。
 	// 插件拿不到前端通道，思考流对它没有意义。
-	appService.AskAIFnStreamReason = func(system, question string, timeoutSec int, onToken, onReason func(string)) (string, string, error) {
+	appService.AskAIFnStreamReason = func(convID, system, question string, timeoutSec int, thinking bool, onToken, onReason func(string)) (string, string, error) {
 		r := aiSvc.AIAskStreamReason(aisvc.AIAskRequest{
 			System:     system,
 			Question:   question,
 			TimeoutSec: timeoutSec,
+			// 面板的开关是「允不允许思考」，请求字段是「强制不思考」：
+			// 默认（thinking=true）不能往上送任何东西，否则会把档案的配置覆盖掉。
+			DisableThinking: !thinking,
+			// 归属会话：SSH 传自己的任务会话，用量才会累加到那条任务上。
+			ConvID: convID,
 		}, onToken, onReason)
 		if r == nil {
 			return "", "", errors.New("AI 服务无响应")
@@ -753,8 +758,23 @@ func main() {
 	// 系统通知服务（用于待办定时提醒）
 	notifier := notifications.New()
 
-	// KV 持久化服务（浮窗位置记忆等轻量状态；ServiceStartup/Shutdown 自动 Load/Save）
-	kvStore := kvstore.New()
+	// KV 持久化服务（浮窗位置记忆等轻量状态）。
+	//
+	// 必须显式给 Filename：kvstore.New() 是纯内存 store，进程退出即丢，
+	// 浮窗位置记忆等于从来没生效过。落在数据目录下，随「整机迁移」的整目录打包一起走。
+	// NewWithConfig 不会自动 Load（只有框架的 ServiceStartup 会）。这里先读一次，
+	// 免得 ServiceStartup 之前的读取路径拿到空 store。
+	winPosFile := filepath.Join(platform.DefaultDataDir(), "winpos.json")
+	kvStore := kvstore.NewWithConfig(&kvstore.Config{
+		Filename: winPosFile,
+		AutoSave: true,
+	})
+	if err := kvStore.Load(); err != nil {
+		// 文件损坏（断电写坏 / 手工编辑）不能让整个应用起不来：
+		// 框架的 ServiceStartup 会再 Load 一次并直接返回错误，删掉重来即可。
+		logger.W("浮窗位置文件损坏，已重置: %v", err)
+		_ = os.Remove(winPosFile)
+	}
 
 	opts := application.Options{
 		Name:        "快启坞",

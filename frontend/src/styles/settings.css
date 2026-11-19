@@ -397,6 +397,27 @@
 }
 .ai-profile-add:hover { color: var(--color-accent); border-color: var(--color-accent); }
 
+/* 一次性问答的模型选择（SSH / 剪贴板 / 笔记 / 插件 host.ai.ask）。
+   跟档案列表同属「模型」页，但只有一个下拉，用一行紧凑表单而不是再占
+   一整块卡片——它不该和档案列表有同等的视觉重量。 */
+.ai-ask-profile {
+  display: flex; align-items: center; gap: var(--space-4);
+  padding: 10px 12px; margin: 0 0 var(--space-6);
+  border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+}
+.ai-ask-profile-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ai-ask-profile-label { font-size: var(--text-md); color: var(--color-text-primary); }
+.ai-ask-profile-hint { font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.5; }
+.ai-ask-profile-select {
+  flex: 0 0 auto; max-width: 46%;
+  padding: 5px 8px; font-family: inherit; font-size: var(--text-sm);
+  color: var(--color-text-primary); background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.ai-ask-profile-select:focus { outline: none; border-color: var(--color-accent); }
+
 /* 通用内容页标题 / 描述 */
 
 /* 通用次级按钮（与 .btn-primary 并列，浅描边风格） */

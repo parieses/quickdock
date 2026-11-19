@@ -26,7 +26,7 @@ import {
   OpenTodoFromPalette,
   SaveUrlAsItem,
 } from '../../bindings/quickdock/services/appservice'
-import { OpenItem } from '../../bindings/quickdock/services/collection/collectionservice'
+import { OpenItem, OpenItemWithQuery } from '../../bindings/quickdock/services/collection/collectionservice'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 import { DlAdd, DlEnable } from '../../bindings/quickdock/services/download/downloadservice'
 import { ExecutePluginCommand, EnablePlugin } from '../../bindings/quickdock/services/plugin/pluginservice'
@@ -112,13 +112,12 @@ export function usePaletteExecutor(deps: PaletteExecutorDeps) {
       return true
     }
     if (r.type === 'quicklink-inline' && r.item) {
-      const item = { ...r.item }
-      let value = item.value || ''
-      if (r.inlineQuery) value = value.replace(/\{query\}/g, r.inlineQuery)
-      item.value = value
-      deps.recordUsage('item:' + item.id, 'item', item.name, item.value || '')
+      const item = r.item
+      const q = r.inlineQuery || ''
+      deps.recordUsage('item:' + item.id, 'item', item.name,
+        (item.value || '').replace(/\{query\}/g, q))
       try {
-        await OpenItem(item as any)
+        await OpenItemWithQuery(item.id, q)
         return true
       } catch (e) {
         console.error('[CmdPalette] OpenItem:', e)
@@ -129,7 +128,7 @@ export function usePaletteExecutor(deps: PaletteExecutorDeps) {
     if (r.type === 'item' && r.item) {
       deps.recordUsage('item:' + r.item.id, 'item', r.label, r.desc)
       try {
-        await OpenItem(r.item as any)
+        await OpenItem(r.item.id)
         return true
       } catch (e) {
         console.error('[CmdPalette] OpenItem:', e)
@@ -194,13 +193,12 @@ export function usePaletteExecutor(deps: PaletteExecutorDeps) {
       deps.recordUsage('system:' + result.cmd.id, 'system', result.label, result.desc)
       await result.cmd.action()
     } else if (result.type === 'quicklink-inline' && result.item) {
-      const item = { ...result.item }
-      let value = item.value || ''
-      if (result.inlineQuery) value = value.replace(/\{query\}/g, result.inlineQuery)
-      item.value = value
-      deps.recordUsage('item:' + item.id, 'item', item.name, item.value || '')
+      const item = result.item
+      const q = result.inlineQuery || ''
+      deps.recordUsage('item:' + item.id, 'item', item.name,
+        (item.value || '').replace(/\{query\}/g, q))
       try {
-        await OpenItem(item as any)
+        await OpenItemWithQuery(item.id, q)
       } catch (e) {
         console.error('[CmdPalette] OpenItem:', e)
       }
@@ -210,7 +208,7 @@ export function usePaletteExecutor(deps: PaletteExecutorDeps) {
     } else if (result.type === 'item' && result.item) {
       deps.recordUsage('item:' + result.item.id, 'item', result.label, result.desc)
       try {
-        await OpenItem(result.item as any)
+        await OpenItem(result.item.id)
       } catch (e) {
         console.error('[CmdPalette] OpenItem:', e)
       }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { logErr } from '../utils/logger'
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Keyboard, RotateCcw, Monitor, Clipboard, Command, FileText, Camera, SquareTerminal, Lock } from '@lucide/vue'
 import { GetHotkeyConfig, SetHotkeyConfig, GetClipboardHotkeyConfig, SetClipboardHotkeyConfig, GetPaletteHotkeyConfig, SetPaletteHotkeyConfig, GetNoteHotkeyConfig, SetNoteHotkeyConfig, GetScreenshotHotkeyConfig, SetScreenshotHotkeyConfig, GetSshHotkeyConfig, SetSshHotkeyConfig, GetLockHotkeyConfig, SetLockHotkeyConfig } from '../../bindings/quickdock/services/appservice'
@@ -12,9 +12,10 @@ import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import { isAppLocked } from '../utils/appLock'
 import CheatSheetModal from './CheatSheetModal.vue'
-import type { HotkeyConfig } from '../types'
+import type { HotkeyConfig, ToastAPI } from '../types'
 
 const { t } = useI18n()
+const toast = inject<ToastAPI>('toast')!
 
 const currentLabel = ref('Ctrl+Space')
 const currentModifiers = ref(2)
@@ -60,6 +61,16 @@ function setMsgAndClear(text: string, delay: number, tone: 'ok' | 'err' = 'ok') 
   msgTone.value = tone
   message.value = text
   msgTimer.value = setTimeout(() => { message.value = ''; msgTimer.value = null }, delay)
+}
+
+// 保存/恢复默认失败的统一收尾：页内提示 + toast + 日志。
+// 只记日志的话，打包版用户看不到 DevTools，界面上仍是一片「成功」的错觉。
+function onSaveError(e: unknown) {
+  const msg = getErrorMessage(e)
+  msgTone.value = 'err'
+  message.value = t('saveFailed2') + ': ' + msg
+  toast.error(msg)
+  logErr('HotkeySettings', e)
 }
 
 function toVK(e: KeyboardEvent): number | null {
@@ -224,55 +235,58 @@ async function saveAll() {
   }
 
   try {
-    await SetHotkeyConfig(currentModifiers.value, currentVk.value)
-    await SetClipboardHotkeyConfig(clipModifiers.value, clipVk.value)
-    await SetPaletteHotkeyConfig(paletteModifiers.value, paletteVk.value)
-    await SetNoteHotkeyConfig(noteModifiers.value, noteVk.value)
-    await SetScreenshotHotkeyConfig(shotModifiers.value, shotVk.value)
-    await SetSshHotkeyConfig(sshModifiers.value, sshVk.value)
-    await SetLockHotkeyConfig(lockModifiers.value, lockVk.value)
+    // 必须 unwrap：后端失败时也只是一个 code!=0 的结果，不抛错就会提示「已保存」。
+    unwrap(await SetHotkeyConfig(currentModifiers.value, currentVk.value))
+    unwrap(await SetClipboardHotkeyConfig(clipModifiers.value, clipVk.value))
+    unwrap(await SetPaletteHotkeyConfig(paletteModifiers.value, paletteVk.value))
+    unwrap(await SetNoteHotkeyConfig(noteModifiers.value, noteVk.value))
+    unwrap(await SetScreenshotHotkeyConfig(shotModifiers.value, shotVk.value))
+    unwrap(await SetSshHotkeyConfig(sshModifiers.value, sshVk.value))
+    unwrap(await SetLockHotkeyConfig(lockModifiers.value, lockVk.value))
     // 重新注册全局快捷键（含调色板/笔记/SSH 窗口），使新配置立即生效。
     await ResumeHotkeys()
     setMsgAndClear(t('hotkeySaved'), 2000)
   } catch (e) {
     msgTone.value = 'err'
     message.value = t('saveFailed2') + ': ' + getErrorMessage(e)
+    toast.error(getErrorMessage(e))
+    logErr('HotkeySettings', e)
   }
 }
 
 async function resetAppDefault() {
   currentModifiers.value = 2; currentVk.value = 32; currentLabel.value = 'Ctrl+Space'
-  try { await SetHotkeyConfig(2, 32); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { logErr('HotkeySettings', e) }
+  try { unwrap(await SetHotkeyConfig(2, 32)); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { onSaveError(e) }
 }
 
 async function resetClipDefault() {
   clipModifiers.value = 2; clipVk.value = 0xC0; clipLabel.value = 'Ctrl+`'
-  try { await SetClipboardHotkeyConfig(2, 0xC0); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { logErr('HotkeySettings', e) }
+  try { unwrap(await SetClipboardHotkeyConfig(2, 0xC0)); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { onSaveError(e) }
 }
 
 async function resetPaletteDefault() {
   paletteModifiers.value = 2; paletteVk.value = 0x4B; paletteLabel.value = 'Ctrl+K'
-  try { await SetPaletteHotkeyConfig(2, 0x4B); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { logErr('HotkeySettings', e) }
+  try { unwrap(await SetPaletteHotkeyConfig(2, 0x4B)); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { onSaveError(e) }
 }
 
 async function resetNoteDefault() {
   noteModifiers.value = 3; noteVk.value = 0x4E; noteLabel.value = 'Ctrl+Alt+N'
-  try { await SetNoteHotkeyConfig(3, 0x4E); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { logErr('HotkeySettings', e) }
+  try { unwrap(await SetNoteHotkeyConfig(3, 0x4E)); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { onSaveError(e) }
 }
 
 async function resetSshDefault() {
   sshModifiers.value = 3; sshVk.value = 0x53; sshLabel.value = 'Ctrl+Alt+S'
-  try { await SetSshHotkeyConfig(3, 0x53); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { logErr('HotkeySettings', e) }
+  try { unwrap(await SetSshHotkeyConfig(3, 0x53)); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { onSaveError(e) }
 }
 
 async function resetLockDefault() {
   lockModifiers.value = 3; lockVk.value = 0x4C; lockLabel.value = 'Ctrl+Alt+L'
-  try { await SetLockHotkeyConfig(3, 0x4C); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { logErr('HotkeySettings', e) }
+  try { unwrap(await SetLockHotkeyConfig(3, 0x4C)); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { onSaveError(e) }
 }
 
 async function resetScreenshotDefault() {
   shotModifiers.value = 0; shotVk.value = 0x70; shotLabel.value = 'F1'
-  try { await SetScreenshotHotkeyConfig(0, 0x70); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { logErr('HotkeySettings', e) }
+  try { unwrap(await SetScreenshotHotkeyConfig(0, 0x70)); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { onSaveError(e) }
 }
 
 function isDefault(type: 'app' | 'clipboard' | 'palette' | 'note' | 'screenshot' | 'ssh' | 'lock'): boolean {

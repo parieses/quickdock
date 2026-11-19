@@ -838,6 +838,12 @@ func doPluginHTTP(pluginID, method, rawURL string, headers map[string]string, bo
 	if u.Host == "" {
 		return nil, fmt.Errorf("url 缺少主机名")
 	}
+	// 初始 URL 再过一次白名单：权限层取参用的是 jsonStringField，键名大小写/写法
+	// 一旦对不上就取不到值（见那里的 EqualFold 修复）。这里独立校验一次，
+	// 不把「白名单是否生效」押在调用方取参成功上。重定向目标由 CheckRedirect 兜。
+	if allowHost != nil && !allowHost(u.String()) {
+		return nil, fmt.Errorf("目标 %s 不在插件 network 白名单内", u.String())
+	}
 
 	var reader io.Reader
 	if body != "" {

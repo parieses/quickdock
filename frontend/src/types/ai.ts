@@ -2,9 +2,11 @@ import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 
 // Wails 不会为嵌套在 ApiResult.data 内的类型生成绑定，故在此手动定义。
 // 该文件是前端源码，不会被 `wails3 generate bindings` 覆盖。
-// 字段名需与 Go 端 json tag 一致（小写 active / profiles）。
+// 字段名需与 Go 端 json tag 一致（小写 active / askActive / profiles）。
 export interface AIProfilesResult {
   active: string
+  /** 一次性问答（SSH / 剪贴板 / 笔记 / 插件）单独指定的档案 id；空 = 跟随 active。 */
+  askActive?: string
   profiles: AIProfile[]
 }
 
@@ -311,6 +313,19 @@ export interface AIToolCall {
   // 追加进去就会变成几十行几乎一样的百分比。
   live?: string
   liveTail?: string
+  // 派活组的整体进度（spawn_progress 事件，只有 spawn_agent 卡片有）。
+  // 主 agent 在等子任务结论时一声不吭，没有这三个数，界面只能显示「调用中」。
+  groupDone?: number; groupTotal?: number; groupElapsedMs?: number
+  // 本卡片自己那个子 agent 的实时进度（child 事件）。
+  // phase=tool 时 tool/round 有值，tool_done 带 ms，done 表示它已经收尾。
+  child?: {
+    phase: 'start' | 'round' | 'tool' | 'tool_done' | 'done'
+    round?: number
+    tool?: string
+    toolCallId?: string
+    ok?: boolean
+    ms?: number
+  }
 }
 
 // 一条编辑快照（回滚点）。Wails 只在 bound 参数里生成类型，返回值里的结构

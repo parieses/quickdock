@@ -62,6 +62,21 @@ type AIAskRequest struct {
 	TimeoutSec int `json:"timeoutSec"`
 	// MaxTokens 可选上限，0 用档案配置或默认值。
 	MaxTokens int `json:"maxTokens"`
+	// DisableThinking 这一轮强制不思考。
+	//
+	// 为什么是「关」而不是「开」：思考本来由档案决定（ThinkingEnabled / 推理档位），
+	// 调用方默认没意见。做成两态布尔会让「没意见」和「明确要求开」挤在同一个值上，
+	// 于是每个调用点都得先知道档案里原本是什么——那正是要避免的耦合。
+	//
+	// SSH 面板的思考开关关掉时置 true：模型不用先想再答，首字时间显著下降。
+	DisableThinking bool `json:"disableThinking"`
+	// ConvID 可选的归属会话。
+	//
+	// 一次性的意思是「不新建会话、不写对话历史」，不是「不记账」。
+	// SSH 面板已经有自己的任务会话（见 services/sshx/ai_session.go），
+	// 不把用量挂上去的话，那条任务的花费永远是 0，统计面板按会话看就是错的。
+	// 空串 = 确实没有归属（笔记 / 剪贴板 / 插件），只进全量明细。
+	ConvID string `json:"convId"`
 }
 
 // AIAskResult 一次性问答的返回。
@@ -84,7 +99,7 @@ type AIAskResult struct {
 // 就决定 AI 按钮是否置灰，用户没配 API Key 时不该先看到一个输入框，
 // 点了才告诉他"没配"。
 func (a *AIService) AIAvailable() *services.ApiResult {
-	cfg, ok := a.getActiveAIProfile()
+	cfg, ok := a.askProfile()
 	if !ok {
 		return services.Ok(map[string]interface{}{"available": false, "reason": "no_profile"})
 	}
@@ -113,7 +128,7 @@ func (a *AIService) AIAsk(req AIAskRequest) *services.ApiResult {
 	if question == "" {
 		return services.FailMsg("问题不能为空")
 	}
-	cfg, ok := a.getActiveAIProfile()
+	cfg, ok := a.askProfile()
 	if !ok {
 		return services.FailMsg("未配置可用的 AI 档案")
 	}
@@ -155,6 +170,9 @@ func (a *AIService) AIAsk(req AIAskRequest) *services.ApiResult {
 	// 用局部副本而不是改 a 的缓存：一次性问答不该污染对话流用的档案。
 	askCfg := cfg
 	askCfg.MaxTokens = maxTok
+	if req.DisableThinking {
+		askCfg = withoutThinking(askCfg)
+	}
 
 	start := time.Now()
 	text, usage, err := a.callAIOnce(ctx, askCfg, []map[string]string{
@@ -166,7 +184,7 @@ func (a *AIService) AIAsk(req AIAskRequest) *services.ApiResult {
 	}
 	// 一次性调用同样花钱，必须记进统计：这条路径服务 SSH 面板、剪贴板 AI、
 	// 笔记 AI 与插件 host.ai.ask。早期只记对话流，这几处消耗在统计里完全是空白。
-	a.recordAIUsage("", usageKindAsk, askCfg, usage)
+	a.recordAIUsage(req.ConvID, usageKindAsk, askCfg, usage)
 
 	truncated := false
 	if n := len([]rune(text)); n > askMaxReturnRune {
@@ -212,7 +230,7 @@ func (a *AIService) AIAskStreamReason(req AIAskRequest, onToken, onReason func(t
 	if question == "" {
 		return services.FailMsg("问题不能为空")
 	}
-	cfg, ok := a.getActiveAIProfile()
+	cfg, ok := a.askProfile()
 	if !ok {
 		return services.FailMsg("未配置可用的 AI 档案")
 	}
@@ -251,6 +269,13 @@ func (a *AIService) AIAskStreamReason(req AIAskRequest, onToken, onReason func(t
 	// 同上：streamAIChat 也只读 cfg.MaxTokens，不挂上去这两个上限就白算了。
 	askCfg := cfg
 	askCfg.MaxTokens = maxTok
+	if req.DisableThinking {
+		askCfg = withoutThinking(askCfg)
+		// 顺手把思考回调摘掉：即使上游根本关不掉（固定推理模型），也不该让
+		// 面板继续显示思考流——用户点的是「关闭思考」，看到思考过程只会以为
+		// 开关没生效。落库同理：这一轮不算思考内容。
+		onReason = nil
+	}
 
 	// streamAIChat 收 []map[string]interface{}（与 buildAIMessages 同构），
 	// 这里手搓两条消息即可，不必再走一次会话/摘要逻辑。
@@ -267,7 +292,7 @@ func (a *AIService) AIAskStreamReason(req AIAskRequest, onToken, onReason func(t
 	if err != nil {
 		return services.Fail(err)
 	}
-	a.recordAIUsage("", usageKindAsk, askCfg, turn.Usage)
+	a.recordAIUsage(req.ConvID, usageKindAsk, askCfg, turn.Usage)
 
 	text := turn.Content
 	truncated := false

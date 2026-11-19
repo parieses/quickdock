@@ -82,6 +82,19 @@ type Tool struct {
 	// schedule_create 按任务名——否则用户批准一次「建这个巡检任务」，
 	// 之后任意任务都能在无人过问的情况下被建出来。
 	GrantKey func(args map[string]any) (key string, rememberable bool)
+	// Ready 可选：运行环境就绪谓词。返回 false 时该工具**不进本次装配**——
+	// 模型看不到它，也就不会去调一个注定报错的工具。
+	//
+	// 为什么在装配时求值而不是注册时判一次：这类依赖（Everything 在跑、某服务已启动）
+	// 用户往往在 QuickDock 启动之后才满足。注册期判一次会让工具在装好之后仍然消失，
+	// 直到重启应用才回来；每轮装配重新问一次，代价只是一次便宜的探测。
+	//
+	// 实现约束：**必须轻量或自带缓存**。它在装配路径上、每轮对话都会跑，
+	// 里面枚举进程/扫盘会直接拖长首字延迟（Everything 就用带 TTL 的缓存版）。
+	Ready func() bool
+	// NotReadyNote 可选：不就绪时的原因，写进 Dropped（面板与报错共用这条文案）。
+	// 不填时给一句通用说明——空原因会让模型以为是工具名写错了，从而原地重试。
+	NotReadyNote func() string
 	// RiskNote 可选：审批卡上的风险说明。默认按等级给一句通用的。
 	RiskNote func(args map[string]any) string
 	// ArgBrief 可选：审批卡上的参数摘要。默认取 path / query 之类。
@@ -273,6 +286,33 @@ func ToolByName(name string) (Tool, bool) {
 	return t, ok
 }
 
+// destructiveTools 破坏性工具：会删除数据、执行命令、停止服务或改写文件。
+//
+// 这份名单与「危险等级」是两回事：等级门决定「工具是否暴露」，名单决定
+// 「无论 requireToken 开关怎么配，都必须带令牌才能调」。后者存在的原因很具体——
+// requireToken 默认 false 是为了不打断已配好的老客户端，但那些客户端的配置片段
+// 同样没有请求头，一旦把 delete/exec 也放行，等于任何人只要连上 127.0.0.1:9230
+// 就能删数据。所以只读工具保持免令牌，动数据的必须自证身份。
+var destructiveTools = map[string]bool{
+	"note_delete":      true, // 删笔记（写墓碑，但用户视角就是删了）
+	"ssh_exec":         true, // 在远端主机执行命令
+	"plugin_execute":   true, // 执行插件命令
+	"env_stop":         true, // 停掉环境服务（redis/mysql…在用的时候）
+	"download_remove":  true, // 删下载任务并删文件
+	"schedule_create":  true, // 新建定时任务＝预置一个未来会自动执行的动作
+	"schedule_run_now": true, // 立即执行定时任务
+	// 以下默认不可达（LevelRisk），但用户把等级调到「含高危」后就会暴露，
+	// 同样不该因为 requireToken=false 而免令牌。
+	"system_command": true,
+	"file_write":     true,
+	"file_edit":      true,
+}
+
+// RequiresToken 判断某工具是否强制要求访问令牌。
+func RequiresToken(name string) bool {
+	return destructiveTools[name]
+}
+
 // SetDisabled 全量替换「被外部 MCP 单独关掉的工具」名单（不影响内置 AI）。
 //
 // 与等级门是两道独立闸：等级门按危险度批量裁剪（一档一刀），这里是对单个
@@ -328,6 +368,13 @@ type ToolInfo struct {
 	// AgentOnly 只给内置 AI 用。面板要把这类工具标出来，
 	// 否则用户会以为「我在面板里关掉的东西，外部客户端也在用」。
 	AgentOnly bool
+	// NotReady 运行环境未就绪（Everything 没装/没跑这类）。
+	//
+	// 这类工具即使开关打开、等级也够，也不会出现在任何一次装配里——模型和客户端
+	// 都看不到它。面板必须能解释「为什么我开了它却没人用」，否则用户会当成 bug。
+	NotReady bool
+	// NotReadyNote 不就绪的具体原因（工具自己声明，如「es.exe 缺失」）。
+	NotReadyNote string
 }
 
 // Catalog 返回全部已注册工具的清单，Disabled/Exposed 按**外部 MCP 侧**策略算。
@@ -343,25 +390,46 @@ func Catalog() []ToolInfo {
 // 之所以要参数而不是读全局：AI 设置页要显示「AI 侧这个工具开没开」，
 // 读 MCP 全局策略会答错——那正是这次要修掉的串台。
 func CatalogWith(pol Policy) []ToolInfo {
+	// 先持锁快照、再解锁求就绪：Ready 可能碰 IO（探测运行时），不能在注册表读锁里跑。
+	type catalogItem struct {
+		t     Tool
+		agent bool
+	}
+	var items []catalogItem
 	regMu.RLock()
-	defer regMu.RUnlock()
-	out := make([]ToolInfo, 0, len(tools)+len(agents))
 	for _, set := range []struct {
 		m     map[string]Tool
 		agent bool
 	}{{tools, false}, {agents, true}} {
 		for _, t := range set.m {
-			off := pol.Disabled[t.Name]
-			out = append(out, ToolInfo{
-				Name:        t.Name,
-				Description: t.Description,
-				Level:       t.Level,
-				Domain:      t.Domain,
-				Disabled:    off,
-				Exposed:     t.Level <= pol.MaxLevel && !off && !set.agent && DomainExposed(t.Domain),
-				AgentOnly:   set.agent,
-			})
+			items = append(items, catalogItem{t: t, agent: set.agent})
 		}
+	}
+	regMu.RUnlock()
+
+	out := make([]ToolInfo, 0, len(items))
+	for _, it := range items {
+		t, agent := it.t, it.agent
+		off := pol.Disabled[t.Name]
+		info := ToolInfo{
+			Name:        t.Name,
+			Description: t.Description,
+			Level:       t.Level,
+			Domain:      t.Domain,
+			Disabled:    off,
+			Exposed:     t.Level <= pol.MaxLevel && !off && !agent && DomainExposed(t.Domain),
+			AgentOnly:   agent,
+		}
+		if t.Ready != nil && !t.Ready() {
+			info.NotReady = true
+			info.NotReadyNote = "运行环境未就绪"
+			if t.NotReadyNote != nil {
+				if note := strings.TrimSpace(t.NotReadyNote()); note != "" {
+					info.NotReadyNote = note
+				}
+			}
+		}
+		out = append(out, info)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Level != out[j].Level {

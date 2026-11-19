@@ -33,6 +33,45 @@ const BODY_CLASS = 'qd-printing'
 const CLEANUP_FALLBACK_MS = 30000
 const PAINT_TIMEOUT_MS = 120
 
+/**
+ * 允许进入宿主文档的标签（白名单）。
+ *
+ * 只收「排版需要」的语义标签：任何可执行/可嵌入内容（script/iframe/object/embed/
+ * svg/meta/base/link/style）都在 DROP_TAGS 里直接丢弃；白名单外的普通标签
+ * （section/a/font…）做「拆壳保留内容」处理——保留文字，丢掉标签本身。
+ */
+const ALLOWED_TAGS = new Set([
+  'P', 'DIV', 'SPAN', 'BR',
+  'TABLE', 'TBODY', 'TR', 'TD', 'TH',
+  'UL', 'OL', 'LI',
+  'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+  'IMG', 'PRE', 'CODE', 'BLOCKQUOTE', 'HR'
+])
+
+/** 连同子树一起丢弃的标签：可执行、可嵌入、可加载外部资源、可覆盖宿主样式。 */
+const DROP_TAGS = new Set([
+  'SCRIPT', 'STYLE', 'LINK', 'META', 'BASE', 'TITLE',
+  'IFRAME', 'FRAME', 'FRAMESET', 'OBJECT', 'EMBED', 'APPLET',
+  'SVG', 'MATH', 'FORM', 'INPUT', 'BUTTON', 'SELECT', 'TEXTAREA', 'OPTION',
+  'VIDEO', 'AUDIO', 'SOURCE', 'TRACK', 'CANVAS', 'TEMPLATE', 'NOSCRIPT'
+])
+
+/** 允许保留的内联样式属性（打印排版够用，且都不能外联加载资源）。 */
+const STYLE_PROPS = new Set([
+  'color', 'background', 'background-color',
+  'font', 'font-family', 'font-size', 'font-style', 'font-weight',
+  'text-align', 'text-decoration', 'text-indent', 'text-transform',
+  'line-height', 'letter-spacing', 'word-spacing', 'white-space',
+  'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+  'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+  'border', 'border-top', 'border-right', 'border-bottom', 'border-left',
+  'border-color', 'border-style', 'border-width', 'border-collapse', 'border-spacing',
+  'width', 'height', 'max-width', 'min-width', 'vertical-align',
+  'list-style', 'list-style-type', 'list-style-position',
+  'page-break-before', 'page-break-after', 'page-break-inside',
+  'break-before', 'break-after', 'break-inside'
+])
+
 function buildGuardStyle(page?: string): string {
   const size = page && /^[A-Za-z0-9 .-]{1,24}$/.test(page) ? page : ''
   return [
@@ -48,6 +87,78 @@ function buildGuardStyle(page?: string): string {
   ]
     .filter(Boolean)
     .join('\n')
+}
+
+/** 图片地址白名单：只允许 http(s) 与位图 data URL，杜绝 javascript:/file:/blob:。 */
+function isSafeImgSrc(raw: string): boolean {
+  const s = raw.trim()
+  if (/^https?:\/\/[^\s]+$/i.test(s)) return true
+  return /^data:image\/(png|jpe?g|gif|webp|bmp|x-icon|vnd\.microsoft\.icon|svg\+xml);base64,[a-z0-9+/=\s]+$/i.test(s)
+}
+
+/** 内联样式白名单：逐条声明过滤，去掉 url()/expression()/@import/反斜杠转义。 */
+function sanitizeStyle(raw: string): string {
+  const out: string[] = []
+  for (const decl of raw.split(';')) {
+    const i = decl.indexOf(':')
+    if (i < 0) continue
+    const prop = decl.slice(0, i).trim().toLowerCase()
+    const val = decl.slice(i + 1).trim()
+    if (!val || !STYLE_PROPS.has(prop)) continue
+    const low = val.toLowerCase()
+    if (low.includes('url(') || low.includes('expression') || low.includes('javascript:') ||
+      low.includes('@import') || low.includes('\\')) continue
+    out.push(`${prop}:${val}`)
+  }
+  return out.join(';')
+}
+
+/** 按白名单把 src 的属性抄到干净节点上。除 src/colspan/rowspan/style 外一律丢弃。 */
+function copyAllowedAttrs(src: Element, dst: HTMLElement): void {
+  const tag = src.tagName
+  for (const a of Array.from(src.attributes)) {
+    const name = a.name.toLowerCase()
+    if (name.startsWith('on')) continue // 内联事件处理器：一个都不留
+    if (name === 'src' && tag === 'IMG') {
+      if (isSafeImgSrc(a.value)) dst.setAttribute('src', a.value.trim())
+      continue
+    }
+    if ((name === 'colspan' || name === 'rowspan') && (tag === 'TD' || tag === 'TH')) {
+      if (/^\d{1,3}$/.test(a.value.trim())) dst.setAttribute(name, a.value.trim())
+      continue
+    }
+    if (name === 'style') {
+      const css = sanitizeStyle(a.value)
+      if (css) dst.setAttribute('style', css)
+      continue
+    }
+  }
+}
+
+/**
+ * 递归重建 DOM（而不是直接 importNode）：
+ * 白名单外的标签拆壳保留文字，黑名单标签连子树一起丢，属性逐个过白名单。
+ * importNode 只过滤「顶层标签名」，`<div><svg onload=...>` 这类嵌套写法照样进宿主。
+ */
+function sanitizeInto(src: Node, dst: Node): void {
+  for (const n of Array.from(src.childNodes)) {
+    if (n.nodeType === Node.TEXT_NODE) {
+      dst.appendChild(document.createTextNode(n.nodeValue || ''))
+      continue
+    }
+    if (n.nodeType !== Node.ELEMENT_NODE) continue
+    const el = n as Element
+    const tag = el.tagName.toUpperCase()
+    if (DROP_TAGS.has(tag)) continue
+    if (!ALLOWED_TAGS.has(tag)) {
+      sanitizeInto(el, dst) // 拆壳：保留内容，丢掉标签
+      continue
+    }
+    const clean = document.createElement(tag.toLowerCase())
+    copyAllowedAttrs(el, clean)
+    sanitizeInto(el, clean)
+    dst.appendChild(clean)
+  }
 }
 
 /** 等两帧（或超时兜底），确保注入的样式与内容已经完成布局 */
@@ -93,14 +204,8 @@ export async function printHtmlDocument(html: string, opts: PrintHtmlOptions = {
 
   const host = document.createElement('div')
   host.id = HOST_ID
-  doc.body?.childNodes.forEach((n) => {
-    if (n.nodeType === Node.ELEMENT_NODE) {
-      const tag = (n as Element).tagName
-      // <script> 绝不能进顶层文档（沙箱逃逸）；link/style 由上面的流程单独处理
-      if (tag === 'SCRIPT' || tag === 'LINK' || tag === 'STYLE') return
-    }
-    host.appendChild(document.importNode(n, true))
-  })
+  // 逐节点白名单重建：插件 HTML 是不可信输入，只让它带来「排版」，不带来任何行为。
+  sanitizeInto(doc.body ?? doc.documentElement, host)
 
   document.head.append(...injected)
   document.body.appendChild(host)

@@ -172,3 +172,85 @@ func (m *multiSink) SetConvID(id string) {
 		}
 	}
 }
+
+// ---- 事件出口随 ctx 走 ----
+//
+// 需要它的只有一件事：**工具在执行期要往父级的流里说话**。spawn_agent 跑在
+// runToolCalls 的 goroutine 里，手上只有 ctx；而它最该报告的事（子 agent 跑到
+// 第几轮、现在在调什么）只有它自己知道。把 sink 传进去签一层层改签名会波及
+// 整条工具调用链，挂 ctx 与 withAgentScope / withToolSurface 是同一个理由。
+
+type eventSinkCtxKey struct{}
+
+func withEventSink(ctx context.Context, s EventSink) context.Context {
+	if s == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, eventSinkCtxKey{}, s)
+}
+
+// eventSinkFrom 从 ctx 取父级事件出口；不在流式执行里（单测、问答）返回 nil。
+func eventSinkFrom(ctx context.Context) EventSink {
+	if ctx == nil {
+		return nil
+	}
+	s, _ := ctx.Value(eventSinkCtxKey{}).(EventSink)
+	return s
+}
+
+// childRelaySink 把子 agent 的关键事件压成一条 child 帧，转发给父级 sink。
+//
+// 为什么不直接把父 sink 塞进 multiSink：子 agent 的 token / reasoning / tool 帧
+// 会原样流进主对话——前端会把子 agent 的工具调用画成主 agent 的卡片，正文还会
+// 和主 agent 的回答混在一起。所以这里**按白名单转发**，且一律压成一条精简帧：
+//
+//	{"phase":"tool|tool_done|round|done","callId":"<父级 spawn 调用的 id>", ...}
+//
+// callId 是关键：前端凭它把进度贴到「派活」那张卡片上，不必维护 node→call 的映射。
+type childRelaySink struct {
+	parent EventSink
+	callID string
+	nodeID string
+	role   string
+}
+
+// Push 丢弃：子 agent 的正文与思考不进主对话（结论会随工具结果回来）。
+func (s *childRelaySink) Push(kind, text string) {}
+
+// Event 按白名单压缩转发。
+func (s *childRelaySink) Event(kind string, data map[string]any) {
+	if s == nil || s.parent == nil {
+		return
+	}
+	switch kind {
+	case "tool":
+		// 子 agent 开始调一个工具：卡片上显示「第 N 轮 · file_grep」。
+		s.emit("tool", map[string]any{
+			"round": data["round"], "tool": data["name"], "toolCallId": data["id"],
+		})
+	case "tool_result":
+		// 工具跑完了：带上耗时，让「它到底在干什么」有节奏感。
+		s.emit("tool_done", map[string]any{
+			"toolCallId": data["id"], "ok": data["ok"], "ms": data["ms"],
+		})
+	case "reasoning_round":
+		// 一轮结束：即使没有工具调用，也说明它在推进，别让界面看起来静止。
+		s.emit("round", map[string]any{"round": data["round"]})
+	case "done":
+		s.emit("done", nil)
+	}
+}
+
+func (s *childRelaySink) emit(phase string, extra map[string]any) {
+	ev := map[string]any{
+		"phase": phase, "callId": s.callID, "nodeId": s.nodeID, "role": s.role,
+	}
+	for k, v := range extra {
+		ev[k] = v
+	}
+	s.parent.Event("child", ev)
+}
+
+// Failed 恒为 false：子 agent 的生死由 ctx 决定（父级取消会传染下来），
+// 不因为「父级 SSE 断了」提前收——那会让已经在跑的活白干。
+func (s *childRelaySink) Failed() bool { return false }

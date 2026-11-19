@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 
+	"quickdock/internal/logger"
 	"quickdock/internal/sysutil"
 )
 
@@ -43,34 +44,71 @@ func syncHostsFile(hostsPath string, domains []string) error {
 }
 
 // mergeHostsBlock 读出原文并把标记区块替换成 domains 对应的内容（纯计算，不落盘）。
-// 已有区块则原地替换，没有则追加到末尾；区块外的内容逐字节保留。
+// 已有区块则摘掉后重新追加，没有则直接追加到末尾；区块外的内容逐字节保留。
 // domains 为空表示清空区块内容但保留标记，方便下次原地更新。
 func mergeHostsBlock(hostsPath string, domains []string) (string, error) {
 	orig, err := os.ReadFile(hostsPath)
 	if err != nil && !os.IsNotExist(err) {
 		return "", fmt.Errorf("读取 hosts 失败: %w", err)
 	}
-	content := string(orig)
-	block := renderHostsBlock(domains)
+	return withHostsBlock(string(orig), renderHostsBlock(domains)), nil
+}
 
-	start := strings.Index(content, hostsBlockBegin)
+// withHostsBlock 把 content 里所有标记区块摘干净，再把 block 追加到末尾。
+//
+// 为什么不是「定位第一段就地替换」：用户手动编辑过、或别的工具截断过之后，
+// 文件里可能同时存在两段 begin（只有一段有 end）。按「第一个 begin 到第一个
+// end」整段替换，会把夹在两段标记之间的用户条目一起删掉——hosts 不是我们的
+// 文件，删用户数据不可接受。宁可每次重排标记段的位置，也不动标记外的内容。
+func withHostsBlock(content, block string) string {
+	begin := strings.Index(content, hostsBlockBegin)
 	end := strings.Index(content, hostsBlockEnd)
-	switch {
-	case start >= 0 && end > start:
+	// 正常情况（恰好一段完整区块）：就地替换，位置与前后文完全不动。
+	// 这条路径必须保持「写一次和写十次结果一样」——站点每次启动都会同步一次。
+	if begin >= 0 && end > begin &&
+		strings.Count(content, hostsBlockBegin) == 1 && strings.Count(content, hostsBlockEnd) == 1 {
 		end += len(hostsBlockEnd)
 		// 连同标记行尾的换行一起吃掉，避免反复重写时累积空行
 		if end < len(content) && content[end] == '\n' {
 			end++
 		}
-		return content[:start] + block + content[end:], nil
-	case start >= 0:
-		// 只有 begin 没有 end（用户手动编辑过）——从 begin 起整段替换
-		return content[:start] + block, nil
-	default:
-		if content != "" && !strings.HasSuffix(content, "\n") {
-			content += "\n"
+		return content[:begin] + block + content[end:]
+	}
+
+	// 异常情况（重复标记 / 只有 begin 的单边残留）：先把所有标记段摘干净，再追加。
+	if begin >= 0 || end >= 0 {
+		logger.W("[sites] hosts 中存在成对/成单的 QuickDock 标记残留，已按标记段重排并保留标记外内容")
+	}
+	content = strings.TrimRight(stripHostsBlocks(content), "\n")
+	if content != "" {
+		content += "\n\n"
+	}
+	return content + block
+}
+
+// stripHostsBlocks 摘掉所有标记区块（含只有 begin 的单边残留），只留用户内容。
+func stripHostsBlocks(content string) string {
+	for {
+		start := strings.Index(content, hostsBlockBegin)
+		if start < 0 {
+			return content
 		}
-		return content + block, nil
+		rel := strings.Index(content[start:], hostsBlockEnd)
+		if rel < 0 {
+			// 只有 begin：只删这一行标记本身，后面的用户条目原样保留。
+			lineEnd := strings.Index(content[start:], "\n")
+			if lineEnd < 0 {
+				return content[:start]
+			}
+			content = content[:start] + content[start+lineEnd+1:]
+			continue
+		}
+		end := start + rel + len(hostsBlockEnd)
+		// 连同标记行尾的换行一起吃掉，避免反复重写时累积空行
+		if end < len(content) && content[end] == '\n' {
+			end++
+		}
+		content = content[:start] + content[end:]
 	}
 }
 

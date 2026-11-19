@@ -2,9 +2,9 @@ package aitools
 
 // 目录工具：列出一个目录里有什么。
 //
-// 为什么 agent 独有而不是对外：file_search（Everything）只知道「文件名→路径」，
-// 不知道层级；模型要理解一个项目，第一步必须是「这个目录里有哪些子目录和文件」，
-// 再逐层展开。这是「在目录里干活」的前提动作，外部客户端自己有 ls / glob。
+// 为什么 agent 独有而不是对外：模型要理解一个项目，第一步必须是「这个目录里有哪些
+// 子目录和文件、各自多大、什么时候改的」，再逐层展开。file_find 虽然也能递归按名字找，
+// 但只知道「名字→路径」；列目录给出的层级与体量信息是另一回事。
 //
 // 默认跳过 node_modules/.git/dist 这类构建产物目录：一个前端项目根目录
 // 光 node_modules 就能产出几万条，把上下文占满而没有任何信息量。
@@ -33,8 +33,8 @@ func registerDir(d Deps) {
 
 	r.add(listDir, mcpsrv.LevelRead, "dir_list",
 		"列出一个目录里有什么（名字、类型、大小、修改时间）。"+
-			"这是「看项目结构」的工具：file_search 是按文件名全盘检索、不知道目录里有什么，"+
-			"file_grep 是按内容找。默认忽略 node_modules/.git/dist 等构建产物目录，需要时用 includeIgnored 打开。"+
+			"这是「看项目结构」的工具，只看一层、不递归——已知文件名要找它在哪，用 file_find；"+
+			"按内容找用 file_grep。默认忽略 node_modules/.git/dist 等构建产物目录，需要时用 includeIgnored 打开。"+
 			"返回的 name 是相对该目录的路径，可直接喂给 file_read",
 		[]string{"path"},
 		map[string]any{

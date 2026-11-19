@@ -11,8 +11,8 @@
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Activity, ChevronDown, ChevronRight, X } from '@lucide/vue'
-import { AIAgentRunTree, AISessionTimeline } from '../../bindings/quickdock/services/ai/aiservice'
+import { Activity, ChevronDown, ChevronRight, CircleStop, X } from '@lucide/vue'
+import { AIAgentRunTree, AICancelAgentNode, AISessionTimeline } from '../../bindings/quickdock/services/ai/aiservice'
 import { useDialogFocus } from '../composables/useDialogFocus'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -220,6 +220,35 @@ function toggleStep(key: string) {
   stepOpen.value = { ...stepOpen.value, [key]: !stepOpen.value[key] }
 }
 
+// —— 单个子任务的停止（见后端 AICancelAgentNode）——
+//
+// 一次编排常常同时跑五六个，跑偏的通常只有一两个。此前用户只能「等它跑完」或
+// 「整条对话停掉」——后者会把已经跑了大半的其它子任务一起杀掉，白花钱。
+const stopping = ref<Record<string, boolean>>({})
+
+/** 还在跑（缺省也算 running：刚建出来的节点还没写状态）。 */
+function childRunning(status?: string): boolean {
+  return !status || status === 'running'
+}
+
+async function stopChild(id: string) {
+  if (stopping.value[id]) return
+  stopping.value = { ...stopping.value, [id]: true }
+  try {
+    unwrap(await AICancelAgentNode(id))
+  } catch (e) {
+    // 「这个子任务已经结束了」是最常见的失败：用户点得比它收尾慢半拍。
+    // 那不是错误，把状态刷新出来就够了。
+    logErr('ai:traceStopChild', e)
+  } finally {
+    stopping.value = { ...stopping.value, [id]: false }
+    // 取消是异步生效的（子 agent 在下一轮边界才会看到 ctx 已取消），
+    // 立刻拉一次能看到「已取消」，不必等下一个 1 秒轮询。
+    void loadTimeline(true)
+    void load(true)
+  }
+}
+
 /** 状态徽标：库里存的是英文 run/node 状态，界面一律走 i18n；pending / 缺省按「进行中」显示。 */
 function statusText(s?: string): string {
   if (s === 'done') return t('aiRunStatusDone')
@@ -239,7 +268,9 @@ function stepTitle(step: RunStep): string {
 /** 步骤的操作目标：复用气泡卡片的 shortPath 口径，绝对路径压成末两段。 */
 function stepTarget(step: RunStep): string {
   if (step.kind !== 'tool') return ''
-  return toolTarget({ args: step.args } as AIToolCall)
+  // name 必须一起传：toolTarget 对 spawn_agent 有专门的摘要口径（role · 任务首行），
+  // 少了 name 就退化成「挑第一个字符串值」，派活那一步又变回一串参数原文。
+  return toolTarget({ name: step.name, args: step.args } as AIToolCall)
 }
 
 /** 步骤右侧的短摘要：耗时 / 增删行 / 字数，一眼看出这一步的「分量」。 */
@@ -448,6 +479,16 @@ onBeforeUnmount(() => {
                   <span v-if="c.elapsedMs">{{ fmtElapsed(c.elapsedMs) }}</span>
                   <span class="trace-node-status" :class="`is-${c.status}`">{{ statusText(c.status) }}</span>
                 </span>
+                <!-- 只停这一个：整行可点展开，所以必须 stop 掉冒泡。 -->
+                <button
+                  v-if="childRunning(c.status)"
+                  class="trace-child-stop"
+                  :title="t('aiTraceChildStop')"
+                  :disabled="!!stopping[c.id]"
+                  @click.stop.prevent="stopChild(c.id)"
+                >
+                  <CircleStop :size="12" />
+                </button>
                 <!-- 右箭头沿用 DSH 子任务面板的读法：整行可点，箭头只提示「还能展开」。 -->
                 <ChevronRight :size="12" class="trace-child-task-arrow" :class="{ 'is-open': childOpen[c.id] }" />
               </div>
@@ -690,19 +731,27 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-.trace-head-ico { color: var(--color-accent); }
+.trace-head-ico { color: var(--color-accent); flex-shrink: 0; }
 
+/* 标题吃掉全部剩余宽度，把右边的范围切换和关闭按钮顶到边上。
+   别用 .trace-modes 的 margin-left:auto 干这事：子任务视图不渲染范围切换，
+   那样关闭按钮会紧跟在标题后面，看起来跑到左边去了。 */
 .trace-title {
   font-size: var(--text-md);
   color: var(--color-text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 范围切换（WP12）：贴在标题右侧，不占一整行——抽屉很窄，多一行会把
    下面的事件列表挤掉大半屏。 */
 .trace-modes {
   display: flex;
+  flex-shrink: 0;
   gap: var(--space-1);
-  margin-left: auto;
   padding: 2px;
   border-radius: var(--radius-sm);
   background: var(--color-bg-hover);
@@ -759,7 +808,9 @@ onBeforeUnmount(() => {
   margin: var(--space-1) 0 0 calc(11px + var(--space-1));
 }
 
-.trace-close {  display: flex;
+.trace-close {
+  display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
   width: 24px;
@@ -926,6 +977,27 @@ onBeforeUnmount(() => {
   transition: transform var(--transition-fast);
 }
 .trace-child-task-arrow.is-open { transform: rotate(90deg); }
+
+/* 单个子任务的停止：默认淡出，悬停整行时才显形——子任务一多，一排红图标
+   比任务标题还抢眼。::after 不用，直接靠 opacity + pointer-events 控制命中。 */
+.trace-child-stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px; height: 20px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), color var(--transition-fast);
+}
+.trace-child-task-head:hover .trace-child-stop { opacity: 1; }
+.trace-child-stop:hover { color: var(--color-danger); background: var(--color-bg-hover); }
+.trace-child-stop:disabled { opacity: .4; cursor: default; }
 
 .trace-child-task-detail {
   padding: var(--space-2);

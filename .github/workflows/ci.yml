@@ -1,0 +1,72 @@
+name: CI
+
+# 每个 PR / push 上跑一组「不需要 GUI、也不需要真机」的门禁：
+# 格式、静态检查、单测（短模式）、前端类型、CSS 变量、i18n 完整性。
+# 这些恰好都是「本地能过、CI 也能过」的检查——需要 WebView / 桌面会话的用例
+# 一律不进这里，宁可少测，也不要一个永远红的流水线。
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    # Windows：项目是 Windows 优先（syscall / 注册表 / wails v3 的 windows 构建），
+    # 放在 linux 上编译会要求 gtk/webkit 头文件，等于把 CI 变成装依赖练习。
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        shell: bash
+        run: |
+          out=$(gofmt -l internal services *.go | grep -v '^$' || true)
+          if [ -n "$out" ]; then
+            echo "以下文件未格式化，请执行 gofmt -w："
+            echo "$out"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./internal/... ./services/...
+
+      # -short：跳过符号链接 / 目录联接这类依赖本机权限的用例。
+      - name: go test -short
+        run: go test -short -count=1 ./internal/... ./services/...
+
+  frontend:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: install
+        run: npm ci
+
+      - name: i18n 完整性
+        run: npm run check:i18n
+
+      - name: CSS 变量
+        run: npm run check:css
+
+      - name: vue-tsc
+        run: npx vue-tsc --noEmit

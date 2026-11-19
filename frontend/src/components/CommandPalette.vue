@@ -10,7 +10,7 @@ import {
 } from '@lucide/vue'
 import { HidePaletteWindow, GetLastCopiedText, CaptureSelection, CaptureFullScreen, OpenNoteFromPalette, OpenTodoFromPalette } from '../../bindings/quickdock/services/appservice'
 import { ExecuteSystemCommand } from '../../bindings/quickdock/services/system/systemservice'
-import { OpenItem } from '../../bindings/quickdock/services/collection/collectionservice'
+import { OpenItemWithQuery } from '../../bindings/quickdock/services/collection/collectionservice'
 import {
   EnvList,
   EnvStatus,
@@ -710,10 +710,11 @@ const { executeSelected } = usePaletteExecutor({
 
 async function commitInlineQuicklink() {
   if (!inlineQuicklink.value) return
-  const item = { ...inlineQuicklink.value }; let value = item.value || ''
-  if (inlineQuery.value) value = value.replace(/\{query\}/g, inlineQuery.value)
-  item.value = value; recordUsage('item:' + item.id, 'item', item.name, item.value || '')
-  try { await OpenItem(item as any) } catch (e) { console.error('[CmdPalette] OpenItem:', e) }
+  const item = inlineQuicklink.value
+  const q = inlineQuery.value || ''
+  // 值里的 {query} 由后端替换（条目内容以库为准，前端不再回传整个 item）
+  recordUsage('item:' + item.id, 'item', item.name, (item.value || '').replace(/\{query\}/g, q))
+  try { await OpenItemWithQuery(item.id, q) } catch (e) { console.error('[CmdPalette] OpenItem:', e) }
   inlineQuicklink.value = null; inlineQuery.value = ''; closePalette()
 }
 

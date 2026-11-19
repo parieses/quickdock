@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { logErr } from '../utils/logger'
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RotateCcw } from '@lucide/vue'
 import {
@@ -15,9 +15,10 @@ import { SuspendHotkeys, ResumeHotkeys } from '../../bindings/quickdock/services
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import { isAppLocked } from '../utils/appLock'
-import type { HotkeyConfig } from '../types'
+import type { HotkeyConfig, ToastAPI } from '../types'
 
 const { t } = useI18n()
+const toast = inject<ToastAPI>('toast')!
 
 interface WinmgrItem {
   key: string
@@ -73,6 +74,15 @@ function setMsg(text: string, delay: number) {
     message.value = ''
     msgTimer.value = null
   }, delay)
+}
+
+// 保存/恢复默认失败的统一收尾：页内提示 + toast + 日志。
+// 只记日志的话，打包版用户看不到 DevTools，界面上仍是一片「成功」的错觉。
+function onSaveError(e: unknown) {
+  const msg = getErrorMessage(e)
+  message.value = t('saveFailed2') + ': ' + msg
+  toast.error(msg)
+  logErr('SettingsWinmgr', e)
 }
 
 function toVK(e: KeyboardEvent): number | null {
@@ -224,11 +234,14 @@ async function resetAll() {
   floatMods.value = 3
   floatVk.value = 0x57
   try {
-    await SetWinmgrRatio(50)
-    await SetWinmgrFloatHotkeyConfig(3, 0x57)
+    // 逐个写库：以前这里只改了本地 ref，界面上显示「已恢复默认」，
+    // 实际库里还是旧键位，重启后原样回来。
+    for (const it of items) unwrap(await SetWinmgrHotkeyConfig(it.key, it.mods, it.vk))
+    unwrap(await SetWinmgrRatio(50))
+    unwrap(await SetWinmgrFloatHotkeyConfig(3, 0x57))
     await ResumeHotkeys()
     setMsg(t('restoreOk'), 2000)
-  } catch (e) { logErr('SettingsWinmgr', e) }
+  } catch (e) { onSaveError(e) }
 }
 
 async function saveAll() {
@@ -244,13 +257,14 @@ async function saveAll() {
     }
   }
   try {
-    for (const it of items) await SetWinmgrHotkeyConfig(it.key, it.mods, it.vk)
-    await SetWinmgrRatio(ratio.value)
-    await SetWinmgrFloatHotkeyConfig(floatMods.value, floatVk.value)
+    // unwind：后端返回 code!=0 时不会 reject，不 unwrap 就会提示「已保存」。
+    for (const it of items) unwrap(await SetWinmgrHotkeyConfig(it.key, it.mods, it.vk))
+    unwrap(await SetWinmgrRatio(ratio.value))
+    unwrap(await SetWinmgrFloatHotkeyConfig(floatMods.value, floatVk.value))
     await ResumeHotkeys()
     setMsg(t('hotkeySaved'), 2000)
   } catch (e) {
-    message.value = t('saveFailed2') + ': ' + getErrorMessage(e)
+    onSaveError(e)
   }
 }
 </script>

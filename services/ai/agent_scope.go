@@ -34,14 +34,27 @@ const (
 	agentMaxNodes = 8
 
 	// agentMaxParallel 同一轮里最多几个子 agent 并发。
-	// 3 是个折中：再多会同时压住上游的并发配额（多数网关按账号限流），
-	// 而少一个又白等了。
-	agentMaxParallel = 3
+	//
+	// 5 是实测定下来的：7 路并发时上游被打满，日志里单轮 10–28 秒、各路的完成
+	// 间隔只剩十几毫秒——并发没换来整体速度，只把每一路都拖慢了（2026-11-19
+	// 那个 6 路 run：123 万 token、跑十几分钟）。5 能覆盖多数分治场景，又给
+	// 上游留出余量。排队语义不存在：超出的会立刻拿到信号量，只是等前面空出来。
+	//
+	// 这个数会被 injectScaleHint 注入提示词与 spawn_agent 的工具描述，
+	// 改这里文案会跟着变，不用另找地方同步。
+	agentMaxParallel = 5
 
 	// agentTaskMaxRune 单个任务描述的字数上限。
 	// 子 agent 看不到父对话，任务描述就是它的全部输入；太短做不对，太长则
 	// 复述一遍上下文、把父对话的 token 又付一次。4000 字足够写清范围与期望产出。
 	agentTaskMaxRune = 4000
+
+	// agentRunBudgetMax run 级预算的硬顶。
+	//
+	// 预算按「主对话额度 + 每个子 agent 的配额」相加得出（见 agentRunTokenBudget），
+	// 理论上 72 万 + 7×20 万 = 212 万。这个硬顶只防「节点上限/单节点配额被调到
+	// 离谱的值」后算出天文数字，正常情况下碰不到。
+	agentRunBudgetMax = 3_000_000
 )
 
 // agentScope 一次顶层执行的编排状态。
@@ -116,7 +129,15 @@ func agentRunTokenBudget(cfg AIProfile) int {
 	if b <= 0 {
 		return 0
 	}
-	return b * 6
+	// 1. 主对话自己的额度 = 单轮上下文预算 × 6。
+	// 2. 每个子 agent 的配额 = agentNodeTokenCap × (agentMaxNodes-1)。子 agent 是
+	//    各自 fresh 的独立上下文，**不共享**主对话那 6 份；塞进同一个总账，结果
+	//    就是「4 个 review 各 27 万，第 4 个刚跑完就把 72 万吃光」（2026-11-19 实测）。
+	budget := b*6 + (agentMaxNodes-1)*agentNodeTokenCap
+	if budget > agentRunBudgetMax {
+		budget = agentRunBudgetMax
+	}
+	return budget
 }
 
 type agentScopeKey struct{}
@@ -271,6 +292,19 @@ func (sc *agentScope) overBudget() bool {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	return sc.budget > 0 && sc.used >= sc.budget
+}
+
+// budgetUsage 当前用量快照（已用, 上限），给拒绝文案用。
+//
+// 只报「预算用完了」模型不知道还剩多少余地；带上具体数字它才能判断这是真收尾
+// 而不是换个说法再派一次。
+func (sc *agentScope) budgetUsage() (int, int) {
+	if sc == nil {
+		return 0, 0
+	}
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	return sc.used, sc.budget
 }
 
 // cwdGate 取某个目录的串行闸。

@@ -162,9 +162,7 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 	if cfg.PresencePenalty != 0 {
 		body["presence_penalty"] = cfg.PresencePenalty
 	}
-	if cfg.ThinkingEnabled {
-		body["enable_thinking"] = true
-	}
+	applyThinkingSwitch(body, cfg)
 	applyReasoningLevel(body, cfg)
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -752,9 +750,7 @@ func (a *AIService) callAIOnce(ctx context.Context, cfg AIProfile, messages []ma
 	if cfg.PresencePenalty != 0 {
 		body["presence_penalty"] = cfg.PresencePenalty
 	}
-	if cfg.ThinkingEnabled {
-		body["enable_thinking"] = true
-	}
+	applyThinkingSwitch(body, cfg)
 	applyReasoningLevel(body, cfg)
 	raw, err := json.Marshal(body)
 	if err != nil {

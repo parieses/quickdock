@@ -38,6 +38,36 @@ func isTerminalTool(path string) bool {
 	return false
 }
 
+// isCmdInterpreter 判断工具是否为 cmd.exe。只有它按 cmd 的元字符规则解析命令行；
+// powershell / wsl 的转义字符各不相同（反引号 / 反斜杠），一律套 cmd 的 ^ 会打印出
+// 多余的字符，所以转义只在 cmd 上做。
+func isCmdInterpreter(path string) bool {
+	switch strings.ToLower(filepath.Base(path)) {
+	case "cmd", "cmd.exe":
+		return true
+	}
+	return false
+}
+
+// escapeCmdValue 转义 cmd.exe 元字符，让条目值只作为「一条命令」执行：
+// & | < > 不再被解释成命令分隔 / 管道 / 重定向，" ^ % 也不再触发二次解析。
+//
+// 代价（有意为之）：依赖 shell 语法（管道、重定向、&& 串联）的条目会失效。
+// 条目值来自用户数据，不能同时被当成「命令」和「脚本」——否则一条
+// `echo hi & calc` 就能在「只是打开一个快捷项」时执行任意程序。
+func escapeCmdValue(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) * 2)
+	for _, r := range s {
+		switch r {
+		case '"', '%', '^', '&', '|', '<', '>':
+			b.WriteByte('^')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 // tryTerminalTool 以“整条命令”方式启动终端类工具（cmd/powershell/wt/wsl）。
 // 返回 (true, err) 表示已处理（含启动结果）；返回 (false, nil) 表示非终端工具，
 // 调用方（item.go execOpen）应走通用参数展开路径。
@@ -62,8 +92,11 @@ func tryTerminalTool(tool OpenTool, value, workingDir string, pathDirs []string)
 		}
 	}
 	quoted := value
-	if strings.ContainsAny(value, " \t()&|<>^") {
-		quoted = `""` + value + `""`
+	if isCmdInterpreter(tool.Path) {
+		quoted = escapeCmdValue(value)
+	}
+	if strings.ContainsAny(quoted, " \t()") {
+		quoted = `""` + quoted + `""`
 	}
 	inner := strings.ReplaceAll(strings.ReplaceAll(tmpl, "{{command}}", quoted), "{{path}}", quoted)
 	toolPath := resolveExecutable(tool.Path)

@@ -31,6 +31,13 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 		return err
 	}
 	a.DB = database
+	// 网页条目的图标是后台抓的（见 db.fillItemIconAsync）：抓回来通知渲染进程
+	// 就地换图标，用户不必刷新才能看到。db 不认识 Wails 事件，故由这里注入。
+	db.ItemIconUpdatedHook = func(itemID, icon string) {
+		if app := a.App(); app != nil {
+			app.Event.Emit("quickdock:item:icon", map[string]string{"id": itemID, "icon": icon})
+		}
+	}
 	// 启动锁：在 DB 就绪后立刻载入密码哈希并置锁定态。必须早于任何窗口内容
 	// 渲染完成——前端首次 LockStatus 查询要拿到真实状态，否则会有一瞬解锁界面。
 	lock.Init(database)
@@ -80,6 +87,7 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
+				logger.LogPanic("lifecycle.go", r)
 				logger.E("QuickDock: 剪贴板过期清理 goroutine panic: %v", r)
 			}
 		}()
@@ -148,6 +156,7 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 			go func() {
 				defer func() {
 					if r := recover(); r != nil {
+						logger.LogPanic("lifecycle.go", r)
 						logger.E("QuickDock: 插件后台加载 goroutine panic: %v", r)
 					}
 				}()
@@ -190,6 +199,7 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
+					logger.LogPanic("lifecycle.go", r)
 					logger.E("QuickDock: dsh 自动启动 goroutine panic: %v", r)
 				}
 			}()

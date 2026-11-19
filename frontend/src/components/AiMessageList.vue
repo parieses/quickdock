@@ -13,7 +13,7 @@ import { computed, nextTick, ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAiCostPreference } from '../composables/useAiCostPreference'
 import {
-  ArrowDown, Bot, Check, ChevronDown, ChevronRight, Copy, FileText, Loader2, Pencil, Play, RotateCcw, Sparkles, StickyNote, Undo2, Wrench,
+  ArrowDown, Bot, Check, ChevronDown, ChevronRight, Copy, FileText, Loader2, Play, Sparkles, StickyNote, Undo2, Users, Wrench,
 } from '@lucide/vue'
 import AgentRunTree from './AgentRunTree.vue'
 import AiDiffView from './AiDiffView.vue'
@@ -25,8 +25,8 @@ import type {
   AIArtifact, AICheckpointView, AIJobRow, AIMessage, AIMsgImage, AIRuleFile, AIStreamStat, AIToolCall,
 } from '../types/ai'
 import {
-  artifactsFromCalls, artifactsOf, jobIdOf, rulesOf, rulesTitle, runIDOf, toolIcon, toolList,
-  toolOutput, toolResultLang, toolTarget, toolVerb as aiToolVerb,
+  artifactsFromCalls, artifactsOf, jobIdOf, rulesOf, rulesTitle, runIDOf, spawnArgs,
+  spawnPartial, spawnResultText, toolIcon, toolList, toolOutput, toolResultLang, toolTarget, toolVerb as aiToolVerb,
 } from '../utils/aiTools'
 
 const props = defineProps<{
@@ -52,14 +52,6 @@ const props = defineProps<{
   draftRunId: string
   errorMsg: string
   canRetry: () => boolean
-  /**
-   * 是否给「重新生成」入口：最后一条是助手回复且没有 run 在跑。
-   *
-   * 与 canRetry 分开两个 prop 而不是共用一个判据：失败时最后一条是**用户**
-   * 消息（助手回复没落库），那时要的是「重试」；而重新生成的前提是已经有一条
-   * 回答可以被重答。合成一个判据必然让其中一种情况消失。
-   */
-  canRegenerate: boolean
   renderBlock: (md: string) => string
   renderMessageBlocks: (m: AIMessage) => string[]
   msgStat: (m: AIMessage) => AIStreamStat | null
@@ -98,16 +90,6 @@ const activeRun = computed<AIRun | null>(
   () => pickActiveRun(props.runs, props.activeId, props.draftRunId) ?? null,
 )
 const streaming = computed(() => !!activeRun.value)
-// 最后一条用户消息：重新生成挂在它身上（见下面模板），因为「重答哪一句」
-// 就是「我最后问的那一句」。放在消息流最底部的居中按钮会被误点到下面
-// 的输入区/其他操作上，长会话里还要滚到底才能按。
-const lastUserId = computed(() => {
-  const list = props.messages
-  for (let i = list.length - 1; i >= 0; i--) {
-    if (list[i].role === 'user') return list[i].id
-  }
-  return ''
-})
 const reasoningText = computed(() => activeRun.value?.reasoning ?? '')
 // 已归档的各轮思考（后端在轮次边界发 reasoning_round）。
 const streamReasonRounds = computed(() => activeRun.value?.reasonRounds ?? NO_REASON_ROUNDS)
@@ -122,45 +104,6 @@ const runCompacts = computed<AICompact[]>(() => activeRun.value?.compacts ?? NO_
 // 流式期的产物：file_write 返回的当下就挂出来，等 done 再显示会让
 // 「文件已经写完了」和「看得见」之间隔一整轮回答。
 const streamArtifacts = computed<AIArtifact[]>(() => artifactsFromCalls(streamTools.value))
-
-// ---- 编辑重发 ----
-// 编辑态放在消息气泡里而不是回填输入框：改的是「那条历史提问」，就地改才不会
-// 让人以为要重新发一条新消息。截断与重发交给父组件，二次确认也在它那边。
-const editingId = ref('')
-const editDraft = ref('')
-const editInputRef = ref<HTMLTextAreaElement | null>(null)
-// v-for 里的字符串 ref 会被收集成数组，用函数 ref 才拿得到那个唯一的 textarea。
-function setEditInput(el: unknown) {
-  if (el) editInputRef.value = el as HTMLTextAreaElement
-}
-
-function beginEdit(m: AIMessage) {
-  editingId.value = m.id
-  editDraft.value = m.content
-  void nextTick(() => { editInputRef.value?.focus() })
-}
-function cancelEdit() {
-  editingId.value = ''
-  editDraft.value = ''
-}
-function saveEdit(m: AIMessage) {
-  const text = editDraft.value.trim()
-  if (!text) return
-  if (text === m.content.trim()) { cancelEdit(); return }
-  emit('edit', m, editDraft.value)
-  cancelEdit()
-}
-// Esc 必须自己吃掉：AIPage 的全局 Esc 是「停止生成」，编辑到一半按 Esc
-// 不该把别的会话里正在跑的任务停掉。输入法拿 Esc 取消候选时一律不处理。
-function onEditKeydown(e: KeyboardEvent, m: AIMessage) {
-  if (e.isComposing || e.keyCode === 229) return
-  if (e.key === 'Escape') {
-    e.preventDefault(); e.stopPropagation(); cancelEdit(); return
-  }
-  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-    e.preventDefault(); e.stopPropagation(); saveEdit(m)
-  }
-}
 
 // 命令在跑的时候输出在卡片里往下长：不跟着滚，用户看到的永远是开头几行，
 // 而这恰恰是最没信息量的部分（pip 真正在动的进度在最后一行）。
@@ -206,10 +149,6 @@ const emit = defineEmits<{
   /** 点某条回复末尾的「本轮用量」：打开这条消息自己的 token 明细弹框 */
   (e: 'open-usage', m: AIMessage): void
   (e: 'retry'): void
-  /** 重新生成上一条回答 */
-  (e: 'regenerate'): void
-  /** 编辑某条历史提问并重发：父组件负责二次确认与截断重发 */
-  (e: 'edit', m: AIMessage, content: string): void
   (e: 'msg-click', ev: MouseEvent): void
   (e: 'msg-mouseup', ev: MouseEvent | KeyboardEvent): void
   (e: 'msg-contextmenu', ev: MouseEvent): void
@@ -402,6 +341,40 @@ function artsOf(m: AIMessage): AIArtifact[] {
 function toolVerb(name: string): string {
   return aiToolVerb(name, t)
 }
+
+/**
+ * spawnProgress 单个派活卡片的实时进度行。
+ *
+ * **只讲这个子 agent 自己在干什么**（第 N 轮 · 正在搜代码 · 2.1s）。
+ * 「这一组完成几个」属于整组的状态，曾经也拼在这里，结果同组五六张卡各写一遍
+ * 「3/5」——看起来像五个不同的任务都做到 3/5。它现在由 `spawnGroup` 统一渲染在
+ * 组尾一行（见模板里的 ai-spawn-group）。
+ */
+function spawnProgress(tc: AIToolCall): string {
+  const bits: string[] = []
+  const c = tc.child
+  if (c?.round) bits.push(t('aiSpawnRound', { n: c.round }))
+  if (c?.phase === 'tool' && c.tool) bits.push(toolVerb(c.tool))
+  else if (c?.phase === 'tool_done' && c.ms) bits.push(fmtElapsed(c.ms))
+  return bits.join(' · ')
+}
+
+/**
+ * spawnGroup 本轮派活组的汇总（贴在整个工具列表最下方那一行）。
+ *
+ * 进度帧是按组广播的：同组每条 spawn_agent 卡片拿到的 groupDone/groupTotal
+ * 完全一样，所以随便取一条就行。取最后一条是因为它最可能带最新帧
+ * （后面的卡片是同一轮里更晚创建的那几条）。
+ */
+const spawnGroup = computed(() => {
+  const spawns = streamTools.value.filter((tc) => tc.name === 'spawn_agent')
+  if (!spawns.length) return null
+  const last = spawns[spawns.length - 1]
+  const total = last.groupTotal || 0
+  // 只派了一个时不报「0/1 完成」——那一路的卡片自己就有耗时。
+  if (total < 2) return null
+  return { done: last.groupDone || 0, total, elapsedMs: last.groupElapsedMs || 0 }
+})
 
 // —— 工具输出的折叠 ——
 //
@@ -724,7 +697,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
           v-for="m in shownMessages"
           :key="m.id"
           :data-msg-id="m.id"
-          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), costLines.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, m.skills, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id, expandedInMessage(m), editingId === m.id, schedTimes, m.created_at]"
+          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), costLines.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, m.skills, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id, expandedInMessage(m), schedTimes, m.created_at]"
           :class="['ai-msg', m.role]"
         >
           <div class="ai-msg-role">
@@ -801,6 +774,16 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
                 <!-- 行级 diff：结果串只说「改成功了」，这里说「改成了什么」。 -->
                 <AiDiffView v-if="tc.diff" :diff="tc.diff" />
                 <div v-if="tc.error" class="ai-tool-err">{{ tc.error }}</div>
+                <!-- 派活：结果是 {run_id,node_id,tokens,result} 一坨 JSON，直接铺原文
+                     等于让用户自己在里面找那句结论。这里只蒸馏「任务全文 + 子 agent 结论」；
+                     结论还没回来（流式期 result 未推送）也给一句提示，否则展开像没反应。 -->
+                <div v-else-if="tc.name === 'spawn_agent'" class="ai-spawn">
+                  <div v-if="spawnArgs(tc.args)?.task" class="ai-spawn-task">{{ spawnArgs(tc.args)?.task }}</div>
+                  <div v-if="tc.running && spawnProgress(tc)" class="ai-spawn-progress">{{ spawnProgress(tc) }}</div>
+                  <div v-if="spawnPartial(tc)" class="ai-spawn-partial">{{ t('aiSpawnPartial') }}</div>
+                  <pre v-if="spawnResultText(tc)" class="ai-tool-res">{{ spawnResultText(tc) }}</pre>
+                  <div v-else class="ai-spawn-hint">{{ tc.running ? t('aiSpawnPending') : t('aiSpawnNoResult') }}</div>
+                </div>
                 <!-- 有 diff 时不再重放一句「已编辑 xxx（替换 1 处）」：
                      路径在摘要行上已经有了，改动在 diff 里已经有了。 -->
                 <pre v-else-if="toolOutput(tc) && !tc.diff" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ toolResText(tc) }}</pre>
@@ -839,22 +822,6 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
           </div>
           <div v-if="m.role === 'assistant'" class="ai-msg-content ai-md">
             <div v-for="(b, bi) in renderMessageBlocks(m)" :key="bi" class="ai-md-block" v-html="b"></div>
-          </div>
-          <div v-else-if="editingId === m.id" class="ai-msg-edit">
-            <textarea
-              :ref="setEditInput"
-              v-model="editDraft"
-              class="ai-msg-edit-input"
-              rows="3"
-              @keydown="onEditKeydown($event, m)"
-            ></textarea>
-            <div class="ai-msg-edit-ops">
-              <button class="qd-btn qd-btn-primary qd-btn-sm" :disabled="!editDraft.trim()" @click="saveEdit(m)">
-                {{ t('aiEditResend') }}
-              </button>
-              <button class="qd-btn qd-btn-sm" @click="cancelEdit">{{ t('cancel') }}</button>
-              <span class="ai-msg-edit-hint">{{ t('aiEditResendHint') }}</span>
-            </div>
           </div>
           <div v-else class="ai-msg-content ai-plain">{{ m.content }}</div>
           <!-- 回答产物：靠右贴边的可折叠列表（同常见 AI IDE 的产物区样式）。
@@ -895,25 +862,6 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
             </button>
             <button v-if="m.content" class="ai-copy" @click="emit('copy', m.content)" :title="t('copy')">
               <Copy :size="12" /> {{ t('copy') }}
-            </button>
-            <!-- 编辑历史提问：只在没有流在跑时给，编辑期间后端会截断这条之后的所有消息 -->
-            <button
-              v-if="!streaming && m.role === 'user' && m.content && editingId !== m.id"
-              class="ai-copy"
-              :title="t('aiEditResendHint')"
-              @click="beginEdit(m)"
-            >
-              <Pencil :size="12" /> {{ t('aiEdit') }}
-            </button>
-            <!-- 重新生成：挂在我最后发的那句问上。只在「最后一条用户消息 + 有可重答的
-                 回答 + 当前没有流在跑」时出现，避免在长会话里堆出一排按钮。 -->
-            <button
-              v-if="!streaming && canRegenerate && m.role === 'user' && m.id === lastUserId"
-              class="ai-copy"
-              :title="t('aiRegenerateHint')"
-              @click="emit('regenerate')"
-            >
-              <RotateCcw :size="12" /> {{ t('aiRegenerate') }}
             </button>
             <button v-if="m.role === 'assistant' && m.content" class="ai-copy" @click="emit('save-note', m.content)" :title="t('aiSaveToNote')">
               <StickyNote :size="12" /> {{ t('aiSaveToNote') }}
@@ -1032,6 +980,8 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
                   </span>
                   <span v-if="tc.approval === 'pending'" class="ai-tool-ms is-ask">{{ t('aiApprovalWaiting') }}</span>
                   <span v-else-if="tc.approval === 'denied'" class="ai-tool-ms is-denied">{{ t('aiToolDenied') }}</span>
+                  <!-- 派活组进度不放在这里：同一轮五六张派活卡会长得一模一样。
+                       整组的「完成几个 / 已等多久」统一贴在工具列表最下方。 -->
                   <span v-else-if="tc.running" class="ai-tool-ms">{{ t('aiToolRunning') }}</span>
                   <span v-else-if="tc.dedup" class="ai-tool-ms">{{ t('aiToolDedup') }}</span>
                   <span v-else-if="tc.ms" class="ai-tool-ms">{{ fmtElapsed(tc.ms) }}</span>
@@ -1053,6 +1003,16 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
                 <div v-else-if="tc.approval === 'allowed'" class="ai-approval-done">{{ t('aiApprovalAllowed') }}</div>
                 <AiDiffView v-if="tc.diff" :diff="tc.diff" />
                 <div v-if="tc.error" class="ai-tool-err">{{ tc.error }}</div>
+                <!-- 与历史卡片同一口径：派活只给任务全文与结论，不铺 JSON 原文。 -->
+                <div v-else-if="tc.name === 'spawn_agent'" class="ai-spawn">
+                  <div v-if="spawnArgs(tc.args)?.task" class="ai-spawn-task">{{ spawnArgs(tc.args)?.task }}</div>
+                  <!-- 实时进度：第 N 轮 · 正在用什么工具 · 这一组还剩几个。
+                       没有它，十几分钟的等待里这张卡只有「执行中」三个字。 -->
+                  <div v-if="tc.running && spawnProgress(tc)" class="ai-spawn-progress">{{ spawnProgress(tc) }}</div>
+                  <div v-if="spawnPartial(tc)" class="ai-spawn-partial">{{ t('aiSpawnPartial') }}</div>
+                  <pre v-if="spawnResultText(tc)" class="ai-tool-res">{{ spawnResultText(tc) }}</pre>
+                  <div v-else class="ai-spawn-hint">{{ tc.running ? t('aiSpawnPending') : t('aiSpawnNoResult') }}</div>
+                </div>
                 <pre v-else-if="toolOutput(tc) && !tc.diff" :ref="(el) => setToolResEl(tc.id, el)" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ toolOutput(tc) }}</pre>
                 <!-- 后台任务：卡片上明写「关闭应用会终止」。工具描述里也写了同一句，
                      但用户看的是这张卡；不在这里再说一次，关窗口时他一定以为
@@ -1063,6 +1023,16 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
                   <button class="ai-job-note-open" @click.stop.prevent="emit('open-jobs', jobIdOf(tc))">{{ t('aiJobBgView') }}</button>
                 </div>
               </details>
+              <!-- 派活组汇总：整组一条，贴在列表最下方。
+                   主 agent 在等 wg.Wait 期间界面上唯一的「还剩几个」就在这，
+                   放在每张卡片里会让同组的卡各写一遍相同的 3/5。 -->
+              <div v-if="spawnGroup" class="ai-spawn-group">
+                <Users :size="11" class="ai-spawn-group-ico" />
+                <span>{{ t('aiSpawnGroupProgress', { done: spawnGroup.done, total: spawnGroup.total }) }}</span>
+                <span v-if="spawnGroup.elapsedMs" class="ai-spawn-group-ms">
+                  {{ t('aiSpawnGroupElapsed', { t: fmtElapsed(spawnGroup.elapsedMs) }) }}
+                </span>
+              </div>
             </div>
           </details>
           <div v-if="hasStreamText" class="ai-msg-content ai-md">
@@ -1088,12 +1058,6 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
           </details>
         </div>
 
-        <!-- 重新生成上一条回答。放在「我发的那句」的操作行里，而不是消息流末尾：
-             末尾那个居中按钮紧贴输入区，最容易点错；而且它离「重答的是哪一句」
-             隔着一整段回答。挂在最后一条用户消息上，语义和位置都对得上。
-             只有最后一条重答才有意义（前面的重答会与后面已有的回答矛盾）。
-             后端按 targetId 截断旧回答并重算会话 token（ai_usage 明细保留：
-             那是一次真实花过钱的调用），所以刷新后不会冒出重复的提问气泡。 -->
         <div v-if="errorMsg" class="ai-error">
           <span class="ai-error-text">{{ errorMsg }}</span>
           <!-- 失败时用户消息已落库，重试就是把它再发一次（图片一起带回去） -->
@@ -1390,6 +1354,60 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   word-break: break-word;
 }
 
+/* 派活卡片：任务原文 + 子 agent 结论。
+   任务用一条左侧细线做引用（它是「用户当初要的东西」，不是输出），结论沿用
+   结果区的等宽小字。两者都在 .ai-spawn 里重排，所以要把 .ai-tool-res 自带的
+   缩进与下边距清掉，否则会缩两层。 */
+.ai-spawn {
+  display: flex; flex-direction: column; gap: var(--space-2);
+  margin: 0 var(--space-3) var(--space-3) 18px;
+}
+
+.ai-spawn-task {
+  max-height: 180px; overflow: auto;
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--color-border);
+  font-size: var(--text-xs); line-height: 1.6;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap; word-break: break-word;
+}
+
+.ai-spawn .ai-tool-res { margin: 0; }
+
+.ai-spawn-hint { font-size: var(--text-xs); color: var(--color-text-muted); }
+
+/* 派活组汇总：整组一条，贴在工具列表底部，与上面每张卡留一道细线。
+   主 agent 在 wg.Wait 期间这里会一直刷新（8 秒一帧），是唯一的组级进度。 */
+.ai-spawn-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px dashed var(--color-border-light);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+.ai-spawn-group-ico { flex-shrink: 0; color: var(--color-accent); }
+.ai-spawn-group-ms { color: var(--color-text-muted); font-family: var(--font-mono); }
+
+/* 实时进度：等子 agent 的十几分钟里，用户能看到的唯一「它在动」的迹象。
+   用等宽字体 + 次要色，读起来像一行状态而不是又一段正文。 */
+.ai-spawn-progress {
+  font-size: var(--text-xs); font-family: var(--font-mono);
+  color: var(--color-text-muted);
+}
+
+/* 残本标记：子任务超时 / 被停时结论只跑了一半，必须一眼看出来。 */
+.ai-spawn-partial {
+  align-self: flex-start;
+  font-size: var(--text-xs);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+
 .ai-tool-res {
   font-size: var(--text-xs); color: var(--color-text-secondary);
   font-family: var(--font-mono); line-height: 1.55;
@@ -1677,9 +1695,6 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 }
 
 .ai-retry:hover { background: var(--color-danger-bg); }
-
-/* 重新生成已经挂到「最后一条提问」的操作行里（见模板），这里的居中软按钮
-   样式随之删除：留着只会让人以为底部还有一个按钮。 */
 
 /* 搜索命中跳转后的落点高亮：只闪一次，不做常驻状态。
    同时闪底色与一圈光晕——用户消息的底色画在气泡上，单靠容器的 background
@@ -1992,25 +2007,6 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 .ai-img-broken { height: 80px; display: flex; align-items: center; justify-content: center; font-size: var(--text-xl); color: var(--color-text-disabled); }
 
 @keyframes ai-blink { 50% { opacity: 0; } }
-
-/* ---- 就地编辑历史提问 ---- */
-.ai-msg-edit { display: flex; flex-direction: column; gap: var(--space-3); }
-.ai-msg-edit-input {
-  width: 100%;
-  padding: var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-  font-family: inherit;
-  font-size: var(--text-md);
-  line-height: 1.6;
-  resize: vertical;
-  outline: none;
-}
-.ai-msg-edit-input:focus { border-color: var(--color-accent); }
-.ai-msg-edit-ops { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
-.ai-msg-edit-hint { font-size: var(--text-xs); color: var(--color-text-muted); }
 
 /* 气泡尾部的单条费用：与 .ai-msg-stat 同属「一行安静的辅助信息」——
    无框、最弱一档颜色、允许换行（模型名 + 金额 + token 在窄窗口会折行）。

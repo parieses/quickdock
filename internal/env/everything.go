@@ -108,6 +108,13 @@ type EverythingRuntime struct {
 	// 仍会拿到 exit 1；没有冷却就会每次都杀一遍进程，把「等索引」恶化成「反复重启」。
 	recoverMu     sync.Mutex
 	lastRecoverAt time.Time
+
+	// readyMu/readyAt/readyVal：IsAvailable 的短期缓存。
+	// 装配 AI 工具面每轮都要问一次「Everything 能不能用」，而探测要枚举进程 + 找 exe，
+	// 每次真跑会把首字延迟拖上几十毫秒；缓存住之后用户装好 Everything 10 秒内也会自动恢复。
+	readyMu  sync.Mutex
+	readyAt  time.Time
+	readyVal bool
 }
 
 func NewEverythingRuntime() *EverythingRuntime {
@@ -613,10 +620,31 @@ func (e *EverythingRuntime) WarmUp(residentEnabled bool) {
 }
 
 // IsAvailable 判定文件检索「能力就绪」：Everything 已装 + es.exe 在位 + 进程在跑。
-// MCP file_search 工具仅在就绪时注册，避免暴露一个永远返回空的工具。
+// 由 MCP file_search 与内置 AI 的 file_find 兜底策略使用：前者按它就绪与否决定是否挂载，
+// 后者据此在提示里说明「全盘按名搜」暂时不可用。
 func (e *EverythingRuntime) IsAvailable() bool {
 	st := e.EverythingStatus()
 	return st.Installed && st.HasEsExe && st.Running
+}
+
+// everythingReadyTTL 就绪判定的缓存时长。
+// 10 秒：短到用户刚装好/刚启动 Everything 就能被感知，长到每轮装配都不会去枚举进程。
+const everythingReadyTTL = 10 * time.Second
+
+// IsAvailableCached 是 IsAvailable 的带 TTL 缓存版，供装配路径使用。
+//
+// 装配工具面时每个依赖外部环境的工具都会问一次「你还在吗」，而 Everything 的探测
+// 包含进程枚举与 exe 查找——直接调 IsAvailable 会让每轮对话开头多出几十毫秒，
+// 且这段开销发生在注册表读锁外但仍在首字路径上。
+func (e *EverythingRuntime) IsAvailableCached() bool {
+	e.readyMu.Lock()
+	defer e.readyMu.Unlock()
+	if !e.readyAt.IsZero() && time.Since(e.readyAt) < everythingReadyTTL {
+		return e.readyVal
+	}
+	v := e.IsAvailable()
+	e.readyVal, e.readyAt = v, time.Now()
+	return v
 }
 
 // ---- ServiceController 契约 ----

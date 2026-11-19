@@ -25,6 +25,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"quickdock/internal/fsguard"
@@ -81,6 +82,9 @@ const (
 	// 与 aiToolResultMaxRune 是两回事：那个是「喂给模型多少」（影响上下文和钱），
 	// 这个是「留给人回看多少」（影响库体积）。完整结果从来没落过库——
 	// 它只在当次请求的上下文里存在过。
+	//
+	// 流式下发（agent_run 的 tool_result 事件）也用这个值，别单独写小数字：
+	// 两处不一致时，卡片一开始显示一截「已截断」，刷新后又突然变长。
 	aiRecordResultMaxRune = 2000
 
 	// aiRecordOutputMaxRune 落库时「人看的输出」（Output）上限。
@@ -230,6 +234,12 @@ type ToolFilter struct {
 	// 域过滤之后再筛掉，永远加不回被策略撤掉的工具——否则一个技能文件就能
 	// 把用户关掉的危险工具重新打开。
 	AllowNames map[string]bool
+	// Exclude 按名字逐个撤下（先于 AllowNames 生效）。
+	//
+	// 与 MaxLevel 分工：等级挡的是「写」，挡不住那些**长得像只读、实际会写**的
+	// 工具（project_memory 的 action=write、plan_update 的整份覆盖）。角色收窄
+	// 只放宽域、不放宽等级之后，靠这一条把这些漏网的逐个摘掉。
+	Exclude map[string]bool
 }
 
 // keep 把角色约束翻译成 mcpsrv.Resolve 的 Keep 回调。nil 表示不收窄。
@@ -243,6 +253,9 @@ func (f *ToolFilter) keep(t mcpsrv.Tool) bool {
 		return false
 	}
 	if f.MaxLevel >= 0 && t.Level > f.MaxLevel {
+		return false
+	}
+	if f.Exclude != nil && f.Exclude[t.Name] {
 		return false
 	}
 	if f.Categories != nil && !f.Categories[t.Domain] {
@@ -312,6 +325,10 @@ func applySystemHints(messages []map[string]interface{}, base, hint, cwd string,
 	case exhausted:
 		// 本来有工具、这一轮却被撤下了：只能是没有轮次了（见 ai_stream.go 的收尾轮）。
 		s += toolHintExhausted
+	default:
+		// 本次从始至终没有工具（定时任务的问答档 / 权限过滤后一个都不剩）。
+		// 不说明的话模型会照旧发起调用，而调用会被静默忽略，整轮变成空回复。
+		s += toolHintNoTools
 	}
 	s += cwdHint(cwd)
 	messages[0]["content"] = s
@@ -325,6 +342,9 @@ func applySystemHints(messages []map[string]interface{}, base, hint, cwd string,
 const planHint = "\n\n[任务清单]\n" +
 	"- 三步以上才能做完的任务，动手前先用 plan_update 列一份步骤清单（全部 todo，当前那条 doing），每完成一步立刻更新并把那条标成 done。\n" +
 	"- 清单会实时显示在用户界面上，必须与实际进度一致：没做的事不要标 done，也不要用正文里的 `- [ ]` 代替它。\n" +
+	"- **收尾必须再更一次**：最后一步做完、开始写最终回答**之前**，再调一次 plan_update 把做完的标 done；" +
+	"确实没做/跳过/失败的条目留在 todo，并在正文里说一句为什么。清单会一直挂在答复下面，" +
+	"停在 doing 会让人以为任务还在跑（实测就这么停在 1/3 过）。\n" +
 	"- 更新清单后不要在正文里复述整份清单；哪些条目自己推进、哪些派出去，按下面的 [任务规模] 判断。" +
 	"两步以内的事不用清单。\n"
 
@@ -387,6 +407,7 @@ func cwdHint(cwd string) string {
 var pathReadTools = map[string]bool{
 	"file_read":     true,
 	"file_grep":     true,
+	"file_find":     true,
 	"dir_list":      true,
 	"git_status":    true,
 	"git_diff":      true,
@@ -436,6 +457,7 @@ var parallelSafeTools = map[string]bool{
 	// —— 只读检索：只打开文件/索引读，不写盘、不改库、无包级缓存 ——
 	"file_read":     true, // 单文件读
 	"file_grep":     true, // 目录内正则搜索（有命中数/时间预算）
+	"file_find":     true, // 目录内按文件名搜（有深度/条目数/时间预算）
 	"file_search":   true, // Everything 按文件名检索，只读索引
 	"dir_list":      true, // 目录列举
 	"git_status":    true, // git status --porcelain，只读
@@ -650,11 +672,19 @@ func (a *AIService) runToolCalls(ctx context.Context, calls []aiToolCall, round 
 	// 同一轮里三条派活全拖成串行；但写工具后面的派活仍要等它做完。
 	for _, group := range parallelGroups(calls) {
 		if len(group) < 2 {
+			// 单个调用也要起心跳：只派一个子 agent 是最常见的用法，而它可能要跑
+			// 十几分钟——那段时间界面上同样只有「执行中」三个字。
+			beat := startSpawnHeartbeat(ctx, calls, group)
 			exec(group[0])
+			beat.stop()
 			continue
 		}
 		sem := make(chan struct{}, agentMaxParallel)
 		var wg sync.WaitGroup
+		// 派活组的心跳：wg.Wait() 期间主 agent 一个字都不出（它在等结论），
+		// 而这一等可能是几分钟。前端只能显示「调用中」，用户看到的是「卡住了」。
+		// 这里每 8 秒推一条「已完成 2/5 · 已等 1 分 20 秒」，让等待有进度。
+		beat := startSpawnHeartbeat(ctx, calls, group)
 		for _, idx := range group {
 			i := idx
 			wg.Add(1)
@@ -666,15 +696,100 @@ func (a *AIService) runToolCalls(ctx context.Context, calls []aiToolCall, round 
 				sem <- struct{}{}
 				defer func() { <-sem }()
 				exec(i)
+				beat.doneOne(calls[i].Name)
 			}()
 		}
 		wg.Wait()
+		beat.stop()
 	}
 
 	for i := range calls {
 		out = append(out, toolMessage(calls[i].ID, contents[i]))
 	}
 	return out, records
+}
+
+// spawnHeartbeatInterval 派活组心跳间隔。
+//
+// 8 秒：子 agent 一轮通常十几秒，更密没有新信息；更疏则「刚派出去」那半分钟
+// 看起来仍然像卡死。只在该组含 spawn_agent 时才起，其它并发组不受影响。
+const spawnHeartbeatInterval = 8 * time.Second
+
+// spawnHeartbeat 派活等待期的进度心跳。
+//
+// 解决的问题：runToolCalls 在这一组上是 wg.Wait()，主 agent 既不出字也不推任何
+// 事件——用户看到的只有「正在调用 spawn_agent」。真实情况可能是「6 个里完成 2 个」，
+// 但这个事实此前完全没有出口（子 agent 的事件写进的是 agent_events 表）。
+type spawnHeartbeat struct {
+	sink   EventSink
+	total  int
+	done   atomic.Int32
+	start  time.Time
+	stopCh chan struct{}
+	once   sync.Once
+}
+
+// startSpawnHeartbeat 起心跳；该组不含派活（或不在流式执行里）时返回空对象，
+// 下面三个方法都做了 nil 安全，调用处不必判空。
+func startSpawnHeartbeat(ctx context.Context, calls []aiToolCall, group []int) *spawnHeartbeat {
+	h := &spawnHeartbeat{}
+	sink := eventSinkFrom(ctx)
+	if sink == nil {
+		return h
+	}
+	for _, i := range group {
+		if calls[i].Name == spawnAgentToolName {
+			h.total++
+		}
+	}
+	if h.total == 0 {
+		return h
+	}
+	h.sink = sink
+	h.start = time.Now()
+	h.stopCh = make(chan struct{})
+	go func() {
+		t := time.NewTicker(spawnHeartbeatInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-h.stopCh:
+				return
+			case <-t.C:
+				h.emit()
+			}
+		}
+	}()
+	return h
+}
+
+// emit 推一条汇总帧。并发安全：sseFlusher.writeEvent 自带锁。
+func (h *spawnHeartbeat) emit() {
+	if h == nil || h.sink == nil {
+		return
+	}
+	h.sink.Event("spawn_progress", map[string]any{
+		"done":      int(h.done.Load()),
+		"total":     h.total,
+		"elapsedMs": time.Since(h.start).Milliseconds(),
+	})
+}
+
+// doneOne 某个调用跑完（成功失败都算，用户关心的是「还剩几个」）。
+func (h *spawnHeartbeat) doneOne(name string) {
+	if h == nil || h.sink == nil || name != spawnAgentToolName {
+		return
+	}
+	h.done.Add(1)
+	h.emit()
+}
+
+// stop 收尾：停 ticker。用 sync.Once 是因为 defer 与显式调用可能各来一次。
+func (h *spawnHeartbeat) stop() {
+	if h == nil || h.stopCh == nil {
+		return
+	}
+	h.once.Do(func() { close(h.stopCh) })
 }
 
 // toolCallPrep 一次调用在执行前的准备结果（WP13：把准备阶段从主流程里拆出来）。

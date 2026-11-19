@@ -80,12 +80,17 @@ func (s Surface) Names() []string {
 
 // Resolve 装配一个工具面。这是唯一的装配入口。
 //
-// 顺序固定：策略（等级/单工具开关）→ 域归属（对外）或场景 → 角色收窄。
-// 三层都是「模型知不知道有这个能力」，真正的拦截在 Invoke，两者共用同一个 Surface。
+// 顺序固定：策略（等级/单工具开关）→ 域归属（对外）或场景 → 就绪谓词 → 角色收窄。
+// 全是「模型知不知道有这个能力」，真正的拦截在 Invoke，两者共用同一个 Surface。
+//
+// 前两层的判定只读内存，留在注册表读锁里；后两层可能碰 IO（Ready 探测运行时），
+// 一律放到解锁之后：RLock 是全局的，在锁里枚举进程会把并发的 tools/list 与
+// 其它会话的装配一起堵住。
 func Resolve(sc ToolScope) Surface {
-	regMu.RLock()
-	defer regMu.RUnlock()
+	sf := Surface{Caller: sc.Caller, Scene: sc.Scene, byName: map[string]Tool{}}
+	var snapshot []Tool
 
+	regMu.RLock()
 	sets := []struct {
 		m     map[string]Tool
 		agent bool
@@ -97,9 +102,6 @@ func Resolve(sc ToolScope) Surface {
 			agent bool
 		}{agents, true})
 	}
-
-	sf := Surface{Caller: sc.Caller, Scene: sc.Scene, byName: map[string]Tool{}}
-	visibleDomains := map[string]bool{}
 	for _, set := range sets {
 		for name, t := range set.m {
 			switch {
@@ -112,20 +114,36 @@ func Resolve(sc ToolScope) Surface {
 					sf.Dropped = append(sf.Dropped, Dropped{Name: name, Reason: "不对外部客户端开放"})
 					continue
 				}
-			} else {
-				if !DomainAllows(t.Domain, sc.Scene, t.Level) {
-					sf.Dropped = append(sf.Dropped, Dropped{Name: name, Reason: "当前能力档未开放"})
-					continue
-				}
-				if sc.Keep != nil && !sc.Keep(t) {
-					sf.Dropped = append(sf.Dropped, Dropped{Name: name, Reason: "角色边界"})
-					continue
+			} else if !DomainAllows(t.Domain, sc.Scene, t.Level) {
+				sf.Dropped = append(sf.Dropped, Dropped{Name: name, Reason: "当前能力档未开放"})
+				continue
+			}
+			snapshot = append(snapshot, t)
+		}
+	}
+	regMu.RUnlock()
+
+	visibleDomains := map[string]bool{}
+	for _, t := range snapshot {
+		// 就绪门：环境没准备好（Everything 没装/没跑）时干脆别让模型看见。
+		// 原来只在 Handler 里报错，模型得先失败一次、再换工具，白烧一轮。
+		if t.Ready != nil && !t.Ready() {
+			reason := "运行环境未就绪"
+			if t.NotReadyNote != nil {
+				if note := strings.TrimSpace(t.NotReadyNote()); note != "" {
+					reason = note
 				}
 			}
-			sf.Tools = append(sf.Tools, t)
-			sf.byName[name] = t
-			visibleDomains[t.Domain] = true
+			sf.Dropped = append(sf.Dropped, Dropped{Name: t.Name, Reason: reason})
+			continue
 		}
+		if sc.Caller != CallerMCP && sc.Keep != nil && !sc.Keep(t) {
+			sf.Dropped = append(sf.Dropped, Dropped{Name: t.Name, Reason: "角色边界"})
+			continue
+		}
+		sf.Tools = append(sf.Tools, t)
+		sf.byName[t.Name] = t
+		visibleDomains[t.Domain] = true
 	}
 	// 排序：tools[] 每轮都作为请求前缀，顺序稳定才能吃到上游的前缀缓存。
 	sort.Slice(sf.Tools, func(i, j int) bool { return sf.Tools[i].Name < sf.Tools[j].Name })

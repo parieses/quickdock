@@ -110,6 +110,74 @@ func activeReasoningLevel(cfg AIProfile) (AIReasoningLevel, bool) {
 	return AIReasoningLevel{}, false
 }
 
+// withoutThinking 返回一份「这一轮不思考」的档案副本。
+//
+// 两处开关都要关，因为它们走的是两条独立路径：
+//   - ThinkingEnabled → 请求体的 enable_thinking（老路径）；
+//   - 模型条目上的 ReasoningLevel → reasoning_effort / thinking_budget 之类（新路径）。
+//
+// 只关前者的话，配了推理档位的模型仍会按档位思考——用户点了「关闭思考」，
+// 面板还是先黑屏十几秒才出字，这个开关就成了摆设。
+//
+// 返回副本而不是就地改：档案是全局共享的缓存，一次性的「这轮别想」
+// 不该影响用户下一次在对话页里的提问。
+//
+// Models 必须复制一层再清档位：结构体赋值只复制 slice 头，直接改
+// cfg.Models[i] 会写到调用方手里那份档案的底层数组上——表现为「在 SSH 里
+// 关了思考，回对话页也一直不思考」，直到进程重启才恢复。
+func withoutThinking(cfg AIProfile) AIProfile {
+	// 先记下原档案走没走 enable_thinking 路径，再清零：清零之后就没有
+	// 别的线索能判断「该不该发 false」了。
+	cfg.thinkingOffExplicit = cfg.ThinkingEnabled
+	cfg.ThinkingEnabled = false
+	if len(cfg.Models) > 0 {
+		models := make([]AIModelEntry, len(cfg.Models))
+		copy(models, cfg.Models)
+		for i := range models {
+			// 有显式「关」档就用它：档位里的 Param 可能是 reasoning_effort=none
+			// 这种真正的关闭值，直接清空反而退化成「不指定档位」= 按厂商默认走。
+			// 没有关档才清空，交给 applyThinkingSwitch 的兜底。
+			models[i].ReasoningLevel = offReasoningLevelName(models[i].ReasoningLevels)
+		}
+		cfg.Models = models
+	}
+	return cfg
+}
+
+// offReasoningLevelName 找档位里的「关」，没配就返回空。
+//
+// 只认名字叫 off 的档位：档位名是界面上的语义标签，跟 Param/Value 是什么
+// 无关（有的厂商用 thinking_budget=0，有的用 reasoning_effort=none）。
+func offReasoningLevelName(levels []AIReasoningLevel) string {
+	for _, lv := range levels {
+		if strings.EqualFold(strings.TrimSpace(lv.Name), "off") {
+			return lv.Name
+		}
+	}
+	return ""
+}
+
+// applyThinkingSwitch 把「想 / 不想」写进请求体。
+//
+// 三个分支的顺序是有意的：
+//  1. 开着 → 发 true，维持原有行为；
+//  2. 这一轮被显式关闭，且档案原本就走 enable_thinking（thinkingOffExplicit）
+//     → 发 false。不发的话，Qwen3 这类默认开思考的模型照样想，用户点了
+//     「关闭思考」还是能看到思考流，这个开关就成了摆设；
+//  3. 其余情况一个字段都不写。对 OpenAI 官方这类严格校验 body 的接口，
+//     多塞一个它不认识的 enable_thinking 会直接 400。
+func applyThinkingSwitch(body map[string]any, cfg AIProfile) {
+	if body == nil {
+		return
+	}
+	switch {
+	case cfg.ThinkingEnabled:
+		body["enable_thinking"] = true
+	case cfg.thinkingOffExplicit:
+		body["enable_thinking"] = false
+	}
+}
+
 // applyReasoningLevel 把选中的档位写进请求体。
 //
 // 只在**配置过档位**时才动请求体：老档案（没配档位）继续走 ThinkingEnabled 的

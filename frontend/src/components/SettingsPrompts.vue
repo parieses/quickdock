@@ -9,7 +9,7 @@
  * 变量（{{date}} / {{time}} / {{selection}}）一律存原文，插入时由 AIPage 展开：
  * 提前展开会把「上次复制的文本」固化进模板，下次再用就是脏数据。
  */
-import { computed, inject, ref, watch } from 'vue'
+import { computed, inject, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Copy, Pencil, Plus, Trash2, X } from '@lucide/vue'
 import { unwrap } from '../utils/api'
@@ -37,6 +37,7 @@ const editing = ref<{ id: string; name: string; category: string; content: strin
 // 保存失败时弹框还开着，toast 会被压在下面看不见。
 const formError = ref('')
 const panelRef = ref<HTMLElement | null>(null)
+const contentRef = ref<HTMLTextAreaElement | null>(null)
 const editingVisible = computed(() => !!editing.value)
 const { onKeydown: onKeydownTrap } = useFocusTrap(editingVisible, panelRef)
 
@@ -78,6 +79,30 @@ function startEdit(p: AIPrompt) {
 function cancelEdit() {
   editing.value = null
   formError.value = ''
+}
+
+// 变量清单：只把 {{date}} 三个占位符列出来，等于让用户猜它们各自会变成什么。
+// 每项都带一句「插入时会发生什么」，并且点一下直接插到光标处——省得手打两层花括号
+// 打错一个，占位符就原样留在正文里发出去。
+const promptVars = [
+  { token: '{{date}}', descKey: 'aiPromptsVarDateDesc' },
+  { token: '{{time}}', descKey: 'aiPromptsVarTimeDesc' },
+  { token: '{{selection}}', descKey: 'aiPromptsVarSelectionDesc' },
+]
+
+function insertVar(token: string) {
+  const el = contentRef.value
+  const draft = editing.value
+  if (!el || !draft) return
+  const start = el.selectionStart ?? el.value.length
+  const end = el.selectionEnd ?? start
+  draft.content = el.value.slice(0, start) + token + el.value.slice(end)
+  // 光标停在插入内容之后：连续插两个变量时顺序才符合直觉
+  void nextTick(() => {
+    el.focus()
+    const pos = start + token.length
+    el.setSelectionRange(pos, pos)
+  })
 }
 
 function onDialogKeydown(e: KeyboardEvent) {
@@ -226,18 +251,30 @@ watch(() => props.visible, (v) => {
             <label class="field">
               <span class="field-label">{{ t('aiPromptsContent') }}</span>
               <textarea
+                ref="contentRef"
                 v-model="editing.content"
                 class="prompt-textarea"
                 maxlength="8000"
                 :placeholder="t('aiPromptsContentPh')"
               ></textarea>
             </label>
-            <p class="prompt-var-hint">
-              {{ t('aiPromptsVarHint') }}
-              <code>&#123;&#123;date&#125;&#125;</code>
-              <code>&#123;&#123;time&#125;&#125;</code>
-              <code>&#123;&#123;selection&#125;&#125;</code>
-            </p>
+            <!-- 变量说明：新建时最容易卡住的地方（不知道占位符写什么、会不会被替换），
+                 所以每个变量都配一句「插入时变成什么」，并支持点一下插入。 -->
+            <div class="prompt-var-hint">
+              <div class="prompt-var-title">{{ t('aiPromptsVarHint') }}</div>
+              <button
+                v-for="v in promptVars"
+                :key="v.token"
+                type="button"
+                class="prompt-var"
+                :title="t('aiPromptsVarInsertTip')"
+                @click="insertVar(v.token)"
+              >
+                <code>{{ v.token }}</code>
+                <span class="prompt-var-desc">{{ t(v.descKey) }}</span>
+              </button>
+              <p class="prompt-var-note">{{ t('aiPromptsVarUnknown') }}</p>
+            </div>
             <p v-if="formError" class="prompt-dialog-error">{{ formError }}</p>
           </div>
           <footer class="prompt-dialog-foot">
@@ -474,19 +511,61 @@ watch(() => props.visible, (v) => {
   border-color: var(--color-border-focus-soft);
 }
 
+/* 变量说明：每行「占位符 + 一句话说明」，整行可点（插入到光标处）。
+ * 卡片式而不是一行流水文字：三个变量各说各的，横排挤在一起时读不出对应关系。 */
 .prompt-var-hint {
-  margin: 0;
-  font-size: var(--text-xs);
-  line-height: 1.6;
-  color: var(--color-text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-primary);
 }
 
-.prompt-var-hint code {
-  margin-left: var(--space-2);
+.prompt-var-title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.prompt-var {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.prompt-var:hover { color: var(--color-text-primary); }
+
+.prompt-var code {
+  flex: none;
+  min-width: 96px;
   padding: 1px var(--space-2);
   border-radius: var(--radius-xs);
   background: var(--color-bg-hover);
   font-family: var(--font-mono);
+  font-size: var(--text-xs);
   color: var(--color-text-secondary);
+}
+
+.prompt-var:hover code { color: var(--color-text-primary); }
+
+.prompt-var-desc {
+  font-size: var(--text-xs);
+  line-height: 1.6;
+}
+
+.prompt-var-note {
+  margin: 0;
+  font-size: var(--text-2xs);
+  line-height: 1.6;
+  color: var(--color-text-disabled);
 }
 </style>

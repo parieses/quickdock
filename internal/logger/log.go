@@ -23,6 +23,9 @@ var (
 	logDir string
 	curDay string
 	size   int64
+	// shardCappedDay 记录「当日分片已全部写满」的日期。一旦置位，本日内不再轮转：
+	// 否则每写一行都要 Close+Open+Stat 一遍最大的分片，热路径被白白拖慢。
+	shardCappedDay string
 	// 插件专属日志文件（与主日志分离，便于插件作者单独排查）
 	pf          *os.File
 	pCurDay     string
@@ -90,6 +93,12 @@ func pickLogName(prefix, day string) string {
 func logFull(path string) bool {
 	st, err := os.Stat(path)
 	return err == nil && st.Size() >= MaxFileSize
+}
+
+// allShardsFull 判断当日最后一个分片是否也已写满（即当日配额用尽）。
+func allShardsFull(prefix, day string) bool {
+	last := fmt.Sprintf("%s%s-%d.log", prefix, day, maxLogShards)
+	return logFull(filepath.Join(logDir, last))
 }
 
 func openLocked() {

@@ -444,17 +444,7 @@ export function useAiRuns(deps: AiRunsDeps) {
 
   let segmentSeq = 0
 
-  /** 重新生成 / 编辑重发的附加参数（见 services/ai/ai_stream.go 的截断处理）。
-   *  普通发送不传，行为与原来完全一致。 */
-  interface SendOpts {
-    action?: 'regen' | 'edit'
-    targetId?: string
-    /** 请求没能开始（含截断被拒）：调用方把乐观改过的消息列表回滚。
-     *  SSE 中途的 event: error 不调它——那时历史已经截断，模型只是这一轮没答好。 */
-    onFailed?: () => void
-  }
-
-  async function send(opts?: SendOpts) {
+  async function send() {
     // 先读后清：任何提前 return（没配 Key / 空消息 / 这条还在跑）都不能把标志
     // 留给下一次手动发送，否则那条用户发言将不再出现在气泡里。
     const reuseUserBubble = retryPending.value
@@ -612,10 +602,6 @@ export function useAiRuns(deps: AiRunsDeps) {
           // 没开的才看这两个字段。分支空 = 用当前分支。
           worktree: worktreeEnabled.value || worktreeActive.value,
           worktreeBranch: worktreeBranch.value || undefined,
-          // 重新生成 / 编辑重发：后端在写响应头之前按 targetId 截断历史，
-          // 再让 saveUserTurn 的幂等与 buildAIMessages 按截断后的库跑这一轮。
-          action: opts?.action,
-          targetId: opts?.targetId,
         }),
         signal: ctrl.signal,
       })
@@ -747,6 +733,51 @@ export function useAiRuns(deps: AiRunsDeps) {
               if ((tc.name === 'file_edit' || tc.name === 'file_write') && !data.error) {
                 void loadCheckpoints(run.convId)
               }
+            }
+            break
+          }
+          case 'spawn_progress': {
+            // 主 agent 正在等派活的结论（后端每 8 秒推一条，见 spawnHeartbeat）。
+            // 这段时间它一个字都不出，这条汇总是界面上「它还活着」的唯一证据。
+            const total = Number(data.total) || 0
+            if (!total) break
+            const done = Number(data.done) || 0
+            const elapsed = Number(data.elapsedMs) || 0
+            for (const tc of run.tools) {
+              if (tc.name !== 'spawn_agent' || !tc.running) continue
+              tc.groupDone = done
+              tc.groupTotal = total
+              tc.groupElapsedMs = elapsed
+              // 组里已经全部回来：后端的 wg.Wait 马上结束，这张卡很快会收到
+              // tool_result。不必在这里改 running——结果帧才是权威。
+            }
+            break
+          }
+          case 'child': {
+            // 单个子 agent 的进度（见后端 childRelaySink）：按 callId 贴到那张派活卡上。
+            // 不按 nodeId 维护映射：callId 每帧都带，省一层需要清理的状态。
+            const tc = run.tools.find((x) => x.id === String(data.callId || ''))
+            if (!tc) break
+            const phase = String(data.phase || '') as NonNullable<typeof tc.child>['phase']
+            const prev = tc.child
+            if (phase === 'start') {
+              tc.child = { phase }
+            } else if (phase === 'tool') {
+              tc.child = {
+                phase,
+                round: Number(data.round) || prev?.round || 0,
+                tool: String(data.tool || ''),
+                toolCallId: String(data.toolCallId || ''),
+              }
+            } else if (phase === 'tool_done') {
+              tc.child = {
+                ...(prev || { phase: 'tool_done' }),
+                phase,
+                ok: !!data.ok,
+                ms: Number(data.ms) || 0,
+              }
+            } else if (phase === 'round' || phase === 'done') {
+              tc.child = { ...(prev || { phase }), phase, round: Number(data.round) || prev?.round }
             }
             break
           }
@@ -982,8 +1013,6 @@ export function useAiRuns(deps: AiRunsDeps) {
         run.error = msg
         // 报错横幅同理只给当前会话；后台那条留红点。
         if (run.convId && run.convId !== activeId.value) runFailed = true
-        // 请求没起来（400 = 服务端拒绝了截断）：把前端乐观收起的历史拉回来。
-        opts?.onFailed?.()
       }
     } finally {
       // 这一轮属于谁、用户还在不在看它。整个收尾都按这两个值判断：

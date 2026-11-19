@@ -58,6 +58,13 @@ type AIService struct {
 	stopsMu sync.Mutex
 	stops   map[string]*stopSlot
 
+	// nodeID → 该子 agent 的取消函数（见 AICancelAgentNode）。
+	//
+	// 比「按会话停」细一级：一个 run 里可能有五六个子任务同时跑，用户常常只想砍掉
+	// 那个跑偏的，而不是把整条对话全停掉（其余几个已经跑了一半，杀了就白花钱）。
+	// 挂在服务上而不是 agentScope 上：绑定方法只有 nodeID，拿不到那次执行的 scope。
+	nodeCancels sync.Map
+
 	// 外部 MCP server 接入状态（见 ext_mcp.go）。
 	ext *extManager
 

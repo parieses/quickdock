@@ -467,13 +467,14 @@ func (m *Manager) MCPRuntime() *MCPRuntime {
 }
 
 // EverythingReady 报告 Everything 检索「能力就绪」：已装 + es.exe 在位 + 进程在跑。
-// MCP file_search 工具仅在就绪时注册，避免暴露一个永远返回空的工具。
+// 走带 TTL 的缓存版（见 EverythingRuntime.IsAvailableCached）：这个判定挂在工具装配路径上，
+// 每轮对话都会问一次，不能每次都枚举进程。file_search 靠它决定挂不挂。
 func (m *Manager) EverythingReady() bool {
 	e := m.EverythingRuntime()
 	if e == nil {
 		return false
 	}
-	return e.IsAvailable()
+	return e.IsAvailableCached()
 }
 
 // List 返回所有运行时概览（顺序：Node → PHP → Go → Redis → Nginx → Git）。

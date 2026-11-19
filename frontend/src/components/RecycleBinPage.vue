@@ -6,7 +6,7 @@ import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { useWorkspaceStore } from '../stores/workspace'
 import {
-  ListRecycle, RestoreRecycle, PurgeRecycle, ClearRecycle,
+  ListRecycle, RestoreRecycle, RestoreRecycleToDefault, PurgeRecycle, ClearRecycle,
 } from '../../bindings/quickdock/services/recycle/recycleservice'
 import { Boxes, LayoutGrid, Layers, Bookmark, FileText, RefreshCw, Trash2, Undo2, Timer, MessageSquare, Folder, Activity } from '@lucide/vue'
 import { Events } from '@wailsio/runtime'
@@ -135,7 +135,22 @@ async function restore(e: RecycleEntry) {
   if (busyKey.value) return
   busyKey.value = k
   try {
-    unwrap(await RestoreRecycle(e.collection, e.id))
+    const res = await RestoreRecycle(e.collection, e.id)
+    // Code=2：父链缺失。这不是错误，是让用户选一次：原样恢复不可能成功，
+    // 但数据还在墓碑里。只有快捷项能「改挂到默认集合」，集合/场景缺父级时
+    // 只能提示先恢复父级，别把用户引到一个必然失败的按钮上。
+    if (res && res.code === 2) {
+      if (e.collection !== 'items') {
+        toast?.error?.(t('recycleRestoreFailed', { msg: res.msg || '' }))
+        return
+      }
+      const name = e.label || typeLabel(e.collection)
+      const ok = toast?.confirm ? await toast.confirm(t('recycleParentMissingConfirm', { name })) : false
+      if (!ok) return
+      unwrap(await RestoreRecycleToDefault(e.collection, e.id))
+    } else {
+      unwrap(res)
+    }
     entries.value = entries.value.filter(x => keyOf(x) !== k)
     toast?.success?.(t('recycleRestored', { name: e.label || typeLabel(e.collection) }))
     if (e.collection === 'monitors') notifyMonitorsChanged()

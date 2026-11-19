@@ -64,6 +64,14 @@ type SshService struct {
 	transferMu      sync.Mutex
 	transferCancels map[string]context.CancelFunc
 
+	// aiConvMu / aiConvs 记录「SSH 会话 → AI 任务 id」（见 ai_session.go）。
+	//
+	// 键是 sessionId 而不是 hostId：用户可能同时开两个标签连同一台机器，
+	// 按主机归并会把两段对话揉进同一个任务里。会话关了再连就是新任务，
+	// 与「连接一次 = 一个助手任务」的语义一致。
+	aiConvMu sync.Mutex
+	aiConvs  map[string]string
+
 	// batchMu / batchCancels 记录「进行中的批量执行 → 取消函数」，键是批次 id。
 	// 与 transferCancels 同形但不是同一张表：两者生命周期与语义都不同
 	// （传输是单文件搬运，批次是一组主机的命令），混在一起会让取消互相误伤。
@@ -87,6 +95,7 @@ func NewSshService(app *services.AppService) *SshService {
 		owners:          make(map[string]string),
 		transferCancels: make(map[string]context.CancelFunc),
 		batchCancels:    make(map[string]context.CancelFunc),
+		aiConvs:         make(map[string]string),
 	}
 	s.batcher = sshcore.NewBatcher(eventSink{app: app}, sshcore.DefaultFlushInterval)
 	s.manager = sshcore.NewManager(s.batcher, sshcore.DefaultScrollback)

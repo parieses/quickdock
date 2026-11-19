@@ -53,7 +53,13 @@ func Fail(err error) *ApiResult {
 	return &ApiResult{Code: 1, Msg: err.Error()}
 }
 
+// FailMsg 返回失败结果并记一条 W。
+//
+// 以前它只拼结果不落日志：凡是「提前 return FailMsg(...)」的分支（未初始化、
+// 参数非法、能力缺失）在日志里完全看不到，用户报「点了没反应」时无从查起。
+// 带上 callerSite 才能区分是哪个接口的哪一处拒绝。
 func FailMsg(msg string) *ApiResult {
+	logger.W("[ERR] %s: %s", callerSite(), msg)
 	return &ApiResult{Code: 1, Msg: msg}
 }
 

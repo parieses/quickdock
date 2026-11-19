@@ -6,6 +6,7 @@
 package recycle
 
 import (
+	"errors"
 	"sort"
 
 	"quickdock/internal/db"
@@ -79,10 +80,40 @@ func (s *RecycleService) RestoreRecycle(collection, id string) *services.ApiResu
 		return services.Ok(nil)
 	}
 	if err := s.App.DB.RestoreTombstone(collection, id); err != nil {
+		// 父链缺失不是「失败」，是「需要用户选一下」：原样恢复不可能成功，
+		// 但数据还在墓碑里。用 Code=2 把这类可决策错误与普通错误区分开，
+		// 前端据此弹出「恢复到默认集合」而不是一句红字报错。
+		var pm *db.ErrParentMissing
+		if errors.As(err, &pm) {
+			return &services.ApiResult{
+				Code: 2,
+				Data: map[string]string{
+					"reason":     "parentMissing",
+					"missing":    pm.Missing,
+					"parentId":   pm.ParentID,
+					"collection": pm.Subject,
+				},
+				Msg: pm.Error(),
+			}
+		}
 		return services.Fail(err)
 	}
 	if collection == "schedules" {
 		s.App.RescheduleAfterRestore(id)
+	}
+	return services.Ok(nil)
+}
+
+// RestoreRecycleToDefault 把条目恢复到默认集合。
+//
+// 只对「所属集合已删除」的快捷项有意义：把父级改成新建/复用的
+// 「回收站恢复」集合后再写回，条目本身的字段一行不改。
+func (s *RecycleService) RestoreRecycleToDefault(collection, id string) *services.ApiResult {
+	if r := s.dbOK(); r != nil {
+		return r
+	}
+	if err := s.App.DB.RestoreTombstoneToDefault(collection, id); err != nil {
+		return services.Fail(err)
 	}
 	return services.Ok(nil)
 }

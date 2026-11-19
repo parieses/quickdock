@@ -7,6 +7,7 @@ package logtail
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -54,6 +55,33 @@ type session struct {
 	done   chan struct{}
 }
 
+// checkLogPath 校验目标文件位于日志目录内。
+//
+// 两侧都先 EvalSymlinks 再比：只比字符串前缀的话，日志目录里放一个指向
+// C:\Users\<me>\.ssh 的符号链接就能绕过（甚至连 ../../ 都不需要）。
+func checkLogPath(path string) error {
+	root := logger.LogDir()
+	if root == "" {
+		return fmt.Errorf("日志目录尚未初始化")
+	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("日志目录不可用: %w", err)
+	}
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return fmt.Errorf("文件不存在或无法解析: %w", err)
+	}
+	rel, err := filepath.Rel(realRoot, realPath)
+	if err != nil {
+		return fmt.Errorf("无法判断文件位置: %w", err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return fmt.Errorf("只允许查看日志目录内的文件（%s）", realRoot)
+	}
+	return nil
+}
+
 // LogTailOpenResult 打开一个尾随会话的返回结构。
 type LogTailOpenResult struct {
 	ID     string   `json:"id"`
@@ -75,6 +103,11 @@ func (s *LogTailService) LogTailOpen(path string, tailLines int) *services.ApiRe
 	path = filepath.Clean(path)
 	if path == "" || path == "." {
 		return services.FailMsg("路径为空")
+	}
+	// 只允许尾随日志目录内的文件：这个绑定收的是任意路径，不设限等于把
+	// 「读任意本地文件」的能力开放给渲染进程（配合一个 XSS 就是 id_rsa 直读）。
+	if err := checkLogPath(path); err != nil {
+		return services.Fail(err)
 	}
 	t, err := logtail.NewTailer(path)
 	if err != nil {

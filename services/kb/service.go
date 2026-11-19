@@ -139,7 +139,7 @@ func (s *KBService) GetKBSettings() *services.ApiResult {
 
 func (s *KBService) settings() Settings {
 	cfg := defaultSettings()
-	raw, err := s.App.DB.GetValue(kbSettingsKey)
+	raw, err := s.App.DB.GetSetting(kbSettingsKey)
 	if err != nil {
 		// 读失败不能静默吞掉：白名单漏配时曾让整轮设置形同不存在——
 		// 用户填了模型名、检索却一直走纯关键词（11-11 事故）。
@@ -182,7 +182,7 @@ func (s *KBService) SaveKBSettings(cfg Settings) *services.ApiResult {
 	if err != nil {
 		return services.Fail(err)
 	}
-	if err := s.App.DB.SetValue(kbSettingsKey, string(raw)); err != nil {
+	if err := s.App.DB.SetSetting(kbSettingsKey, string(raw)); err != nil {
 		return services.Fail(err)
 	}
 
@@ -1000,7 +1000,9 @@ func (s *KBService) AskKB(req AskKBRequest) *services.ApiResult {
 	}
 
 	start := time.Now()
-	out, model, err := s.App.AskAIFnStreamReason(kbAskSystemPrompt, prompt, 120, onToken, nil)
+	// thinking=true：知识库问答没有思考开关，沿用档案配置（onReason 为 nil，
+	// 思考增量不往界面上推，但仍会占首字时间——这是档案层面的选择）。
+	out, model, err := s.App.AskAIFnStreamReason("", kbAskSystemPrompt, prompt, 120, true, onToken, nil)
 	if req.StreamID != "" && deltaBuf.Len() > 0 {
 		s.emit("ai:ask-delta", map[string]interface{}{"id": req.StreamID, "delta": deltaBuf.String()})
 	}

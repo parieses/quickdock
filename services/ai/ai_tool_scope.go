@@ -231,6 +231,19 @@ const (
 		"请直接根据上面已经拿到的结果，用文字把最终答案写完并收尾；" +
 		"不要输出任何工具调用格式或标记（诸如 invoke / parameter 这类 DSML 标记）。" +
 		"确实还没做完的，用一段话讲清楚「已经完成什么、还差什么、下一步该怎么做」，不要留悬空的半句话。\n"
+
+	// toolHintNoTools 本次请求从始至终没有挂工具时的说明。
+	//
+	// 定时任务的「问答」档、以及权限过滤后一个工具都不剩的场景都走这条路。
+	// 缺这段的实测后果很具体：模型按习惯发起工具调用（DeepSeek 写成 DSML 标记），
+	// 本轮工具列表为空 → 调用被忽略 → 正文一个字都没有 → saveSegment 判定
+	// 「未产出内容」跳过落库，用户看到的就是「任务执行成功，但没有任何输出」，
+	// 库里只剩一条 user 消息。
+	toolHintNoTools = "\n\n[本次不提供工具]\n" +
+		"本轮**没有任何可用工具**（工具未挂载，输出工具调用不会被执行）。" +
+		"请直接用文字回答：可以依据已有知识作答；需要实时信息（天气、股价、新闻等）时，" +
+		"说明「这需要联网或工具才能查到」，不要编造数据。" +
+		"不要输出任何工具调用格式或标记（诸如 invoke / parameter 这类 DSML 标记）。\n"
 )
 
 // buildToolHint 按装配结果生成工具说明。
@@ -308,6 +321,10 @@ func (a *AIService) AIToolPolicy() *services.ApiResult {
 			"disabled":  pol.Disabled[t.Name],
 			"gated":     t.Level > pol.MaxLevel,
 			"agentOnly": t.AgentOnly,
+			// notReady：运行环境没准备好（如 Everything 没跑）。开关开着也调不到，
+			// 界面必须能解释——否则用户看到的是一条「已启用但从不出现」的工具。
+			"notReady":     t.NotReady,
+			"notReadyNote": t.NotReadyNote,
 		})
 	}
 	domains := make([]map[string]any, 0, 8)

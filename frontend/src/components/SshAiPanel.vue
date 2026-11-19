@@ -120,6 +120,36 @@ const { profile: activeProfile, model: activeModel, check: checkAI } = useAIAvai
 const { streamEnabled } = useAiStreamPreference()
 
 /**
+ * 思考开关：关掉之后这一轮不让模型先写推理再回答，首字明显更快。
+ *
+ * 为什么存 localStorage 而不是跟着会话：它表达的是「我平时在这个面板里想怎么问」，
+ * 换一台机器、关掉再打开又要重新关一次，只会让人以为开关没生效
+ * （与上面的流式偏好同一个理由）。
+ *
+ * 默认开：档案里配了 thinking 就说明用户要更细的推理，面板不该替人擅自降级。
+ * 关掉是「这次我想快点拿到命令」的选择，代价是复杂问题的推理质量下降。
+ */
+const THINKING_KEY = 'quickdock.ai.ssh.thinking'
+function readThinking(): boolean {
+  if (typeof localStorage === 'undefined') return true
+  try {
+    // 只认显式的 '0'：首次使用（null）与存储损坏都按「开」处理。
+    return localStorage.getItem(THINKING_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+const thinking = ref(readThinking())
+watch(thinking, (v) => {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(THINKING_KEY, v ? '1' : '0')
+  } catch {
+    // 隐私模式 / 存储被禁：退化为「仅本次运行有效」，不影响功能
+  }
+})
+
+/**
  * 流式增量与它所属的那一轮。
  *
  * 现在增量走本地 SSE（见 utils/aiAskStream.ts），不再经 Wails 事件广播，
@@ -189,6 +219,9 @@ async function ask() {
       // 把上一轮的摘要回传，后端据此做增量压缩（见后端 compressSshHistory）。
       prevSummary: summary.value,
       selection: selection.value,
+      // 关掉思考时在请求里标明：后端把这一轮的档案副本里的思考开关（含推理档位）
+      // 一起清掉，模型不再先写推理——首字因此快上好几秒。
+      disableThinking: !thinking.value,
     }, {
       // 用户关掉「流式输出」时只收不显示，等于回到一次性返回（偏好仍然有效）。
       onDelta: (s) => {
@@ -379,12 +412,14 @@ function dropSelection() {
       :live-text="liveText"
       :live-reason="liveReason"
       :stoppable="true"
+      :thinking="thinking"
       @ask="ask"
       @stop="stop"
       @clear="clearAll"
       @close="emit('close')"
       @copy="copyCmd"
       @update:question="onQuestionInput"
+      @update:thinking="thinking = $event"
     >
       <!-- 环境徽章：让用户随时知道自己在问哪一类机器。
            生产用 danger 色——它不该是"又一个标签"，而要能在余光里被认出来。 -->

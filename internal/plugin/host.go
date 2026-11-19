@@ -173,12 +173,17 @@ func checkFSPermission(inst *PluginInstance, method string, params json.RawMessa
 
 // jsonStringField 从 JSON-RPC params 中安全取出一个 string 字段。
 // 字段不存在或不是字符串时返回 ok=false，调用方据此决定是否参与校验。
+//
+// 字段名按大小写不敏感匹配（EqualFold）：JSON 键名本身是大小写敏感的，但
+// 本函数取的都是「安全校验参数」（url/target/program/tool），而权限层要求
+// ok=false 才跳过校验——插件只要写 {"URL": "..."} 就能让白名单整条失效。
+// 归一后 `URL`/`Url`/`url` 取到同一个值，绕过面消失。
 func jsonStringField(params json.RawMessage, field string) (string, bool) {
 	var args map[string]json.RawMessage
 	if err := json.Unmarshal(params, &args); err != nil {
 		return "", false
 	}
-	v, ok := args[field]
+	v, ok := jsonLookupFold(args, field)
 	if !ok {
 		return "", false
 	}
@@ -187,6 +192,19 @@ func jsonStringField(params json.RawMessage, field string) (string, bool) {
 		return "", false
 	}
 	return s, true
+}
+
+// jsonLookupFold 按大小写不敏感查 JSON 对象字段；同名多键时取第一个命中的。
+func jsonLookupFold(args map[string]json.RawMessage, field string) (json.RawMessage, bool) {
+	if v, ok := args[field]; ok {
+		return v, true
+	}
+	for k, v := range args {
+		if strings.EqualFold(k, field) {
+			return v, true
+		}
+	}
+	return nil, false
 }
 
 // jsonIntField 从 JSON-RPC params 中安全取出一个整数字段。
@@ -198,7 +216,7 @@ func jsonIntField(params json.RawMessage, field string) (int, bool) {
 	if err := json.Unmarshal(params, &args); err != nil {
 		return 0, false
 	}
-	v, ok := args[field]
+	v, ok := jsonLookupFold(args, field)
 	if !ok {
 		return 0, false
 	}

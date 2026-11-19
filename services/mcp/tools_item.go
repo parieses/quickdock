@@ -48,7 +48,7 @@ func registerItemTools(s *MCPService, r *toolRegistrar) {
 		}
 		for _, it := range items {
 			if it.ID == id {
-				if r := s.Collection.OpenItem(it); r != nil && r.Code != 0 {
+				if r := s.Collection.OpenItem(it.ID); r != nil && r.Code != 0 {
 					return nil, errors.New(r.Msg)
 				}
 				return "已打开 " + it.Name, nil

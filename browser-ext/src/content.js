@@ -309,7 +309,10 @@
     }
     bubbleHost = document.createElement(HOST_TAG)
     bubbleHost.id = HOST_ID
-    bubbleRoot = bubbleHost.attachShadow({ mode: 'open' })
+    // closed：页面脚本（含被注入的第三方脚本）拿不到 bubbleHost.shadowRoot，
+    // 也就无法读取里面的账号列表、更无法对填充按钮合成事件。
+    // 本文件所有取节点的地方都用下面这个常驻引用，不依赖 host.shadowRoot。
+    bubbleRoot = bubbleHost.attachShadow({ mode: 'closed' })
     const style = document.createElement('style')
     style.textContent = BUBBLE_CSS
     bubbleRoot.appendChild(style)
@@ -413,6 +416,9 @@
         btn.addEventListener('mousedown', (e) => {
           // mousedown 而不是 click：click 之前输入框会先 blur，
           // 部分站点在 blur 时收起表单，条就没了。
+          // isTrusted：页面脚本可以 dispatch 一个合成 mousedown 把用户名密码
+          // 填进它自己的表单——只认真实用户操作，合成事件一律不响应。
+          if (!e.isTrusted) return
           e.preventDefault()
           e.stopPropagation()
           void fillFromItem(it)
@@ -600,9 +606,9 @@
     if (saveHost && saveHost.isConnected && saveRoot) return saveRoot
     saveHost = document.createElement(HOST_TAG)
     saveHost.id = SAVE_HOST_ID
-    // open 而不是 closed：closed 下 host.shadowRoot 恒为 null，取节点只能
-    // 靠额外变量记住根，早期正因为这点建议条一次都没渲染成功。
-    saveRoot = saveHost.attachShadow({ mode: 'open' })
+    // closed（与建议条同策略）：宿主的「保存到 QuickDock」卡片里会显示账号与
+    // 站点信息，不该让页面脚本读得到。取节点一律走下面这个常驻引用。
+    saveRoot = saveHost.attachShadow({ mode: 'closed' })
     const style = document.createElement('style')
     style.textContent = SAVE_CSS
     saveRoot.appendChild(style)
@@ -889,6 +895,9 @@
   }, true)
 
   document.addEventListener('submit', (e) => {
+    // isTrusted：页面脚本可以 dispatch 一个合成 submit 事件，诱使扩展把
+    // 密码框里的内容当成「用户刚登录」保存下来。只认真实提交。
+    if (!e.isTrusted) return
     const form = e.target
     if (!(form instanceof HTMLFormElement)) return
     const pw = form.querySelector('input[type="password"]')
@@ -897,6 +906,7 @@
 
   // 有些 SPA 不用 submit，直接拦 Enter 发 XHR。
   document.addEventListener('keydown', (e) => {
+    if (!e.isTrusted) return // 同理：合成 Enter 不能触发凭据保存
     if (e.key !== 'Enter') return
     const t = e.target
     if (t instanceof HTMLInputElement && t.type === 'password') {

@@ -12,7 +12,7 @@
  * 现在上下文随请求走，一次调用拿回答案。
  */
 import { aiActionLabelKey } from '../utils/aiActions'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlignLeft, Languages, ListTree, PenLine, CornerDownLeft, Plus, Replace } from '@lucide/vue'
 import { askOverStream } from '../utils/aiAskStream'
@@ -56,6 +56,36 @@ const panelRef = ref<InstanceType<typeof AiPanel> | null>(null)
 const { profile: activeProfile, model: activeModel, check: checkAI } = useAIAvailability()
 /** 回答方式：关掉「流式输出」就不再逐段渲染，等整段回来一次显示（传输仍是 SSE）。 */
 const { streamEnabled } = useAiStreamPreference()
+
+/**
+ * 思考开关：关掉之后这一轮不让模型先写推理再回答，首字明显更快。
+ *
+ * 持久化在 localStorage 而不是跟着笔记：它表达的是「我平时在这个面板里
+ * 想怎么问」，换一篇笔记又要重关一次只会让人以为开关没生效
+ * （与流式偏好、SSH 面板同一个理由）。
+ *
+ * 默认开：档案里配了 thinking 就说明用户要更细的推理，面板不擅自降级。
+ * 润色/续写这类直出动作嫌慢时再关掉即可。
+ */
+const THINKING_KEY = 'quickdock.ai.note.thinking'
+function readThinking(): boolean {
+  if (typeof localStorage === 'undefined') return true
+  try {
+    // 只认显式的 '0'：首次使用（null）与存储损坏都按「开」处理。
+    return localStorage.getItem(THINKING_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+const thinking = ref(readThinking())
+watch(thinking, (v) => {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(THINKING_KEY, v ? '1' : '0')
+  } catch {
+    // 隐私模式 / 存储被禁：退化为「仅本次运行有效」，不影响功能
+  }
+})
 
 /** 流式增量与它所属的那一轮。seq 用来作废上一轮迟到的回调（见 utils/aiAskStream.ts）。 */
 const liveText = ref('')
@@ -102,6 +132,7 @@ async function run(action: string, question: string) {
       action,
       question,
       history: history.value.slice(-6),
+      disableThinking: !thinking.value,
     }, {
       onDelta: (s) => {
         if (seq === askSeq && streamEnabled.value) liveText.value += s
@@ -183,10 +214,12 @@ function writeBack(mode: 'insert' | 'replace' | 'append') {
       :err-msg="errMsg"
       :live-text="liveText"
       :live-reason="liveReason"
+      :thinking="thinking"
       @ask="askFree"
       @clear="clearAll"
       @close="emit('close')"
       @copy="copyResult"
+      @update:thinking="thinking = $event"
     >
       <template #badge>
         <span

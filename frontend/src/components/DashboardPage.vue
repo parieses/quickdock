@@ -59,7 +59,8 @@ import {
   Open as OpenShelf, Reveal as RevealShelf,
 } from '../../bindings/quickdock/services/shelf/shelfservice'
 import { AIListProfiles, AIUsageStats } from '../../bindings/quickdock/services/ai/aiservice'
-import type { Todo, Monitor, CollectionItem } from '../../bindings/quickdock/internal/db/models'
+import type { Todo, Monitor } from '../../bindings/quickdock/internal/db/models'
+import type { CollectionItem } from '../types'
 import type { AIUsageStatsResult, AICostEntry } from '../types/ai'
 import {
   RefreshCw, ListTodo, Activity, Server, Plug, ChevronRight, ChevronDown, FolderOpen, Check,
@@ -1429,7 +1430,7 @@ async function toggleTodo(x: Todo) {
 
 async function openItem(it: CollectionItem) {
   try {
-    unwrap(await OpenItem(it))
+    unwrap(await OpenItem(it.id))
   } catch (e) {
     toast.error(getErrorMessage(e))
     logErr('dashboard.openItem', e)
@@ -1612,6 +1613,11 @@ function stopPage() {
 onMounted(async () => {
   // 浮层监听要先注册：预览模式下面也要能开设置面板，不能被下面的 return 跳过。
   attachGlobal()
+  // 网页图标由后端后台抓取，回来后只补这一格的图标，不重拉整张卡片。
+  Events.On('quickdock:item:icon', (p: any) => {
+    const it = items.value.find((i) => i.id === p?.id)
+    if (it && p?.icon) it.icon = p.icon
+  })
   lastRefresh.value = new Date()
   if (PREVIEW) { seedPreview(); startPage(); return }
   void refreshAll()

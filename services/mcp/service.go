@@ -128,6 +128,10 @@ func (s *MCPService) MCPTools() *services.ApiResult {
 			"exposed":   t.Exposed,
 			"disabled":  t.Disabled,
 			"agentOnly": t.AgentOnly,
+			// notReady：运行环境未就绪（Everything 没装/没跑）。这类工具开关再怎么开，
+			// 装配时都会被拦掉，模型看不到——面板要能说明这件事，否则像故障。
+			"notReady":     t.NotReady,
+			"notReadyNote": t.NotReadyNote,
 		})
 	}
 	return services.Ok(out)
@@ -556,6 +560,20 @@ func withGrantKey(fn func(args map[string]any) (key string, rememberable bool)) 
 
 func withRiskNote(fn func(args map[string]any) string) toolOption {
 	return func(t *mcpsrv.Tool) { t.RiskNote = fn }
+}
+
+// withReady 声明「运行环境就绪才把这条工具挂给模型」。
+//
+// 用在依赖外部环境的工具上（file_search 要 Everything 在跑）：不就绪时工具直接从
+// 本次装配里消失，模型看不到就不会去调——比「挂上去、调用时报错、模型再换个工具」
+// 少一整轮往返，也少一条看着像 bug 的红色报错卡。
+//
+// ready 会在每轮装配时被调用，必须轻量：拿运行时那边带缓存的判定，别在这里现探。
+func withReady(ready func() bool, notReadyNote func() string) toolOption {
+	return func(t *mcpsrv.Tool) {
+		t.Ready = ready
+		t.NotReadyNote = notReadyNote
+	}
 }
 
 func (r *toolRegistrar) addTool(t mcpsrv.Tool) {

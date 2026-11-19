@@ -72,7 +72,14 @@ release_notes.md
 
 # 本地 Ed25519 验签回归测试：仅本地保留用于守护更新签名链路，不纳入版本库
 services/update_verify_test.go
+# 本地临时脚本目录（ReTag / ResetGit 之类，只在本机用）不入库。
+# 但 frontend/scripts/*.mjs 是 CI 门禁的一部分（ci.yml 跑 npm run check:css），
+# 必须入库——否则本地门禁绿、CI 上「文件不存在」直接红。
+# 例外必须写在忽略规则之后，且要先把目录本身放出来（Git 不会进被排除的目录）。
 scripts/
+!frontend/scripts/
+frontend/scripts/*
+!frontend/scripts/*.mjs
 
 # --- 外部插件（独立开发，不在主仓库管理）---
 plugins/external/

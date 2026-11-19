@@ -21,7 +21,10 @@ import (
 const (
 	aiProfilesKey = "ai_profiles"
 	aiActiveKey   = "ai_active_profile"
-	aiLegacyKey   = "ai_config"
+	// aiAskKey 一次性问答（SSH / 剪贴板 / 笔记 / 插件）单独指定的档案 id。
+	// 空串 = 跟随 ai_active_profile。
+	aiAskKey    = "ai_ask_profile"
+	aiLegacyKey = "ai_config"
 
 	aiDefaultModel = "gpt-4o-mini"
 	aiDefaultTemp  = 0.7
@@ -43,6 +46,17 @@ type AIProfile struct {
 	FrequencyPenalty float64 `json:"frequencyPenalty"`
 	PresencePenalty  float64 `json:"presencePenalty"`
 	ThinkingEnabled  bool    `json:"thinkingEnabled"`
+	// thinkingOffExplicit 这一轮「关思考」要不要显式发 enable_thinking=false。
+	//
+	// 由 withoutThinking 置位，只出现在一次性问答的档案副本上：不导出、无
+	// json tag，因为它不是用户配置，而是「这一次调用」的意图。
+	//
+	// 为什么需要它：ThinkingEnabled 的语义一直是「不发字段 = 不思考」，但 Qwen3
+	// 这类模型默认就开着思考，不发字段等于让它继续想——用户点了关闭，面板里
+	// 照样一条条冒出思考流。真要关掉必须显式发 false；反过来，对不认这个字段
+	// 的厂商（OpenAI 官方对未知 body 字段直接 400）又不能乱发，所以只在档案
+	// 原本就走 enable_thinking 路径（ThinkingEnabled=true）时才置位。
+	thinkingOffExplicit bool
 	// ImageInput 图片输入能力声明：both（默认，URL+本地图）/ url（仅公网链接，
 	// 如 Agnes 2.5 Flash）/ base64（仅本地图）。不按模型名推断——各家支持矩阵
 	// 是厂商实现细节，显式声明是唯一不会静默出错的姿势（见 ai_image.go）。
@@ -154,14 +168,20 @@ type aiProfileStored = AIProfile
 
 // AIProfilesResult 返回给前端的档案列表与当前激活项
 type AIProfilesResult struct {
-	Active   string      `json:"active"`
-	Profiles []AIProfile `json:"profiles"`
+	Active string `json:"active"`
+	// AskActive 一次性问答（SSH / 剪贴板 / 笔记 / 插件 host.ai.ask）单独指定的档案 id。
+	// 空串 = 跟随 Active。它解决的是「聊天用便宜的、面板问答用快的」这类诉求：
+	// 以前这两类共用一个全局档案，换一个就全换。
+	AskActive string      `json:"askActive"`
+	Profiles  []AIProfile `json:"profiles"`
 }
 
 // AISaveProfilesRequest 保存档案列表的请求
 type AISaveProfilesRequest struct {
-	Active   string      `json:"active"`
-	Profiles []AIProfile `json:"profiles"`
+	Active string `json:"active"`
+	// AskActive 一次性问答档案 id；空串表示跟随 Active。
+	AskActive string      `json:"askActive"`
+	Profiles  []AIProfile `json:"profiles"`
 }
 
 // AIConfig 兼容旧接口的单一配置（API Key 已解密）
@@ -366,6 +386,24 @@ func (a *AIService) getActiveAIProfile() (AIProfile, bool) {
 	return cfg, true
 }
 
+// askProfile 一次性问答（SSH / 剪贴板 / 笔记 / 插件 host.ai.ask）使用的档案。
+//
+// 与对话流的区别：那一边按会话上的 profile_id 走（见 aiProfileForRun），
+// 这一边没有会话可挂，以前只能共用全局激活项。设置里单独指定后，
+// 「聊天用强模型、面板问答用快模型」这类组合才成立。
+// 未指定、或指定的档案已被删除，一律回落到全局激活项——
+// 面板不该因为一个配置项被删就整体不可用（getAIProfileByID 已内置这个回落）。
+func (a *AIService) askProfile() (AIProfile, bool) {
+	if a.App != nil && a.App.DB != nil {
+		if v, err := a.App.DB.GetSetting(aiAskKey); err == nil {
+			if id := strings.TrimSpace(v); id != "" {
+				return a.getAIProfileByID(id)
+			}
+		}
+	}
+	return a.getActiveAIProfile()
+}
+
 // getAIProfileByID 取指定档案（解密后）；id 无效时回落到全局激活项。
 //
 // 为什么不缓存：全局那份 aiCachedCfg 只能放一个档案，把按 id 查的结果写进去
@@ -472,7 +510,25 @@ func (a *AIService) AIListProfiles() *services.ApiResult {
 	if active == "" && len(profiles) > 0 {
 		active = profiles[0].ID
 	}
-	return services.Ok(AIProfilesResult{Active: active, Profiles: profiles})
+	// 指定的一次性问答档案若已被删掉，回显成空（= 跟随对话模型），
+	// 否则设置页会显示一个下拉里根本不存在的选项。
+	askActive := ""
+	if v, err := a.App.DB.GetSetting(aiAskKey); err == nil {
+		askActive = strings.TrimSpace(v)
+	}
+	if askActive != "" {
+		exists := false
+		for i := range profiles {
+			if profiles[i].ID == askActive {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			askActive = ""
+		}
+	}
+	return services.Ok(AIProfilesResult{Active: active, AskActive: askActive, Profiles: profiles})
 }
 
 // AISaveProfiles 保存完整档案列表与激活项（API Key 留空则保留原密文）
@@ -536,6 +592,11 @@ func (a *AIService) AISaveProfiles(req AISaveProfilesRequest) *services.ApiResul
 		active = out[0].ID
 	}
 	if err := a.App.DB.SetSetting(aiActiveKey, active); err != nil {
+		return services.Fail(err)
+	}
+	// 一次性问答档案：空串表示跟随 active，要能存下来（更新时也要能清掉），
+	// 所以不判空直接写。指向已删档案的脏值在 AIListProfiles 里回显时过滤。
+	if err := a.App.DB.SetSetting(aiAskKey, strings.TrimSpace(req.AskActive)); err != nil {
 		return services.Fail(err)
 	}
 	_ = a.App.DB.SetSetting(aiLegacyKey, "")

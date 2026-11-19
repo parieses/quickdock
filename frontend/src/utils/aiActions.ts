@@ -1,44 +1,26 @@
-// 快捷提示词（解释/翻译/总结/审阅）的前端单一事实源。
+// 剪贴板 / 便签面板「翻译 / 总结」按钮的显示名单一事实源。
 //
-// 为什么放这里：输入框的 chip 行、剪贴板面板、便签面板都要列「翻译 / 总结」，
-// 各自写一份 label 和提示词就会漂（同一个动作两处叫两个名字、两处填两段不同的指令）。
+// 聊天页曾有一排 chip（解释 / 翻译 / 总结 / 审阅）、落地页曾有一排模式 pill，两处
+// 摆的都是同样的意图。这些已经全部收口：聊天页和落地页默认就是普通对话，话术统一
+// 从输入框左侧 + 面板的「提示词」取（internal/db/prompt.go，用户能改能加）。
+// 硬编码模板与提示词库必然重复，别再往界面加第二份。
 //
-// 交互语义：点按钮 = 把 fillKey 对应的模板填进输入框，光标留在末尾等用户补内容
-// （同 Cursor / Claude Code 的快捷 prompt）。不再是「选中一个隐藏动作」——
-// 提示词就在正文里，所见即所得，发送时只发普通对话，不走 promptAction 机制。
-// 后端的 prompts/actions/*.md 仍保留，供老会话兼容。
-//
-// 模式与动作分离：落地页「模式」只保留对话（chat）；解释/翻译/总结/审阅是
-// 聊天页的快捷提示词，不是模式。执行权限由现有权限徽标（只读/完全访问）承担，
-// 不另加 Ask/Agent 按钮——那会和「只读」重复。
+// 这里只剩一件事：按 action key 给那两个面板取显示名。key 与后端 ai_actions.go 的
+// 常量一致，实际指令仍在后端 prompts/actions/*.md。
 
-/** 一个动作：key 与后端 ai_actions.go 的常量一一对应（老会话/sidebar 图标仍读它）。 */
-export interface AiActionChip {
+/** 一个动作：key 与后端 ai_actions.go 的常量一一对应。 */
+interface AiActionChip {
   key: 'chat' | 'explain' | 'translate' | 'summarize' | 'review'
   labelKey: string
-  descKey: string
-  /** 点击时填入输入框的模板 i18n key；chat 为空（它不是提示词，代表普通对话）。 */
-  fillKey: string
 }
 
-/** 全量清单：chat 在首位供 sidebar 图标/历史 mode 映射使用，不代表落地页要全显示。 */
-export const AI_ACTION_CHIPS: AiActionChip[] = [
-  { key: 'chat', labelKey: 'aiModeChat', descKey: 'aiModeChatDesc', fillKey: '' },
-  { key: 'explain', labelKey: 'aiModeExplain', descKey: 'aiModeExplainDesc', fillKey: 'aiQuickExplain' },
-  { key: 'translate', labelKey: 'aiModeTranslate', descKey: 'aiModeTranslateDesc', fillKey: 'aiQuickTranslate' },
-  { key: 'summarize', labelKey: 'aiModeSummarize', descKey: 'aiModeSummarizeDesc', fillKey: 'aiQuickSummarize' },
-  { key: 'review', labelKey: 'aiActionReview', descKey: 'aiActionReviewDesc', fillKey: 'aiQuickReview' },
+const AI_ACTION_CHIPS: AiActionChip[] = [
+  { key: 'chat', labelKey: 'aiModeChat' },
+  { key: 'explain', labelKey: 'aiModeExplain' },
+  { key: 'translate', labelKey: 'aiModeTranslate' },
+  { key: 'summarize', labelKey: 'aiModeSummarize' },
+  { key: 'review', labelKey: 'aiActionReview' },
 ]
-
-/** 聊天页输入区真正展示的快捷提示词：不含 chat（chat 只是落地页唯一入口）。 */
-export const AI_QUICK_PROMPTS: AiActionChip[] = AI_ACTION_CHIPS.filter((a) => a.key !== 'chat')
-
-/** 帮助按钮填入的模板 key。注意它是一句完整问题，本身就能直接发送，
- *  和「解释/翻译」那种待补内容的模板不同，不参与空模板拦截。 */
-export const AI_HELP_FILL_KEY = 'aiActionHelpAsk'
-
-/** 空模板校验用：这些 key 的译文原样留在输入框里 = 用户点了但没填内容。 */
-export const QUICK_PROMPT_FILL_KEYS: string[] = AI_QUICK_PROMPTS.map((a) => a.fillKey)
 
 /** 按 key 取 label（面板复用；找不到返回 key 本身，别把界面弄成空白）。 */
 export function aiActionLabelKey(key: string): string {

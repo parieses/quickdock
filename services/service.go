@@ -85,7 +85,13 @@ type AppService struct {
 	// 复用，改签名要动另一套调用约定；而「要不要显示思考」只有面板关心。
 	// 面板正在从 Wails 事件搬到本地 SSE（见 services/ai/ai_ask_stream.go），
 	// 顺手把思考流也接上——否则开了 thinking 的模型在首字之前是纯黑屏。
-	AskAIFnStreamReason func(system, question string, timeoutSec int, onToken, onReason func(text string)) (text string, model string, err error)
+	// thinking=false 表示「这一轮强制不思考」：SSH / 笔记 / 剪贴板面板都给了
+	// 用户一个开关，关掉后首字明显更快（不用先想再答），代价是复杂推理变弱。
+	//
+	// convID 是可选的归属会话：SSH 面板每轮问答都发生在自己的任务会话里，
+	// 传进来才能把 token 累加到那条任务上（否则统计里恒为 0）。
+	// 笔记 / 剪贴板 / 知识库没有会话，传空串即可。
+	AskAIFnStreamReason func(convID, system, question string, timeoutSec int, thinking bool, onToken, onReason func(text string)) (text string, model string, err error)
 
 	// AIAvailableFn 报告当前是否配置了可用的 AI 档案（供插件在调用 host.ai.ask 前预检，
 	// 避免「盲目调用 → 拿到未配置/不可用 的裸错」）。
@@ -361,7 +367,7 @@ func (a *AppService) dshAutoStartEnabled() bool {
 	if a.DB == nil {
 		return true
 	}
-	v, err := a.DB.GetValue(dshcore.AutoStartKey)
+	v, err := a.DB.GetSetting(dshcore.AutoStartKey)
 	if err != nil || v == "" {
 		return true
 	}

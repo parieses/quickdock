@@ -2746,6 +2746,9 @@ const dialogCtx = reactive({
                 <!-- agent 专用工具对外部客户端不可见（exposed=false），但那是设计而不是被挡住，
                      所以单独标出来：否则用户会以为它「没资格」，去调等级也调不出来。 -->
                 <span v-if="tool.agentOnly" class="badge plat">{{ t('mcpToolAgentOnly') }}</span>
+                <!-- 环境未就绪：开关开着也调不到（如 file_search 依赖 Everything 正在运行）。
+                     不标的话，用户会以为是自己没开，反复点开关。 -->
+                <span v-if="tool.notReady" class="badge warn" :title="tool.notReadyNote || undefined">{{ t('mcpToolNotReady') }}</span>
                 <!-- AI 侧状态：只读徽标。两个开关是两份策略，这里显示出来是为了
                      让「为什么 AI 用不了但客户端能用」一眼可见，而不是让用户去猜。 -->
                 <span v-if="tool.aiOff" class="badge plat mcp-ai-off" :title="t('mcpAiSideHint')">{{ t('mcpAiSideOff') }}</span>

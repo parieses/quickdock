@@ -58,8 +58,11 @@ func (o *openAIUsage) toUsage() db.TokenUsage {
 //
 // 「记了多少 token」和「这个对话累计多少 token」是两个概念，这里把边界钉死：
 //   - 明细永远写（统计面板按它算钱）；
-//   - 只有 chat 才累加到会话行（对话列表那一栏），标题生成 / 摘要压缩不算
-//     一问一答 —— 否则列表里的数字会比「各条回复下方之和」大出一截。
+//   - 有会话归属的才累加到会话行（对话列表那一栏）。标题生成 / 摘要压缩 /
+//     记忆整理不算一问一答 —— 否则列表里的数字会比「各条回复下方之和」大出一截。
+//   - 一次性问答（kind=ask）只有调用方明确给了会话 id 才累加：SSH 面板的
+//     任务会话属于这种情况（问答确实发生在那个任务里）；笔记 / 剪贴板 /
+//     插件没有会话，只进全量明细。以前一律不累加，SSH 任务的 token 恒为 0。
 //
 // 失败只写日志、绝不影响回答：统计是附属功能，不能因为它把已经生成的内容搞丢。
 func (a *AIService) recordAIUsage(convID, kind string, cfg AIProfile, u db.TokenUsage) {
@@ -69,7 +72,7 @@ func (a *AIService) recordAIUsage(convID, kind string, cfg AIProfile, u db.Token
 	if err := a.App.DB.RecordAIUsage(convID, cfg.Model, kind, u); err != nil {
 		logger.W("[ai] 记录用量失败 kind=%s model=%s: %v", kind, cfg.Model, err)
 	}
-	if kind != usageKindChat || convID == "" {
+	if convID == "" || (kind != usageKindChat && kind != usageKindAsk) {
 		return
 	}
 	if err := a.App.DB.AddAIConversationUsage(convID, cfg.Model, u, true); err != nil {

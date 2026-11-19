@@ -166,14 +166,33 @@ func hotkeyLabel(modifiers, vk int) string {
 // 每个动作在 DB 中各存一条 "modifiers,vk"。为避免过度膨胀，前端按 key 调统一的
 // Get/Set 方法（默认值由各动作在前端传入），后端复用 getHotkeyConfigByKey 工厂。
 
+// winmgrActionKeys 窗口管理动作的固定键名集合。
+//
+// 这两个方法收的是「前端传来的 key」，不校验就等于把任意 app_state 键交给前端写
+// （配合 SetSetting 的白名单也只是一层兜底，不该靠它来兜）。与 tray.go 的
+// winmgrActions 表、SettingsWinmgr.vue 的 items 三处保持一致。
+var winmgrActionKeys = map[string]bool{
+	"winmgr_left": true, "winmgr_right": true, "winmgr_top": true, "winmgr_bottom": true,
+	"winmgr_tl": true, "winmgr_tr": true, "winmgr_bl": true, "winmgr_br": true,
+	"winmgr_center": true, "winmgr_maximize": true, "winmgr_restore": true,
+	"winmgr_minimize": true, "winmgr_topmost": true,
+	"winmgr_monitor_prev": true, "winmgr_monitor_next": true,
+}
+
 // GetWinmgrHotkeyConfig 读取某个窗口管理动作的热键配置。
 // defMod/defVK 为该动作的默认热键；未配置或解析失败时回退默认值。
 func (a *AppService) GetWinmgrHotkeyConfig(key string, defMod, defVK int) *ApiResult {
+	if !winmgrActionKeys[key] {
+		return FailMsg("未知的窗口管理动作: " + key)
+	}
 	return a.getHotkeyConfigByKey(key, defMod, defVK, "")
 }
 
 // SetWinmgrHotkeyConfig 保存某个窗口管理动作的热键配置。
 func (a *AppService) SetWinmgrHotkeyConfig(key string, modifiers, vk int) *ApiResult {
+	if !winmgrActionKeys[key] {
+		return FailMsg("未知的窗口管理动作: " + key)
+	}
 	return a.setHotkeyConfigByKey(key, modifiers, vk)
 }
 

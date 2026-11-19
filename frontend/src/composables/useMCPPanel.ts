@@ -37,6 +37,10 @@ export interface MCPToolInfo {
   // reason 它没进外部客户端工具面的原因（超出等级上限 / 已单独关闭 / 不对外）。
   // 来自 MCPDoctor：面板上「关着」的行悬停就能看到是哪一层关的，不用猜。
   reason?: string
+  // notReady 运行环境未就绪（如 file_search 需要 Everything 在跑）：开关开着也调不到。
+  // notReadyNote 是具体原因，作为徽标的悬停说明。
+  notReady?: boolean
+  notReadyNote?: string
 }
 
 // MCPToolGroup 面板里的一个工具分组。

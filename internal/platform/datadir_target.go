@@ -3,6 +3,7 @@ package platform
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -56,4 +57,28 @@ func EnsureDataDir(dir string) error {
 		return os.ErrInvalid
 	}
 	return os.MkdirAll(dir, 0700)
+}
+
+// IsSubPath 判断 child 是否位于 parent 之内（含两者相同）。
+//
+// 用于拦截「把目标目录选成当前数据目录的子目录/父目录」这类迁移请求：
+// 子目录会被打包自身、父目录会在清理阶段连带删掉新数据，两种都是不可逆的数据丢失。
+//
+// 用 filepath.Rel 而不是字符串前缀：后者会把 "D:\data2" 误判成 "D:\data" 的子路径。
+// Rel 按路径段逐字节比较，Windows 下大小写不敏感，故先统一小写再算。
+func IsSubPath(parent, child string) bool {
+	if parent == "" || child == "" {
+		return false
+	}
+	p := filepath.Clean(parent)
+	c := filepath.Clean(child)
+	if runtime.GOOS == "windows" {
+		p = strings.ToLower(p)
+		c = strings.ToLower(c)
+	}
+	rel, err := filepath.Rel(p, c)
+	if err != nil {
+		return false // 跨盘符等无法比较的情况：不认为是父子关系
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }

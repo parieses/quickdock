@@ -188,6 +188,7 @@ func (s *SshService) Connect(hostID string, cols, rows int, shellIntegration boo
 		// 映射得跟着活到那时，否则重开窗口认不出这条会话属于谁。
 		if state == sshcore.StateClosed {
 			s.dropOwner(sid)
+			s.dropAIConv(sid)
 		}
 	})
 
@@ -258,7 +259,9 @@ func (s *SshService) Disconnect(sessionID string) *services.ApiResult {
 
 	// 映射必须无条件清掉：若把清理放在错误分支后面，连接已死时这条记录
 	// 会永远留在 owners 里，而它对应的会话早被摘掉，成了查不到也删不掉的僵尸。
+	// AI 任务的映射同理（见 ai_session.go）：任务本身留着，只摘「会话 → 任务」。
 	defer s.dropOwner(sessionID)
+	defer s.dropAIConv(sessionID)
 
 	closeErr := s.manager.Close(sessionID)
 	if _, still := s.manager.Get(sessionID); !still {

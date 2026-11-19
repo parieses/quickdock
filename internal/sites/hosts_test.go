@@ -75,19 +75,35 @@ func TestSyncHostsFile_ReplaceExistingBlock(t *testing.T) {
 
 func TestSyncHostsFile_IncompleteBlockRecovered(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hosts")
-	// 用户手动删掉了 end 标记：应当从 begin 起整段替换，而不是抛错或双写
-	if err := os.WriteFile(path, []byte("127.0.0.1 localhost\n"+hostsBlockBegin+"\n127.0.0.1 stale.test\n"), 0o644); err != nil {
+	// 用户手动删掉了 end 标记：不能从 begin 起整段替换（会连带删掉 begin 之后的
+	// 用户条目），而是保留原有内容、在末尾追加完整区块。
+	if err := os.WriteFile(path, []byte("127.0.0.1 localhost\n"+hostsBlockBegin+"\n127.0.0.1 stale.test\n10.0.0.1 keep.internal\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := syncHostsFile(path, []string{"ok.test"}); err != nil {
 		t.Fatalf("修复不完整区块失败: %v", err)
 	}
 	got := readFile(t, path)
-	if strings.Contains(got, "stale.test") {
-		t.Errorf("残留旧域名: %s", got)
+	if !strings.Contains(got, "10.0.0.1 keep.internal") {
+		t.Errorf("原有条目被截断: %s", got)
+	}
+	if !strings.Contains(got, "127.0.0.1 ok.test") {
+		t.Errorf("新区块未写入: %s", got)
 	}
 	if strings.Count(got, hostsBlockBegin) != 1 {
-		t.Errorf("begin 标记重复: %s", got)
+		t.Errorf("残留的 begin 标记应被摘掉，只留一份新区块: %s", got)
+	}
+
+	// 第二次同步会命中「begin+end 都在」分支，把整段残留吃掉（自愈，不无限追加）
+	if err := syncHostsFile(path, []string{"ok.test"}); err != nil {
+		t.Fatalf("二次同步失败: %v", err)
+	}
+	again := readFile(t, path)
+	if strings.Count(again, hostsBlockBegin) != 1 {
+		t.Errorf("二次同步应吃掉残留区块，begin 应只剩 1 个: %s", again)
+	}
+	if !strings.Contains(again, "10.0.0.1 keep.internal") {
+		t.Errorf("二次同步不该删掉用户条目: %s", again)
 	}
 }
 

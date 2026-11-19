@@ -3,13 +3,13 @@ import { logErr } from '../utils/logger'
 // 管理场景、集合、项、打开工具、搜索的全局状态
 
 import { defineStore } from 'pinia'
+import { Events } from '@wailsio/runtime'
 import { ref, computed, watch } from 'vue'
 import { ListWorkspaces, CreateWorkspace, DeleteWorkspace, UpdateWorkspace, GetWorkspace, ReorderWorkspaces } from '../../bindings/quickdock/services/workspace/workspaceservice'
 import { ListScenes, CreateScene, UpdateScene, DeleteScene, ReorderScenes } from '../../bindings/quickdock/services/scene/sceneservice'
 import { ListCollections, CreateCollection, UpdateCollection, DeleteCollection, ReorderCollections, OpenItem, OpenAllInCollection } from '../../bindings/quickdock/services/collection/collectionservice'
 import { ListItems, CreateItem, UpdateItem, DeleteItem, ReorderItems } from '../../bindings/quickdock/services/item/itemservice'
 import { ListTools, GetValue, SetValue, SearchAll } from '../../bindings/quickdock/services/appservice'
-import type { CollectionItem as BindingCollectionItem } from '../../bindings/quickdock/internal/db/models'
 import type { Workspace, Scene, Collection, CollectionItem, OpenTool } from '../types'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
@@ -76,6 +76,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const scenes = ref<Scene[]>([])
   const collections = ref<Collection[]>([])
   const items = ref<CollectionItem[]>([])
+
+  // 网页条目的图标是后端后台抓的（保存时不再同步等网络）。抓回来时后端发
+  // quickdock:item:icon，这里就地补到已渲染的条目上——不重拉列表，也不会
+  // 因为图标晚到就把用户正在看的列表刷成加载态。
+  Events.On('quickdock:item:icon', (payload: any) => {
+    const id = payload?.id
+    const icon = payload?.icon
+    if (!id || !icon) return
+    const target = items.value.find((i) => i.id === id)
+    if (target && !target.icon) target.icon = icon
+  })
   const tools = ref<OpenTool[]>([])
 
   const loading = ref(false)
@@ -631,7 +642,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // ---- 打开 ----
 
   async function openItem(item: CollectionItem) {
-    unwrap(await OpenItem(item as BindingCollectionItem))
+    unwrap(await OpenItem(item.id))
   }
 
   async function openAllInCollection(collectionId: string) {
@@ -656,7 +667,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return -1 // -1 = 全部，调用方据此显示不同文案
     }
     // 不动 items.value：那是「当前选中集合」的列表，这里只是取数据
-    const rows = (unwrap<BindingCollectionItem[]>(await ListItems(collection.id)) ?? [])
+    const rows = (unwrap<any[]>(await ListItems(collection.id)) ?? [])
       .map((r) => toCamelCase(r) as unknown as CollectionItem)
     let picks: CollectionItem[]
     if (strategy === 'batch') {

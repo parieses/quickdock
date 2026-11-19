@@ -83,7 +83,8 @@ func domainCatalog() []mcpsrv.Domain {
 		{
 			ID: "code", LabelKey: "mcpCatCode", Order: orderCode, External: false,
 			Summary: "目录、文件、git、命令与后台任务（仅内置 AI）",
-			Hint: "**代码**：dir_list 看目录结构，file_read 读文件（行号在 content 里），file_grep 按内容搜，" +
+			Hint: "**代码**：dir_list 看目录结构，file_read 读文件（行号在 content 里），file_find 按文件名找，" +
+				"file_grep 按内容搜，" +
 				"git_status / git_diff 看改动与差异，check_workdir 一次问清「这是什么项目、该怎么跑」，" +
 				"job_status / job_output 看后台任务，project_memory 读写本工作区的记忆。" +
 				"改已有文件的流程永远是：先看 → 读清原文 → 精确替换 → 看 diff 确认。\n",
@@ -112,7 +113,8 @@ func domainCatalog() []mcpsrv.Domain {
 		{
 			ID: mcpsrv.CategoryFile, LabelKey: "mcpCatFile", Order: orderFile, External: true,
 			Summary: "文件检索、读取、按内容搜索",
-			Hint: "**文件**：file_read 读文件内容（带行号），file_grep 按内容搜（正则），file_search 按文件名搜。" +
+			Hint: "**文件**：file_read 读文件内容（带行号），file_grep 按内容搜（正则），file_find 在目录树里按文件名找" +
+				"（*.go 这类通配符或普通子串都行，不依赖任何外部程序）。" +
 				"只能读当前工作目录内的文件；越界读取需要用户当场同意。\n",
 			Scenes: onlyRead(),
 		},

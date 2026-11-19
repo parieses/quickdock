@@ -51,6 +51,16 @@ func CapturePanic(label string) {
 	panic(r)
 }
 
+// LogPanic 记录一个已经被 recover 的 panic（含完整堆栈），不改变控制流。
+//
+// 与 RecoverToLog 的分工：RecoverToLog 本身就是那个 defer 调用，会吞掉 panic 后
+// 直接返回；而有一类 recover 之后还要做事——补发 error 事件、复位 busy 标记、
+// 把 panic 转成 error 返回。那些地方只能 recover 之后显式调本函数，
+// 否则崩现场只留下 "panic: xxx" 一行，没有栈。
+func LogPanic(label string, r any) {
+	writeCrash("panic", label, fmt.Sprintf("panic: %v", r), string(debug.Stack()))
+}
+
 // RecoverToLog 以 defer 方式调用：记录 panic 后不重新抛出。
 // 适用于 goroutine 内部（看门狗、巡检循环等），避免单个后台协程把宿主带崩。
 func RecoverToLog(label string) {

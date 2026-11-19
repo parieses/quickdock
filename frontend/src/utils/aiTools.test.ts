@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   artifactsFromCalls, artifactsOf, countToolRounds, rulesOf, rulesTitle, runIDOf,
-  serializeTools, shortPath, toolList, toolOutput, toolTarget,
+  serializeTools, shortPath, spawnArgs, spawnPartial, spawnResultText, spawnTaskBrief, toolList,
+  toolOutput, toolTarget,
 } from './aiTools'
 import type { AIMessage, AIToolCall } from '../types/ai'
 
@@ -143,6 +144,61 @@ describe('toolTarget', () => {
     const raw = 'x'.repeat(200)
     expect(toolTarget(call({ args: raw })).length).toBe(81) // 80 + 省略号
     expect(toolTarget(call({}))).toBe('')
+  })
+})
+
+describe('spawn_agent 摘要', () => {
+  // 模型写 task 时经常把 Windows 路径原样塞进 JSON 字符串，`\p` 是非法转义，
+  // 整段 JSON.parse 必然失败——这正是派活行长期显示一坨参数原文的原因。
+  const badJSON = '{"role":"explore","task":"项目：D:\\project\\quickdock-v3 看看支付流程"}'
+
+  it('任务里含非法 JSON 转义时仍能抠出 role/task', () => {
+    expect(() => JSON.parse(badJSON)).toThrow()
+    const s = spawnArgs(badJSON)
+    expect(s?.role).toBe('explore')
+    expect(s?.task).toContain('quickdock-v3')
+  })
+
+  it('摘要行是「角色 · 任务首行」，不再是参数原文', () => {
+    expect(toolTarget(call({ name: 'spawn_agent', args: badJSON }))).toBe(
+      'explore · 项目：D:\\project\\quickdock-v3 看看支付流程',
+    )
+  })
+
+  it('缺 role 时兜底 agent；参数完全解析不出时返回 null', () => {
+    expect(spawnArgs('{"task":"只读排查"}')?.role).toBe('agent')
+    expect(spawnArgs('{oops')).toBeNull()
+    expect(spawnArgs('')).toBeNull()
+  })
+
+  it('任务摘要取首个非空行并压掉多余空白', () => {
+    expect(spawnTaskBrief('\n\n  第一行   有空格 \n第二行')).toBe('第一行 有空格')
+    expect(spawnTaskBrief('a'.repeat(80)).length).toBe(49) // 48 + 省略号
+  })
+
+  it('子 agent 结论只取 JSON 里的 result 字段', () => {
+    const tc = call({
+      name: 'spawn_agent',
+      result: '{"run_id":"r1","node_id":"n1","role":"explore","tokens":12,"result":"结论：没有支付相关代码"}',
+    })
+    expect(spawnResultText(tc)).toBe('结论：没有支付相关代码')
+  })
+
+  it('结果为空时返回空串（调用方据此显示「还在跑」提示，而不是空白面板）', () => {
+    expect(spawnResultText(call({ name: 'spawn_agent' }))).toBe('')
+  })
+
+  // 残本标记：子任务超时 / 被停时结论只跑了一半。结果会被截断成半截 JSON，
+  // 所以判定只能扫文本——partial 字段被后端刻意排在 result 之前。
+  it('partial=true 的结果要能认出来，且不影响取结论', () => {
+    const tc = call({
+      name: 'spawn_agent',
+      result: '{"run_id":"r1","node_id":"n1","role":"explore","tokens":9,"partial":true,"note":"子任务未跑完","result":"结论：只查到一半"}',
+    })
+    expect(spawnPartial(tc)).toBe(true)
+    expect(spawnResultText(tc)).toBe('结论：只查到一半')
+    expect(spawnPartial(call({ name: 'spawn_agent', result: '{"result":"完整结论"}' }))).toBe(false)
+    expect(spawnPartial(call({ name: 'spawn_agent' }))).toBe(false)
   })
 })
 

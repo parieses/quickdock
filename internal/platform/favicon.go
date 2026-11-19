@@ -2,10 +2,12 @@ package platform
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"hash/fnv"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +21,11 @@ import (
 // 共享 HTTP 客户端：favicon 抓取复用连接（连接级 Timeout 仍生效）
 var faviconClient = &http.Client{Timeout: 2500 * time.Millisecond}
 
+// faviconBudget 一次抓取的**总**预算：根 favicon + 首页 HTML + <link> 图标，
+// 全部加起来也不能超过这个时间。单请求各有 2.5s 超时，串联三轮就是 7.5s，
+// 而抓图标这件事整体只值 3s。
+const faviconBudget = 3 * time.Second
+
 // 预编译正则：避免每次抓取 favicon 时重新编译
 var linkTagRe = regexp.MustCompile(`(?i)<link\b[^>]*>`)
 
@@ -29,11 +36,22 @@ var attrReCache sync.Map // name → *regexp.Regexp（两种模式各存一份�
 // 用于「网页」类型 item 自动填充图标。失败或超时返回空字符串。
 // 结果按站点主机名缓存到磁盘，避免每次保存重复请求网络。
 //
-// 安全性：仅当响应体确实是图像（按 magic bytes 嗅探）时才接受，避免把站点返回的
-// HTML 错误页（如 SPA 的 index.html）当成图标存进数据库。
+// 安全性：
+//   - 仅当响应体确实是图像（按 magic bytes 嗅探）时才接受，避免把站点返回的
+//     HTML 错误页（如 SPA 的 index.html）当成图标存进数据库；
+//   - 只访问 http/https、默认端口、非环回/私网的、与条目同 host 的地址。
+//     条目值来自用户，链接里的图标 href 也可能指向任意地方（http://127.0.0.1:6379
+//     之类），不设限等于给了一个「保存条目即可探测内网」的原语；
+//   - 总预算 3s：保存路径不等人，抓不到就用默认图标。
 func FetchFavicon(rawURL string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), faviconBudget)
+	defer cancel()
+
 	u, err := parseSiteURL(rawURL)
 	if err != nil {
+		return ""
+	}
+	if !safeFaviconURL(ctx, u) {
 		return ""
 	}
 	host := u.Host
@@ -56,14 +74,14 @@ func FetchFavicon(rawURL string) string {
 
 	// 2. 优先尝试根路径 /favicon.ico（先 https 后 http）
 	for _, scheme := range []string{"https", "http"} {
-		if dataURL, ok := tryFetchIcon(scheme + "://" + host + "/favicon.ico"); ok {
+		if dataURL, ok := tryFetchIcon(ctx, scheme+"://"+host+"/favicon.ico", host); ok {
 			writeFavCache(cachePath, dataURL)
 			return dataURL
 		}
 	}
 
 	// 3. 解析首页 HTML 中的 <link rel="icon"> 等，定位真实图标地址
-	if dataURL, ok := discoverIconFromHTML(host); ok {
+	if dataURL, ok := discoverIconFromHTML(ctx, host); ok {
 		writeFavCache(cachePath, dataURL)
 		return dataURL
 	}
@@ -71,9 +89,59 @@ func FetchFavicon(rawURL string) string {
 	return ""
 }
 
-// tryFetchIcon 抓取给定 URL 并校验其为图像，成功返回 data URL
-func tryFetchIcon(urlStr string) (string, bool) {
-	body, _, ok := fetchWithTimeout(urlStr)
+// safeFaviconURL 校验图标抓取目标：只允许 http/https、默认端口、
+// 非环回/私网/链路本地地址。域名会做一次 DNS 解析，任一地址落在内网即拒绝
+// （防 DNS 指向 127.0.0.1 / 169.254.x.x 这类绕过）。
+func safeFaviconURL(ctx context.Context, u *url.URL) bool {
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return false
+	}
+	if p := u.Port(); p != "" && p != "80" && p != "443" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return !isPrivateIP(ip)
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	addrs, err := net.DefaultResolver.LookupIPAddr(lookupCtx, host)
+	if err != nil || len(addrs) == 0 {
+		return false
+	}
+	for _, a := range addrs {
+		if isPrivateIP(a.IP) {
+			return false
+		}
+	}
+	return true
+}
+
+func isPrivateIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()
+}
+
+// sameHost 判断两个 host[:port] 是否指向同一站点（大小写不敏感，忽略默认端口）。
+func sameHost(a, b string) bool {
+	norm := func(s string) string {
+		s = strings.ToLower(strings.TrimSpace(s))
+		s = strings.TrimSuffix(s, ":80")
+		s = strings.TrimSuffix(s, ":443")
+		return s
+	}
+	return norm(a) == norm(b)
+}
+
+// tryFetchIcon 抓取给定 URL 并校验其为图像，成功返回 data URL。
+// expectHost 非空时要求目标与条目同 host（图标可能来自 CDN，但那等于让
+// 插件/用户借 favicon 抓取去访问任意域名，代价大于收益，一律拒绝）。
+func tryFetchIcon(ctx context.Context, urlStr, expectHost string) (string, bool) {
+	body, _, ok := fetchWithTimeout(ctx, urlStr, expectHost)
 	if !ok {
 		return "", false
 	}
@@ -87,9 +155,9 @@ func tryFetchIcon(urlStr string) (string, bool) {
 
 // discoverIconFromHTML 抓取首页并解析 <link rel="icon/shortcut icon/apple-touch-icon"> 的 href，
 // 再抓取该图标地址。返回 data URL。
-func discoverIconFromHTML(host string) (string, bool) {
+func discoverIconFromHTML(ctx context.Context, host string) (string, bool) {
 	for _, scheme := range []string{"https", "http"} {
-		html, ok := fetchHTML(scheme + "://" + host + "/")
+		html, ok := fetchHTML(ctx, scheme+"://"+host+"/", host)
 		if !ok {
 			continue
 		}
@@ -101,7 +169,7 @@ func discoverIconFromHTML(host string) (string, bool) {
 		if abs == "" {
 			continue
 		}
-		if dataURL, ok := tryFetchIcon(abs); ok {
+		if dataURL, ok := tryFetchIcon(ctx, abs, host); ok {
 			return dataURL, true
 		}
 	}
@@ -134,8 +202,15 @@ func sniffImage(data []byte) (string, bool) {
 }
 
 // fetchHTML 抓取首页 HTML 文本（仅要求 200，不限 MIME）
-func fetchHTML(urlStr string) (string, bool) {
-	req, err := http.NewRequest("GET", urlStr, nil)
+func fetchHTML(ctx context.Context, urlStr, expectHost string) (string, bool) {
+	u, err := url.Parse(urlStr)
+	if err != nil || !safeFaviconURL(ctx, u) {
+		return "", false
+	}
+	if expectHost != "" && !sameHost(u.Host, expectHost) {
+		return "", false
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
 	if err != nil {
 		return "", false
 	}
@@ -235,7 +310,9 @@ func parseSiteURL(raw string) (*url.URL, error) {
 		return nil, fmt.Errorf("empty")
 	}
 	u, err := url.Parse(s)
-	if err != nil {
+	// url.Parse("github.com") 不报错但 Host 为空（它把整串当 Path），
+	// 所以判断条件是「没有 Host」而不是「解析出错」——否则裸域名永远拿不到图标。
+	if err != nil || u.Host == "" {
 		u, err = url.Parse("https://" + s)
 		if err != nil {
 			return nil, err
@@ -247,9 +324,17 @@ func parseSiteURL(raw string) (*url.URL, error) {
 	return u, nil
 }
 
-// fetchWithTimeout 带 2.5s 超时的 GET 请求，读取最多 512KB（复用 faviconClient 连接池）
-func fetchWithTimeout(urlStr string) ([]byte, string, bool) {
-	req, err := http.NewRequest("GET", urlStr, nil)
+// fetchWithTimeout 在总预算内发起 GET，读取最多 512KB（复用 faviconClient 连接池）。
+// expectHost 非空时要求目标与条目同 host；任何情况下都拒绝环回/私网/非默认端口。
+func fetchWithTimeout(ctx context.Context, urlStr, expectHost string) ([]byte, string, bool) {
+	u, err := url.Parse(urlStr)
+	if err != nil || !safeFaviconURL(ctx, u) {
+		return nil, "", false
+	}
+	if expectHost != "" && !sameHost(u.Host, expectHost) {
+		return nil, "", false
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
 	if err != nil {
 		return nil, "", false
 	}

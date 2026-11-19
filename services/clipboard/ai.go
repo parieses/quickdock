@@ -95,6 +95,11 @@ type ClipboardAiAskRequest struct {
 	History []string `json:"history"`
 	// StreamID 流式标识。非空时后端经 Wails 事件 ai:ask-delta 逐段推送增量；空则退化一次性返回。
 	StreamID string `json:"streamId"`
+	// DisableThinking 本轮关闭模型的思考（面板头部的「思考」开关）。
+	//
+	// 剪贴板的预置动作（翻译/摘要/格式化）都是直出型任务，开着 thinking
+	// 只把首字往后推；复杂提问再打开。开关交给用户，不在后端一刀切。
+	DisableThinking bool `json:"disableThinking"`
 }
 
 // ClipboardAiAskResult 剪贴板场景 AI 问答返回。
@@ -223,7 +228,7 @@ func (a *ClipboardService) askOnce(req ClipboardAiAskRequest, onToken, onReason 
 	prompt := buildClipboardAiPrompt(text, action, question, req.History)
 
 	start := time.Now()
-	out, model, err := a.askStream(prompt, onToken, onReason)
+	out, model, err := a.askStream(prompt, !req.DisableThinking, onToken, onReason)
 	if err != nil {
 		return nil, err
 	}
@@ -238,9 +243,12 @@ func (a *ClipboardService) askOnce(req ClipboardAiAskRequest, onToken, onReason 
 }
 
 // askStream 优先走带思考增量的通道，未装配时退回只有正文的那条（理由见 sshx 的同名方法）。
-func (a *ClipboardService) askStream(prompt string, onToken, onReason func(string)) (string, string, error) {
+//
+// thinking 由调用方按开关传入：关掉时模型不先写推理，首字明显更快。
+// 退回分支拿不到这个开关（旧通道没有该参数），只能沿用档案配置。
+func (a *ClipboardService) askStream(prompt string, thinking bool, onToken, onReason func(string)) (string, string, error) {
 	if a.App.AskAIFnStreamReason != nil {
-		return a.App.AskAIFnStreamReason(clipboardAiSystemPrompt, prompt, clipboardAiTimeoutSec, onToken, onReason)
+		return a.App.AskAIFnStreamReason("", clipboardAiSystemPrompt, prompt, clipboardAiTimeoutSec, thinking, onToken, onReason)
 	}
 	return a.App.AskAIFnStream(clipboardAiSystemPrompt, prompt, clipboardAiTimeoutSec, onToken)
 }

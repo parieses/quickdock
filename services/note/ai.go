@@ -80,6 +80,11 @@ type NoteAiAskRequest struct {
 	History []string `json:"history"`
 	// StreamID 流式标识。非空时后端经 Wails 事件 ai:ask-delta 逐段推送增量。
 	StreamID string `json:"streamId"`
+	// DisableThinking 本轮关闭模型的思考（面板头部的「思考」开关）。
+	//
+	// 笔记的预置动作（润色/总结/续写）本身就偏「直出」，开着 thinking
+	// 只是把首字往后推；复杂提问才需要它。开关交给用户，不在后端一刀切。
+	DisableThinking bool `json:"disableThinking"`
 }
 
 // NoteAiAskResult 笔记场景 AI 问答返回。
@@ -199,7 +204,7 @@ func (s *NoteService) askOnce(req NoteAiAskRequest, onToken, onReason func(strin
 	prompt := buildNoteAiPrompt(text, action, question, req.History)
 
 	start := time.Now()
-	out, model, err := s.askStream(prompt, onToken, onReason)
+	out, model, err := s.askStream(prompt, !req.DisableThinking, onToken, onReason)
 	if err != nil {
 		return nil, err
 	}
@@ -215,9 +220,12 @@ func (s *NoteService) askOnce(req NoteAiAskRequest, onToken, onReason func(strin
 }
 
 // askStream 优先走带思考增量的通道，未装配时退回只有正文的那条。
-func (s *NoteService) askStream(prompt string, onToken, onReason func(string)) (string, string, error) {
+//
+// thinking 由调用方按开关传入：关掉时模型不先写推理，首字明显更快。
+// 退回分支拿不到这个开关（旧通道没有该参数），只能沿用档案配置。
+func (s *NoteService) askStream(prompt string, thinking bool, onToken, onReason func(string)) (string, string, error) {
 	if s.App.AskAIFnStreamReason != nil {
-		return s.App.AskAIFnStreamReason(noteAiSystemPrompt, prompt, noteAiTimeoutSec, onToken, onReason)
+		return s.App.AskAIFnStreamReason("", noteAiSystemPrompt, prompt, noteAiTimeoutSec, thinking, onToken, onReason)
 	}
 	return s.App.AskAIFnStream(noteAiSystemPrompt, prompt, noteAiTimeoutSec, onToken)
 }

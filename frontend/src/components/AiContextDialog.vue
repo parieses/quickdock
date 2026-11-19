@@ -394,7 +394,7 @@ void n // 保留 i18n 的数字格式化入口，后续要按语言显示千分�
   height: 100%;
   border-radius: var(--radius-full);
   background: var(--color-accent);
-  transition: width var(--transition-normal);
+  transition: width var(--transition-base);
 }
 
 .ctx-bar-fill.is-warn { background: var(--color-warning); }

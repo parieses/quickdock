@@ -584,6 +584,12 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 	}
 	ctx = withAgentScope(ctx, sc)
 
+	// 流式出口本身（还没包 dbSink）：进度帧只走这一条。
+	//
+	// 进度帧（child / spawn_progress）是纯瞬时状态，落进 agent_events 只是给
+	// 回放添几百行没有意义的数据。所以挂到 ctx 上的是 SSE 那一个，不是 multiSink。
+	liveSink := sink
+
 	// 主对话也落 agent_events。
 	//
 	// 顶层此前只有 sseSink：事件发完就没了，run 树里只有子 agent 的步骤，主 agent
@@ -619,6 +625,11 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 			}()
 		}
 	}
+
+	// 事件出口挂到 ctx：工具在执行期要能往这条流里说话（见 eventSinkFrom）。
+	// 目前唯一的使用者是 spawn_agent——它把子 agent 的进度压成 child 帧推回来，
+	// 否则主对话里那张「派活」卡片只能显示「调用中」，用户以为卡死。
+	ctx = withEventSink(ctx, liveSink)
 
 	// 审批闸门（见 ai_approval.go）。同样挂 ctx、同样只挂顶层执行：
 	// 子 agent 用 dbSink 跑在后台，没有「人」在等它，审批事件发出去只会等到超时
@@ -900,6 +911,9 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 	// 放在循环外、一次提问一个：新提问要重新计数，否则用户说「再发一次」会被挡。
 	seenCalls := map[string]aiToolRecord{}
 	var lastErr error
+	// noToolsRetry 本轮「没有工具却返回工具调用」已经补过一次纠正提示。
+	// 只补一次：模型要是坚持调工具，再重试只会把同样的结果再买一遍。
+	noToolsRetry := false
 	// 空响应防御：部分思考模型 / 中转网关会把输出预算全花在 reasoning 上，
 	// 正文一个字不吐就 [DONE]。这种轮次若被当成「正常最终回答」，会跳过落库
 	// （saveSegment 见 content 和工具都空就 return），用户看到的就是「任务什么
@@ -1019,6 +1033,14 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 			chatBudget = b * req.TurnBudgetFactor
 		}
 	}
+	// 子 agent 的单节点预算：不跟着上下文窗口放大。
+	//
+	// 1M 窗口算出来的单轮预算是 19.3 万，套到「只查三个文件改了什么」的子任务上，
+	// 等于允许它把整个仓库读一遍（实测单人 122 万 prompt token）。这里给一个
+	// 与窗口无关的上限，到线走收尾而不是硬断（见下面的预算分支）。
+	if req.Fresh && (chatBudget == 0 || chatBudget > agentNodeTokenCap) {
+		chatBudget = agentNodeTokenCap
+	}
 	// chatBudgetHard 自动续期的硬顶：3 倍初始预算。
 	//
 	// 为什么要续：预算本来是为了挡住「看着一直在动、其实在原地空转」，
@@ -1037,6 +1059,8 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 
 	// loopCompactShown 本次 run 是否已经出过「循环内折叠」的卡片（见循环里）。
 	loopCompactShown := false
+	// deadlineWarned 硬超时前的收尾提醒是否已发（只发一次，否则每轮都插一句）。
+	deadlineWarned := false
 	// 日志同样只记一次：折叠是长任务里每轮都会发生的常态，原实现每轮
 	// 都打一条 I 日志，用户看到的就是「一直在提示超预算」，误以为是故障。
 	loopCompactLogged := false
@@ -1090,8 +1114,11 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 		// 之前一撞预算就收尾，用户看到的就是「活儿干到一半自己断了」，
 		// 然后被迫再打一句「继续」——那句话还会被当成新的用户诉求记进记忆。
 		// 硬顶（3 倍）兜住病态空转：真在原地打转的话 madeProgress 很快就是 false。
-		if !budgetClosed && chatBudget > 0 && tokensOf(totalUsage) >= chatBudget {
-			if madeProgress(records[budgetMark:]) && chatBudget < chatBudgetHard {
+		if !budgetClosed && chatBudget > 0 && (tokensOf(totalUsage) >= chatBudget || (req.Fresh && sc.overBudget())) {
+			// 只有顶层会自动续期：主对话那头有用户，撞线了说一声「接着做」就是新的一轮。
+			// 子 agent 背后没有人，续期等于把上限变成一句空话——这次实测 run 级预算
+			// 72 万被冲到 123 万，中间没有任何一关卡住它。
+			if !req.Fresh && madeProgress(records[budgetMark:]) && chatBudget < chatBudgetHard {
 				// 半步 = 初始预算的一半（不是写死的 20×history，见 turnBudgetStart）。
 				chatBudget += turnBudgetStart / 2
 				if chatBudget > chatBudgetHard {
@@ -1106,11 +1133,49 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 				// limit 收到本轮：万一模型在没有 tools 的情况下仍返回工具调用，
 				// 底下 `turnIdx > limit` 那条兜底会忽略并跳出，不会再花一次工具的钱。
 				limit = turnIdx - 1
-				sink.Event("notice", map[string]any{
-					"message": fmt.Sprintf("本次提问已消耗约 %d token，达到单次预算，先收尾；没做完说一声「接着做」就行", tokensOf(totalUsage)),
-				})
-				logger.I("[ai] 主循环达到 token 预算 conv=%s 已用=%d 预算=%d 轮次=%d",
-					res.ConvID, tokensOf(totalUsage), chatBudget, turnIdx)
+				msg := fmt.Sprintf("本次提问已消耗约 %d token，达到单次预算，先收尾；没做完说一声「接着做」就行", tokensOf(totalUsage))
+				if req.Fresh {
+					// 子 agent 的收尾话术不能提用户：它看不到对话，也没人能回它一句。
+					msg = fmt.Sprintf("这个子任务已消耗约 %d token，达到上限：请立即用已经查到的信息给出结论，"+
+						"不要再检索；没查完的部分在结论里写明「未覆盖」。", tokensOf(totalUsage))
+					// 只撤 tools 还不够。实测（2026-11-19）四个 review 子任务各跑 8 轮、
+					// 烧掉 27 万 prompt token，最后正文只剩一句「我先查看…再逐个审阅」——
+					// 思考模型把分析全写在 reasoning 里，正文永远是过渡语，tools 一消失
+					// 它就顺着过渡语收尾了。这里必须像硬超时那样明说「写结论」。
+					messages = append(messages, map[string]interface{}{
+						"role": "user",
+						"content": "（系统提示）本子任务的额度已用完，工具已收回。现在请**在正文里**写出结论：" +
+							"你查到了什么、结论是什么、哪些部分没有覆盖到。不要只在思考里分析，" +
+							"发起方看不到你的思考过程。",
+					})
+				}
+				sink.Event("notice", map[string]any{"message": msg})
+				logger.I("[ai] 主循环达到 token 预算 conv=%s 已用=%d 预算=%d 轮次=%d depth=%d",
+					res.ConvID, tokensOf(totalUsage), chatBudget, turnIdx, sc.Depth())
+			}
+		}
+		// 硬超时前的收尾提醒。
+		//
+		// spawn_agent 的 20 分钟是硬杀（context deadline）：到点取消，子 agent 连
+		// 一句话都说不出来，父 agent 只能拿到「执行失败」再重派一遍。提前 2 分钟
+		// 撤掉工具并要求它收尾，至少能留下一份带 partial 标记的结论。
+		if !deadlineWarned && len(tools) > 0 {
+			if dl, ok := ctx.Deadline(); ok {
+				if remain := time.Until(dl); remain > 0 && remain <= agentWrapUpLead {
+					deadlineWarned = true
+					tools = nil
+					messages = append(messages, map[string]interface{}{
+						"role": "user",
+						"content": "（系统提示）本子任务剩余的运行时间不足 " + fmtRemain(remain) +
+							"，工具已收回。请立即停止检索，用**已经查到的信息**输出结论，" +
+							"并注明哪些部分没有覆盖到。",
+					})
+					sink.Event("notice", map[string]any{
+						"message": fmt.Sprintf("子任务剩余时间不足 %s，已要求它收尾", fmtRemain(remain)),
+					})
+					logger.I("[ai] 子 agent 接近硬超时，提前收尾 conv=%s node=%s 剩余=%s",
+						res.ConvID, sc.CurrentNodeID(), fmtRemain(remain))
+				}
 			}
 		}
 		// 每轮按「本轮到底有没有工具」重建 system（覆盖式，见 applySystemHints）。
@@ -1441,12 +1506,32 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 			break // 没有工具调用 = 这一轮就是最终回答
 		}
 		if len(tools) == 0 {
-			// 兜底：收尾轮已经不带 tools，正常模型不会再返回 tool_calls。
-			//
-			// 判据用「本轮有没有给工具」而不是 `turnIdx > limit`：插话/打断会把
-			// limit 顶到 maxRounds，此时 `turnIdx > limit` 永远不成立，模型真的
-			// 调工具就会一路执行下去（预算已关）或结果无处呈现。反过来，
-			// 只要本轮给了工具，调用就是合法的，不该被静默忽略。
+			// 没有工具的一轮却仍返回工具调用（配额收尾轮 / 定时任务的问答档 /
+			// 只读但工具全被过滤）。以前这里直接忽略并 break，代价是：模型把调用
+			// 写成 DSML 文本 → 调用被丢掉 → 正文为空 → saveSegment 判定「未产出
+			// 内容」跳过落库，用户看到「执行成功但没有任何输出」，库里只剩一条
+			// user 消息。这里补一次明确的纠正，给它把话说圆的机会（只重试一次，
+			// 避免网关异常时无限烧钱）。
+			if !noToolsRetry {
+				noToolsRetry = true
+				logger.W("[ai] 无工具轮仍返回 %d 个工具调用，追加纠正提示后重试 conv=%s",
+					len(turn.ToolCalls), res.ConvID)
+				messages = append(messages, map[string]interface{}{
+					"role": "user",
+					"content": "你刚才尝试调用工具，但本次没有提供任何工具，调用不会被执行。" +
+						"不要输出任何工具调用格式或标记，直接用文字回答上面的问题。",
+				})
+				// 补一轮预算：否则 continue 出去可能直接撞上 for 上界。
+				if turnIdx >= limit && !budgetClosed {
+					limit++
+					if limit > maxRounds {
+						limit = maxRounds
+					}
+				}
+				if turnIdx <= limit {
+					continue
+				}
+			}
 			logger.W("[ai] 收尾轮仍返回 %d 个工具调用，已忽略 conv=%s", len(turn.ToolCalls), res.ConvID)
 			break
 		}
@@ -1506,10 +1591,14 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 				// 不必等整轮结束再回头查一次。
 				"runId": r.RunID, "nodeId": r.NodeID,
 				// 保留换行：JSON 结果压成一行就没法读了。
-				"result": truncateKeepLines(r.Result, 400),
+				//
+				// 上限必须与落库一致（aiRecordResultMaxRune）。原先写死 400：
+				// 一来几乎所有工具结果都超，每张卡片都挂一句「已截断：共 N 字」；
+				// 二来刷新后走落库的 2000 字版本，同一张卡片内容会突然变长。
+				"result": truncateKeepLines(r.Result, aiRecordResultMaxRune),
 				// 人看的输出（命令的 stdout/stderr）：卡片上铺的是它，
-				// 不是上面那段给模型的 JSON——那段在 400 字里只剩转义字符，
-				// 截断后连 JSON 都不是，用户看到的就是一句「已截断」。
+				// 不是上面那段给模型的 JSON——那段只剩转义字符，
+				// 截断后连 JSON 都不是。
 				"output": truncateKeepLines(r.Output, aiRecordOutputMaxRune),
 			})
 		}
