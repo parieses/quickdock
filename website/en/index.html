@@ -358,6 +358,20 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">Trace and subtask status at a glance, with clearer hierarchy and error steps</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>Status colors are now consistent across the subtask tree and the trace drawer: running is blue, done green, failed red, and canceled orange — no more "running" and "canceled" both showing as gray. The branch that is still running lights up its left edge and pulses its status dot, so you can scan a list of subtasks and instantly see which one is still going or which one failed, without reading every line. These animations turn off automatically when your system requests reduced motion.</li>
+          <li>The trace node tree now has hierarchy guide lines, so besides indentation you can see exactly which node spawned which subtask. Failed steps highlight both their number and title in red, making them easy to spot in a long timeline. A subtask that has not started yet used to be mislabeled "Done" in the message bubble; it now reads "Running", matching the drawer.</li>
+          <li>The button that stops an individual subtask was only visible on mouse hover; it now also appears on keyboard focus with a visible focus ring. Arrow and button transitions in the drawer also respect the system's reduced-motion setting.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.52</span>
+          <span class="log-date">2026-11-18</span>
           <span class="log-title">AI runs are now replayable, long chats stop forgetting themselves, tool calls get steadier</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -410,26 +424,6 @@
           <li>Clicking "edit model" in Settings appeared to do nothing — fixed. When the dialog shells were unified, their layer was hardcoded to 3000, underneath the full-screen settings shell at 10000, so every dialog opened from Settings was mounted but buried. Overlay layers are now a single ladder, and toasts were raised above dialogs so a notification stays visible while one is open. The same screen gained two buttons: a model's API key only ever showed a mask, so checking which key you had entered meant retyping it — now one click reveals it and another copies it, with the plaintext dropped when the dialog closes.</li>
         </ul>
       </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.49</span>
-          <span class="log-date">2026-11-12</span>
-          <span class="log-title">The password vault is here: web logins autofill, SSH passwords get a home</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>A new password vault: web logins, SSH, databases, Git, WebDAV and API keys in one place. AES-256-GCM at rest, with the key itself wrapped by the system DPAPI. Stored on this machine only and excluded from WebDAV backups — which is exactly what keeps passwords off the wire. Copied passwords clear from the clipboard after 30 seconds, and the in-memory key is wiped when you lock the app and rebuilt silently on unlock.</li>
-          <li>With the Chrome / Edge extension, web forms fill themselves: a suggestion strip appears next to the password field listing only entries that match the current domain, so the whole vault never lands on someone else's screen. Filled values submit correctly on React / Vue sites too. After login it offers to save, new passwords save automatically and changed ones still ask for confirmation, tracked per site so two different logins can't overwrite each other. One switch in the vault page controls the extension; turning it off stops the local listener immediately.</li>
-          <li>SSH hosts no longer require a password up front: you are asked at connect time, and the answer goes into the vault and is remembered for that host. If the password changed, entering the new one overwrites both the host and the vault entry. The host form also has a "fill from vault" button.</li>
-          <li>Note previews and code panes can finally be selected and copied. The app disables selection globally (to keep UI text from being dragged along), and that rule was inherited into the note pages — the preview could not even form a selection, and the code pane showed a highlight while Ctrl+C produced nothing. Selection and active-line colors were rebuilt too: the active line used to be opaque and painted over the selection on the cursor's line, which looked like "one line goes missing".</li>
-          <li>Knowledge base: after pressing Stop, rebuild requests were silently dropped — the queue now recovers. Switching embedding models now gives accurate semantic search: vectors from two different models used to be mixed into one similarity space, and the symptom was "results look fine, just wrong", which is far harder to spot than an error. A malformed PDF can no longer stall indexing.</li>
-          <li>"Go to environments" on the downloader and Git pages now lands on the right runtime. It used to stop at the default node entry, leaving you to scroll through thirty-odd runtimes yourself.</li>
-        </ul>
-      </details>
-
-
-
 
     </div>
 
