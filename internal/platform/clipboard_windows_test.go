@@ -3,12 +3,32 @@
 package platform
 
 import (
+	"strings"
 	"testing"
 	"unicode/utf16"
 	"unsafe"
 
 	"github.com/wailsapp/wails/v3/pkg/w32"
 )
+
+// clipboardUnavailable 判断写入失败是不是「根本打不开剪贴板」这一类环境问题。
+//
+// 剪贴板是全系统独占资源，而且依赖交互式窗口站：本机正在跑的 QuickDock
+// （捕获协程每次写入后立刻抢读）和 CI 的 headless 会话都会让 OpenClipboard
+// 直接失败（"OpenClipboard failed" / "Access is denied"）。那属于环境竞争，
+// 不是读写路径的回归——按本文件开头的约定跳过，别让一条「本机开不了剪贴板」
+// 把流水线永远染红（实测本机 4 例全挂，CI 上同样没有交互式会话）。
+//
+// 只认这两类消息：其它错误仍按失败处理，免得真回归被一起跳掉。
+func clipboardUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "OpenClipboard") ||
+		strings.Contains(msg, "Access is denied") ||
+		strings.Contains(msg, "拒绝访问")
+}
 
 // 注意：本文件里的「打不开剪贴板」一律 Skip 而不是 Fatal。
 // 剪贴板是全系统独占的，本应用运行时它自己的捕获协程会在每次写入后立刻抢读，
@@ -25,6 +45,9 @@ func TestWithClipboardRoundTrip(t *testing.T) {
 	const want = "quickdock-clipboard-round-trip"
 
 	if err := w32.SetClipboardText(want); err != nil {
+		if clipboardUnavailable(err) {
+			t.Skipf("剪贴板打不开（被占用或无交互会话），跳过本次断言: %v", err)
+		}
 		t.Fatalf("SetClipboardText: %v", err)
 	}
 
@@ -70,6 +93,9 @@ func TestSetClipboardTextRoundTrip(t *testing.T) {
 	const want = "quickdock-复制-文本-a\nb"
 
 	if err := SetClipboardText(0, want); err != nil {
+		if clipboardUnavailable(err) {
+			t.Skipf("剪贴板打不开（被占用或无交互会话），跳过本次断言: %v", err)
+		}
 		t.Fatalf("SetClipboardText: %v", err)
 	}
 	if got := readClipboardTextForTest(t); got != want {
@@ -78,6 +104,9 @@ func TestSetClipboardTextRoundTrip(t *testing.T) {
 
 	// 空串也是合法内容：必须真的清掉剪贴板文本，而不是报错或保留旧值。
 	if err := SetClipboardText(0, ""); err != nil {
+		if clipboardUnavailable(err) {
+			t.Skipf("剪贴板打不开（被占用或无交互会话），跳过本次断言: %v", err)
+		}
 		t.Fatalf("SetClipboardText(空串): %v", err)
 	}
 	if got := readClipboardTextForTest(t); got != "" {
@@ -130,6 +159,9 @@ func TestClipboardSequenceNumberAdvances(t *testing.T) {
 	}
 
 	if err := SetClipboardText(0, "quickdock-seq-probe-1"); err != nil {
+		if clipboardUnavailable(err) {
+			t.Skipf("剪贴板打不开（被占用或无交互会话），跳过本次断言: %v", err)
+		}
 		t.Fatalf("SetClipboardText: %v", err)
 	}
 	first := ClipboardSequenceNumber()
@@ -138,6 +170,9 @@ func TestClipboardSequenceNumberAdvances(t *testing.T) {
 	}
 
 	if err := SetClipboardText(0, "quickdock-seq-probe-2"); err != nil {
+		if clipboardUnavailable(err) {
+			t.Skipf("剪贴板打不开（被占用或无交互会话），跳过本次断言: %v", err)
+		}
 		t.Fatalf("SetClipboardText: %v", err)
 	}
 	second := ClipboardSequenceNumber()
@@ -150,6 +185,9 @@ func TestClipboardSequenceNumberAdvances(t *testing.T) {
 // 我们自己写入时 owner 为 NULL，探测必须放行（否则文件/图片读取会被无条件跳过）。
 func TestClipboardOwnerResponsive(t *testing.T) {
 	if err := SetClipboardText(0, "quickdock-owner-probe"); err != nil {
+		if clipboardUnavailable(err) {
+			t.Skipf("剪贴板打不开（被占用或无交互会话），跳过本次断言: %v", err)
+		}
 		t.Fatalf("SetClipboardText: %v", err)
 	}
 	var responsive bool
