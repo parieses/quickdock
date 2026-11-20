@@ -702,6 +702,92 @@ func (s *KBService) SearchKB(query string, topN int, libraryID string) *services
 	return s.searchKB(query, topN, libraryID, "")
 }
 
+// kbLikeStr / kbLikeInt / kbLikeInt64 把 Database.Query 返回的驱动原始值读成
+// KBHit 字段。SQLite 驱动整数给 int64，字符串可能给 []byte，这里统一收口。
+func kbLikeStr(v interface{}) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case []byte:
+		return string(x)
+	}
+	return ""
+}
+
+func kbLikeInt(v interface{}) int {
+	switch x := v.(type) {
+	case int64:
+		return int(x)
+	case int:
+		return x
+	case float64:
+		return int(x)
+	}
+	return 0
+}
+
+func kbLikeInt64(v interface{}) int64 {
+	switch x := v.(type) {
+	case int64:
+		return x
+	case int:
+		return int64(x)
+	case float64:
+		return int64(x)
+	}
+	return 0
+}
+
+// searchChunksLike 短词 / 全文索引零命中时的 LIKE 兜底。
+// trigram FTS 的索引单位是 3 字，1–2 字（尤其中文逐字上屏）恒定 0 结果；
+// 与笔记搜索同口径，这里按标题 + 正文 LIKE 补齐。
+// libraryID / sourceID 过滤必须下推到 SQL：LIMIT 在 WHERE 之后生效，
+// 事后筛会让「TopK 里全是别的库」变成空结果。
+func (s *KBService) searchChunksLike(q string, limit int, libraryID, sourceID string) ([]db.KBHit, error) {
+	escaped := strings.ReplaceAll(q, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `%`, `\%`)
+	escaped = strings.ReplaceAll(escaped, `_`, `\_`)
+	pat := "%" + escaped + "%"
+
+	sqlStr := `SELECT c.rowid, c.id, c.source_id, s.name, s.path, s.library_id, s.ext,
+		c.heading, c.text, c.page, c.idx
+		FROM kb_chunks c JOIN kb_sources s ON s.id = c.source_id
+		WHERE (c.heading LIKE ? ESCAPE '\' OR c.text LIKE ? ESCAPE '\')`
+	args := []interface{}{pat, pat}
+	if libraryID != "" {
+		sqlStr += ` AND s.library_id = ?`
+		args = append(args, libraryID)
+	}
+	if sourceID != "" {
+		sqlStr += ` AND c.source_id = ?`
+		args = append(args, sourceID)
+	}
+	sqlStr += ` ORDER BY c.idx ASC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.App.DB.Query(sqlStr, args...)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]db.KBHit, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, db.KBHit{
+			RowID:      kbLikeInt64(r["rowid"]),
+			ChunkID:    kbLikeStr(r["id"]),
+			SourceID:   kbLikeStr(r["source_id"]),
+			SourceName: kbLikeStr(r["name"]),
+			SourcePath: kbLikeStr(r["path"]),
+			LibraryID:  kbLikeStr(r["library_id"]),
+			Ext:        kbLikeStr(r["ext"]),
+			Heading:    kbLikeStr(r["heading"]),
+			Text:       kbLikeStr(r["text"]),
+			Page:       kbLikeInt(r["page"]),
+			Idx:        kbLikeInt(r["idx"]),
+		})
+	}
+	return out, nil
+}
+
 // searchKB 混合检索实现。sourceID 非空时限定在某一份文档内
 // （问答的「只问这份文档」场景）。
 //
@@ -713,7 +799,7 @@ func (s *KBService) searchKB(query string, topN int, libraryID, sourceID string)
 		return r
 	}
 	q := strings.TrimSpace(query)
-	if len([]rune(q)) < 3 {
+	if q == "" {
 		return services.Ok(SearchResult{Query: q, Hits: []SearchHit{}, Mode: "fts"})
 	}
 	cfg := s.settings()
@@ -726,6 +812,15 @@ func (s *KBService) searchKB(query string, topN int, libraryID, sourceID string)
 	ftsHits, err := s.App.DB.SearchChunksFTS(q, searchTopK, libraryID, sourceID)
 	if err != nil {
 		return services.Fail(err)
+	}
+	// trigram 索引单位是 3 字：1–2 字（中文逐字上屏尤其高频）恒定零命中。
+	// 与笔记搜索同口径，零命中就补一次 LIKE；长词正常命中时不付这趟全表扫的代价。
+	// libraryID / sourceID 已在 LIKE SQL 里下推过滤，不会事后筛出空 TopK。
+	if len(ftsHits) == 0 {
+		ftsHits, err = s.searchChunksLike(q, searchTopK, libraryID, sourceID)
+		if err != nil {
+			return services.Fail(err)
+		}
 	}
 
 	byRow := make(map[int64]db.KBHit, len(ftsHits))
