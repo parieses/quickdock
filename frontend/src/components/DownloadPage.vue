@@ -833,6 +833,15 @@ function parseCategoryText(): Record<string, string> {
   return out
 }
 
+// 清空已保存的 RPC secret：空串在后端表示「不修改」（表单每次打开 secret 都是空的，
+// 拿空串当清空会悄悄抹掉凭据），必须显式传哨兵值。点了之后 UI 立即反映「未设置」，
+// 真正生效在用户点保存、哨兵随表单一起下发时。
+const REMOTE_SECRET_CLEAR = '__QC_CLEAR_REMOTE_SECRET__'
+function clearRemoteSecret() {
+  settingsForm.value.remoteSecret = REMOTE_SECRET_CLEAR
+  settingsForm.value.remoteSecretSet = false
+}
+
 async function submitSettings() {
   // 始终下发规则文本：清空后提交也要让「恢复推荐值」真正生效。
   settingsForm.value.categoryRules = parseCategoryText()
@@ -1816,7 +1825,7 @@ onUnmounted(() => {
                 <div class="dl-settings-grid">
                   <label class="dl-field"><span>{{ t('dlConnHost') }}</span><input v-model="settingsForm.remoteHost" class="qd-input" placeholder="192.168.1.10" /></label>
                   <label class="dl-field"><span>{{ t('dlConnPort') }}</span><input v-model.number="settingsForm.remotePort" type="number" min="1" max="65535" class="qd-input" /></label>
-                  <label class="dl-field"><span>{{ t('dlConnSecret') }}</span><input v-model="settingsForm.remoteSecret" type="password" class="qd-input" :placeholder="settingsForm.remoteSecretSet ? t('dlConnSecretSet') : ''" /></label>
+                  <label class="dl-field"><span>{{ t('dlConnSecret') }}</span><span class="dl-secret-row"><input v-model="settingsForm.remoteSecret" type="password" class="qd-input" :placeholder="settingsForm.remoteSecretSet ? t('dlConnSecretSet') : ''" /><button v-if="settingsForm.remoteSecretSet" type="button" class="qd-btn qd-btn-sm dl-secret-clear" :title="t('clear')" @click="clearRemoteSecret"><X :size="14" /></button></span></label>
                   <label class="dl-field"><span>{{ t('dlConnPath') }}</span><input v-model="settingsForm.remotePath" class="qd-input" placeholder="/jsonrpc" /></label>
                 </div>
                 <div class="dl-switch-grid">
@@ -1921,6 +1930,8 @@ onUnmounted(() => {
 .dl-settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: var(--space-4); }
 .dl-field { display: flex; flex-direction: column; gap: var(--space-2); font-size: var(--text-xs); color: var(--color-text-secondary); }
 .dl-field .qd-input { width: 100%; }
+.dl-secret-row { display: flex; align-items: center; gap: var(--space-2); }
+.dl-secret-clear { flex: none; }
 .dl-field-wide { grid-column: 1 / -1; }
 .dl-field-block { margin-top: var(--space-4); }
 .dl-field-block .qd-input { min-height: 88px; resize: vertical; }

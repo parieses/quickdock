@@ -134,6 +134,13 @@ func optionsView(c *aria2.Config) DlOptionsView {
 	}
 }
 
+// remoteSecretClear 是前端「连接设置」里显式清空 RPC secret 的哨兵值。
+// 空串仍表示「不修改」——设置表单每次打开 secret 输入框都是空的，拿空串当
+// 清空会把用户已保存的凭据悄悄抹掉。真实 secret 是 aria2 随机 token，
+// 与该串碰撞的概率可忽略。前端接线点：DownloadPage.vue 的「清空 secret」
+// 动作把 settingsForm.remoteSecret 设为这个字符串再调 DlSetOptions。
+const remoteSecretClear = "__QC_CLEAR_REMOTE_SECRET__"
+
 func applyOptionsInput(cfg *aria2.Config, in DlOptionsView) {
 	if v := strings.TrimSpace(in.DownloadDir); v != "" {
 		cfg.DownloadDir = v
@@ -193,7 +200,11 @@ func applyOptionsInput(cfg *aria2.Config, in DlOptionsView) {
 		cfg.RemotePort = in.RemotePort
 	}
 	// 留空表示「不修改已有 secret」；填了才覆盖，避免表单每次打开把凭据清空。
-	if v := strings.TrimSpace(in.RemoteSecret); v != "" {
+	// 想真正清空时传 remoteSecretClear（前端「清空 secret」动作），否则这个
+	// 只写字段一旦设错就再也回不到未配置状态。
+	if v := strings.TrimSpace(in.RemoteSecret); v == remoteSecretClear {
+		cfg.RemoteSecret = ""
+	} else if v != "" {
 		cfg.RemoteSecret = v
 	}
 	cfg.RemoteSecure = in.RemoteSecure
@@ -2003,9 +2014,13 @@ func (s *DownloadService) emitSnapshot() {
 		}
 	}
 	// 任务被移除后清掉去重标记，否则重试生成的新状态可能被旧记录挡住。
+	// 只把「当前真正在 aria2 里」的任务算活跃：tasks 还混着 historyViews 补的
+	// stale 历史项，把它们当 alive 会让这些 GID 的标记永远留在 map 里不回收。
 	alive := make(map[string]bool, len(tasks))
 	for _, t := range tasks {
-		alive[t.GID] = true
+		if !t.Stale {
+			alive[t.GID] = true
+		}
 	}
 	for k := range s.notified {
 		if i := strings.LastIndexByte(k, ':'); i > 0 && !alive[k[:i]] {
