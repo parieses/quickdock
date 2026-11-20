@@ -4,7 +4,9 @@ import (
 	"hash/fnv"
 	"strconv"
 
+	"quickdock/internal/db"
 	"quickdock/internal/linkutil"
+	"quickdock/internal/logger"
 )
 
 // 关联接口的入参上限。id 是 UUID、label 是标题快照，500 已远大于正常值；
@@ -29,7 +31,18 @@ func (a *AppService) ListEntityLinks(srcType, srcId string) *ApiResult {
 	return wrap(a.DB.ListEntityLinks(srcType, srcId))
 }
 
-// ListEntityBacklinks 反链（精确 id + 标题兜底）。data: []db.EntityLink
+// backlinkLink 一条反链 = 边 + 来源标题。
+//
+// 边表只给目标侧存了 dst_label 快照，没有 src_label（见 internal/db/entity_link.go
+// 文件头）。不在这里补来源标题的话，前端拿不到任何可显示的字段，整列反链都会
+// 渲染成「已删除」—— 明明只是展示名缺失，看起来却像引用它的笔记全没了。
+type backlinkLink struct {
+	db.EntityLink
+	SrcLabel string `json:"srcLabel"`
+}
+
+// ListEntityBacklinks 反链（精确 id + 标题兜底），并补齐来源标题。
+// data: []backlinkLink（EntityLink 的全部字段 + srcLabel）
 func (a *AppService) ListEntityBacklinks(dstType, dstId, dstLabel string) *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
@@ -40,7 +53,40 @@ func (a *AppService) ListEntityBacklinks(dstType, dstId, dstLabel string) *ApiRe
 	if len(dstId) > maxLinkParamLen || len(dstLabel) > maxLinkParamLen {
 		return FailMsg("参数过长")
 	}
-	return wrap(a.DB.ListEntityBacklinks(dstType, dstId, dstLabel))
+	rows, err := a.DB.ListEntityBacklinks(dstType, dstId, dstLabel)
+	if err != nil {
+		return Fail(err)
+	}
+
+	// 按类型分组后各做一次 IN 查询：逐行回表在笔记页高频刷新下会放大成 N 次查询。
+	idsByType := make(map[string][]string, 3)
+	for _, r := range rows {
+		if r.SrcID == "" {
+			continue
+		}
+		idsByType[r.SrcType] = append(idsByType[r.SrcType], r.SrcID)
+	}
+	labels := make(map[string]string, len(rows))
+	for typ, ids := range idsByType {
+		m, lerr := a.DB.EntityLabels(typ, ids)
+		if lerr != nil {
+			// 标题查不到只影响显示名，不该让整张反链表格报错；这些行走「已删除」降级。
+			logger.W("[link] 反链来源标题查询失败 type=%s: %v", typ, lerr)
+			continue
+		}
+		for id, label := range m {
+			labels[typ+"\x00"+id] = label
+		}
+	}
+
+	out := make([]backlinkLink, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, backlinkLink{
+			EntityLink: r,
+			SrcLabel:   labels[r.SrcType+"\x00"+r.SrcID],
+		})
+	}
+	return Ok(out)
 }
 
 // AddEntityLink 手动建一条关联，kind 固定为 manual。data: db.EntityLink（落库行）
@@ -84,6 +130,30 @@ func (a *AppService) ListLinkTargets() *ApiResult {
 		return r
 	}
 	notes, todos, items, err := a.DB.ListLinkTargets()
+	if err != nil {
+		return Fail(err)
+	}
+	return Ok(map[string]interface{}{
+		"notes": notes,
+		"todos": todos,
+		"items": items,
+	})
+}
+
+// SearchLinkTargets 服务端候选搜索，补上「候选全量被 LIMIT 截断」后搜不到的那部分。
+// typ 传空串表示三类都搜；limit 由后端夹到上限，前端不必自己算。
+// data: { "notes":[{id,label,hint}], "todos":[...], "items":[...] }
+func (a *AppService) SearchLinkTargets(keyword, typ string, limit int) *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	if len(keyword) > maxLinkParamLen {
+		return FailMsg("关键词过长")
+	}
+	if typ != "" && !validLinkType(typ) {
+		return FailMsg("非法的实体类型")
+	}
+	notes, todos, items, err := a.DB.SearchLinkTargets(typ, keyword, limit)
 	if err != nil {
 		return Fail(err)
 	}

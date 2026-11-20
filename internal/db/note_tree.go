@@ -272,9 +272,21 @@ func (d *Database) RenameNoteNode(id, name string) error {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	// 旧名必须在 UPDATE 之前取：改名后要回写其它笔记正文里的 [[旧标题]]，
+	// 否则用户只是改个名字，所有指向这篇的 wiki 链接立刻变成「未找到对应条目」。
+	// 查询失败（id 不存在）时 oldName 为空，跳过回写，与原来的静默成功保持一致。
+	var oldName string
+	_ = d.conn.QueryRow(`SELECT name FROM notes WHERE id = ?`, id).Scan(&oldName)
 	if _, err := d.conn.Exec(`UPDATE notes SET name = ?, updated_at = ? WHERE id = ?`,
 		name, time.Now().Format(time.RFC3339), id); err != nil {
 		return err
+	}
+	if oldName != "" && oldName != name {
+		// 回写失败不让改名本身失败：正文引用是派生数据，最坏情况只是留着旧链接，
+		// 与没有这个功能时的表现一致；报错回滚反而会让「改名」变成不可用操作。
+		if err := d.rewriteWikiRefsLocked(oldName, name); err != nil {
+			logger.W("[note] 改名回写 wiki 引用失败 %q -> %q: %v", oldName, name, err)
+		}
 	}
 	return d.rebuildNoteIndex()
 }
