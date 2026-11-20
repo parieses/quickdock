@@ -4381,6 +4381,7 @@ export default {
   linkFromBody: 'From body [[...]]',
   linkSaveFirst: 'Save first to add links',
   linkEmpty: 'Nothing here yet',
+  linkTypeAll: 'All',
   linkTypeNote: 'Note',
   linkTypeTodo: 'Todo',
   linkTypeItem: 'Item',

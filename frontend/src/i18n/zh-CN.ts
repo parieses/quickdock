@@ -4397,6 +4397,7 @@ export default {
   linkFromBody: '来自正文 [[...]]',
   linkSaveFirst: '先保存后再添加关联',
   linkEmpty: '暂无内容',
+  linkTypeAll: '全部',
   linkTypeNote: '笔记',
   linkTypeTodo: '待办',
   linkTypeItem: '条目',

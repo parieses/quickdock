@@ -7,7 +7,7 @@
  * 跳转一律复用 bridge 里已有的深链（pendingOpenNoteId / pendingOpenTodoId /
  * pendingTarget），不另造事件或全局 ref。
  */
-import { ref, computed, watch, inject } from 'vue'
+import { ref, computed, watch, inject, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -67,8 +67,39 @@ const flatTargets = computed<Candidate[]>(() => [
   ...(targets.value.todos || []).map(x => ({ ...x, type: 'todo' as EntityType })),
   ...(targets.value.items || []).map(x => ({ ...x, type: 'item' as EntityType })),
 ])
+
+// 一级筛选：按类型分档。三类候选混在一个小列表里时，每行前面重复的「笔记 / 待办」
+// 类型字样要占掉一截宽度，条目一多就只能靠肉眼逐行比对，扫视成本很高。
+// 这里先选类型、再在类型内搜索，等于把平铺列表拆成两级；
+// 不用 hover 飞出菜单，是因为候选容器本身就是一百多像素的滚动区，浮层会被裁掉。
+const activeType = ref<'all' | EntityType>('all')
+
+const typeTabs = computed(() => {
+  const n = {
+    note: targets.value.notes?.length || 0,
+    todo: targets.value.todos?.length || 0,
+    item: targets.value.items?.length || 0,
+  }
+  const all = [{ key: 'all' as const, label: t('linkTypeAll'), n: n.note + n.todo + n.item }]
+  return [
+    ...all,
+    { key: 'note' as EntityType, label: t('linkTypeNote'), n: n.note },
+    { key: 'todo' as EntityType, label: t('linkTypeTodo'), n: n.todo },
+    { key: 'item' as EntityType, label: t('linkTypeItem'), n: n.item },
+  ].filter(x => x.key === 'all' || x.n > 0)
+})
+
+// 只选了一个类型时就没必要留「全部」这一档，直接落到该类型，少一次点击。
+function autoPickType() {
+  const rest = typeTabs.value.filter(x => x.key !== 'all')
+  activeType.value = rest.length === 1 ? (rest[0].key as EntityType) : 'all'
+}
+
+const scopedTargets = computed(() =>
+  activeType.value === 'all' ? flatTargets.value : flatTargets.value.filter(c => c.type === activeType.value),
+)
 const filteredTargets = computed(() =>
-  flatTargets.value.filter(c => matchesTextOrPinyin([c.label], query.value, 'link:' + c.type + ':' + c.id)),
+  scopedTargets.value.filter(c => matchesTextOrPinyin([c.label], query.value, 'link:' + c.type + ':' + c.id)),
 )
 
 function iconFor(type: string) {
@@ -116,6 +147,7 @@ async function loadAll() {
     links.value = unwrap<EntityLink[]>(a) || []
     backlinks.value = unwrap<BacklinkRow[]>(b) || []
     targets.value = unwrap<LinkTargetGroups>(c) || { notes: [], todos: [], items: [] }
+    autoPickType()
   } catch (e) {
     toast.error(getErrorMessage(e))
   } finally {
@@ -125,6 +157,18 @@ async function loadAll() {
 
 // 切换实体时把 compact 浮层收回去：不然在 A 文档点开后切到 B，浮层会一直盖在正文上
 watch(() => [props.srcType, props.srcId], () => { expanded.value = false; void loadAll() }, { immediate: true })
+
+// compact 宿主（笔记编辑区）里展开的是浮层，压在正文上：点正文或别处就该收回，
+// 否则只能再点一次标题，浮层一直挡着。非 compact 是表单内的一段，用户还要在里面操作，不做点外收起。
+const rootEl = ref<HTMLElement | null>(null)
+function onDocMouseDown(e: MouseEvent) {
+  if (!props.compact || !expanded.value) return
+  const target = e.target as Node | null
+  if (!target || rootEl.value?.contains(target)) return
+  expanded.value = false
+}
+onMounted(() => document.addEventListener('mousedown', onDocMouseDown, true))
+onUnmounted(() => document.removeEventListener('mousedown', onDocMouseDown, true))
 
 function pickCandidate(c: Candidate) {
   selectedTarget.value = { type: c.type, id: c.id, label: c.label }
@@ -176,7 +220,7 @@ function openBacklink(b: BacklinkRow) {
 </script>
 
 <template>
-  <div class="elp" :class="{ 'elp-compact': compact, 'elp-open': expanded }">
+  <div ref="rootEl" class="elp" :class="{ 'elp-compact': compact, 'elp-open': expanded }">
     <div v-key-click
       class="elp-head"
       :class="{ 'is-toggle': canToggle }"
@@ -213,6 +257,18 @@ function openBacklink(b: BacklinkRow) {
         </div>
         <!-- mousedown.prevent：点候选时不让输入框失焦（否则 blur 先收起列表，click 就丢掉了） -->
         <div v-if="candsOpen" class="elp-cands" @mousedown.prevent>
+          <!-- 一级：先按类型收窄。tab 常驻，不藏进下拉，切换只花一次点击。
+               只有一类候选时纯属多余，直接不渲染。 -->
+          <div v-if="typeTabs.length > 1" class="elp-tabs">
+            <button
+              v-for="tab in typeTabs"
+              :key="tab.key"
+              type="button"
+              class="elp-tab"
+              :class="{ on: activeType === tab.key }"
+              @click="activeType = tab.key"
+            >{{ tab.label }}<span class="elp-tab-n">{{ tab.n }}</span></button>
+          </div>
           <div v-if="!filteredTargets.length" class="elp-empty">{{ t('linkEmpty') }}</div>
           <button
             v-for="c in filteredTargets"
@@ -223,7 +279,8 @@ function openBacklink(b: BacklinkRow) {
             @click="pickCandidate(c)"
           >
             <component :is="iconFor(c.type)" :size="12" />
-            <span class="elp-cand-type">{{ typeLabel(c.type) }}</span>
+            <!-- 已按类型收窄时类型名是废话，让位给标题 -->
+            <span v-if="activeType === 'all'" class="elp-cand-type">{{ typeLabel(c.type) }}</span>
             <span class="elp-cand-label">{{ c.label }}</span>
           </button>
         </div>
@@ -301,7 +358,14 @@ function openBacklink(b: BacklinkRow) {
 .elp-add-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent-border); }
 .elp-add-btn:disabled { opacity: 0.4; cursor: default; }
 
-.elp-cands { max-height: 96px; overflow-y: auto; margin-top: var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-primary); }
+.elp-cands { max-height: 132px; overflow-y: auto; margin-top: var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-primary); }
+/* 一级类型栏吸顶：候选一多要滚，类型档位不能跟着滚出去 */
+.elp-tabs { position: sticky; top: 0; display: flex; gap: 2px; padding: 4px; background: var(--color-bg-primary); border-bottom: 1px solid var(--color-border); }
+.elp-tab { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: none; border-radius: var(--radius-xs); background: transparent; color: var(--color-text-muted); font-family: inherit; font-size: var(--text-xs); cursor: pointer; }
+.elp-tab:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.elp-tab.on { background: var(--color-accent-bg); color: var(--color-accent); }
+.elp-tab-n { color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
+.elp-tab.on .elp-tab-n { color: inherit; opacity: 0.7; }
 .elp-cand { display: flex; align-items: center; gap: var(--space-2); width: 100%; padding: var(--space-2) var(--space-3); border: none; background: transparent; color: var(--color-text-secondary); text-align: left; cursor: pointer; font-family: inherit; font-size: var(--text-sm); }
 .elp-cand:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .elp-cand.is-picked { background: var(--color-accent-bg); color: var(--color-accent); }

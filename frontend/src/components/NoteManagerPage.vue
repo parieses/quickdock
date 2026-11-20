@@ -1229,13 +1229,30 @@ function onAiWriteBack(text: string, mode: 'insert' | 'replace' | 'append') {
 const showWikiPicker = ref(false)
 const wikiQuery = ref('')
 const wikiTargets = ref<LinkTargetGroups>({ notes: [], todos: [], items: [] })
+// 与 EntityLinkPicker 同一套两级逻辑：三类候选平铺时每行都要重复「笔记」前缀，
+// 标题被挤到右边，条目一多只能逐行比对。先按类型收窄，再在类型内搜索。
+const wikiActiveType = ref<'all' | EntityType>('all')
+const wikiTypeTabs = computed(() => {
+  const n = {
+    note: wikiTargets.value.notes?.length || 0,
+    todo: wikiTargets.value.todos?.length || 0,
+    item: wikiTargets.value.items?.length || 0,
+  }
+  return [
+    { key: 'all' as const, label: t('linkTypeAll'), n: n.note + n.todo + n.item },
+    { key: 'note' as EntityType, label: t('linkTypeNote'), n: n.note },
+    { key: 'todo' as EntityType, label: t('linkTypeTodo'), n: n.todo },
+    { key: 'item' as EntityType, label: t('linkTypeItem'), n: n.item },
+  ].filter(x => x.key === 'all' || x.n > 0)
+})
 const wikiCandidates = computed(() => {
   const all: { type: EntityType; id: string; label: string }[] = [
     ...(wikiTargets.value.notes || []).map(x => ({ ...x, type: 'note' as EntityType })),
     ...(wikiTargets.value.todos || []).map(x => ({ ...x, type: 'todo' as EntityType })),
     ...(wikiTargets.value.items || []).map(x => ({ ...x, type: 'item' as EntityType })),
   ]
-  return all.filter(c => matchesTextOrPinyin([c.label], wikiQuery.value, 'wiki:' + c.type + ':' + c.id))
+  const scoped = wikiActiveType.value === 'all' ? all : all.filter(c => c.type === wikiActiveType.value)
+  return scoped.filter(c => matchesTextOrPinyin([c.label], wikiQuery.value, 'wiki:' + c.type + ':' + c.id))
 })
 function linkTypeLabel(type: string): string {
   if (type === 'note') return t('linkTypeNote')
@@ -1243,11 +1260,28 @@ function linkTypeLabel(type: string): string {
   if (type === 'item') return t('linkTypeItem')
   return type
 }
+// 点外部关闭：原先只有再点一次工具条上的链接按钮才收起，在正文里点一下、
+// 或去点旁边别的按钮时浮层会一直挂着，挡住正文。
+const wikiPopEl = ref<HTMLElement | null>(null)
+const wikiBtnEl = ref<HTMLElement | null>(null)
+function onWikiDocDown(e: MouseEvent) {
+  if (!showWikiPicker.value) return
+  const target = e.target as Node | null
+  if (!target) return
+  // 按钮自身的开合交给 @click 的 toggle，这里必须放过去，
+  // 否则 mousedown 先关掉、紧接着 click 又打开，看起来像没反应。
+  if (wikiPopEl.value?.contains(target) || wikiBtnEl.value?.contains(target)) return
+  showWikiPicker.value = false
+}
+
 async function openWikiPicker() {
   showWikiPicker.value = !showWikiPicker.value
   if (!showWikiPicker.value) return
   try {
     wikiTargets.value = unwrap<LinkTargetGroups>(await ListLinkTargets()) || { notes: [], todos: [], items: [] }
+    // 只有一类有候选时不必留「全部」档，直接落到该类型，少一次点击。
+    const rest = wikiTypeTabs.value.filter(x => x.key !== 'all')
+    wikiActiveType.value = rest.length === 1 ? (rest[0].key as EntityType) : 'all'
   } catch (e) {
     toast.error(getErrorMessage(e))
   }
@@ -1274,9 +1308,11 @@ async function renameCurrent() {
 onMounted(() => {
   loadTreePrefs(); loadRecent(); loadNoteView(); load()
   docEditorHost.value?.addEventListener('paste', onEditorPaste, true)
+  document.addEventListener('mousedown', onWikiDocDown, true)
 })
 onBeforeUnmount(() => {
   docEditorHost.value?.removeEventListener('paste', onEditorPaste, true)
+  document.removeEventListener('mousedown', onWikiDocDown, true)
   if (savedResetTimer) clearTimeout(savedResetTimer)
   void flushPendingSave()
   offDocScroll?.()
@@ -1522,16 +1558,27 @@ watch(pendingOpenNoteId, (id) => {
             <button class="ne-copy" :title="t('notesExportMd')" @click="exportDoc"><FileDown :size="13" /></button>
             <button class="ne-copy" :title="t('copy')" @click="copyDoc"><CopyIcon :size="13" /></button>
             <button v-if="tocItems.length" class="ne-copy" :class="{ active: tocOpen }" :title="t('notesToc')" @click="tocOpen = !tocOpen"><List :size="13" /></button>
-            <button class="ne-copy" :title="t('wikiInsertLink')" @click="openWikiPicker"><Link2 :size="13" /></button>
-            <div v-if="showWikiPicker" class="ne-wiki-pop">
+            <button ref="wikiBtnEl" class="ne-copy" :title="t('wikiInsertLink')" @click="openWikiPicker"><Link2 :size="13" /></button>
+            <div v-if="showWikiPicker" ref="wikiPopEl" class="ne-wiki-pop">
               <div class="ne-wiki-search">
                 <Search :size="12" />
-                <input v-model="wikiQuery" class="ne-wiki-input" :placeholder="t('search')" spellcheck="false" />
+                <input v-model="wikiQuery" class="ne-wiki-input" :placeholder="t('search')" spellcheck="false" @keydown.esc="showWikiPicker = false" />
+              </div>
+              <!-- 一级：按类型收窄，只有一类候选时不渲染 -->
+              <div v-if="wikiTypeTabs.length > 1" class="ne-wiki-tabs">
+                <button
+                  v-for="tab in wikiTypeTabs"
+                  :key="tab.key"
+                  type="button"
+                  class="ne-wiki-tab"
+                  :class="{ on: wikiActiveType === tab.key }"
+                  @click="wikiActiveType = tab.key"
+                >{{ tab.label }}<span class="ne-wiki-tab-n">{{ tab.n }}</span></button>
               </div>
               <div class="ne-wiki-list">
                 <div v-if="!wikiCandidates.length" class="ne-wiki-empty">{{ t('linkEmpty') }}</div>
                 <button v-for="c in wikiCandidates" :key="c.type + ':' + c.id" class="ne-wiki-item" @click="insertWiki(c)">
-                  <span class="ne-wiki-type">{{ linkTypeLabel(c.type) }}</span>
+                  <span v-if="wikiActiveType === 'all'" class="ne-wiki-type">{{ linkTypeLabel(c.type) }}</span>
                   <span class="ne-wiki-label">{{ c.label }}</span>
                 </button>
               </div>
@@ -1687,6 +1734,13 @@ watch(pendingOpenNoteId, (id) => {
 .ne-wiki-input { flex: 1; min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: var(--text-sm); outline: none; font-family: inherit; }
 .ne-wiki-input:focus { border-color: var(--color-border-focus-soft); }
 .ne-wiki-list { max-height: 180px; overflow-y: auto; margin-top: var(--space-3); }
+/* 一级类型档位：pop 只有 260px 宽，四档要允许换行 */
+.ne-wiki-tabs { display: flex; flex-wrap: wrap; gap: 2px; margin-top: var(--space-2); }
+.ne-wiki-tab { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: none; border-radius: var(--radius-xs); background: transparent; color: var(--color-text-muted); font-family: inherit; font-size: var(--text-xs); cursor: pointer; }
+.ne-wiki-tab:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.ne-wiki-tab.on { background: var(--color-accent-bg); color: var(--color-accent); }
+.ne-wiki-tab-n { color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
+.ne-wiki-tab.on .ne-wiki-tab-n { color: inherit; opacity: 0.7; }
 .ne-wiki-empty { padding: var(--space-3); color: var(--color-text-disabled); font-size: var(--text-sm); }
 .ne-wiki-item { display: flex; align-items: center; gap: var(--space-3); width: 100%; padding: var(--space-2) var(--space-3); border: none; border-radius: var(--radius-xs); background: transparent; color: var(--color-text-primary); text-align: left; cursor: pointer; font-family: inherit; font-size: var(--text-sm); }
 .ne-wiki-item:hover { background: var(--color-bg-hover); }
