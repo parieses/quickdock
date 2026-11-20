@@ -396,6 +396,8 @@ export type EntityType = 'note' | 'todo' | 'item'
 export interface LinkTarget {
   id: string
   label: string
+  /** 区分重名项的次要信息：笔记=父文件夹、待办=到期日、条目=所属集合。可能为空。 */
+  hint?: string
 }
 
 export interface LinkTargetGroups {

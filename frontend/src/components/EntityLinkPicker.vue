@@ -19,6 +19,7 @@ import {
   AddEntityLink,
   RemoveEntityLink,
   ListLinkTargets,
+  SearchLinkTargets,
   ResolveWikiTarget,
 } from '../../bindings/quickdock/services/appservice'
 import { Link2, FileText, ListTodo, Box, Trash2, Search, Plus, ArrowUpRight, ChevronDown } from '@lucide/vue'
@@ -35,8 +36,8 @@ const props = withDefaults(defineProps<{
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 
-// 反链行的来源标题不在 EntityLink 出边表里，后端若补字段会带在这些可选键上；
-// 都拿不到就按「已删除」降级，绝不抛错。
+// 反链行的来源标题由服务端补在 srcLabel 上（边表本身没有来源快照）；
+// 目标已被删除时才拿不到，走「已删除」降级，绝不抛错。
 type BacklinkRow = EntityLink & { srcLabel?: string; label?: string; title?: string; name?: string }
 type Candidate = LinkTarget & { type: EntityType }
 
@@ -59,8 +60,25 @@ function toggle() {
   expanded.value = !expanded.value
 }
 
+// manual 与 wiki 边可能指向同一个目标（界面上加过，正文里又写了 [[...]]）：
+// 唯一索引含 kind，两条都会留着。不合并的话，同一标题会在「正向关联」和
+// 「来自正文」里各出现一次，看着像重复关联了两次。
+function linkKey(dstType: string, dstId: string, dstLabel: string): string {
+  return dstType + '\x00' + (dstId || 'label:' + dstLabel)
+}
+
 const manual = computed(() => links.value.filter(l => l.kind !== 'wiki'))
-const wiki = computed(() => links.value.filter(l => l.kind === 'wiki'))
+const wikiAll = computed(() => links.value.filter(l => l.kind === 'wiki'))
+const manualKeys = computed(() => new Set(manual.value.map(l => linkKey(l.dstType, l.dstId, l.dstLabel))))
+const wikiKeySet = computed(() => new Set(wikiAll.value.map(l => linkKey(l.dstType, l.dstId, l.dstLabel))))
+// 「来自正文」只列手动关联没覆盖到的目标
+const wiki = computed(() =>
+  wikiAll.value.filter(l => !manualKeys.value.has(linkKey(l.dstType, l.dstId, l.dstLabel))),
+)
+// 手动行如果正文也提到了，加角标说明还有一条 wiki 边
+function alsoInBody(l: EntityLink): boolean {
+  return wikiKeySet.value.has(linkKey(l.dstType, l.dstId, l.dstLabel))
+}
 
 const flatTargets = computed<Candidate[]>(() => [
   ...(targets.value.notes || []).map(x => ({ ...x, type: 'note' as EntityType })),
@@ -95,12 +113,82 @@ function autoPickType() {
   activeType.value = rest.length === 1 ? (rest[0].key as EntityType) : 'all'
 }
 
+// 候选懒加载：候选是三类全量集合（各上限 2000），而面板默认收起，多数时候根本用不到。
+// 改成第一次打开候选时才拉，之后 60s 内复用缓存；原来每次切换实体都拉一遍，
+// 在笔记页来回切文档时纯属白搬几百 KB。
+const targetsLoaded = ref(false)
+const targetsLoading = ref(false)
+let targetsAt = 0
+const targetsTTL = 60_000
+
+async function ensureTargets() {
+  if (targetsLoading.value) return
+  if (targetsLoaded.value && Date.now() - targetsAt < targetsTTL) return
+  targetsLoading.value = true
+  try {
+    targets.value = unwrap<LinkTargetGroups>(await ListLinkTargets()) || { notes: [], todos: [], items: [] }
+    targetsLoaded.value = true
+    targetsAt = Date.now()
+    // 档位依赖各类型的候选数量，候选到位后才能判断该不该收成单档
+    if (!typeTabs.value.some(x => x.key === activeType.value)) autoPickType()
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  } finally {
+    targetsLoading.value = false
+  }
+}
+
+// 服务端搜索：本地候选有 2000/类 的上限，第 2001 条起本地再怎么筛也筛不到
+// （表现为「明明有这篇笔记，就是搜不出来」）。输入变化时防抖补一次服务端
+// 标题 LIKE，结果并到本地命中之后。拼音匹配仍只作用于本地集合。
+const remoteHits = ref<Candidate[]>([])
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+let searchSeq = 0
+
+async function runRemoteSearch() {
+  const kw = query.value.trim()
+  if (!kw) { remoteHits.value = []; return }
+  const seq = ++searchSeq
+  try {
+    const typ = activeType.value === 'all' ? '' : activeType.value
+    const res = unwrap<LinkTargetGroups>(await SearchLinkTargets(kw, typ, 50))
+    if (seq !== searchSeq) return // 后发先至的旧结果直接丢弃
+    remoteHits.value = [
+      ...(res?.notes || []).map(x => ({ ...x, type: 'note' as EntityType })),
+      ...(res?.todos || []).map(x => ({ ...x, type: 'todo' as EntityType })),
+      ...(res?.items || []).map(x => ({ ...x, type: 'item' as EntityType })),
+    ]
+  } catch {
+    // 服务端搜索只是补齐手段，失败时本地结果照常可用，不打断输入
+  }
+}
+
+function scheduleRemoteSearch() {
+  if (searchTimer) clearTimeout(searchTimer)
+  if (!query.value.trim()) { remoteHits.value = []; return }
+  searchTimer = setTimeout(() => { void runRemoteSearch() }, 250)
+}
+
+function openCands() {
+  candsOpen.value = true
+  void ensureTargets()
+  if (query.value.trim()) scheduleRemoteSearch()
+}
+
 const scopedTargets = computed(() =>
   activeType.value === 'all' ? flatTargets.value : flatTargets.value.filter(c => c.type === activeType.value),
 )
-const filteredTargets = computed(() =>
-  scopedTargets.value.filter(c => matchesTextOrPinyin([c.label], query.value, 'link:' + c.type + ':' + c.id)),
-)
+const filteredTargets = computed(() => {
+  const local = scopedTargets.value.filter(c =>
+    matchesTextOrPinyin([c.label], query.value, 'link:' + c.type + ':' + c.id),
+  )
+  if (!query.value.trim() || !remoteHits.value.length) return local
+  const seen = new Set(local.map(c => c.type + ':' + c.id))
+  const extra = remoteHits.value.filter(c =>
+    (activeType.value === 'all' || c.type === activeType.value) && !seen.has(c.type + ':' + c.id),
+  )
+  return [...local, ...extra]
+})
 
 function iconFor(type: string) {
   if (type === 'note') return FileText
@@ -139,15 +227,12 @@ async function loadAll() {
   if (!props.srcId) { links.value = []; backlinks.value = []; return }
   loading.value = true
   try {
-    const [a, b, c] = await Promise.all([
+    const [a, b] = await Promise.all([
       ListEntityLinks(props.srcType, props.srcId),
       ListEntityBacklinks(props.srcType, props.srcId, props.srcLabel || ''),
-      ListLinkTargets(),
     ])
     links.value = unwrap<EntityLink[]>(a) || []
     backlinks.value = unwrap<BacklinkRow[]>(b) || []
-    targets.value = unwrap<LinkTargetGroups>(c) || { notes: [], todos: [], items: [] }
-    autoPickType()
   } catch (e) {
     toast.error(getErrorMessage(e))
   } finally {
@@ -157,6 +242,10 @@ async function loadAll() {
 
 // 切换实体时把 compact 浮层收回去：不然在 A 文档点开后切到 B，浮层会一直盖在正文上
 watch(() => [props.srcType, props.srcId], () => { expanded.value = false; void loadAll() }, { immediate: true })
+
+// 展开面板就预取候选：类型档位的数量依赖它，等用户点到搜索框才拉会先闪一下空档。
+// 仍然只在「真的要用」时才请求 —— 面板默认收起，绝大多数笔记页停留都不会触发。
+watch(expanded, (v) => { if (v) void ensureTargets() })
 
 // compact 宿主（笔记编辑区）里展开的是浮层，压在正文上：点正文或别处就该收回，
 // 否则只能再点一次标题，浮层一直挡着。非 compact 是表单内的一段，用户还要在里面操作，不做点外收起。
@@ -247,7 +336,7 @@ function openBacklink(b: BacklinkRow) {
             class="elp-add-input"
             :placeholder="t('search')"
             spellcheck="false"
-            @focus="candsOpen = true"
+            @focus="openCands"
             @blur="candsOpen = false"
             @keydown.esc="candsOpen = false"
           />
@@ -282,6 +371,8 @@ function openBacklink(b: BacklinkRow) {
             <!-- 已按类型收窄时类型名是废话，让位给标题 -->
             <span v-if="activeType === 'all'" class="elp-cand-type">{{ typeLabel(c.type) }}</span>
             <span class="elp-cand-label">{{ c.label }}</span>
+            <!-- 重名靠 hint 区分：同名日报看父文件夹，同名待办看到期日 -->
+            <span v-if="c.hint" class="elp-cand-hint">{{ c.hint }}</span>
           </button>
         </div>
       </div>
@@ -292,6 +383,8 @@ function openBacklink(b: BacklinkRow) {
         <component :is="iconFor(l.dstType)" :size="12" class="elp-row-icon" />
         <span class="elp-type">{{ typeLabel(l.dstType) }}</span>
         <span class="elp-label">{{ l.dstLabel || t('deleted') }}</span>
+        <!-- 正文里也写了 [[...]]：只剩这一条，但标出来省得用户以为漏了 -->
+        <span v-if="alsoInBody(l)" class="elp-wiki-mark" :title="t('linkFromBody')">[[]]</span>
         <button type="button" class="elp-del" :title="t('delete')" @click.stop="removeLink(l.id)">
           <Trash2 :size="12" />
         </button>
@@ -371,6 +464,10 @@ function openBacklink(b: BacklinkRow) {
 .elp-cand.is-picked { background: var(--color-accent-bg); color: var(--color-accent); }
 .elp-cand-type { flex-shrink: 0; color: var(--color-text-muted); }
 .elp-cand-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 次要信息（父文件夹 / 到期日 / 所属集合）：只用来区分重名，不该抢标题的宽度 */
+.elp-cand-hint { flex-shrink: 0; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-disabled); font-size: var(--text-xs); }
+/* 「正文也写了 [[...]]」角标 */
+.elp-wiki-mark { flex-shrink: 0; color: var(--color-text-disabled); font-size: var(--text-xs); }
 
 .elp-sec { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); padding-bottom: var(--space-1); color: var(--color-text-muted); font-weight: 600; }
 .elp-n { color: var(--color-text-disabled); font-weight: 500; }

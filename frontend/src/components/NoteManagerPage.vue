@@ -44,7 +44,7 @@ import {
   ImportNotes,
 } from '../../bindings/quickdock/services/note/noteservice'
 import { CopyText } from '../../bindings/quickdock/services/clipboard/clipboardservice'
-import { ResolveWikiTarget, ListLinkTargets } from '../../bindings/quickdock/services/appservice'
+import { ResolveWikiTarget, ListLinkTargets, SearchLinkTargets } from '../../bindings/quickdock/services/appservice'
 import {
   Trash2, Search, X, FolderPlus, FileText, Folder,
   Copy as CopyIcon, PanelLeft, PanelLeftClose, ChevronDown, Sparkles, FileDown, List,
@@ -1245,14 +1245,58 @@ const wikiTypeTabs = computed(() => {
     { key: 'item' as EntityType, label: t('linkTypeItem'), n: n.item },
   ].filter(x => x.key === 'all' || x.n > 0)
 })
+type WikiCand = { type: EntityType; id: string; label: string; hint?: string }
+
+// 服务端候选搜索：本地候选被 LIMIT 截断后，靠它兜住「有这篇却搜不到」。
+// 与 EntityLinkPicker 同一套策略：防抖 250ms，只补不替，失败静默。
+const wikiRemoteHits = ref<WikiCand[]>([])
+let wikiSearchTimer: ReturnType<typeof setTimeout> | null = null
+let wikiSearchSeq = 0
+
+async function runWikiRemoteSearch() {
+  const kw = wikiQuery.value.trim()
+  if (!kw) { wikiRemoteHits.value = []; return }
+  const seq = ++wikiSearchSeq
+  try {
+    const typ = wikiActiveType.value === 'all' ? '' : wikiActiveType.value
+    const res = unwrap<LinkTargetGroups>(await SearchLinkTargets(kw, typ, 50))
+    if (seq !== wikiSearchSeq) return
+    wikiRemoteHits.value = [
+      ...(res?.notes || []).map(x => ({ ...x, type: 'note' as EntityType })),
+      ...(res?.todos || []).map(x => ({ ...x, type: 'todo' as EntityType })),
+      ...(res?.items || []).map(x => ({ ...x, type: 'item' as EntityType })),
+    ]
+  } catch {
+    // 补齐手段失败不影响本地结果
+  }
+}
+
+function scheduleWikiRemoteSearch() {
+  if (wikiSearchTimer) clearTimeout(wikiSearchTimer)
+  if (!wikiQuery.value.trim()) { wikiRemoteHits.value = []; return }
+  wikiSearchTimer = setTimeout(() => { void runWikiRemoteSearch() }, 250)
+}
+
+watch(wikiQuery, scheduleWikiRemoteSearch)
+watch(wikiActiveType, () => {
+  wikiRemoteHits.value = []
+  if (wikiQuery.value.trim()) scheduleWikiRemoteSearch()
+})
+
 const wikiCandidates = computed(() => {
-  const all: { type: EntityType; id: string; label: string }[] = [
+  const all: WikiCand[] = [
     ...(wikiTargets.value.notes || []).map(x => ({ ...x, type: 'note' as EntityType })),
     ...(wikiTargets.value.todos || []).map(x => ({ ...x, type: 'todo' as EntityType })),
     ...(wikiTargets.value.items || []).map(x => ({ ...x, type: 'item' as EntityType })),
   ]
   const scoped = wikiActiveType.value === 'all' ? all : all.filter(c => c.type === wikiActiveType.value)
-  return scoped.filter(c => matchesTextOrPinyin([c.label], wikiQuery.value, 'wiki:' + c.type + ':' + c.id))
+  const local = scoped.filter(c => matchesTextOrPinyin([c.label], wikiQuery.value, 'wiki:' + c.type + ':' + c.id))
+  if (!wikiQuery.value.trim() || !wikiRemoteHits.value.length) return local
+  const seen = new Set(local.map(c => c.type + ':' + c.id))
+  const extra = wikiRemoteHits.value.filter(c =>
+    (wikiActiveType.value === 'all' || c.type === wikiActiveType.value) && !seen.has(c.type + ':' + c.id),
+  )
+  return [...local, ...extra]
 })
 function linkTypeLabel(type: string): string {
   if (type === 'note') return t('linkTypeNote')
@@ -1282,6 +1326,8 @@ async function openWikiPicker() {
     // 只有一类有候选时不必留「全部」档，直接落到该类型，少一次点击。
     const rest = wikiTypeTabs.value.filter(x => x.key !== 'all')
     wikiActiveType.value = rest.length === 1 ? (rest[0].key as EntityType) : 'all'
+    wikiRemoteHits.value = []
+    if (wikiQuery.value.trim()) scheduleWikiRemoteSearch()
   } catch (e) {
     toast.error(getErrorMessage(e))
   }
@@ -1296,6 +1342,7 @@ function insertWiki(c: { type: EntityType; label: string }) {
   // watch(docContent) 会把新内容同步进 CM；这里只额外落一次盘并收起浮层。
   showWikiPicker.value = false
   wikiQuery.value = ''
+  wikiRemoteHits.value = []
   void saveDoc()
   docEditor?.focus()
 }
@@ -1580,6 +1627,8 @@ watch(pendingOpenNoteId, (id) => {
                 <button v-for="c in wikiCandidates" :key="c.type + ':' + c.id" class="ne-wiki-item" @click="insertWiki(c)">
                   <span v-if="wikiActiveType === 'all'" class="ne-wiki-type">{{ linkTypeLabel(c.type) }}</span>
                   <span class="ne-wiki-label">{{ c.label }}</span>
+                  <!-- 重名靠 hint 区分：同名日报看父文件夹，同名待办看到期日 -->
+                  <span v-if="c.hint" class="ne-wiki-hint">{{ c.hint }}</span>
                 </button>
               </div>
             </div>
@@ -1746,6 +1795,8 @@ watch(pendingOpenNoteId, (id) => {
 .ne-wiki-item:hover { background: var(--color-bg-hover); }
 .ne-wiki-type { flex-shrink: 0; color: var(--color-text-muted); }
 .ne-wiki-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 次要信息（父文件夹 / 到期日 / 所属集合）：只用来区分重名，不抢标题宽度 */
+.ne-wiki-hint { flex-shrink: 0; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-disabled); font-size: var(--text-xs); }
 .ne-tags { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-5); border-bottom: 1px solid var(--color-border); }
 .ne-tags-label { font-size: var(--text-xs); color: var(--color-text-muted); flex-shrink: 0; }
 .ne-tags-input { flex: 1; padding: var(--space-2) var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: var(--text-sm); outline: none; font-family: inherit; }
