@@ -173,6 +173,20 @@ const propfindBody = `<?xml version="1.0" encoding="utf-8"?>
 // 上层能据此给出可操作的指引，而不是让用户对着「用户名或密码错误」去猜。
 var ErrUnauthorized = errors.New("网关拒绝认证（HTTP 401）")
 
+// ErrGatewayUnreachable 网关连不上（连接层失败，而非网关返回 HTTP 错误）。
+// 上层据此区分「网关没起来」与「网关返回 HTTP 错误」，不要匹配中文文案：
+// 文案会改、会被包装，哨兵用 errors.Is 判断才稳。
+var ErrGatewayUnreachable = errors.New("无法连接网盘网关")
+
+const (
+	// transferOverallTimeout 单次下载/上传的整体上限。几 GB 的大文件走慢网盘
+	// 可以传很久，但不能无限挂住 goroutine（.part 残留、批量上传卡后续文件）。
+	transferOverallTimeout = 2 * time.Hour
+	// transferIdleTimeout 连续多久没有字节进展就判定停滞并中断。真正的慢速
+	// 连接仍在推进，看门狗会一直被重置；只有彻底卡死才触发。
+	transferIdleTimeout = 90 * time.Second
+)
+
 // Test 探测连通性：PROPFIND Depth:0 根目录。错误信息区分 401（凭据错）与其它。
 func (c *Client) Test(ctx context.Context) error {
 	status, _, err := c.propfind(ctx, "/", 0)
@@ -250,8 +264,18 @@ func (c *Client) List(ctx context.Context, dir string) ([]Entry, error) {
 }
 
 // Download 把远端文件写入 w。返回文件总大小（服务器未给 Content-Length 时为 -1）。
+//
+// 两道护栏：整体超时 + 读空闲看门狗。dlClient 只有 ResponseHeaderTimeout，
+// 响应头到手后中途挂起会让 Read 永久阻塞，.part 永远留在盘上、批量任务卡死。
 func (c *Client) Download(ctx context.Context, remotePath string, w io.Writer, onProgress func(done, total int64)) (int64, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.fullURL(remotePath), nil)
+	ctx, cancel := context.WithTimeout(ctx, transferOverallTimeout)
+	defer cancel()
+	// 空闲看门狗单独派生：读到一个字节就重置计时器，超时则取消请求，
+	// 让阻塞中的 Read 立刻返回，而不是等一个永远不会来的字节。
+	idleCtx, idleCancel := context.WithCancel(ctx)
+	defer idleCancel()
+
+	req, err := http.NewRequestWithContext(idleCtx, http.MethodGet, c.fullURL(remotePath), nil)
 	if err != nil {
 		return -1, err
 	}
@@ -275,12 +299,35 @@ func (c *Client) Download(ctx context.Context, remotePath string, w io.Writer, o
 		return -1, fmt.Errorf("下载失败（HTTP %d）", resp.StatusCode)
 	}
 
+	idle := time.NewTimer(transferIdleTimeout)
+	defer idle.Stop()
+	watchDone := make(chan struct{})
+	defer close(watchDone)
+	go func() {
+		select {
+		case <-idle.C:
+			idleCancel()
+		case <-idleCtx.Done():
+		case <-watchDone:
+		}
+	}()
+	resetIdle := func() {
+		if !idle.Stop() {
+			select {
+			case <-idle.C:
+			default:
+			}
+		}
+		idle.Reset(transferIdleTimeout)
+	}
+
 	total := resp.ContentLength
 	var done int64
 	buf := make([]byte, 256<<10)
 	for {
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {
+			resetIdle()
 			if _, werr := w.Write(buf[:n]); werr != nil {
 				return done, fmt.Errorf("写入本地文件失败: %w", werr)
 			}
@@ -293,10 +340,69 @@ func (c *Client) Download(ctx context.Context, remotePath string, w io.Writer, o
 			break
 		}
 		if rerr != nil {
+			if ctx.Err() != nil {
+				return done, fmt.Errorf("下载已取消或超时: %w", ctx.Err())
+			}
+			if idleCtx.Err() != nil {
+				return done, fmt.Errorf("下载停滞超过 %s，已中断", transferIdleTimeout)
+			}
 			return done, fmt.Errorf("下载中断: %w", rerr)
 		}
 	}
 	return total, nil
+}
+
+// UploadGuarded 在 Upload 之上加整体超时与读空闲看门狗。
+// Upload（write.go）用无整体超时的 dlClient：服务端停止读 body 时，写会一直
+// 阻塞，批量上传后面的文件全卡住。这里不改它的签名，由服务层改调本方法。
+func (c *Client) UploadGuarded(ctx context.Context, remotePath string, r io.Reader, size int64, onProgress func(done, total int64)) error {
+	ctx, cancel := context.WithTimeout(ctx, transferOverallTimeout)
+	defer cancel()
+	idleCtx, idleCancel := context.WithCancel(ctx)
+	defer idleCancel()
+
+	idle := time.NewTimer(transferIdleTimeout)
+	defer idle.Stop()
+	watchDone := make(chan struct{})
+	defer close(watchDone)
+	go func() {
+		select {
+		case <-idle.C:
+			idleCancel()
+		case <-idleCtx.Done():
+		case <-watchDone:
+		}
+	}()
+	resetIdle := func() {
+		if !idle.Stop() {
+			select {
+			case <-idle.C:
+			default:
+			}
+		}
+		idle.Reset(transferIdleTimeout)
+	}
+	if err := c.Upload(idleCtx, remotePath, &idleWatchReader{r: r, note: resetIdle}, size, onProgress); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("上传已取消或超时: %w", ctx.Err())
+		}
+		if idleCtx.Err() != nil {
+			return fmt.Errorf("上传停滞超过 %s，已中断", transferIdleTimeout)
+		}
+		return err
+	}
+	return nil
+}
+
+// idleWatchReader 每次 Read 都通知看门狗「传输还有进展」。
+type idleWatchReader struct {
+	r    io.Reader
+	note func()
+}
+
+func (w *idleWatchReader) Read(p []byte) (int, error) {
+	w.note()
+	return w.r.Read(p)
 }
 
 // ---- 内部 ----
@@ -313,7 +419,7 @@ func (c *Client) propfind(ctx context.Context, dir string, depth int) (int, []by
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("无法连接网盘网关: %w", err)
+		return 0, nil, fmt.Errorf("%w: %w", ErrGatewayUnreachable, err)
 	}
 	defer resp.Body.Close()
 	const maxResp = 32 << 20 // 32MB：目录列表响应的上限，防异常响应撑爆内存

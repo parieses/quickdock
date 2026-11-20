@@ -46,11 +46,31 @@ type NetdiskService struct {
 	// proxy 远端文件的本地预览通道（懒启动，见 ensureProxy）。
 	mu    sync.Mutex
 	proxy *netdisk.ProxyServer
+
+	// transferCtx 是所有下载/上传的父 ctx：客户端在它之上再加整体/空闲超时，
+	// Close 时一次取消全部在途传输，避免退出后还挂着 goroutine 写 .part。
+	transferCtx    context.Context
+	transferCancel context.CancelFunc
+
+	// 网关状态探测的短缓存：首屏不再同步等 2s 的 PROPFIND，
+	// 后台单飞刷新，后续调用读缓存值（结构不变）。
+	setupMu         sync.Mutex
+	setupNeed       bool
+	setupAt         time.Time
+	setupRefreshing bool
 }
 
 // NewNetdiskService 创建服务实例。
 func NewNetdiskService(app *services.AppService) *NetdiskService {
-	return &NetdiskService{App: app}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &NetdiskService{App: app, transferCtx: ctx, transferCancel: cancel}
+}
+
+// Close 取消所有在途网盘传输。由宿主退出流程调用（接线点在 App 关闭处）。
+func (s *NetdiskService) Close() {
+	if s.transferCancel != nil {
+		s.transferCancel()
+	}
 }
 
 // GatewayInfo 网关连接概览，前端据此决定是「引导安装」还是「直接列目录」。
@@ -111,7 +131,7 @@ func (s *NetdiskService) NetdiskStatus() *services.ApiResult {
 		info.Version = st.Version
 	}
 	if info.Running {
-		info.NeedSetup = s.gatewayNeedSetup()
+		info.NeedSetup = s.gatewayNeedSetupCached()
 	}
 	// 预览代理按需启动：只有页面真的打开才占一个本地端口。
 	if p := s.ensureProxy(); p != nil {
@@ -180,13 +200,42 @@ func (s *NetdiskService) gatewayNeedSetup() bool {
 	entries, err := c.List(ctx, "/")
 	if err != nil {
 		if errors.Is(err, netdisk.ErrUnauthorized) ||
-			strings.Contains(err.Error(), "无法连接") ||
+			errors.Is(err, netdisk.ErrGatewayUnreachable) ||
 			s.gatewayDatabaseLocked() {
 			return false
 		}
 		return true
 	}
 	return len(entries) == 0
+}
+
+// gatewaySetupTTL 网关「是否需要引导配置」结果的缓存有效期。
+// 状态探测要发一次根目录 PROPFIND（网关未就绪时最多等 2s），首屏同步等它
+// 会明显拖慢加载；缓存 + 单飞后台刷新后，后续首屏/轮询直接读值。
+const gatewaySetupTTL = 20 * time.Second
+
+// gatewayNeedSetupCached 返回缓存的引导标记，必要时在后台单飞刷新。
+// 第一次调用还没有缓存时先返回 false 并异步探测，绝不阻塞首屏。
+func (s *NetdiskService) gatewayNeedSetupCached() bool {
+	s.setupMu.Lock()
+	if s.setupAt.IsZero() || time.Since(s.setupAt) >= gatewaySetupTTL {
+		if !s.setupRefreshing {
+			s.setupRefreshing = true
+			go s.refreshGatewayNeedSetup()
+		}
+	}
+	need := s.setupNeed
+	s.setupMu.Unlock()
+	return need
+}
+
+func (s *NetdiskService) refreshGatewayNeedSetup() {
+	need := s.gatewayNeedSetup() // 内部自带 2s 超时与哨兵错误判断
+	s.setupMu.Lock()
+	s.setupNeed = need
+	s.setupAt = time.Now()
+	s.setupRefreshing = false
+	s.setupMu.Unlock()
 }
 
 // NetdiskListDir 列出网关上的目录。path 为空表示根（各网盘的挂载点都在这层）。
@@ -325,7 +374,11 @@ func (s *NetdiskService) runDownload(c *netdisk.Client, remotePath, destPath str
 		}
 	}
 
-	total, err := c.Download(context.Background(), remotePath, f, onProgress)
+	ctx := s.transferCtx
+	if ctx == nil {
+		ctx = context.Background() // 兼容直接构造结构体的调用方
+	}
+	total, err := c.Download(ctx, remotePath, f, onProgress)
 	if err != nil {
 		fail(err.Error()) // 只删 .part，用户已有的同名文件保持原样
 		return
@@ -563,6 +616,10 @@ func (s *NetdiskService) runUploads(c *netdisk.Client, locals []string, remoteDi
 		s.App.App().Event.Emit("quickdock:netdisk:upload", p)
 	}
 	count := len(locals)
+	ctx := s.transferCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	for i, lp := range locals {
 		name := filepath.Base(lp)
 		row := uploadProgress{
@@ -588,7 +645,7 @@ func (s *NetdiskService) runUploads(c *netdisk.Client, locals []string, remoteDi
 		}
 		row.Total = st.Size()
 		emit(row)
-		uerr := c.Upload(context.Background(), row.Path, f, st.Size(), func(done, total int64) {
+		uerr := c.UploadGuarded(ctx, row.Path, f, st.Size(), func(done, total int64) {
 			pct := 0
 			if total > 0 {
 				pct = int(done * 100 / total)
