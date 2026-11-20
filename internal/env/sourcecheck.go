@@ -46,6 +46,9 @@ type SourceCheck struct {
 	// 这种情况不是「源坏了」，而是「需要开启镜像加速」——面板会区分提示。
 	MirrorOK bool  `json:"mirrorOk"`
 	MirrorMs int64 `json:"mirrorMs"`
+	// VersionMissing 每个推荐版本在该源都返回 404/410，但每次都拿到了 HTTP 响应
+	// （源本身可达，只是版本清单没跟上）。与「连接不上」分开，避免误报「源失效」。
+	VersionMissing bool `json:"versionMissing"`
 }
 
 // VersionSourceCheck 上游「版本列表」的体检结果与新鲜度。
@@ -148,9 +151,8 @@ func probeURLStatus(rawURL string) (int, string, error) {
 // probeOnce 发一次探测请求，返回状态码与重定向目标（不自动跟随）。
 // 代理失败时退化直连，与 fetchURL 的容错口径一致。
 func probeOnce(rawURL, method string, timeout time.Duration) (int, string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	newReq := func() (*http.Request, error) {
+	start := time.Now()
+	newReq := func(ctx context.Context) (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, method, rawURL, nil)
 		if err != nil {
 			return nil, err
@@ -159,17 +161,34 @@ func probeOnce(rawURL, method string, timeout time.Duration) (int, string, error
 		req.Header.Set("Range", "bytes=0-0")
 		return req, nil
 	}
-	req, err := newReq()
-	if err != nil {
-		return 0, "", err
+	do := func(ctx context.Context, tr http.RoundTripper) (*http.Response, error) {
+		req, err := newReq(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return (&http.Client{Transport: tr, CheckRedirect: noFollowRedirect}).Do(req)
 	}
-	resp, err := (&http.Client{Transport: ProxyTransport(), CheckRedirect: noFollowRedirect}).Do(req)
+
+	// 代理与直连必须用不同的 ctx：代理可能一直挂到超时，那个 ctx 已经耗尽，
+	// 再用它建直连请求会立刻 deadline exceeded，把「直连可达」误判成「源失效」。
+	proxyCtx, proxyCancel := context.WithTimeout(context.Background(), timeout)
+	resp, err := do(proxyCtx, ProxyTransport())
 	if err != nil {
-		req2, _ := newReq()
-		resp, err = (&http.Client{Transport: &http.Transport{}, CheckRedirect: noFollowRedirect}).Do(req2)
+		proxyCancel() // 失败立刻归还计时器，别留给直连
+		// 直连预算优先用剩余时间；代理若挂满全程，仍给半程预算保证真能试一次。
+		// 最坏总耗时 = timeout + timeout/2，不会翻倍。
+		fallback := time.Until(start.Add(timeout))
+		if fallback < timeout/2 {
+			fallback = timeout / 2
+		}
+		directCtx, directCancel := context.WithTimeout(context.Background(), fallback)
+		defer directCancel()
+		resp, err = do(directCtx, &http.Transport{})
 		if err != nil {
 			return 0, "", err
 		}
+	} else {
+		defer proxyCancel() // 成功：保持 ctx 活到函数结束（读取响应头）
 	}
 	defer resp.Body.Close()
 	loc := ""
@@ -222,49 +241,74 @@ func CheckAllSources(ctx context.Context, onSource func(SourceCheck), onVersion 
 
 			// 1) 下载源逐个体检
 			def := registry[rt]
-			version := ""
-			if len(def.versions) > 0 {
-				version = def.versions[0]
-			}
 			for _, src := range ListSources(rt) {
 				if ctx.Err() != nil {
 					return
-				}
-				url := ""
-				if version != "" {
-					url = src.Build(version, runtime.GOOS, runtime.GOARCH)
 				}
 				item := SourceCheck{
 					Runtime:  string(rt),
 					Name:     def.display,
 					SourceID: src.ID,
 					Source:   src.Name,
-					Version:  version,
-					URL:      url,
 				}
-				if url == "" {
-					item.Error = "该源不支持当前平台或无法构造地址"
+				if len(def.versions) == 0 {
+					item.Error = "该运行时没有可探测的版本"
 				} else {
 					t0 := time.Now()
-					code, finalURL, err := probeURLStatus(url)
-					item.Code = code
+					// 不能固定拿 versions[0] 探所有源：某个源可能恰好没有这个版本，
+					// 404 只说明「版本清单与它不同步」，不是「源连不上」。逐个版本试，
+					// 任一版本能下就算这个源健康。
+					var (
+						lastCode   int
+						lastFinal  string
+						lastErr    error
+						allMissing = true
+						tried      bool
+					)
+					for _, ver := range def.versions {
+						u := src.Build(ver, runtime.GOOS, runtime.GOARCH)
+						if u == "" {
+							continue // 该源不支持此版本/平台，换下一个
+						}
+						tried = true
+						code, finalURL, err := probeURLStatus(u)
+						lastCode, lastFinal, lastErr = code, finalURL, err
+						item.Version, item.URL = ver, u
+						if err == nil && code >= 200 && code < 400 {
+							item.OK = true
+							break
+						}
+						if err != nil || (code != http.StatusNotFound && code != http.StatusGone) {
+							allMissing = false // 不是纯版本缺失
+						}
+					}
+					item.Code = lastCode
 					item.LatencyMs = time.Since(t0).Milliseconds()
-					item.OK = err == nil && code >= 200 && code < 400
-					if err != nil {
-						item.Error = err.Error()
-					} else if !item.OK {
-						item.Error = http.StatusText(code)
+					switch {
+					case item.OK:
+						// 命中一个可下载版本，源健康
+					case !tried:
+						item.Error = "该源不支持当前平台或无法构造地址"
+					case allMissing && lastErr == nil:
+						// 所有推荐版本都拿到 404/410 响应：源可达，只是版本没跟上。
+						item.VersionMissing = true
+						item.Error = fmt.Sprintf("推荐版本在该源均不存在（HTTP %d），源本身可达", lastCode)
+					case lastErr != nil:
+						item.Error = lastErr.Error()
+					default:
+						item.Error = http.StatusText(lastCode)
 						if item.Error == "" {
-							item.Error = "HTTP " + strconv.Itoa(code)
+							item.Error = "HTTP " + strconv.Itoa(lastCode)
 						}
 					}
 					// 直连失败时，对「最终地址」再探一次 gh-proxy：
 					// 国内直连 github Release 资产常被阻断（连接层超时），而镜像可用——
 					// 这跟「源本身坏了」是两回事，要在面板里分开表达。
-					// 用 finalURL 而不是原始 url：JDK 这类重定向 API 原始地址里没有
-					// github.com，只有跟到最后一跳才看得出需要加速。
-					if !item.OK {
-						if mirrorURL := ghProxyURL(finalURL); mirrorURL != "" {
+					// 用 lastFinal 而不是原始 url：JDK 这类重定向 API 原始地址里没有
+					// github.com，只有跟到最后一跳才看得出需要加速。版本缺失时镜像也
+					// 只会 404，没必要再花一次往返。
+					if !item.OK && !item.VersionMissing && lastFinal != "" {
+						if mirrorURL := ghProxyURL(lastFinal); mirrorURL != "" {
 							t1 := time.Now()
 							if c2, _, e2 := probeURLStatus(mirrorURL); e2 == nil && c2 >= 200 && c2 < 400 {
 								item.MirrorOK = true

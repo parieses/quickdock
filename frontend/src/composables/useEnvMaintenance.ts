@@ -417,8 +417,10 @@ export function useEnvMaintenance(deps: Deps = {}) {
     if (Array.isArray(rep?.versions) && rep.versions.length) sourceCheck.versions = rep.versions
     const local = localSourceStats()
     const num = (v: any, fallback: number) => {
-      const n = Number(v)
-      return Number.isFinite(n) && n > 0 ? n : fallback
+      // 后端合法上报的 0（0 个可镜像/0 个失败）不能当缺失，只有 null/undefined
+      // 才回退到本地统计；用 ?? 把这两种情况分开。
+      const n = Number(v ?? fallback)
+      return Number.isFinite(n) && n >= 0 ? n : fallback
     }
     sourceCheck.report = {
       durationMs: Number(rep?.durationMs) || 0,
@@ -504,7 +506,12 @@ export function useEnvMaintenance(deps: Deps = {}) {
       const res = unwrap<any>(await EnvManifestImport(manifestPanel.text, true))
       manifestPanel.report = res?.report || manifestPanel.report
       manifestPanel.applied = res?.appliedActive || []
-      if (manifestPanel.applied.length)
+      // 后端把「激活/写 PATH 失败」放在 warning 里（仍返回成功以保留比对报告），
+      // 这里必须显式提示，否则用户以为清单已经完整应用。
+      if (res?.warning) {
+        manifestPanel.error = String(res.warning)
+        toast.error(String(res.warning))
+      } else if (manifestPanel.applied.length)
         toast.success(t('maintManifestApplied', { n: manifestPanel.applied.length }))
       await deps.onEnvChanged?.()
     } catch (e: any) {

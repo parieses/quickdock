@@ -724,8 +724,14 @@ func (s *EnvironmentService) EnvManifestImport(data string, applyActive bool) *s
 		return services.Fail(err)
 	}
 	applied := []string{}
+	warning := ""
 	if applyActive {
-		if got, aerr := s.App.Env.ApplyManifestActive([]byte(data)); aerr == nil {
+		got, aerr := s.App.Env.ApplyManifestActive([]byte(data))
+		if aerr != nil {
+			// 不能整段吞掉：激活切换 / 写 PATH 失败时用户拿到的是「成功」，
+			// 完全不知道哪一步没生效。沿用成功响应，加一个 warning 字段透出。
+			warning = aerr.Error()
+		} else {
 			applied = got
 		}
 	}
@@ -734,6 +740,7 @@ func (s *EnvironmentService) EnvManifestImport(data string, applyActive bool) *s
 		"report":        report,
 		"appliedActive": applied,
 		"mergedNotes":   merged,
+		"warning":       warning,
 	})
 }
 
