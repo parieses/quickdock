@@ -3,6 +3,9 @@ package services
 import (
 	"hash/fnv"
 	"strconv"
+	"strings"
+	"sync"
+	"time"
 
 	"quickdock/internal/db"
 	"quickdock/internal/linkutil"
@@ -99,6 +102,12 @@ func (a *AppService) AddEntityLink(srcType, srcId, dstType, dstId, dstLabel stri
 	}
 	if srcId == "" {
 		return FailMsg("源 id 不能为空")
+	}
+	// 手动关联必须指向一个真实目标：空/纯空白 dstId 只会在边表里留下
+	// 一条永远点不开的 manual 边（wiki 悬空边才允许 dst_id 为空，走的是
+	// db 层另一条路径，不经过这里）。
+	if strings.TrimSpace(dstId) == "" {
+		return FailMsg("目标 id 不能为空")
 	}
 	if len(srcId) > maxLinkParamLen || len(dstId) > maxLinkParamLen || len(dstLabel) > maxLinkParamLen {
 		return FailMsg("参数过长")
@@ -219,6 +228,23 @@ func hashDanglingID(typ, label string) string {
 	return graphDanglingPrefix + strconv.FormatUint(h.Sum64(), 16)
 }
 
+// graphCache 进程内构图缓存。每次构图都要全量拉三类各 2000 候选 + 全量边，
+// 反复打开图谱 / 刷新时纯属白搬；缓存 60s，与前端 EntityLinkPicker 的候选
+// 缓存口径一致。写操作后刻意不主动失效：图谱是派生视图，陈旧一小会儿可接受，
+// 换来的是不必把缓存失效散落到每个笔记/待办/条目的写入口。
+// 用 Mutex 而非 RWMutex：构图耗时主要在 DB 查询，持锁串行反而避免并发重复算。
+var (
+	graphCacheMu sync.Mutex
+	graphCache   = make(map[int]graphCacheEntry)
+)
+
+const graphCacheTTL = 60 * time.Second
+
+type graphCacheEntry struct {
+	at   time.Time
+	data map[string]interface{}
+}
+
 // GraphData 给关系图谱一次性返回构图数据。
 // data: {"nodes":[{id,type,label}], "links":[{source,target,kind}]}
 //
@@ -236,6 +262,13 @@ func (a *AppService) GraphData(limit int) *ApiResult {
 	if limit < 0 || limit > graphMaxLimit {
 		return FailMsg("图谱上限参数非法")
 	}
+
+	graphCacheMu.Lock()
+	defer graphCacheMu.Unlock()
+	if e, ok := graphCache[limit]; ok && time.Since(e.at) < graphCacheTTL {
+		return Ok(e.data)
+	}
+
 	notes, todos, items, err := a.DB.ListLinkTargets()
 	if err != nil {
 		return Fail(err)
@@ -350,8 +383,10 @@ func (a *AppService) GraphData(limit int) *ApiResult {
 	for _, id := range order {
 		nodes = append(nodes, *nodeMap[id])
 	}
-	return Ok(map[string]interface{}{
+	data := map[string]interface{}{
 		"nodes": nodes,
 		"links": links,
-	})
+	}
+	graphCache[limit] = graphCacheEntry{at: time.Now(), data: data}
+	return Ok(data)
 }

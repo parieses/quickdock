@@ -23,6 +23,7 @@ import { pendingOpenTodoId } from '../composables/bridge'
 // 待办的增删改都会汇流到 refresh()，在那里顺手把侧边栏角标拉齐（不用等 60s 轮询）
 import { navBadges } from '../composables/useNavBadges'
 import { matchesTextOrPinyin } from '../utils/pinyin'
+import { invalidateLinkTargets } from '../constants/linkEvents'
 import {
   Plus, Check, Trash2, Pencil, ChevronLeft, ChevronRight, CalendarDays, Bell, Clock, BellRing,
   RefreshCw, ListTree, Timer, X, Search, ChevronUp, ChevronDown, History, BarChart3,
@@ -823,6 +824,7 @@ async function createTodo() {
       tagsTextToJSON(cTags.value),
     ))
     showCreate.value = false
+    invalidateLinkTargets() // 新待办立刻可当互链目标，不等候选缓存 TTL
     await refresh()
   } catch (e) {
     error.value = getErrorMessage(e)

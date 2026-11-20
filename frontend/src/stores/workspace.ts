@@ -17,6 +17,7 @@ import { toSnakeCase, toCamelCase } from '../utils/caseConversion'
 import { debounce } from '../utils/debounce'
 import { matchesTextOrPinyin } from '../utils/pinyin'
 import { ITEM_TYPE, TOOL_TYPES, SENTINEL_TOOL_NAME } from '../constants/itemTypes'
+import { invalidateLinkTargets } from '../constants/linkEvents'
 
 // 资源类型 → 推荐打开工具类型（数组：第一项用于默认工具，全部用于下拉候选）
 // 目录额外把「编辑器」纳入候选，以便用 VSCode / Trae / Cursor 等打开目录
@@ -216,9 +217,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   })
   const filteredItems = computed(() => {
     if (hasSearch.value && searchResults.value) {
-      const ids = new Set(searchResults.value.items.map(i => i.id))
-      return [...items.value]
-        .filter(i => ids.has(i.id))
+      // 条目按集合懒加载：没点开过的集合其条目不在 items.value 里。
+      // searchResults.items 已经是 local(内存) + 后端 FTS 的合并结果，
+      // 再与 items.value 取交集只会把「存过但没点开过」的 FTS 命中滤掉，
+      // 表现就是「我明明存过这条却搜不到」。直接用搜索结果，不要交集。
+      return [...searchResults.value.items]
         .sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
     }
     return items.value
@@ -580,6 +583,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const i = unwrap(await CreateItem(activeWorkspaceId.value, activeCollectionId.value, name, itemType, value))
     const normalized = normalizeRows([i])[0] as CollectionItem
     items.value.push(normalized)
+    invalidateLinkTargets() // 新条目立刻可当互链目标，不等候选缓存 TTL
     return normalized
   }
 

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"quickdock/internal/logger"
 )
 
 // Todo 待办任务
@@ -165,11 +167,11 @@ func (d *Database) UpdateTodo(id, title, priority, dueDate, note, startTime, end
 
 	// 先读旧值：SQLite 的 UPDATE ... SET 里引用同名列时语义不直观（取决于赋值顺序），
 	// 这两件事又都必须基于「改之前」的值判断，索性读出来在 Go 里算。
-	var oldReminder, oldCompletedAt string
+	var oldReminder, oldCompletedAt, oldTitle string
 	var oldSent int
 	if err := d.conn.QueryRow(
-		"SELECT reminder_time, reminder_sent, completed_at FROM todos WHERE id = ?", id,
-	).Scan(&oldReminder, &oldSent, &oldCompletedAt); err != nil {
+		"SELECT reminder_time, reminder_sent, completed_at, title FROM todos WHERE id = ?", id,
+	).Scan(&oldReminder, &oldSent, &oldCompletedAt, &oldTitle); err != nil {
 		return err
 	}
 	// 提醒时间被改过就复位 reminder_sent：提醒器只扫 reminder_sent=0 的条目，
@@ -196,7 +198,17 @@ func (d *Database) UpdateTodo(id, title, priority, dueDate, note, startTime, end
 		 WHERE id = ?`,
 		title, priority, dueDate, note, startTime, endTime, reminderTime, recurrence, tags, status, done, sent, completedAt, id,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	// 待办改名会让 [[todo:旧标题]] 立刻变成悬空链接；与笔记改名同口径回写。
+	// 派生数据失败只记日志，不回滚已经落库的待办编辑。
+	if oldTitle != "" && oldTitle != title {
+		if err := d.rewriteWikiRefsLocked(oldTitle, title, "todo"); err != nil {
+			logger.W("[todo] 改名回写 wiki 引用失败 %q -> %q: %v", oldTitle, title, err)
+		}
+	}
+	return nil
 }
 
 // SetTodoStatus 设置待办状态（kanban 拖拽用），done 由 status 派生

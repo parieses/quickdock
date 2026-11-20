@@ -12,6 +12,7 @@ import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { matchesTextOrPinyin } from '../utils/pinyin'
+import { LINK_TARGETS_INVALIDATED } from '../constants/linkEvents'
 import { pendingOpenNoteId, pendingOpenTodoId, navigate, navigateTo } from '../composables/bridge'
 import {
   ListEntityLinks,
@@ -64,7 +65,10 @@ function toggle() {
 // 唯一索引含 kind，两条都会留着。不合并的话，同一标题会在「正向关联」和
 // 「来自正文」里各出现一次，看着像重复关联了两次。
 function linkKey(dstType: string, dstId: string, dstLabel: string): string {
-  return dstType + '\x00' + (dstId || 'label:' + dstLabel)
+  // 有 id 就只按 id 合并：两篇同名笔记是两条不同的边，不能被标题错并到一起。
+  // 只有悬空 wiki 边（写 [[标题]] 当时没解析出目标，dstId 为空）才退化到标题。
+  const id = (dstId || '').trim()
+  return dstType + '\x00' + (id || 'label:' + dstLabel)
 }
 
 const manual = computed(() => links.value.filter(l => l.kind !== 'wiki'))
@@ -120,6 +124,9 @@ const targetsLoaded = ref(false)
 const targetsLoading = ref(false)
 let targetsAt = 0
 const targetsTTL = 60_000
+// 写操作后主动失效用的轻量信号（常量定义在 constants/linkEvents.ts，派发方共用）。
+// 新建笔记/待办/条目成功后宿主 dispatch 一次这个事件，下次打开候选就会重拉，
+// 而不是吃 TTL 内的旧全量集合（服务端补齐仍由 SearchLinkTargets 负责）。
 
 async function ensureTargets() {
   if (targetsLoading.value) return
@@ -144,6 +151,13 @@ async function ensureTargets() {
 const remoteHits = ref<Candidate[]>([])
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 let searchSeq = 0
+
+/** 让候选缓存立即过期：宿主新建实体后调用，或收到失效事件时自动触发。 */
+function invalidateTargets() {
+  targetsLoaded.value = false
+  targetsAt = 0
+  remoteHits.value = []
+}
 
 async function runRemoteSearch() {
   const kw = query.value.trim()
@@ -256,8 +270,17 @@ function onDocMouseDown(e: MouseEvent) {
   if (!target || rootEl.value?.contains(target)) return
   expanded.value = false
 }
-onMounted(() => document.addEventListener('mousedown', onDocMouseDown, true))
-onUnmounted(() => document.removeEventListener('mousedown', onDocMouseDown, true))
+onMounted(() => {
+  document.addEventListener('mousedown', onDocMouseDown, true)
+  window.addEventListener(LINK_TARGETS_INVALIDATED, invalidateTargets)
+})
+onUnmounted(() => {
+  document.removeEventListener('mousedown', onDocMouseDown, true)
+  window.removeEventListener(LINK_TARGETS_INVALIDATED, invalidateTargets)
+})
+
+// 供宿主在保存新实体后直接调 ref.value.invalidateTargets()，无需派发 DOM 事件。
+defineExpose({ invalidateTargets })
 
 function pickCandidate(c: Candidate) {
   selectedTarget.value = { type: c.type, id: c.id, label: c.label }

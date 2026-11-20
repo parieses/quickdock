@@ -407,9 +407,18 @@ func (d *Database) UpdateItem(id string, updates map[string]interface{}) error {
 	if id == "" {
 		return fmt.Errorf("id 不能为空")
 	}
-	if name, ok := updates["name"]; ok {
-		if s, ok2 := name.(string); ok2 && validateName(s) == "" {
+	newName, newNameOK := updates["name"].(string)
+	if _, ok := updates["name"]; ok {
+		if newNameOK && validateName(newName) == "" {
 			return fmt.Errorf("项目名称不能为空")
+		}
+	}
+	// 改名回写要拿旧名，必须在 updateByID 覆盖前读；updateByID 自带写锁，
+	// 这里走带读锁的 QueryOne，不会与它重入。
+	var oldName string
+	if newNameOK {
+		if row, e := d.QueryOne("SELECT name FROM items WHERE id = ?", id); e == nil && row != nil {
+			oldName = str(row["name"])
 		}
 	}
 	// 应用/exe/lnk 类型：未显式设置图标且 value/type 变化时，尝试自动提取图标
@@ -419,11 +428,22 @@ func (d *Database) UpdateItem(id string, updates map[string]interface{}) error {
 		asyncIcon, iconType, iconValue = d.autoFillItemIcon(id, updates)
 	}
 	updates["updated_at"] = now()
-	err := d.updateByID("items", id, updates)
-	if err == nil && asyncIcon {
+	if err := d.updateByID("items", id, updates); err != nil {
+		return err
+	}
+	if asyncIcon {
 		d.fillItemIconAsync(id, iconType, iconValue)
 	}
-	return err
+	// 条目改名会让 [[item:旧名]] 立刻变成悬空链接；与笔记/待办同口径回写。
+	// 派生数据失败只记日志，不回滚已经落库的条目编辑。
+	if newNameOK && oldName != "" && oldName != newName {
+		d.mu.Lock()
+		if e := d.rewriteWikiRefsLocked(oldName, newName, "item"); e != nil {
+			logger.W("[item] 改名回写 wiki 引用失败 %q -> %q: %v", oldName, newName, e)
+		}
+		d.mu.Unlock()
+	}
+	return nil
 }
 
 // resolveItemIcon 按类型/值解析应填充的图标：

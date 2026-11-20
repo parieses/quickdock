@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"quickdock/internal/logger"
 )
 
 // NoteExport 一条导出项。Path 是用 / 分隔的相对路径，文档带 .md 后缀。
@@ -111,6 +113,12 @@ func (d *Database) ImportNoteBatch(payload, parentID, fallbackName string) (crea
 		return 0, fmt.Errorf("一次最多导入 2000 篇，当前 %d 篇", len(items))
 	}
 
+	// 正文里的 [[...]] 是派生数据的真源，但 createNoteDocLocked 走 *Locked 变体
+	// 刻意不碰 wiki 出边（service 层的 syncWikiLinks 也进不来）。攒下来整批结束
+	// 再统一重建：那时所有笔记都已落库，跨文档的 [[标题]] 也能解析到 id。
+	// 声明在 defer 之前，让中途失败的部分导入也能把已写入笔记的出边补齐。
+	imported := make([]struct{ id, content string }, 0, len(items))
+
 	// 整批只持一次写锁：内部全走 *Locked 变体（不自行加锁、不逐篇重建索引），
 	// 末尾统一重建一次。否则 2000 篇导入会触发上千次全表重建（O(N²)），而且
 	// 旧写法里 findOrCreateNoteFolder 带 RLock、CreateNoteDoc 带 Lock，
@@ -121,6 +129,14 @@ func (d *Database) ImportNoteBatch(payload, parentID, fallbackName string) (crea
 	defer func() {
 		if rerr := d.rebuildNoteIndex(); rerr != nil && err == nil {
 			err = rerr
+		}
+		// 中途 return 时可能已经写进去一部分行，这些笔记的 wiki 出边也要补齐；
+		// 仍在同一把写锁内、直接走 d.conn，不调带锁的 SyncNoteWikiLinks（会重入死锁）。
+		// 派生数据失败只记日志，不覆盖真正的导入错误。
+		for _, n := range imported {
+			if e := rebuildNoteWikiLinks(d.conn, n.id, n.content); e != nil {
+				logger.W("[note] 批量导入重建 wiki 出边失败 id=%s: %v", n.id, e)
+			}
 		}
 		d.mu.Unlock()
 	}()
@@ -166,9 +182,11 @@ func (d *Database) ImportNoteBatch(payload, parentID, fallbackName string) (crea
 		if tags == "" {
 			tags = "[]"
 		}
-		if _, e := d.createNoteDocLocked(parent, name, item.Content, format); e != nil {
+		n, e := d.createNoteDocLocked(parent, name, item.Content, format)
+		if e != nil {
 			return created, e
 		}
+		imported = append(imported, struct{ id, content string }{n.ID, item.Content})
 		// createNoteDocLocked 把 tags 固定成 []，这里补写导入文件里带的标签。
 		// 用 UpdateNoteTags 会额外留一条修订，导入本身就是一次明确的离散动作，
 		// 留痕合理；但为了不让每篇导入都产生「空标签」垃圾修订，只在真有标签时写。

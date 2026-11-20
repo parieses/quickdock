@@ -335,26 +335,30 @@ func rebuildNoteWikiLinks(q linkExecQuerier, noteID, content string) error {
 	return nil
 }
 
-// rewriteWikiRefsLocked 在笔记改名后回写引用它的地方。
+// rewriteWikiRefsLocked 在笔记 / 待办 / 条目改名后回写引用它的地方。
+// kind 取 note / todo / item：决定 [[kind:旧名]] 的前缀，以及未解析边的 dst_type 限定。
 //
 // 两类数据要一起修：
-//  1. 正文里的 [[旧标题]] / [[note:旧标题]] —— 不改的话，这条链接立刻变成悬空链接，
+//  1. 正文里的 [[旧标题]] / [[kind:旧标题]] —— 不改的话，这条链接立刻变成悬空链接，
 //     点进去提示「未找到对应条目」，而用户只是改了个名字。
 //  2. 当初没解析出目标的边（dst_id=”）的 dst_label —— 这类边靠标题兜底命中反链，
 //     标题不跟着改，反链就会从新标题那篇笔记里消失。
 //
 // 已解析出 dst_id 的边不动：它们按 id 匹配，标题改了也不影响。
 // 调用方必须已持有写锁（本函数直接走 d.conn，不再加锁，避免 RWMutex 重入死锁）。
-func (d *Database) rewriteWikiRefsLocked(oldName, newName string) error {
+func (d *Database) rewriteWikiRefsLocked(oldName, newName, kind string) error {
 	if oldName == "" || oldName == newName {
 		return nil
+	}
+	if !validEntityType(kind) {
+		return fmt.Errorf("非法实体类型: %s", kind)
 	}
 	// 1. 未解析的边改标题。UPDATE OR IGNORE：若新标题那条边已经存在，
 	// 唯一索引会挡住这次更新，留下旧行由正文回写后的重建流程统一收口。
 	if _, err := d.conn.Exec(
 		`UPDATE OR IGNORE entity_links SET dst_label = ?
-		 WHERE kind = 'wiki' AND dst_id = '' AND dst_label = ? AND (dst_type = '' OR dst_type = 'note')`,
-		newName, oldName,
+		 WHERE kind = 'wiki' AND dst_id = '' AND dst_label = ? AND (dst_type = '' OR dst_type = ?)`,
+		newName, oldName, kind,
 	); err != nil {
 		return err
 	}
@@ -362,9 +366,9 @@ func (d *Database) rewriteWikiRefsLocked(oldName, newName string) error {
 	// 2. 正文回写。LIKE 只做粗筛（转义后精确匹配字面 [[标题]]），
 	// 真正的替换用 ReplaceAll：整串匹配，不会误伤 [[旧标题加后缀]]。
 	oldPlain := "[[" + oldName + "]]"
-	oldTyped := "[[note:" + oldName + "]]"
+	oldTyped := "[[" + kind + ":" + oldName + "]]"
 	newPlain := "[[" + newName + "]]"
-	newTyped := "[[note:" + newName + "]]"
+	newTyped := "[[" + kind + ":" + newName + "]]"
 	rows, err := d.conn.Query(
 		`SELECT id, content FROM notes
 		 WHERE keyword <> ? AND (content LIKE ? ESCAPE '\' OR content LIKE ? ESCAPE '\')`,
@@ -533,17 +537,27 @@ func (d *Database) EntityLabels(typ string, ids []string) (map[string]string, er
 	if len(uniq) == 0 {
 		return out, nil
 	}
-	args := make([]interface{}, 0, len(uniq))
-	for _, id := range uniq {
-		args = append(args, id)
-	}
-	ph := strings.TrimSuffix(strings.Repeat("?,", len(uniq)), ",")
-	rows, err := d.Query(`SELECT id, `+col+` AS label FROM `+table+` WHERE id IN (`+ph+`)`, args...)
-	if err != nil {
-		return out, err
-	}
-	for _, r := range rows {
-		out[str(r["id"])] = str(r["label"])
+	// 单条 IN 的占位符不能无上限：SQLite 默认变量上限虽已提高，但一次塞进
+	// 数万个 id 仍会拖慢解析、并给反链查询埋雷。分批查再合并，口径不变。
+	const batchSize = 500
+	for start := 0; start < len(uniq); start += batchSize {
+		end := start + batchSize
+		if end > len(uniq) {
+			end = len(uniq)
+		}
+		batch := uniq[start:end]
+		args := make([]interface{}, 0, len(batch))
+		for _, id := range batch {
+			args = append(args, id)
+		}
+		ph := strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")
+		rows, err := d.Query(`SELECT id, `+col+` AS label FROM `+table+` WHERE id IN (`+ph+`)`, args...)
+		if err != nil {
+			return out, err
+		}
+		for _, r := range rows {
+			out[str(r["id"])] = str(r["label"])
+		}
 	}
 	return out, nil
 }

@@ -284,7 +284,7 @@ func (d *Database) RenameNoteNode(id, name string) error {
 	if oldName != "" && oldName != name {
 		// 回写失败不让改名本身失败：正文引用是派生数据，最坏情况只是留着旧链接，
 		// 与没有这个功能时的表现一致；报错回滚反而会让「改名」变成不可用操作。
-		if err := d.rewriteWikiRefsLocked(oldName, name); err != nil {
+		if err := d.rewriteWikiRefsLocked(oldName, name, "note"); err != nil {
 			logger.W("[note] 改名回写 wiki 引用失败 %q -> %q: %v", oldName, name, err)
 		}
 	}
@@ -371,6 +371,11 @@ func (d *Database) SetNoteFormat(id, format string) error {
 func (d *Database) MoveNoteNode(id, newParentID string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	// 与创建路径同口径：parentId 指向不存在的 id 或某个文档时，节点会建/移过去
+	// 却永远不在树里渲染（前端只在文件夹下挂子节点），变成看不见的孤儿。
+	if err := ensureParentFolderLocked(d, newParentID); err != nil {
+		return err
+	}
 	// 防环：不能把节点移进自己的子树
 	if isSelfInSubtreeLocked(d, id, newParentID) {
 		return fmt.Errorf("不能把节点移动到它自身的子目录下")

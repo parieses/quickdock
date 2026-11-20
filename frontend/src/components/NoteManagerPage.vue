@@ -23,6 +23,7 @@ import { installMathOnce } from '../utils/mathMarkdown'
 import { installWikiOnce } from '../utils/wikiMarkdown'
 import { createCodeEditor, type CodeEditorHandle } from '../utils/aiCodeEditor'
 import { downloadText, downloadBlob, safeFileName } from '../utils/download'
+import { invalidateLinkTargets } from '../constants/linkEvents'
 import {
   ListNotesTree,
   SearchNotesTree,
@@ -401,6 +402,7 @@ async function newDocAt(folderId: string) {
   try {
     const r = unwrap<Note>(await CreateNoteDoc(folderId, '未命名笔记', '', 'markdown'))
     if (folderId) expanded.value.add(folderId)
+    invalidateLinkTargets() // 新笔记立刻可当互链目标，不等候选缓存 TTL
     await load()
     if (r) { const found = nodes.value.find(x => x.id === r.id); if (found) onDoc(found) }
   } catch (e) { toast.error(getErrorMessage(e)) }
@@ -424,6 +426,7 @@ async function createFromTemplate(tpl: NoteTemplate) {
   const title = tpl.key === 'worklog' ? `${tpl.label} ${date}` : tpl.label
   try {
     const r = unwrap<Note>(await CreateNoteDoc('', title, tpl.body, 'markdown'))
+    invalidateLinkTargets() // 新笔记立刻可当互链目标，不等候选缓存 TTL
     await load()
     if (r) {
       const found = nodes.value.find(x => x.id === r.id)
@@ -747,6 +750,7 @@ async function onImportFile(e: Event) {
     const text = await file.text()
     const res = unwrap<{ created: number }>(await ImportNotes(text, '', file.name))
     toast.success(t('notesImportDone', { count: res?.created ?? 0 }))
+    invalidateLinkTargets() // 批量导入的笔记也要立刻进互链候选
     await load()
   } catch (err) {
     logErr('NoteManager:importNotes', err)
