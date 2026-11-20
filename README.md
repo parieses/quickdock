@@ -95,7 +95,7 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 | 剪贴板 AI | 条目上「问 AI」就地弹层，预置翻译、摘要、格式化和自由提问 |
 | 笔记 AI | 笔记浮窗内嵌面板，支持总结、润色、续写、翻译 |
 | DeepSeek Harness | 内嵌完整 Agent 编程入口，自动装填便携 Node，原生窗口承载 3080 端口；打开前校验 WebView2 版本，进程意外退出自动重拉 |
-| MCP 服务 | `http://127.0.0.1:9230/mcp`，65 个工具分只读、低危写、高危三级权限（默认开放 62 个）；含下载器工具域（查任务与进度、暂停 / 恢复 / 删除）与 SSH 工具域（列主机、SFTP 读、受限执行——默认一台主机都不授权，需逐台勾选 `mcpAllowed`，写文件与上传类工具刻意不注册）；高危的杀进程与执行系统指令恒不注册，等同工具不存在 |
+| MCP 服务 | `http://127.0.0.1:9230/mcp`，工具分只读、低危写、高危三级权限（默认开放只读 + 低危写）；含下载器工具域（查任务与进度、暂停 / 恢复 / 删除）与 SSH 工具域（列主机、SFTP 读、受限执行——默认一台主机都不授权，需逐台勾选 `mcpAllowed`，写文件与上传类工具刻意不注册）；高危的杀进程与执行系统指令恒不注册，等同工具不存在 |
 | Git 面板 | 对标 SourceTree 的仓库视角：分支 / 标签 / 远端 / 子模块管理，贮藏，文件历史与逐行归属（blame），amend、cherry-pick、revert，分支对比、side-by-side diff，SSH 密钥一键配置 GitHub / GitLab，多选批量操作与存档导出 |
 | 环境管理 | 运行时的安装、切换、启停、配置、日志、控制台，全部在用户目录内；每个运行时标题旁的「?」给一张资料卡（分组、本页能做什么、上手提示、实时状态与官网 / 文档 / 源码链接），DSH 等不在运行时列表里的特殊项也能单独打开自己的资料卡；可对项目目录做只读体检：版本声明逐个对照已装与激活版本，依赖清单（`package.json` / `go.mod` / `pyproject.toml` 等）出一份快照 |
 | 下载器 | 以 aria2 为引擎：链接、批量、磁力、种子、Metalink；状态分页与七标签详情、多选批量、速度曲线、下载前空间预检、失败重试、完成通知。可逐任务指定目录、按文件名独立建文件夹；大文件写满有磁盘守卫与引擎自愈，还支持换机续传导入。退出前让 aria2 自己落盘会话、历史跨重启保留（已完成 / 失败的任务不再凭空消失，标为历史项只留打开目录与删除）。支持 BT 与远程引擎，也能在 MCP 里查进度 |
@@ -554,9 +554,9 @@ AI 完成通知有前置判断：主窗口可见且当前停在 AI 对话页时�
 应用对外暴露 Model Context Protocol 服务，供 AI 客户端调用本地能力。
 
 - **地址**：`http://127.0.0.1:9230/mcp`，Streamable HTTP，仅接受 POST，协议版本 2025-06-18
-- **注册 66 个 MCP 工具，分三级权限**，默认开放 63 个（只读 + 低危写），3 个高危当前恒不开放；可在环境管理页按档位或逐个工具开关：
-  - 只读（40）：`app_info`、`env_list`、`env_status`、`env_log`、`env_versions`、`file_search`、`file_find`、`file_read`、`file_grep`、`workspace_list`、`item_search`、`recent_items`、`todo_list`、`note_search`、`note_read`、`note_tags`、`note_revisions`、`clipboard_recent`、`port_list`、`log_list`、`log_read`、`crash_list`、`crash_read`、`schedule_list`、`schedule_runs`、`monitor_list`、`monitor_logs`、`plugin_list`、`plugin_exec_logs`、`download_status`、`download_list`、`download_detail`、`download_global_stat`、`kb_list`、`kb_search`、`ssh_list_hosts`、`ssh_list_sessions`、`ssh_terminal_read`、`ssh_sftp_list`、`ssh_sftp_read`
-  - 低危写（23）：`env_start`、`env_stop`、`env_restart`、`robot_notify`、`item_open`、`todo_create`、`todo_done`、`clipboard_copy`、`note_create`、`note_update`、`note_quick`、`note_folder_create`、`note_move`、`note_restore`、`note_delete`、`schedule_run_now`、`monitor_check_now`、`plugin_execute`、`plugin_open`、`download_pause`、`download_resume`、`download_remove`、`ssh_exec`
+- **分三级权限**，默认开放只读 + 低危写，高危恒不开放；可在环境管理页按档位或逐个工具开关：
+  - 只读：`app_info`、`env_list`、`env_status`、`env_log`、`env_versions`、`env_port_conflict`、`env_project_versions`、`env_disk_usage`、`file_search`、`file_find`、`file_read`、`file_grep`、`workspace_list`、`workspace_list_all`、`item_search`、`item_list`、`recent_items`、`scene_list`、`collection_list`、`shelf_list`、`todo_list`、`note_search`、`note_read`、`note_tags`、`note_revisions`、`note_revision_read`、`note_quick_read`、`clipboard_recent`、`clipboard_search`、`port_list`、`log_list`、`log_read`、`crash_list`、`crash_read`、`log_storage`、`schedule_list`、`schedule_runs`、`monitor_list`、`monitor_logs`、`monitor_logs_since`、`plugin_list`、`plugin_exec_logs`、`download_status`、`download_list`、`download_detail`、`download_global_stat`、`netdisk_status`、`netdisk_list_dir`、`netdisk_search`、`kb_list`、`kb_search`、`kb_libraries`、`kb_status`、`kb_chunks`、`mail_codes`、`mail_read`、`credentials_status`、`password_generate`、`ssh_list_hosts`、`ssh_list_sessions`、`ssh_terminal_read`、`ssh_sftp_list`、`ssh_sftp_read`
+  - 低危写：`env_start`、`env_stop`、`env_restart`、`robot_notify`、`item_open`、`todo_create`、`todo_update`、`todo_done`、`clipboard_copy`、`note_create`、`note_update`、`note_quick`、`note_folder_create`、`note_move`、`note_restore`、`note_delete`、`schedule_run_now`、`monitor_check_now`、`plugin_execute`、`plugin_open`、`download_pause`、`download_resume`、`download_remove`、`ssh_exec`
   - 高危（当前版本恒不开放，环境管理页只有「只读 / 只读+低危写」两档）：`process_kill`、`system_command`、`download_add`
 - **下载器工具域**：四个只读工具看引擎状态、任务列表、单个任务详情与全局统计，三个写工具作用于用户自己建的 gid。`download_add` 刻意归高危且当前不开放 —— 让宿主向模型给出的任意地址发请求并写盘是 SSRF 的经典形状，新建任务请走下载页
 - **SSH 工具域**：五个只看不动的工具（列已保存主机、列会话、读终端屏显、列 SFTP 目录、读远端文件）加一个 `ssh_exec`。三道闸叠着用：主机级 `mcpAllowed` 默认全关（客户端是外部进程，没这道闸等于把用户存的每台机器交给任意连上来的 Agent）、命令风险判定、审计只记命令不记输出（stdout/stderr 常夹密钥与业务数据）。写文件 / 上传 / 删除类工具刻意不注册，描述文案也反复写「只读」，免得模型以为能随意改远端。`ssh_exec` 用低危写而不是高危 —— 高危档恒不注册，标了等于工具不存在，反而失去授权与风险判定这两道可见的闸

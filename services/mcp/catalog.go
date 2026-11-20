@@ -97,15 +97,16 @@ func domainCatalog() []mcpsrv.Domain {
 		{
 			ID: mcpsrv.CategoryApp, LabelKey: "mcpCatApp", Order: orderApp, External: true,
 			Summary: "软件信息、监听端口、机器人通知",
-			Hint:    "**软件与端口**：app_info 看版本与数据目录，port_list 看本机谁在监听哪个端口。\n",
+			Hint:    "**软件与端口**：app_info 看版本与数据目录，port_list 看本机谁在监听哪个端口。credentials_status 看密码库状态（不含明文），mail_codes 取最近收到的邮箱验证码、mail_read 读缓存邮件正文。\n",
 			WriteHint: "robot_notify 会**真的**把消息发到用户配置的机器人（企业微信 / 钉钉 / 飞书 / Telegram 等），" +
-				"不是草稿。发之前确认内容，不要为测试而发。\n",
+				"不是草稿。发之前确认内容，不要为测试而发。password_generate 只生成新密码，不会改密码库里的条目。\n",
 			Scenes: readScenes(),
 		},
 		{
 			ID: mcpsrv.CategoryEnv, LabelKey: "mcpCatEnv", Order: orderEnv, External: true,
 			Summary: "运行时与服务的状态、日志、启停",
-			Hint:    "**环境**：env_list 看装了哪些运行时/服务，env_status 看某个的当前状态，env_log 看日志，env_versions 看可安装版本。\n",
+			Hint: "**环境**：env_list 看装了哪些运行时/服务，env_status 看某个的当前状态，env_log 看日志，env_versions 看可安装版本。" +
+				"env_port_conflict 查端口被占，env_project_versions 读项目的版本声明，env_disk_usage 看各运行时占多少空间。\n",
 			WriteHint: "env_start / env_stop / env_restart 直接改变正在运行的服务——停之前说清会影响什么，" +
 				"用户没让你停就不要顺手停。\n",
 			Scenes: readScenes(),
@@ -120,15 +121,17 @@ func domainCatalog() []mcpsrv.Domain {
 		},
 		{
 			ID: mcpsrv.CategoryItem, LabelKey: "mcpCatItem", Order: orderItem, External: true,
-			Summary:   "快捷项、最近使用、工作空间",
-			Hint:      "**启动台**：workspace_list 看工作空间/场景/集合/项目，item_search 按名字找快捷项，recent_items 看最近用过什么。\n",
+			Summary: "快捷项、最近使用、工作空间",
+			Hint: "**启动台**：workspace_list 看工作空间/场景/集合/项目，item_search 按名字找快捷项，recent_items 看最近用过什么。" +
+				"要按层级浏览用 workspace_list_all → scene_list → collection_list → item_list，shelf_list 看常用路径分块。\n",
 			WriteHint: "item_open 真的会在用户机器上打开那个项目（窗口 / 网页 / 命令），先确认是哪一个再打开。\n",
 			Scenes:    readScenes(),
 		},
 		{
 			ID: mcpsrv.CategoryNote, LabelKey: "mcpCatNote", Order: orderNote, External: true,
 			Summary: "笔记与文件夹的读写、搜索、回收站",
-			Hint: "**笔记**：note_search 按内容找，note_read 读全文，note_tags 看标签，note_revisions 看历史版本。" +
+			Hint: "**笔记**：note_search 按内容找，note_read 读全文，note_tags 看标签，note_revisions 看历史版本，" +
+				"note_revision_read 读某个版本的正文，note_quick_read 读快捷笔记。" +
 				"用户说「找一下我写过的 xx」时先搜再读，不要凭标题猜内容。\n",
 			WriteHint: "note_create / note_quick 新建，note_update 改内容，note_move 换文件夹，note_delete 进回收站（可 note_restore 恢复）。" +
 				"改笔记前先 note_read 看清原文；删之前告诉用户「进了回收站」。\n",
@@ -137,14 +140,16 @@ func domainCatalog() []mcpsrv.Domain {
 		{
 			ID: mcpsrv.CategoryKnowledge, LabelKey: "mcpCatKnowledge", Order: orderKnowledge, External: true,
 			Summary: "本地文档知识库检索（只读）",
-			Hint: "**知识库**：kb_search 按内容检索用户导入的文档，kb_list 看有哪些文档。" +
+			Hint: "**知识库**：kb_search 按内容检索用户导入的文档，kb_list 看有哪些文档，kb_libraries 看分库，" +
+				"kb_status 看索引进度，kb_chunks 看某份文档切成了哪些片段。" +
 				"回答里引用知识库内容时说明来自哪份文档。\n",
 			Scenes: onlyRead(),
 		},
 		{
 			ID: mcpsrv.CategoryDownload, LabelKey: "mcpCatDownload", Order: orderDownload, External: true,
 			Summary: "下载器任务的状态与控制",
-			Hint:    "**下载**：download_list 看任务，download_status / download_global_stat / download_detail 看进度与详情。\n",
+			Hint: "**下载**：download_list 看任务，download_status / download_global_stat / download_detail 看进度与详情。" +
+				"网盘在 netdisk_status / netdisk_list_dir / netdisk_search 看状态、列目录、搜文件。\n",
 			WriteHint: "download_pause / download_resume / download_remove 改变任务状态，download_add 会真的开始下载（高危档）。" +
 				"删任务前确认是哪一个。\n",
 			Scenes: readScenes(),
@@ -161,22 +166,23 @@ func domainCatalog() []mcpsrv.Domain {
 		},
 		{
 			ID: mcpsrv.CategoryTodo, LabelKey: "mcpCatTodo", Order: orderTodo, External: true,
-			Summary:   "待办清单与完成状态",
-			Hint:      "**待办**：todo_list 看清单（含状态与到期时间）。\n",
-			WriteHint: "todo_create 建一条（说清标题与到期时间），todo_done 标记完成。批量「都标记完成」之前先 todo_list 确认范围。\n",
-			Scenes:    readScenes(),
+			Summary: "待办清单与完成状态",
+			Hint:    "**待办**：todo_list 看清单（含状态与到期时间）。\n",
+			WriteHint: "todo_create 建一条（标题必填，可一并给到期日、提醒时间、标签、重复规则）；" +
+				"todo_update 只改要改的字段（其余保持原值），todo_done 标记完成。批量「都标记完成」之前先 todo_list 确认范围。\n",
+			Scenes: readScenes(),
 		},
 		{
 			ID: mcpsrv.CategoryClipboard, LabelKey: "mcpCatClipboard", Order: orderClipboard, External: true,
 			Summary:   "剪贴板历史与写入",
-			Hint:      "**剪贴板**：clipboard_recent 看最近复制过的文本/图片/文件。\n",
+			Hint:      "**剪贴板**：clipboard_recent 看最近复制过的文本/图片/文件，clipboard_search 全库搜旧内容。\n",
 			WriteHint: "clipboard_copy 会覆盖用户当前剪贴板内容——先说一句再写。\n",
 			Scenes:    readScenes(),
 		},
 		{
 			ID: mcpsrv.CategoryDiag, LabelKey: "mcpCatDiag", Order: orderDiag, External: true,
 			Summary: "应用日志与崩溃记录",
-			Hint: "**诊断**：log_list 列日志文件，log_read 读内容，crash_list / crash_read 看崩溃记录。" +
+			Hint: "**诊断**：log_list 列日志文件，log_read 读内容，crash_list / crash_read 看崩溃记录，log_storage 看日志占多少空间。" +
 				"用户报「刚才崩了 / 某功能不对」时先看这里，不要凭猜测解释。\n",
 			Scenes: onlyRead(),
 		},
@@ -193,7 +199,7 @@ func domainCatalog() []mcpsrv.Domain {
 		{
 			ID: mcpsrv.CategoryMonitor, LabelKey: "mcpCatMonitor", Order: orderMonitor, External: true,
 			Summary:   "网站监控状态与检测记录",
-			Hint:      "**站点监控**：monitor_list 看监控项与当前状态，monitor_logs 看检测记录与响应时间。\n",
+			Hint:      "**站点监控**：monitor_list 看监控项与当前状态，monitor_logs 看最近检测记录，monitor_logs_since 按时间段查。\n",
 			WriteHint: "monitor_check_now 会立刻发一次真实请求并计入统计，别拿它当连通性玩具。\n",
 			Scenes:    readScenes(),
 		},

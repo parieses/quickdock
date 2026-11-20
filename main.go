@@ -753,7 +753,7 @@ func main() {
 	// 依赖剪贴板/工作空间/待办/诊断/系统/笔记/收藏/端口/集合/监控/知识库/下载器门面
 	// （工具复用其能力，且必须复用同一实例而非另建），故在其后创建。
 	envengine.SetMCPAppVersion(appVersion)
-	mcpSvc := mcpsvc.NewMCPService(appService, clipSvc, pluginSvc, workspaceSvc, todoSvc, diagSvc, systemSvc, noteSvc, frecencySvc, portSvc, collectionSvc, monitorSvc, kbSvc, downloadSvc, sshSvc, appVersion)
+	mcpSvc := mcpsvc.NewMCPService(appService, clipSvc, pluginSvc, workspaceSvc, todoSvc, diagSvc, systemSvc, noteSvc, frecencySvc, portSvc, collectionSvc, monitorSvc, kbSvc, downloadSvc, sshSvc, envSvc, netdiskSvc, mailboxSvc, credentialsSvc, shelfSvc, sceneSvc, itemSvc, appVersion)
 
 	// 系统通知服务（用于待办定时提醒）
 	notifier := notifications.New()

@@ -50,4 +50,28 @@ func registerKBTools(s *MCPService, r *toolRegistrar) {
 		"列出知识库中已导入的文档及其索引状态（ready / pending / failed）。"+
 			"检索之前先用它确认有没有相关文档，比盲目 kb_search 更省事。",
 		nil, nil)
+
+	// 以下三条补齐「有哪些库 / 索引到哪了 / 某文档切成几段」——此前只有
+	// kb_search + kb_list，AI 想判断检索是否覆盖某个库时只能猜。
+	r.add(func(args map[string]any) (any, error) {
+		if s.KB == nil {
+			return nil, errors.New("知识库未就绪")
+		}
+		return unwrap(s.KB.ListKBLibraries())
+	}, mcpsrv.LevelRead, "kb_libraries", "列出所有知识库（分库）。检索前先确认有哪些库，避免把 A 库的内容当成 B 库的", nil, nil)
+
+	r.add(func(args map[string]any) (any, error) {
+		if s.KB == nil {
+			return nil, errors.New("知识库未就绪")
+		}
+		return unwrap(s.KB.GetKBStatus())
+	}, mcpsrv.LevelRead, "kb_status", "查看知识库索引状态：已导入多少文档/分块、是否有待索引或失败项。用户问「文档索引好了没」时用这个，不要猜", nil, nil)
+
+	r.add(func(args map[string]any) (any, error) {
+		if s.KB == nil {
+			return nil, errors.New("知识库未就绪")
+		}
+		return unwrap(s.KB.ListKBChunks(mcpsrv.Arg(args, "sourceID")))
+	}, mcpsrv.LevelRead, "kb_chunks", "列出某份文档切分后的片段（含来源位置）。确认检索命中来自原文哪一段时用；sourceID 用 kb_list 返回的 id", []string{"sourceID"},
+		map[string]any{"sourceID": str("文档来源 id，来自 kb_list")})
 }

@@ -53,6 +53,20 @@ func registerNoteTools(s *MCPService, r *toolRegistrar) {
 			"limit": mcpsrv.Int("最多返回条数，默认 20"),
 		})
 
+	// note_quick 早先只能写不能读：AI 塞进去一份草稿后想核对，只能去搜笔记列表碰运气。
+	r.add(func(args map[string]any) (any, error) {
+		return unwrap(s.Note.GetNote())
+	}, mcpsrv.LevelRead, "note_quick_read", "读取「快捷笔记」当前内容（note_quick 写入的那篇）。核对上次写进去的草稿时用", nil, nil)
+
+	r.add(func(args map[string]any) (any, error) {
+		id, err := requireNoteID(args)
+		if err != nil {
+			return nil, err
+		}
+		return unwrap(s.Note.GetNoteRevision(id))
+	}, mcpsrv.LevelRead, "note_revision_read", "读取某个历史版本的正文（note_revisions 只列不读）。回滚前先看清楚那一版写了什么", []string{"id"},
+		map[string]any{"id": str("历史版本 id，来自 note_revisions")})
+
 	// ---- 低危写 ----
 
 	r.add(func(args map[string]any) (any, error) {

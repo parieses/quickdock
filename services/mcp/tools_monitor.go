@@ -137,6 +137,27 @@ func registerMonitorTools(s *MCPService, r *toolRegistrar) {
 		if id == "" {
 			return nil, errors.New("缺少参数 monitorId（用 monitor_list 获取）")
 		}
+		return unwrap(s.Monitor.GetMonitorLogsSince(
+			id,
+			int64(mcpsrv.ArgInt(args, "sinceTs", 0)),
+			int64(mcpsrv.ArgInt(args, "limit", 100))))
+	}, mcpsrv.LevelRead, "monitor_logs_since",
+		"按时间范围查某监控的检测记录（sinceTs 为 Unix 秒）。回答「昨晚 8 点到 10 点抖了几次」这类问题用这个，monitor_logs 只能取最近 N 条",
+		[]string{"monitorId"},
+		map[string]any{
+			"monitorId": str("监控 ID，来自 monitor_list"),
+			"sinceTs":   intp("起始时间 Unix 秒；0 表示最近 24 小时"),
+			"limit":     intp("最多返回条数，默认 100"),
+		})
+
+	r.add(func(args map[string]any) (any, error) {
+		if s.Monitor == nil {
+			return nil, errors.New("监控服务未初始化")
+		}
+		id := strings.TrimSpace(mcpsrv.Arg(args, "monitorId"))
+		if id == "" {
+			return nil, errors.New("缺少参数 monitorId（用 monitor_list 获取）")
+		}
 		res := s.Monitor.CheckMonitorNow(id)
 		if res.Code != 0 {
 			return nil, errors.New(res.Msg)

@@ -160,6 +160,34 @@ func registerDownloadTools(s *MCPService, r *toolRegistrar) {
 		"移除一个任务（活跃任务取消下载，已结束任务清掉结果记录）。注意：aria2 的 remove 不会删除磁盘上已下载的文件，只移除任务本身；删除后不能再恢复进度",
 		[]string{"gid"}, map[string]any{"gid": str("任务 gid")})
 
+	// 网盘三件套：与下载器同属「取文件」，且「交给下载器」本来就共用一条链路，
+	// 故挂在下载器域而不是新开域（新域要联动 i18n 五处）。
+	r.add(func(args map[string]any) (any, error) {
+		if s.Netdisk == nil {
+			return nil, errors.New("网盘服务未就绪")
+		}
+		return unwrap(s.Netdisk.NetdiskStatus())
+	}, mcpsrv.LevelRead, "netdisk_status", "查看网盘聚合网关的状态（是否运行、地址）。网盘页打不开时先查这个", nil, nil)
+
+	r.add(func(args map[string]any) (any, error) {
+		if s.Netdisk == nil {
+			return nil, errors.New("网盘服务未就绪")
+		}
+		return unwrap(s.Netdisk.NetdiskListDir(mcpsrv.Arg(args, "path")))
+	}, mcpsrv.LevelRead, "netdisk_list_dir", "列出网盘某个目录的内容（文件/文件夹、大小、修改时间）。path 留空为根目录", nil,
+		map[string]any{"path": str("网盘内的目录路径，留空为根目录")})
+
+	r.add(func(args map[string]any) (any, error) {
+		if s.Netdisk == nil {
+			return nil, errors.New("网盘服务未就绪")
+		}
+		return unwrap(s.Netdisk.NetdiskSearch(mcpsrv.Arg(args, "path"), mcpsrv.Arg(args, "keyword")))
+	}, mcpsrv.LevelRead, "netdisk_search", "在网盘里按关键词搜文件（可限定目录）。要找网盘上的某份文件时用这个", []string{"keyword"},
+		map[string]any{
+			"path":    str("限定搜索的网盘目录，留空为全盘"),
+			"keyword": str("要搜的文件名关键词"),
+		})
+
 	// 与 tools_monitor.go 同一条边界：目标由模型决定的「向外发请求」不默认开放。
 	// 保留实现，将来若提供高危档位或用户显式授权，无需再改注册代码。
 	r.add(func(args map[string]any) (any, error) {

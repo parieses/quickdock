@@ -25,14 +25,21 @@ import (
 	"quickdock/services"
 	clipboardsvc "quickdock/services/clipboard"
 	collectionsvc "quickdock/services/collection"
+	credentialssvc "quickdock/services/credentials"
 	diagsvc "quickdock/services/diag"
 	downloadsvc "quickdock/services/download"
+	envsvc "quickdock/services/env"
 	frecencysvc "quickdock/services/frecency"
+	itemsvc "quickdock/services/item"
 	kbsvc "quickdock/services/kb"
+	mailboxsvc "quickdock/services/mailbox"
 	monitorsvc "quickdock/services/monitor"
+	netdisksvc "quickdock/services/netdisk"
 	notesvc "quickdock/services/note"
 	pluginsvc "quickdock/services/plugin"
 	portsvc "quickdock/services/port"
+	scenesvc "quickdock/services/scene"
+	shelfsvc "quickdock/services/shelf"
 	sshxsvc "quickdock/services/sshx"
 	systemsvc "quickdock/services/system"
 	todosvc "quickdock/services/todo"
@@ -64,15 +71,24 @@ type MCPService struct {
 	SSH *sshxsvc.SshService
 	// Download 下载器门面：与页面共用同一个实例（轮询、通知去重状态不能另起一份）。
 	Download *downloadsvc.DownloadService
-	version  string
+	// 以下门面为补齐 UI 侧已有、MCP 先前缺失的只读查询而注入。
+	// 复用 main 里的同一实例，避免另起一份导致状态/缓存与页面不一致。
+	Env         *envsvc.EnvironmentService
+	Netdisk     *netdisksvc.NetdiskService
+	Mailbox     *mailboxsvc.MailboxService
+	Credentials *credentialssvc.CredentialsService
+	Shelf       *shelfsvc.ShelfService
+	Scene       *scenesvc.SceneService
+	Item        *itemsvc.ItemService
+	version     string
 }
 
 // NewMCPService 创建 MCP 绑定服务，并注册业务工具。
 //
 // ssh 必须是 main 里与 SSH 页共用的那个实例：MCP 工具复用它的连接池与
 // 会话管理器，另起一份会让「list_sessions 看不到已开终端」这类问题出现。
-func NewMCPService(app *services.AppService, clip *clipboardsvc.ClipboardService, plugin *pluginsvc.PluginService, workspace *workspacesvc.WorkspaceService, todo *todosvc.TodoService, diag *diagsvc.DiagService, sys *systemsvc.SystemService, note *notesvc.NoteService, frecency *frecencysvc.FrecencyService, port *portsvc.PortService, collection *collectionsvc.CollectionService, monitor *monitorsvc.MonitorService, kb *kbsvc.KBService, download *downloadsvc.DownloadService, ssh *sshxsvc.SshService, version string) *MCPService {
-	s := &MCPService{App: app, Clip: clip, Plugin: plugin, Workspace: workspace, Todo: todo, Diag: diag, System: sys, Note: note, Frecency: frecency, Port: port, Collection: collection, Monitor: monitor, KB: kb, Download: download, SSH: ssh, version: version}
+func NewMCPService(app *services.AppService, clip *clipboardsvc.ClipboardService, plugin *pluginsvc.PluginService, workspace *workspacesvc.WorkspaceService, todo *todosvc.TodoService, diag *diagsvc.DiagService, sys *systemsvc.SystemService, note *notesvc.NoteService, frecency *frecencysvc.FrecencyService, port *portsvc.PortService, collection *collectionsvc.CollectionService, monitor *monitorsvc.MonitorService, kb *kbsvc.KBService, download *downloadsvc.DownloadService, ssh *sshxsvc.SshService, env *envsvc.EnvironmentService, netdisk *netdisksvc.NetdiskService, mailbox *mailboxsvc.MailboxService, credentials *credentialssvc.CredentialsService, shelf *shelfsvc.ShelfService, scene *scenesvc.SceneService, item *itemsvc.ItemService, version string) *MCPService {
+	s := &MCPService{App: app, Clip: clip, Plugin: plugin, Workspace: workspace, Todo: todo, Diag: diag, System: sys, Note: note, Frecency: frecency, Port: port, Collection: collection, Monitor: monitor, KB: kb, Download: download, SSH: ssh, Env: env, Netdisk: netdisk, Mailbox: mailbox, Credentials: credentials, Shelf: shelf, Scene: scene, Item: item, version: version}
 	s.registerTools()
 	return s
 }

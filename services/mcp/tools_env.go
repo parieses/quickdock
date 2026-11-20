@@ -88,6 +88,38 @@ func registerEnvTools(s *MCPService, r *toolRegistrar) {
 	}, mcpsrv.LevelRead, "env_versions", "列出某运行时可下载的版本（需联网，慢）", []string{"runtime"},
 		map[string]any{"runtime": str("运行时 id")})
 
+	// 以下三条是 UI 侧「项目体检 / 磁盘占用 / 端口冲突」背后的只读方法，
+	// 走门面而不是直接摸 App.Env：门面已经做了版本归一与结果封装。
+	r.add(func(args map[string]any) (any, error) {
+		if s.Env == nil {
+			return nil, errors.New("环境管理服务未就绪")
+		}
+		return unwrap(s.Env.EnvPortConflict(mcpsrv.Arg(args, "runtime"), mcpsrv.Arg(args, "version")))
+	}, mcpsrv.LevelRead, "env_port_conflict", "检查某运行时版本要用的端口是否被别的进程占用。启动服务前先查，能省掉一次失败重启", []string{"runtime"},
+		map[string]any{
+			"runtime": str("运行时 id，如 nginx"),
+			"version": str("版本号，省略则用已装的第一个版本"),
+		})
+
+	r.add(func(args map[string]any) (any, error) {
+		if s.Env == nil {
+			return nil, errors.New("环境管理服务未就绪")
+		}
+		dir := mcpsrv.Arg(args, "dir")
+		if dir == "" {
+			return nil, errors.New("缺少参数 dir（项目目录）")
+		}
+		return unwrap(s.Env.EnvProjectVersions(dir))
+	}, mcpsrv.LevelRead, "env_project_versions", "读取项目目录里的版本声明（go.mod / package.json / .nvmrc 等），对照已装与激活的运行时版本。做项目体检用", []string{"dir"},
+		map[string]any{"dir": str("项目目录的绝对路径")})
+
+	r.add(func(args map[string]any) (any, error) {
+		if s.Env == nil {
+			return nil, errors.New("环境管理服务未就绪")
+		}
+		return unwrap(s.Env.EnvDiskUsage())
+	}, mcpsrv.LevelRead, "env_disk_usage", "统计各运行时安装目录占用多少磁盘空间。用户问「环境占了多少空间 / 能删哪个版本」时用", nil, nil)
+
 	// ---- 低危写 ----
 
 	r.add(func(args map[string]any) (any, error) {

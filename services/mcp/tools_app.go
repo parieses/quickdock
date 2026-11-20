@@ -61,4 +61,59 @@ func registerAppTools(s *MCPService, r *toolRegistrar) {
 			"body":    str("消息正文，可留空"),
 			"channel": str("可选。指定渠道：内置/扩展 kind，或扩展渠道的 id（GetExtraNotifyChannels 返回）；用扩展渠道的 kind 则发往该 kind 的全部渠道。留空则发给所有已启用渠道"),
 		})
+
+	// ---- 邮箱验证码（只读；不暴露账号密码配置、外连收信与清空）----
+
+	r.add(func(args map[string]any) (any, error) {
+		if s.Mailbox == nil {
+			return nil, errors.New("邮箱服务未就绪")
+		}
+		return unwrap(s.Mailbox.GetCodes())
+	}, mcpsrv.LevelRead, "mail_codes", "列出最近收到的邮箱验证码（已从邮件正文解析）。用户说「刚才的验证码是多少」时用；不会触发收信，只读本地已缓存的邮件", nil, nil)
+
+	r.add(func(args map[string]any) (any, error) {
+		if s.Mailbox == nil {
+			return nil, errors.New("邮箱服务未就绪")
+		}
+		id := mcpsrv.Arg(args, "id")
+		if id == "" {
+			return nil, errors.New("缺少参数 id（用 mail_codes 获取）")
+		}
+		return unwrap(s.Mailbox.GetMessage(id))
+	}, mcpsrv.LevelRead, "mail_read", "按 id 读一封已缓存邮件的正文（mail_codes 返回 id）。不联网、不触发收信", []string{"id"},
+		map[string]any{"id": str("邮件 id，来自 mail_codes")})
+
+	// ---- 密码库：只暴露状态与随机密码生成，明文读取/写入/导出刻意不给 AI ----
+
+	r.add(func(args map[string]any) (any, error) {
+		if s.Credentials == nil {
+			return nil, errors.New("密码库服务未就绪")
+		}
+		return unwrap(s.Credentials.Status())
+	}, mcpsrv.LevelRead, "credentials_status", "查看密码库是否已解锁、条目数、扩展是否启用。只报状态，不返回任何密码明文", nil, nil)
+
+	r.add(func(args map[string]any) (any, error) {
+		if s.Credentials == nil {
+			return nil, errors.New("密码库服务未就绪")
+		}
+		// ArgBool 没有默认值重载：未传时三个开关都要是 true，故显式补齐。
+		opt := func(key string, def bool) bool {
+			v, ok := args[key].(bool)
+			if !ok {
+				return def
+			}
+			return v
+		}
+		return unwrap(s.Credentials.GeneratePassword(
+			mcpsrv.ArgInt(args, "length", 16),
+			opt("digits", true),
+			opt("symbols", true),
+			opt("upper", true)))
+	}, mcpsrv.LevelRead, "password_generate", "生成一个随机密码（不接触密码库里已有的条目）。用户让你帮忙想个强密码时用", nil,
+		map[string]any{
+			"length":  mcpsrv.Int("长度，默认 16"),
+			"digits":  mcpsrv.Bool("是否含数字，默认 true"),
+			"symbols": mcpsrv.Bool("是否含符号，默认 true"),
+			"upper":   mcpsrv.Bool("是否含大写字母，默认 true"),
+		})
 }

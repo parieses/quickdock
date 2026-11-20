@@ -40,4 +40,8 @@ func registerDiagTools(s *MCPService, r *toolRegistrar) {
 		return unwrap(s.Diag.ReadCrashFile(name))
 	}, mcpsrv.LevelRead, "crash_read", "读取单个崩溃文件内容（供 AI 分析 panic/JS 异常栈）", []string{"name"},
 		map[string]any{"name": str("崩溃文件名")})
+
+	r.add(func(args map[string]any) (any, error) {
+		return unwrap(s.Diag.GetLogStorage())
+	}, mcpsrv.LevelRead, "log_storage", "统计日志与崩溃记录占用了多少磁盘空间（按文件/目录分）。用户问「日志能不能清、能省多少」时用这个，不要凭感觉回答", nil, nil)
 }
