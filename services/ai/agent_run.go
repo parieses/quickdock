@@ -204,15 +204,27 @@ func toolArgErrorHint(err error, records []aiToolRecord) string {
 // 上一发不一致——既没命中，又白占库。
 const aiWireMaxRune = 160000
 
+// aiWireTotalMaxRune 单条会话保留的 wire 总量上限（字符）。
+//
+// 保真重放要留**每一**次提问的 wire（见 buildAIMessages），不裁的话库体积随
+// 提问次数线性涨。1.2M 字 ≈ 60 万 token 的工具对话原文，已经覆盖任何窗口
+// 装得下的历史；超出时从最老的开始丢（TrimAIConversationWires），丢掉的只是
+// 很早那段的重放对齐，最近几轮照常命中。
+const aiWireTotalMaxRune = 1_200_000
+
 // composeBaseSystem 把一段「干净 system」（firstSystem 的结果，含模式提示/摘要/记忆/技能）
-// 补上所有运行期行为约束，得到完整的 baseSystem。
+// 补上所有**稳定**的运行期行为约束，得到完整的 baseSystem。
 //
 // 初始装配与两处压缩后重建必须走同一处：重建出来的 messages 里 system 是干净的，
 // 只贴 rules 会丢掉 planHint（怎么拆任务）、workdirHint（临时文件往哪写）、
-// scaleHint（能不能派子 agent）、resumeHint（上次做到哪）、extToolsOverflowHint
-// （外部工具被截）——表现是长对话一压缩，AI 就突然不懂规矩了。
+// scaleHint（能不能派子 agent）、extToolsOverflowHint（外部工具被截）——
+// 表现是长对话一压缩，AI 就突然不懂规矩了。
 // 这些约束都按「这次到底挂了什么」决定说不说，所以参数是 tools/cwd/extTrimmed 本身。
-func composeBaseSystem(clean string, rules aiRules, tools []map[string]any, cwd string, conv *db.AIConversation, message string, extTrimmed bool) string {
+//
+// 续跑/清单提示（resumeHintFor）**不在这里拼**：清单随 plan_update 每轮都可能变，
+// 放在 system 里等于每轮把整段前缀缓存作废一遍。system 必须是会话内一字不变的段；
+// 会变的提示挪去贴在最后的 user 消息上（见 runAgent 里 applyMentionBlock 的用法）。
+func composeBaseSystem(clean string, rules aiRules, tools []map[string]any, cwd string, extTrimmed bool) string {
 	out := clean
 	if hasToolPayload(tools, "plan_update") {
 		out += planHint
@@ -220,9 +232,6 @@ func composeBaseSystem(clean string, rules aiRules, tools []map[string]any, cwd 
 	out += workdirHintFor(cwd, tools)
 	out += scaleHintFor(tools)
 	out = withRules(out, rules)
-	if resumeHint := resumeHintFor(conv, message); resumeHint != "" {
-		out += resumeHint
-	}
 	if extTrimmed {
 		out += extToolsOverflowHint
 	}
@@ -692,7 +701,7 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 	if req.Fresh {
 		// 子 agent 的上下文只有「角色提示 + 那条自包含的 task」：
 		// 不读父对话历史（那会让上下文与花费随父对话线性增长）。
-		messages = a.subAgentMessages(cfg, mode, req.Role, message)
+		messages = a.subAgentMessages(cfg, mode, message)
 	} else {
 		var berr error
 		messages, berr = a.buildAIMessages(ctx, cfg, res.ConvID, mode, sink)
@@ -805,8 +814,19 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 	// 压缩后重建复用的是同一份，不重新读盘——那次重建此刻正被超窗逼着做，
 	// 多加一次 IO 没有收益，还可能读到用户正在编辑的半截文件。
 	rules := a.loadAIRules(cwd, aiMentionPaths(req.Mentions))
-	baseSystem := composeBaseSystem(firstSystem(messages), rules, tools, cwd, conv, message, extTrimmed)
+	baseSystem := composeBaseSystem(firstSystem(messages), rules, tools, cwd, extTrimmed)
+	// 子 agent 的角色提示拼在所有稳定段之后（见 subAgentMessages 的说明）：
+	// 同一次编排里各角色共享 [档案+模式+workdir+scale+rules] 前缀，差异只在尾部。
+	if req.Fresh && strings.TrimSpace(req.Role) != "" {
+		baseSystem += subAgentHint(req.Role)
+	}
 	applySystemHints(messages, baseSystem, toolHint, cwd, modeHasTools, false)
+	// 续跑/清单提示贴在本次提问（最后一条 user 消息）上，不进 system：
+	// 清单随 plan_update 每轮都可能变，system 里放它等于每轮全量作废前缀缓存。
+	// 位置在历史尾部，更新时只作废它自己这一小段。与 @ 引用同一张贴法。
+	if rh := resumeHintFor(conv, message); rh != "" {
+		applyMentionBlock(messages, rh)
+	}
 	// 让用户看见「这次用上了哪些规则」：改了不生效又没有任何提示，
 	// 是这类功能最常见的抱怨，而用户没法自己看出 AI 到底读没读到。
 	if len(rules.Files) > 0 {
@@ -886,7 +906,7 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 			}
 			// system / 规则 / 行为约束 / @ 引用要重新贴回去：压缩换掉的是整个
 			// 消息列表，这些都只存在于内存里（与下面超窗兜底走同一个 helper）。
-			baseSystem = composeBaseSystem(firstSystem(newMsgs), rules, tools, cwd, conv, message, extTrimmed)
+			baseSystem = composeBaseSystem(firstSystem(newMsgs), rules, tools, cwd, extTrimmed)
 			applySystemHints(newMsgs, baseSystem, toolHint, cwd, len(tools) > 0, modeHasTools && len(tools) == 0)
 			applyMentionBlock(newMsgs, mentionBlock)
 			messages = newMsgs
@@ -965,8 +985,32 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 	// 实测（看板 1198 请求）命中率 76%，而每次提问的首发几乎 0 命中。
 	// 原样留一份就能在重建时把它接回去，前缀一路对齐到最后一个 tool 消息。
 	//
-	// 只留内存，run 结束时一次落库（见 persistWire），更早的提问会被清空。
+	// **每一段提问都要留**（不再只留最后一次）：中间插话会把一次提问切成多段，
+	// 每段各有自己的工具对话；只留最后一段，倒数第二次追问起前缀就分叉了。
+	// segWireStart 是「当前段从 wireTail 的第几条开始」，saveSegment 落库时把
+	// 属于这一段的 wire 原文挂到那一条回复上。
 	var wireTail []map[string]interface{}
+	segWireStart := 0
+
+	// persistWireTo 把一段工具对话原文落到指定回复上（超上限整段跳过）。
+	persistWireTo := func(messageID string, seg []map[string]interface{}) {
+		if req.Fresh || messageID == "" || len(seg) == 0 {
+			return
+		}
+		raw, err := json.Marshal(stripInternalMessageKeys(seg))
+		if err != nil {
+			logger.W("[ai] 工具对话原文序列化失败 conv=%s: %v", res.ConvID, err)
+			return
+		}
+		if n := len([]rune(string(raw))); n > aiWireMaxRune {
+			// 退化成旧行为：宁可丢这次命中率，也不让库被一次长任务撑爆。
+			logger.I("[ai] 工具对话原文 %d 字超上限（%d），跳过落库 conv=%s", n, aiWireMaxRune, res.ConvID)
+			return
+		}
+		if err := a.App.DB.SetAIMessageWire(messageID, string(raw)); err != nil {
+			logger.W("[ai] 写入工具对话原文失败 conv=%s: %v", res.ConvID, err)
+		}
+	}
 
 	saveSegment := func(content string, stopped bool) {
 		if req.Fresh {
@@ -1007,6 +1051,10 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 			sink.Event("error", map[string]any{"message": e.Error()})
 		} else if msg != nil {
 			lastSavedMsgID = msg.ID
+			// 这一段的工具对话原文挂到这一段的回复上（见 wireTail 的说明）。
+			// 插话切段后每段各有自己的 wire，重建时才能按真实顺序逐段接回。
+			persistWireTo(msg.ID, wireTail[segWireStart:])
+			segWireStart = len(wireTail)
 		}
 		segStart = len(records)
 		segUsage = db.TokenUsage{}
@@ -1014,31 +1062,18 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 		roundReason = roundReason[:0]
 	}
 
-	// persistWire 把本次提问的工具对话原文落到最后一段助手回复上。
+	// persistWire 把收尾时还挂着的最后一段 wire 落库，并按总量预算裁剪全会的 wire。
 	//
 	// 三条收尾路径（正常结束 / 用户停止 / 上游报错）都要调：用户点停止之后接着
 	// 再问一句是常态，那一发同样重建历史——不落就等于这次的工具轮白跑一遍。
-	// 无论有没有 wire 都先清掉同会话其它消息上的：同一会话只留最近一次提问那份。
+	// 裁剪取代旧的「只留一条清其余」：保真重放要每一段都留，只控总量。
 	persistWire := func() {
 		if req.Fresh {
 			return
 		}
-		_ = a.App.DB.ClearAIMessageWires(res.ConvID, lastSavedMsgID)
-		if lastSavedMsgID == "" || len(wireTail) == 0 {
-			return
-		}
-		raw, err := json.Marshal(stripInternalMessageKeys(wireTail))
-		if err != nil {
-			logger.W("[ai] 工具对话原文序列化失败 conv=%s: %v", res.ConvID, err)
-			return
-		}
-		if n := len([]rune(string(raw))); n > aiWireMaxRune {
-			// 退化成旧行为：宁可丢这次命中率，也不让库被一次长任务撑爆。
-			logger.I("[ai] 工具对话原文 %d 字超上限（%d），跳过落库 conv=%s", n, aiWireMaxRune, res.ConvID)
-			return
-		}
-		if err := a.App.DB.SetAIMessageWire(lastSavedMsgID, string(raw)); err != nil {
-			logger.W("[ai] 写入工具对话原文失败 conv=%s: %v", res.ConvID, err)
+		persistWireTo(lastSavedMsgID, wireTail[segWireStart:])
+		if err := a.App.DB.TrimAIConversationWires(res.ConvID, lastSavedMsgID, aiWireTotalMaxRune); err != nil {
+			logger.W("[ai] 裁剪会话 wire 超量失败 conv=%s: %v", res.ConvID, err)
 		}
 	}
 
@@ -1490,7 +1525,7 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 			// 它可能已经带上了这次新算出的摘要。规则、清单/目录/派活/续跑等
 			// 行为约束全部由 composeBaseSystem 重贴，和请求前压缩走同一处——
 			// 漏贴的症状是「长对话压缩后 AI 突然不懂规矩」，极难复现。
-			baseSystem = composeBaseSystem(firstSystem(newMsgs), rules, tools, cwd, conv, message, extTrimmed)
+			baseSystem = composeBaseSystem(firstSystem(newMsgs), rules, tools, cwd, extTrimmed)
 			applySystemHints(newMsgs, baseSystem, toolHint, cwd, len(tools) > 0, modeHasTools && len(tools) == 0)
 			// 引用材料同样要贴回去：重建出来的 messages 里那条 user 消息是库里的原文，
 			// @ 的内容只存在于内存。漏了这步，超窗重试之后 AI 会对着「照这个改」发愣。
@@ -1619,6 +1654,19 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 					}
 				}
 				if turnIdx <= limit {
+					// 这一段的最终回答要进 messages：插话之后模型看到的上下文里
+					// 应该有「自己刚才说了什么」（否则下一轮的回答没有依据）；
+					// 同时这也是前缀对齐的要求——下次提问重建历史时会从库里
+					// 把这段回复接回去，本次 run 里不发它，重建出的前缀就从
+					// 这里开始分叉（与 wireTail 的说明同理，方向反过来）。
+					// 内容取 trim 后的：与 saveSegment 落库的正文逐字节一致，
+					// 重建时才能对上。不进 wireTail——它本来就能从库里重建。
+					if s := strings.TrimSpace(turn.Content); s != "" {
+						messages = append(messages, map[string]interface{}{
+							"role":    "assistant",
+							"content": s,
+						})
+					}
 					continue
 				}
 				// 补不上轮次了：别让这句话静默消失（见 flushPendingInjects）。

@@ -137,8 +137,8 @@ type AIMessage struct {
 	// 为什么要单独存：ReasoningContent 是把多轮拼成的一段，界面只能把它挂在
 	// 整条回复的顶部——十轮工具下来就是一坨几千字的东西。按轮拆开之后，
 	// 每条调用旁边能显示「模型当时在想什么」。空串表示没有分轮信息（旧数据）。
-	ReasoningRounds  string `json:"reasoning_rounds"`
-	Images           string `json:"images"`
+	ReasoningRounds string `json:"reasoning_rounds"`
+	Images          string `json:"images"`
 	// AttachedFiles 用户主动插入的文件引用，JSON 数组：[{"name":"a.pdf","path":"D:/x/a.pdf"}]。
 	// 只存元信息不存字节（粘贴/拖入的来源原文只在本次请求里展开进上下文）。
 	// 与 Images 一样只出现在 user 消息上，用于刷新/重启后气泡里还能看到文件 chip。
@@ -1071,9 +1071,10 @@ func (d *Database) SetAIMessageWire(messageID, wire string) error {
 
 // ClearAIMessageWires 清空某会话里除 keepID 之外所有消息的 wire。
 //
-// 为什么必须清：wire 存的是与「发给模型的原文」逐字节相同的一份，一次提问几十 KB。
-// 一旦会话存在多份，库体积随提问次数线性增长，而重建时只有最近一条用得上——
-// 保留更早的纯属白占空间。清空是幂等的，可以在每次 run 结束时无条件调用。
+// 「只留最近一条」的旧策略：wire 存的是与「发给模型的原文」逐字节相同的一份，
+// 一次提问几十 KB，全留着库体积随提问次数线性增长。会话级保真重放（见
+// services/ai 的 buildAIMessages）之后改用 TrimAIConversationWires 按总预算裁，
+// 不再无条件清——但保留这个入口：快照回滚等场景仍可能要整段清空。
 func (d *Database) ClearAIMessageWires(convID, keepID string) error {
 	convID = strings.TrimSpace(convID)
 	if convID == "" {
@@ -1083,6 +1084,53 @@ func (d *Database) ClearAIMessageWires(convID, keepID string) error {
 		`UPDATE ai_messages SET wire = '' WHERE conv_id = ? AND id <> ? AND wire <> ''`,
 		[]interface{}{convID, keepID},
 	)
+}
+
+// TrimAIConversationWires 把某会话的 wire 总量裁到 maxTotalRunes 字以内。
+//
+// 为什么要留所有 wire：重建历史时每条带 wire 的助手回复都能与「当时真实发出的
+// 请求」逐字节对齐，前缀缓存才能跨提问连续命中——只留最近一条时，第二次追问
+// 起前缀就从更早的助手消息开始分叉，之前的整段历史全按全价重算。
+//
+// 为什么又要裁：一条 wire 最多 160K 字（aiWireMaxRune），几十次提问不裁就是
+// 几 MB。裁的策略是**从最老的开始丢**：最老的提问对应的原文大概率已经被摘要
+// 压缩挤出上下文，丢了它只影响很早那段的重放对齐；keepID（最新一条）不丢。
+func (d *Database) TrimAIConversationWires(convID, keepID string, maxTotalRunes int) error {
+	convID = strings.TrimSpace(convID)
+	if convID == "" || maxTotalRunes <= 0 {
+		return nil
+	}
+	rows, err := d.Query(
+		`SELECT id, LENGTH(wire) AS n FROM ai_messages WHERE conv_id = ? AND wire <> '' ORDER BY rowid ASC`,
+		convID)
+	if err != nil {
+		return err
+	}
+	total := 0
+	for _, r := range rows {
+		if v, ok := r["n"].(int64); ok {
+			total += int(v)
+		}
+	}
+	if total <= maxTotalRunes {
+		return nil
+	}
+	for _, r := range rows {
+		if total <= maxTotalRunes {
+			break
+		}
+		id, _ := r["id"].(string)
+		if id == "" || id == keepID {
+			continue
+		}
+		if err := d.ExecuteParams(`UPDATE ai_messages SET wire = '' WHERE id = ?`, []interface{}{id}); err != nil {
+			return err
+		}
+		if v, ok := r["n"].(int64); ok {
+			total -= int(v)
+		}
+	}
+	return nil
 }
 
 // AddAIMessageUsage 把一次额外调用（记忆整理）的用量并进某条回复。

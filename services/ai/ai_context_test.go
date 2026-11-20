@@ -160,13 +160,14 @@ func TestLoopBudgetNotSmallerThanLegacy(t *testing.T) {
 func TestLoopBudgetScalesWithWindow(t *testing.T) {
 	// 大窗口不能用历史软上限 1/3 算：120K 软上限会把 1M 窗口的循环预算
 	// 卡死在 40K，模型读几份源码就折叠，然后不停重读（实测 30 轮零产出）。
-	// 现在按物理窗口算，1M 应拿到接近 200K 的封顶值。
+	// 2026-11-20 放宽到 ceiling 的六成（上限 400K）：折叠会改写历史、作废
+	// 前缀缓存，时机越晚越好；400 风险由 Measured 的 85% 守卫兜底。
 	big := aiLoopBudget(AIProfile{ContextWindow: 1000000, ContextSoftCap: 120000})
-	if big < 150000 {
+	if big < 300000 {
 		t.Fatalf("1M 窗口的循环预算过小: %d", big)
 	}
 	small := aiLoopBudget(AIProfile{ContextWindow: 128000, ContextSoftCap: 120000})
-	if small < 24000 || small > 40000 {
-		t.Fatalf("128K 窗口应保持 24K~40K 旧量级，实际 %d", small)
+	if small < 60000 || small > 80000 {
+		t.Fatalf("128K 窗口应约在 ceiling 六成（~72K），实际 %d", small)
 	}
 }

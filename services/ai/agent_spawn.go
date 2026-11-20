@@ -482,12 +482,16 @@ func subAgentHint(role string) string {
 // 与 buildAIMessages 的区别只有两处（都是刻意的）：
 //   - 不读历史：子 agent 的任务是自包含的，带上父对话只会让它偏离任务；
 //   - 不做摘要压缩：没有历史可压，压了反而多一次模型调用（要花钱）。
-func (a *AIService) subAgentMessages(cfg AIProfile, mode, role, task string) []map[string]interface{} {
+//
+// **角色提示不在这里拼**：它按角色不同而不同，嵌在 system 中段会把同一次
+// 编排里 N 个子 agent 的共享前缀截断在那里。挪到 runAgent 里拼在所有稳定段
+// （workdir/scale/rules）之后，子 agent 之间、子 agent 与父级之间就能共享
+// 「档案提示+模式+稳定段」这一大段前缀，各自冷启动的部分只剩角色差异。
+func (a *AIService) subAgentMessages(cfg AIProfile, mode, task string) []map[string]interface{} {
 	system := aiModePrompts[mode]
 	if cfg.SystemPrompt != "" {
 		system = cfg.SystemPrompt + "\n\n" + system
 	}
-	system += subAgentHint(role)
 	return []map[string]interface{}{
 		{"role": "system", "content": system},
 		{"role": "user", "content": task},

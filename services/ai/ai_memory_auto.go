@@ -71,6 +71,15 @@ const (
 	memoryEntryMax = 6
 	// memoryNoteMinUserRune 太短的提问不值得单独跑一次调用（「继续」「谢谢」）。
 	memoryNoteMinUserRune = 12
+
+	// memoryNoteMinReplyRune 纯问答（没调工具、没动文件）的回答长度门槛。
+	//
+	// 记忆整理是每次提问后的一次**冷启动**模型调用：prompt 与主对话完全不同，
+	// 前缀缓存零命中，是一笔固定开销。动过文件、调过工具的任务值得记；
+	// 一问一答里只有「答案本身就有长期价值」的才值得——回不到几百字的
+	// 问答（怎么导出、在哪设置）结论早就留在对话里了，再花一次调用把
+	// 它抄进记忆纯属浪费。门槛取 400 字：一句话能说清的不配占用整理名额。
+	memoryNoteMinReplyRune = 400
 )
 
 // memoryAutoOn 读开关。读不到设置时按「开」处理：默认行为应该是用户要的那个。
@@ -213,9 +222,14 @@ func (a *AIService) writeTaskMemoryAsync(cfg AIProfile, in taskMemoryInput) {
 	}
 	// 纯寒暄 / 续跑口令不值得一次完整计费调用。动了文件或调了工具的照整理：
 	// 那往往就是「继续做」的后半段，跳过它等于那半段永远进不了记忆。
-	if in.Rounds == 0 && len(in.Files) == 0 &&
-		utf8.RuneCountInString(strings.TrimSpace(in.User)) < memoryNoteMinUserRune {
-		return
+	// 纯问答（没调工具、没动文件）还要回答够长才整理：短问答的结论留在
+	// 对话里就行，每次都为它跑一次零缓存命中的整理调用不划算（见常量说明）。
+	if in.Rounds == 0 && len(in.Files) == 0 {
+		u := utf8.RuneCountInString(strings.TrimSpace(in.User))
+		r := utf8.RuneCountInString(strings.TrimSpace(in.Reply))
+		if u < memoryNoteMinUserRune || r < memoryNoteMinReplyRune {
+			return
+		}
 	}
 	if !a.memoryAutoOn() {
 		return

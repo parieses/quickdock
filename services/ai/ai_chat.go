@@ -680,38 +680,39 @@ func (a *AIService) buildAIMessagesWithin(ctx context.Context, cfg AIProfile, co
 	}
 
 	messages := []map[string]interface{}{{"role": "system", "content": system}}
-	// 最近一条带 wire 的助手回复：重建时把它的工具对话原样接回去（见 AIMessage.Wire）。
+	// 带 wire 的助手回复：把当时的工具对话原文逐字节接回去（见 AIMessage.Wire）。
 	//
-	// 只还原这一条，不是每条都还原：更早的提问在历史里已经被摘要/压缩过，还原
-	// 它们既对不上任何一次真实请求的前缀（白算 token），又把上下文撑大一截。
-	// 而最近这一条正好是「上一发请求的尾部」——接回去之后，本次请求从 system 到
-	// 最后一个 tool 消息都与上一发逐字节相同，前缀缓存才真的能用上。
-	wireAt := lastWireMessageIndex(hist)
-	for idx, m := range hist {
-		if idx == wireAt {
-			messages = append(messages, decodeMessageWire(m.Wire)...)
-		}
+	// **每一条带 wire 的都还原，不是只有最近一条**：前缀缓存按逐字节匹配，只要
+	// 历史里有一条助手回复被换成了「合并后的正文」重建形式，从它开始整个前缀
+	// 就与上一发请求对不上了——之前「只还原最近一条」的做法，第二次追问起
+	// 缓存就全废（实测命中率 76% 的主因）。全量还原后，本次请求的前缀一路
+	// 对齐到上一发的最后一个 tool 消息，只有新增的这一次提问是真 token。
+	//
+	// wire 里有工具对话、没有最终正文：正文就在后面那条普通助手消息里（落库
+	// 时的合并正文），顺序恰好是协议要求的「工具调用 → 工具结果 → 最终回答」。
+	return appendHistoryWithWires(messages, hist, func(m db.AIMessage) interface{} {
 		// 带图片的 user 消息组装为 [text, image_url...] 块数组，其余保持纯字符串。
 		// 图片按当前档案能力转换：本地图重读 base64，URL 图直发；能力不匹配的跳过。
-		messages = append(messages, map[string]interface{}{
-			"role":    m.Role,
-			"content": a.messageContent(cfg, m.Role, m.Content, m.Images),
-		})
-	}
-	return messages, nil
+		return a.messageContent(cfg, m.Role, m.Content, m.Images)
+	}), nil
 }
 
-// lastWireMessageIndex 返回最近一条带 wire 的助手消息下标（没有则 -1）。
+// appendHistoryWithWires 把库里的历史追加到 messages 上，带 wire 的助手回复
+// 先接回工具对话原文再接普通正文（见 buildAIMessages 的说明）。
 //
-// 只取最后一条：wire 存的是「上一发请求的尾部」，只有它能与本次请求的前缀
-// 对上；更早的提问早就被摘要/压缩过，还原它们只会把上下文撑大。
-func lastWireMessageIndex(hist []db.AIMessage) int {
-	for i := len(hist) - 1; i >= 0; i-- {
-		if hist[i].Role == "assistant" && hist[i].Wire != "" {
-			return i
+// 抽成纯函数：重放的顺序与「每条 wire 都还原」是缓存命中率的命门，
+// 用单测锁住，别让后续重构把它改回「只还原最近一条」。
+func appendHistoryWithWires(messages []map[string]interface{}, hist []db.AIMessage, contentOf func(db.AIMessage) interface{}) []map[string]interface{} {
+	for _, m := range hist {
+		if m.Role == "assistant" && strings.TrimSpace(m.Wire) != "" {
+			messages = append(messages, decodeMessageWire(m.Wire)...)
 		}
+		messages = append(messages, map[string]interface{}{
+			"role":    m.Role,
+			"content": contentOf(m),
+		})
 	}
-	return -1
+	return messages
 }
 
 // decodeMessageWire 把库里存的「工具对话原文」解析成消息列表。

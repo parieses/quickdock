@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"quickdock/internal/db"
@@ -181,6 +182,18 @@ func aiToolsPayload(sf mcpsrv.Surface) ([]map[string]any, bool) {
 	if len(out) == 0 {
 		return nil, false
 	}
+	// 按工具名排序后发给模型。
+	//
+	// 为什么必须确定序：sf.Tools 的顺序来自 MCP surface 的注册/枚举，同一个
+	// 工具面两次装配的顺序不保证一致。不少网关把 tools 数组算进前缀缓存 key，
+	// 顺序抖一次 = 整个前缀作废——而模型对工具列表顺序没有任何行为依赖，
+	// 排序是零成本的确定性保障。内置工具优先的逻辑在上面的名额分配里已经
+	// 完成，这里排序不影响谁被挂上。
+	sort.Slice(out, func(i, j int) bool {
+		ni, _ := out[i]["function"].(map[string]any)["name"].(string)
+		nj, _ := out[j]["function"].(map[string]any)["name"].(string)
+		return ni < nj
+	})
 	return out, extTrimmed
 }
 
@@ -211,6 +224,8 @@ const (
 	toolHintDiscipline = "[执行纪律]\n" +
 		"- 要调工具就直接调：不写「我先看一下」「让我查查」这类预告，也不要每步都汇报一次进度。" +
 		"工具返回后不复述结果——用户已经能在工具行里看到，你只给结论或做下一步。\n" +
+		"- 最终回答聚焦增量结论：不复述命令输出、文件原文、清单内容（用户界面上都看得到），" +
+		"也不把每一步做过的事再串讲一遍。写「改了什么、为什么、结果如何」，不写流水账。\n" +
 		"- 要产出文件就用 file_write，**不要**在 run_command 里 echo / Set-Content / node -e 造文件——" +
 		"引号、换行、编码在那条路上都容易出错，而且用户看不出你写了什么。\n" +
 		"- 高危命令被拒绝时，把命令写给用户让他在终端里执行，不要换个写法反复试。\n"

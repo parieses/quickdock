@@ -325,17 +325,19 @@ func aiPayloadTokens(messages []map[string]interface{}, tools []map[string]any) 
 // 1M 窗口上旧公式恒等于 40K，模型读三四个文件就撞线、工具结果被折叠，
 // 它发现「刚读的内容被摘要掉了」就重读——实测能连转 30 轮不落一个文件。
 //
-// 改成按物理窗口的 1/5（有 200K 封顶）：128K 窗口仍约 24K，行为不变；
-// 1M 窗口给到 ~198K，长任务读一整个项目的源码也不会被过早折叠。
-// 真正的 400 风险仍由 aiLoopBudgetThisTurn 的 85% 余量守卫兜着，这里只放宽
-// 「本次循环内允许多少工具结果」，不会把请求推过出站上限。
+// 也**不能按 ceiling/5 来算**（2026-11-20 放宽）：折叠会改写历史，是前缀缓存
+// 的头号杀手——128K 窗口上 24K token 就开始折，长任务每几轮折一次，每次折叠
+// 都把已攒的缓存整段作废（看板命中率 76% 的第二主因）。真正的 400 风险由
+// aiLoopBudgetThisTurn 的 85% 余量守卫兜着，这里只是「本次循环内允许多少
+// 工具结果」的静态上限，取 ceiling 的六成：128K 窗口 ~72K，1M 窗口封顶 400K。
+// 折叠时机越晚越好——越晚折，折叠前攒下的缓存轮次越多。
 func aiLoopBudget(cfg AIProfile) int {
-	b := contextLimitsOf(cfg).Ceiling / 5
+	b := contextLimitsOf(cfg).Ceiling * 6 / 10
 	if b < 24000 {
 		b = 24000
 	}
-	if b > 200000 {
-		b = 200000
+	if b > 400000 {
+		b = 400000
 	}
 	return b
 }

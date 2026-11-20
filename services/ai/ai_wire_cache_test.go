@@ -61,23 +61,39 @@ func TestDecodeMessageWireBroken(t *testing.T) {
 	}
 }
 
-// 只认最后一条带 wire 的助手消息：更早的还原了也用不上。
-func TestLastWireMessageIndex(t *testing.T) {
+// 每一条带 wire 的助手回复都要还原（不是只有最近一条）：
+// 只还原最近一条时，第二次追问起前缀就从更早的助手消息开始分叉，整段历史
+// 按全价重算——这是看板命中率 76% 的主因。顺序必须是 wire 在前、正文在后。
+func TestAppendHistoryWithWiresReplaysAll(t *testing.T) {
 	hist := []db.AIMessage{
 		{Role: "user", Content: "q1"},
-		{Role: "assistant", Content: "a1"},
+		{Role: "assistant", Content: "a1", Wire: `[{"role":"assistant","content":"t1"},{"role":"tool","tool_call_id":"c1","content":"r1"}]`},
 		{Role: "user", Content: "q2"},
-		{Role: "assistant", Content: "a2", Wire: "[]"},
+		{Role: "assistant", Content: "a2", Wire: `[{"role":"assistant","content":"t2"},{"role":"tool","tool_call_id":"c2","content":"r2"}]`},
 		{Role: "user", Content: "q3"},
 		{Role: "assistant", Content: "a3"},
 	}
-	if got := lastWireMessageIndex(hist); got != 3 {
-		t.Errorf("应命中下标 3，实际 %d", got)
+	out := appendHistoryWithWires([]map[string]interface{}{}, hist, func(m db.AIMessage) interface{} { return m.Content })
+	var got []string
+	for _, m := range out {
+		role, _ := m["role"].(string)
+		c, _ := m["content"].(string)
+		got = append(got, role+"/"+c)
 	}
-	// user 消息上挂着 wire 也不算：只有 assistant 的 wire 代表一次工具对话。
-	hist[3].Role = "user"
-	hist[3].Wire = ""
-	if got := lastWireMessageIndex(hist); got != -1 {
-		t.Errorf("没有 assistant wire 时应返回 -1，实际 %d", got)
+	want := []string{
+		"user/q1",
+		"assistant/t1", "tool/r1", "assistant/a1",
+		"user/q2",
+		"assistant/t2", "tool/r2", "assistant/a2",
+		"user/q3",
+		"assistant/a3",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("重放条数 = %d，期望 %d\n实际: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("第 %d 条 = %q，期望 %q", i, got[i], want[i])
+		}
 	}
 }
