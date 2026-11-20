@@ -153,7 +153,9 @@ func checkFSPermission(inst *PluginInstance, method string, params json.RawMessa
 
 	for _, field := range spec.pathFields {
 		var raw string
-		if v, ok := args[field]; ok {
+		// 与 jsonStringField 同一口径：字段名大小写不敏感（PATH / Path / path 都认）。
+		// 插件写错大小写不该绕过 scope 校验——取不到值时下面按空串拒绝（fail-closed）。
+		if v, ok := jsonLookupFold(args, field); ok {
 			_ = json.Unmarshal(v, &raw)
 		}
 		if strings.TrimSpace(raw) == "" {
