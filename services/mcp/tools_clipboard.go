@@ -17,7 +17,7 @@ func registerClipboardTools(s *MCPService, r *toolRegistrar) {
 			return nil, errors.New("剪贴板服务未就绪")
 		}
 		return s.Clip.ListClipboardEntries(mcpsrv.ArgInt(args, "limit", 20)), nil
-	}, mcpsrv.LevelRead, "clipboard_recent", "列出最近的剪贴板历史（文本条目）", nil,
+	}, mcpsrv.LevelRead, "clipboard_recent", "列出最近的剪贴板条目（文本/图片/文件）", nil,
 		map[string]any{"limit": intp("返回条数，默认 20")})
 
 	r.add(func(args map[string]any) (any, error) {

@@ -71,6 +71,17 @@ func registerTodoTools(s *MCPService, r *toolRegistrar) {
 		if err != nil {
 			return nil, err
 		}
+		status := updateArg(args, "status", cur.Status)
+		// schema 只接受 todo / doing / done；非法值必须报错，不能静默透传给 DB 变成未知状态。
+		if v, provided := args["status"]; provided {
+			s, _ := v.(string)
+			switch s {
+			case "todo", "doing", "done":
+				status = s
+			default:
+				return nil, errors.New("status 非法：只接受 todo / doing / done")
+			}
+		}
 		return unwrap(s.Todo.UpdateTodo(
 			id,
 			updateArg(args, "title", cur.Title),
@@ -82,7 +93,7 @@ func registerTodoTools(s *MCPService, r *toolRegistrar) {
 			updateArg(args, "reminderTime", cur.ReminderTime),
 			updateArg(args, "recurrence", cur.Recurrence),
 			updateArg(args, "tags", cur.Tags),
-			updateArg(args, "status", cur.Status),
+			status,
 		))
 	}, mcpsrv.LevelWrite, "todo_update", "增量修改一条待办：只传 id 和要改的字段，其余字段保持原值。要清空某字段就传空字符串", []string{"id"},
 		map[string]any{

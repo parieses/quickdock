@@ -17,9 +17,14 @@ func registerItemTools(s *MCPService, r *toolRegistrar) {
 
 	// ---- 只读 ----
 
+	// workspace_list 与 workspace_list_all 行为完全相同；后者是目录 Hint 与 scene_list
+	// 描述里引用的规范名。这里保留前者作为兼容别名，不删除——外部 MCP 客户端可能已在调用它。
 	r.add(func(args map[string]any) (any, error) {
+		if s.Workspace == nil {
+			return nil, errors.New("工作空间服务未就绪")
+		}
 		return unwrap(s.Workspace.ListWorkspaces())
-	}, mcpsrv.LevelRead, "workspace_list", "列出所有工作空间", nil, nil)
+	}, mcpsrv.LevelRead, "workspace_list", "列出所有工作空间（workspace_list_all 的兼容别名，返回相同结果；新调用建议用 workspace_list_all）", nil, nil)
 
 	r.add(func(args map[string]any) (any, error) {
 		q := mcpsrv.Arg(args, "query")

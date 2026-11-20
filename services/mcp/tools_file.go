@@ -88,6 +88,9 @@ func registerFileTools(s *MCPService, r *toolRegistrar) {
 				"要按文件名在某个目录里找，改用 file_find（不依赖 Everything）")
 		}
 		limit := mcpsrv.ArgInt(args, "limit", 30)
+		if limit <= 0 {
+			limit = 30
+		}
 		if limit > 200 {
 			limit = 200
 		}

@@ -114,23 +114,25 @@ func registerNoteTools(s *MCPService, r *toolRegistrar) {
 		if id == "" {
 			return nil, errors.New("缺少参数 id（用 note_search 获取）")
 		}
-		content, tags := mcpsrv.Arg(args, "content"), mcpsrv.Arg(args, "tags")
-		// 分三路：只传一个字段时不要覆盖另一个。此前空 tags 会清空标签、空 content 会清空正文，
-		// 模型「只改一半」就会造成静默数据丢失。
+		// 按「参数是否存在」而非「值是否为空」分流：只传一个字段时不覆盖另一个，
+		// 而显式传 content:"" 现在真的能清空正文（此前它被当成「没传」走标签分支）。
+		// 类型断言同时挡住 content:null 这类非字符串值，避免静默清空。
+		content, hasContent := args["content"].(string)
+		tags, hasTags := args["tags"].(string)
 		switch {
-		case content == "" && tags == "":
-			return nil, errors.New("content 与 tags 至少提供一个（需要清空正文请显式传 content 为空串的场景请改用 note_create 覆盖）")
-		case content == "":
-			return unwrap(s.Note.UpdateNoteDocTags(id, tags))
-		case tags == "":
-			return unwrap(s.Note.UpdateNoteDocContent(id, content))
-		default:
+		case hasContent && hasTags:
 			return unwrap(s.Note.UpdateNoteDoc(id, content, tags))
+		case hasContent:
+			return unwrap(s.Note.UpdateNoteDocContent(id, content))
+		case hasTags:
+			return unwrap(s.Note.UpdateNoteDocTags(id, tags))
+		default:
+			return nil, errors.New("content 与 tags 至少提供一个（要清空正文请传 content 为空串，要清空标签请传 tags 为 []）")
 		}
-	}, mcpsrv.LevelWrite, "note_update", "更新笔记正文与标签：只传 content 改正文（保留标签），只传 tags 改标签（保留正文），两个都传则一起覆盖。tags 为 JSON 数组字符串，如 [\"a\",\"b\"]；传 [] 清空标签", []string{"id"},
+	}, mcpsrv.LevelWrite, "note_update", "更新笔记正文与标签：只传 content 改正文（保留标签），只传 tags 改标签（保留正文），两个都传则一起覆盖。content 传空串即清空正文；tags 为 JSON 数组字符串，如 [\"a\",\"b\"]，传 [] 清空标签", []string{"id"},
 		map[string]any{
 			"id":      str("笔记 id（用 note_search 获取）"),
-			"content": str("新的正文内容；不传则保留原正文"),
+			"content": str("新的正文内容；不传则保留原正文，传空串则清空正文"),
 			"tags":    str("标签 JSON 数组字符串；不传则保留原标签，传 [] 清空"),
 		})
 

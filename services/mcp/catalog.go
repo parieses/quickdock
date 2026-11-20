@@ -97,9 +97,10 @@ func domainCatalog() []mcpsrv.Domain {
 		{
 			ID: mcpsrv.CategoryApp, LabelKey: "mcpCatApp", Order: orderApp, External: true,
 			Summary: "软件信息、监听端口、机器人通知",
-			Hint:    "**软件与端口**：app_info 看版本与数据目录，port_list 看本机谁在监听哪个端口。credentials_status 看密码库状态（不含明文），mail_codes 取最近收到的邮箱验证码、mail_read 读缓存邮件正文。\n",
+			Hint: "**软件与端口**：app_info 看版本与数据目录，port_list 看本机谁在监听哪个端口。credentials_status 看密码库状态（不含明文），mail_codes 取最近收到的邮箱验证码、mail_read 读缓存邮件正文。" +
+				"password_generate 只生成新密码，不会改密码库里的条目（只读档也能用，属于只读工具）。\n",
 			WriteHint: "robot_notify 会**真的**把消息发到用户配置的机器人（企业微信 / 钉钉 / 飞书 / Telegram 等），" +
-				"不是草稿。发之前确认内容，不要为测试而发。password_generate 只生成新密码，不会改密码库里的条目。\n",
+				"不是草稿。发之前确认内容，不要为测试而发。\n",
 			Scenes: readScenes(),
 		},
 		{

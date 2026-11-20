@@ -298,7 +298,7 @@ var destructiveTools = map[string]bool{
 	"ssh_exec":         true, // 在远端主机执行命令
 	"plugin_execute":   true, // 执行插件命令
 	"env_stop":         true, // 停掉环境服务（redis/mysql…在用的时候）
-	"download_remove":  true, // 删下载任务并删文件
+	"download_remove":  true, // 移除下载任务记录（活跃任务取消下载；不删磁盘上已下载的文件）
 	"schedule_create":  true, // 新建定时任务＝预置一个未来会自动执行的动作
 	"schedule_run_now": true, // 立即执行定时任务
 	// 以下默认不可达（LevelRisk），但用户把等级调到「含高危」后就会暴露，

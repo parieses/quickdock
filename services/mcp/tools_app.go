@@ -17,12 +17,16 @@ func registerAppTools(s *MCPService, r *toolRegistrar) {
 	str := mcpsrv.Str
 
 	r.add(func(args map[string]any) (any, error) {
-		// 三个数分开报，跟 MCPStatus 面板同一口径：
+		// 三个数分开报，跟 MCPStatus 面板同一口径：agent 工具单独算，不混进对外工具数。
 		// 只报一个「工具数」时，模型会把它当成宿主的全部能力——被等级门挡住的高危工具
 		// 就变成了「这个宿主没有」，用户在被要求「执行命令」时找不到入口也不知为什么。
 		cat := mcpsrv.Catalog()
-		exposed := 0
+		exposed, total := 0, 0
 		for _, t := range cat {
+			if t.AgentOnly {
+				continue
+			}
+			total++
 			if t.Exposed {
 				exposed++
 			}
@@ -37,8 +41,8 @@ func registerAppTools(s *MCPService, r *toolRegistrar) {
 			// tools=当前开放（客户端 tools/list 真正能看到并调用的），
 			// toolsTotal=已注册总数，toolsBlocked=被等级/单工具开关挡住的。
 			"tools":        exposed,
-			"toolsTotal":   len(cat),
-			"toolsBlocked": len(cat) - exposed,
+			"toolsTotal":   total,
+			"toolsBlocked": total - exposed,
 		}, nil
 	}, mcpsrv.LevelRead, "app_info", "QuickDock 基本信息：版本、平台、数据目录、MCP 服务地址，以及工具数量（tools=当前开放数、toolsTotal=已注册总数、toolsBlocked=被危险等级或单工具开关挡住的数量）", nil, nil)
 
