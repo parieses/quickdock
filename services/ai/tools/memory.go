@@ -248,7 +248,10 @@ func sanitizeTopicName(name string) string {
 	return out
 }
 
-var topicNumberRe = regexp.MustCompile(`^(\d{1,3})-(.+)$`)
+// 分册编号允许到 6 位：只认 1-3 位时，第 1000 册（如 "1000-go基础"）会被
+// 当成「无编号主题」，findTopicFile 找不到旧分册、nextTopicNumber 也算不到它，
+// 于是同一主题反复新建、编号撞车。放宽后旧的 1-3 位分册仍照常匹配。
+var topicNumberRe = regexp.MustCompile(`^(\d{1,6})-(.+)$`)
 
 func hasTopicNumber(name string) bool { return topicNumberRe.MatchString(name) }
 

@@ -654,9 +654,11 @@ function onPasteWithDocs(e: ClipboardEvent) {
   }
   if (files.length && hasDocFiles(files)) {
     e.preventDefault()
+    // 文档进插入文件通道；addDroppedFiles 内部已处理读取失败与提示。
     void addDroppedFiles(files)
-    return
   }
+  // 同一批里夹带的图片交回图片附件通道，别被文档通道一起吞掉。
+  // onInputPaste 只看 image/*，纯图片/纯文本路径与原来完全一致。
   onInputPaste(e)
 }
 function onDropWithDocs(e: DragEvent) {
@@ -664,8 +666,8 @@ function onDropWithDocs(e: DragEvent) {
   if (files.length && hasDocFiles(files)) {
     e.preventDefault()
     void addDroppedFiles(files)
-    return
   }
+  // 同上：文档已收下，图仍走原图片附件通道。
   onInputDrop(e)
 }
 

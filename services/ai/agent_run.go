@@ -730,6 +730,14 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 	if !req.Fresh && len(req.AttachedFiles) > 0 {
 		mentionBlock += buildAttachedFilesBlock(req.AttachedFiles, sink)
 	}
+	// 续跑/清单提示也并进这一块，不进 system：
+	// 清单随 plan_update 每轮都可能变，system 里放它等于每轮全量作废前缀缓存。
+	// 位置在历史尾部，更新时只作废它自己这一小段。与 @ 引用同一张贴法。
+	// 关键是压缩重建（请求前压缩 / 超窗重试）复用的就是 mentionBlock 这一块：
+	// 若在这里单独 apply 一次，重建后会被漏掉——模型会突然看不到「还有清单没做完」。
+	if rh := resumeHintFor(conv, message); rh != "" {
+		mentionBlock += rh
+	}
 	if mentionBlock != "" {
 		applyMentionBlock(messages, mentionBlock)
 	}
@@ -821,12 +829,6 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 		baseSystem += subAgentHint(req.Role)
 	}
 	applySystemHints(messages, baseSystem, toolHint, cwd, modeHasTools, false)
-	// 续跑/清单提示贴在本次提问（最后一条 user 消息）上，不进 system：
-	// 清单随 plan_update 每轮都可能变，system 里放它等于每轮全量作废前缀缓存。
-	// 位置在历史尾部，更新时只作废它自己这一小段。与 @ 引用同一张贴法。
-	if rh := resumeHintFor(conv, message); rh != "" {
-		applyMentionBlock(messages, rh)
-	}
 	// 让用户看见「这次用上了哪些规则」：改了不生效又没有任何提示，
 	// 是这类功能最常见的抱怨，而用户没法自己看出 AI 到底读没读到。
 	if len(rules.Files) > 0 {
@@ -904,8 +906,9 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 				logger.W("[ai] 请求前压缩无果 conv=%s: %v", res.ConvID, berr)
 				break
 			}
-			// system / 规则 / 行为约束 / @ 引用要重新贴回去：压缩换掉的是整个
+			// system / 规则 / 行为约束 / @ 引用 / 续跑清单要重新贴回去：压缩换掉的是整个
 			// 消息列表，这些都只存在于内存里（与下面超窗兜底走同一个 helper）。
+			// 续跑提示已并进 mentionBlock，下面这次 applyMentionBlock 会一并贴回。
 			baseSystem = composeBaseSystem(firstSystem(newMsgs), rules, tools, cwd, extTrimmed)
 			applySystemHints(newMsgs, baseSystem, toolHint, cwd, len(tools) > 0, modeHasTools && len(tools) == 0)
 			applyMentionBlock(newMsgs, mentionBlock)
@@ -1522,13 +1525,16 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 				break
 			}
 			// 新组装的上下文里 system 是干净的（没贴提示），base 要跟着换：
-			// 它可能已经带上了这次新算出的摘要。规则、清单/目录/派活/续跑等
-			// 行为约束全部由 composeBaseSystem 重贴，和请求前压缩走同一处——
+			// 它可能已经带上了这次新算出的摘要。规则、清单用法/工作目录/规模等
+			// 行为约束由 composeBaseSystem + applySystemHints 重贴，和请求前压缩走同一处——
 			// 漏贴的症状是「长对话压缩后 AI 突然不懂规矩」，极难复现。
+			// 注意续跑/清单状态不在这里：它贴在末条 user 消息上（已并进 mentionBlock），
+			// 由下面那次 applyMentionBlock 重贴——composeBaseSystem 不负责它。
 			baseSystem = composeBaseSystem(firstSystem(newMsgs), rules, tools, cwd, extTrimmed)
 			applySystemHints(newMsgs, baseSystem, toolHint, cwd, len(tools) > 0, modeHasTools && len(tools) == 0)
-			// 引用材料同样要贴回去：重建出来的 messages 里那条 user 消息是库里的原文，
-			// @ 的内容只存在于内存。漏了这步，超窗重试之后 AI 会对着「照这个改」发愣。
+			// 引用材料、插入文件与续跑清单都要贴回去：重建出来的 messages 里那条
+			// user 消息是库里的原文，@ 的内容与续跑提示只存在于内存。漏了这步，
+			// 超窗重试之后 AI 会对着「照这个改」发愣、也不知道还有清单没做完。
 			applyMentionBlock(newMsgs, mentionBlock)
 			messages = newMsgs
 			// 重建出来的是纯净消息（无轮次标记），必须按结构重新推导：

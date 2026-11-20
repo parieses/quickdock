@@ -59,7 +59,8 @@ function fileToDataURL(file: File): Promise<string> {
 export function hasDocFiles(files: File[]): boolean {
   return files.some((f) => {
     const ext = docExt(f.name || '')
-    return SUPPORTED_EXTS.includes(ext) && !SECRET_EXTS.includes(ext) && f.size <= MAX_DOC_BYTES
+    // 0 字节文件解析不出来，别让它进插入文件通道到后端才报错。
+    return SUPPORTED_EXTS.includes(ext) && !SECRET_EXTS.includes(ext) && f.size > 0 && f.size <= MAX_DOC_BYTES
   })
 }
 
@@ -77,14 +78,17 @@ export function useAiAttachedFiles(deps: {
       t('aiAttachFileFilter'),
       FILE_FILTER,
     )) ?? []
+    let added = 0
     for (const path of picked) {
       // 去重：同一路径选两次没有意义，后端也会把它展开两遍浪费预算。
       if (attachedFiles.value.some((f) => f.path === path)) continue
       seq += 1
       const name = path.split(/[\\/]/).pop() || path
       attachedFiles.value.push({ id: `af-${seq}`, path, name })
+      added += 1
     }
-    if (picked.length) toast.success(t('aiAttachFileAdded', { n: attachedFiles.value.length }))
+    // 报本次新增数，不是列表总数——否则第二次再选一个会显示「已插入 5 个」。
+    if (added) toast.success(t('aiAttachFileAdded', { n: added }))
   }
 
   /**
@@ -99,14 +103,25 @@ export function useAiAttachedFiles(deps: {
       const ext = docExt(f.name || '')
       if (!SUPPORTED_EXTS.includes(ext)) return false
       if (SECRET_EXTS.includes(ext)) return false
-      if (f.size > MAX_DOC_BYTES) return false
+      if (f.size <= 0 || f.size > MAX_DOC_BYTES) return false
       return true
     })
     if (!docs.length) return false
+    let added = 0
+    let failed = 0
     for (const f of docs) {
       // 内容来源按 name + size 去重：重复粘贴同一份不该展开两遍吃预算。
       if (attachedFiles.value.some((x) => !x.path && x.name === f.name && x.size === f.size)) continue
-      const dataUrl = await fileToDataURL(f)
+      let dataUrl: string
+      try {
+        dataUrl = await fileToDataURL(f)
+      } catch (err) {
+        // FileReader.onerror 会 reject；这里不希望它冒泡成未处理的 Promise rejection
+        // （调用处是 void addDroppedFiles）。跳过这份文件，其余照常加入。
+        console.warn('[ai] 读取拖入文件失败:', f.name, err)
+        failed += 1
+        continue
+      }
       seq += 1
       attachedFiles.value.push({
         id: `af-${seq}`,
@@ -115,8 +130,10 @@ export function useAiAttachedFiles(deps: {
         content: dataUrl,
         size: f.size,
       })
+      added += 1
     }
-    toast.success(t('aiAttachFileAdded', { n: attachedFiles.value.length }))
+    if (added) toast.success(t('aiAttachFileAdded', { n: added }))
+    if (failed) toast.error(t('loadFailed')) // 复用已有通用文案，不新增 i18n key
     return true
   }
 

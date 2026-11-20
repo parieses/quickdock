@@ -19,6 +19,7 @@
  */
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { escapePastedClose } from '../utils/aiPaste'
 
 const props = defineProps<{
   /** 纯文本（不含胶囊）：与原来的 textarea 同一个值，父组件不需要知道胶囊的存在 */
@@ -80,7 +81,7 @@ function serialize(): { text: string; skills: string[] } {
       // 不是他手写的指令，里面的「忽略以上要求」之类不算授权。
       if (child.dataset.paste) {
         if (text && !text.endsWith('\n')) text += '\n'
-        text += `<pasted_text lines="${child.dataset.pasteLines || ''}">\n${child.dataset.pasteFull || ''}\n</pasted_text>`
+        text += `<pasted_text lines="${child.dataset.pasteLines || ''}">\n${escapePastedClose(child.dataset.pasteFull || '')}\n</pasted_text>`
         if (!text.endsWith('\n')) text += '\n'
         continue
       }
@@ -143,7 +144,7 @@ function snapshotChips(): { name: string; offset: number }[] {
       // 粘贴 chip 不保留到重建后（发送即清空，跟 skill 不同）；偏移按它展开后的
       // 全文长度算，避免它后面的 skill 胶囊位置错乱。
       if (child.dataset.paste) {
-        text += `<pasted_text lines="${child.dataset.pasteLines || ''}">\n${child.dataset.pasteFull || ''}\n</pasted_text>\n`
+        text += `<pasted_text lines="${child.dataset.pasteLines || ''}">\n${escapePastedClose(child.dataset.pasteFull || '')}\n</pasted_text>\n`
         continue
       }
       if (child.tagName === 'BR') {
