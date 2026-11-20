@@ -153,6 +153,13 @@ type AIMessage struct {
 	// ToolRounds 用了几轮工具调用（0 = 纯文本回答）。
 	// 与「调用了几个工具」不同：一轮可以并发调多个，界面上「调了几轮」要看这个。
 	ToolRounds int `json:"tool_rounds"`
+	// Wire 这次提问里真正发给模型的工具对话原文，JSON 数组：
+	//   [{"role":"assistant","tool_calls":[...]},{"role":"tool","tool_call_id":"...","content":"..."},...]
+	//
+	// 与 ToolCalls 是两回事：那个是给界面看的摘要（结果截到 2000 字），
+	// 这个是给下一次请求做前缀缓存用的原文（与发出去的那份逐字节相同）。
+	// 只保留最近一次提问，更早的清空——它是「重建历史」的原料，不是历史本身。
+	Wire string `json:"wire"`
 	// Skills 这条用户消息发出时真正挂上的技能名（JSON 数组字符串），空 = 没挂。
 	// 只为了在聊天里标出「这条用到了哪个技能」——在此之前技能只存在于提示词里，
 	// 模型读了 SKILL.md 也只留一条普通工具行，用户看不出自己选的技能生效没有。
@@ -228,6 +235,7 @@ func mapToAIMessage(m map[string]interface{}) AIMessage {
 		Stopped:          integer(m["stopped"]) != 0,
 		ToolCalls:        str(m["tool_calls"]),
 		ToolRounds:       integer(m["tool_rounds"]),
+		Wire:             str(m["wire"]),
 		Skills:           str(m["skills"]),
 		CreatedAt:        str(m["created_at"]),
 	}
@@ -1042,6 +1050,71 @@ func (d *Database) RecordAIUsageScoped(convID, runID, nodeID, model, kind string
 	)
 }
 
+// SetAIMessageWire 写入某条助手回复对应的「工具对话原文」（见 AIMessage.Wire）。
+//
+// 单独一个入口而不是塞进 SaveAssistantTurn：wire 要等整次 run 结束、所有工具轮
+// 都跑完才拼得出来，而消息是在收尾时落库的——两者时刻不同。也正因为只在结束时
+// 写一次，中途插话切出来的多条回复里只有最后一条会带 wire（下次重建历史时也只
+// 需要还原这一条，更早的已经被压缩/摘要，还原了也用不上）。
+func (d *Database) SetAIMessageWire(messageID, wire string) error {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return nil
+	}
+	return d.ExecuteParams(`UPDATE ai_messages SET wire = ? WHERE id = ?`, []interface{}{wire, messageID})
+}
+
+// ClearAIMessageWires 清空某会话里除 keepID 之外所有消息的 wire。
+//
+// 为什么必须清：wire 存的是与「发给模型的原文」逐字节相同的一份，一次提问几十 KB。
+// 一旦会话存在多份，库体积随提问次数线性增长，而重建时只有最近一条用得上——
+// 保留更早的纯属白占空间。清空是幂等的，可以在每次 run 结束时无条件调用。
+func (d *Database) ClearAIMessageWires(convID, keepID string) error {
+	convID = strings.TrimSpace(convID)
+	if convID == "" {
+		return nil
+	}
+	return d.ExecuteParams(
+		`UPDATE ai_messages SET wire = '' WHERE conv_id = ? AND id <> ? AND wire <> ''`,
+		[]interface{}{convID, keepID},
+	)
+}
+
+// AddAIMessageUsage 把一次额外调用（记忆整理）的用量并进某条回复。
+//
+// 为什么并进消息行：输入框下方的 token 用量是前端把消息行的 prompt/completion
+// 加起来的（AIPage.vue 的 statusPills），单开一列或一张表，那个数字就永远不含
+// 记忆整理的开销——用户看着「我就问了几句怎么花了这么多」也解释不清。
+// 语义上也说得通：这条回复连带它触发的记忆整理一共花了多少。
+//
+// ai_usage 明细仍然按真实模型记一行（kind=memory），成本报表与按模型统计不受影响；
+// 这里只改「这条回复的 token 数」。代价是消息卡片下方的估算费用会把记忆调用也按
+// 聊天模型的单价算一遍（配了廉价档时会略高）——精确花费看用量面板的 ai_usage 明细。
+func (d *Database) AddAIMessageUsage(messageID string, u TokenUsage) (bool, error) {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" || u.Empty() {
+		return false, nil
+	}
+	// 必须看影响行数：消息行可能已经不在（会话被删、生成中途被打断没落库、
+	// 快照回滚）。只当成功的话，调用方会照常往前端推一条「用量 +N」的事件，
+	// 用户看到数字变了、刷新又变回去——像是账算错了。
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	res, err := d.conn.Exec(
+		`UPDATE ai_messages SET prompt_tokens = prompt_tokens + ?, completion_tokens = completion_tokens + ?,
+		        cached_tokens = cached_tokens + ? WHERE id = ?`,
+		u.Prompt, u.Completion, u.Cached, messageID,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // SumAIUsageByRun 按 run 汇总成本（供编排器做预算控制与事后归集）。
 //
 // 只汇总该 run 的行：编排外的一次性调用（标题生成、SSH 面板问答）run_id 为空，
@@ -1345,6 +1418,9 @@ type AssistantTurn struct {
 	ReasoningRounds string
 	// Action 一次性动作名（空 = 普通对话），见 services/ai/ai_actions.go。
 	Action string
+	// Wire 这次提问发给模型的工具对话原文（见 AIMessage.Wire），空串 = 没调过工具
+	// 或调用方没提供。调用方在 run 结束时单独写也可以（见 SetAIMessageWire）。
+	Wire string
 }
 
 // SaveAssistantTurn 追加一条助手回复，并记下这一次调用自己的用量。
@@ -1366,6 +1442,7 @@ func (d *Database) SaveAssistantTurn(convID string, t AssistantTurn) (*AIMessage
 		Stopped:          t.Stopped,
 		ToolCalls:        t.ToolCalls,
 		ToolRounds:       t.ToolRounds,
+		Wire:             t.Wire,
 		ReasoningRounds:  t.ReasoningRounds,
 		Action:           t.Action,
 		CreatedAt:        now(),

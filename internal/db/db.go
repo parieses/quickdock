@@ -172,8 +172,10 @@ var validColumns = map[string]bool{
 	"worktree_branch": true,
 	// ai_messages：工具调用记录与轮次（内置 agent）。白名单是全局的、不按表分，
 	// 漏一个就是写入时「非法列名」——而 structToMap 会把零值字段也转成列。
-	"tool_calls":    true,
-	"tool_rounds":   true,
+	"tool_calls":  true,
+	"tool_rounds": true,
+	// wire：这次提问发给模型的工具对话原文（见 AIMessage.Wire）。
+	"wire":          true,
 	"image_hash":    true,
 	"count":         true,
 	"prompt_tokens": true, "completion_tokens": true,

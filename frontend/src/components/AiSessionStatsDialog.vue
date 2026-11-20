@@ -98,26 +98,31 @@ function close() { emit('update:open', false) }
 function fmtFull(n: number): string {
   return Math.round(n || 0).toLocaleString('en-US')
 }
-/** 命中率保留一位小数（截图口径 99.7%，不是取整的 99%）。分母用未缓存+缓存读取=prompt。 */
+/** 命中率保留一位小数（截图口径 99.7%，不是取整的 99%）。分母用未缓存+缓存读取=prompt。
+ *  上限夹到 100：cache_read 偶尔会大于 prompt（上游计数口径异常），不夹会出现 137.0%。 */
 function hitRate1(st: Stats): string {
   const prompt = st.uncached_input + st.cache_read
-  return prompt > 0 ? ((st.cache_read / prompt) * 100).toFixed(1) : '0.0'
+  return prompt > 0 ? Math.min(100, (st.cache_read / prompt) * 100).toFixed(1) : '0.0'
 }
-/** 毫秒转「22分55秒」/「59分42秒」/「3.6秒」。 */
+/** 毫秒转「22 分 55 秒」/「3.6 秒」/「820 毫秒」。单位按语言走 i18n，不写死中文。 */
 function fmtDur(ms: number): string {
-  if (ms <= 0) return '0秒'
-  if (ms < 1000) return ms + '毫秒'
+  if (ms <= 0) return t('aiSStatDurSec', { n: 0 })
+  if (ms < 1000) return t('aiSStatDurMs', { n: Math.round(ms) })
   const sec = ms / 1000
-  if (sec < 60) return sec.toFixed(1) + '秒'
+  if (sec < 60) return t('aiSStatDurSec', { n: sec.toFixed(1) })
   const m = Math.floor(sec / 60)
   const s = Math.round(sec % 60)
-  return `${m}分${s}秒`
+  return t('aiSStatDurMinSec', { m, s })
 }
 
-// 标题：单条回复→「本轮用量」；会话级→沿用原「会话统计 / Token 用量」。
-const dialogTitleKey = computed(() => {
-  if (props.tab === 'tokens') return props.usage ? 'aiMsgUsageTitle' : 'aiSStatTabTokens'
-  return 'aiSStatTitle'
+// 标题：单条回复→「本轮用量」；会话级→「会话统计 / Token 用量」。
+//
+// 直接返回**翻译后的字符串**而不是 key：`t(变量)` 里的 key 静态检查看不见，
+// 曾经 aiSStatTabTokens 就是这么漏掉的（中英字典都没有，界面上直接显示这串
+// 英文标识符）。每个分支写死字面量 key，缺了就一眼能查出来。
+const dialogTitle = computed(() => {
+  if (props.tab === 'tokens') return props.usage ? t('aiMsgUsageTitle') : t('aiSStatTabTokens')
+  return t('aiSStatTitle')
 })
 
 function onKeydown(e: KeyboardEvent) {
@@ -133,9 +138,9 @@ watch(() => props.open, (v) => {
   <Teleport to="body">
     <template v-if="props.open">
       <div class="sstat-backdrop" @click="close" />
-      <section class="sstat-dialog" role="dialog" aria-modal="true" :aria-label="t(dialogTitleKey)">
+      <section class="sstat-dialog" role="dialog" aria-modal="true" :aria-label="dialogTitle">
         <header class="sstat-head">
-          <span class="sstat-title">{{ t(dialogTitleKey) }}</span>
+          <span class="sstat-title">{{ dialogTitle }}</span>
           <strong v-if="props.tab === 'tokens' && stats" class="sstat-head-total">{{ fmtFull(stats.total_tokens) }} tok</strong>
           <button class="sstat-close" :title="t('aiCtxClose')" @click="close"><X :size="14" /></button>
         </header>

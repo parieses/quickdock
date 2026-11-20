@@ -156,26 +156,5 @@ func TestAppendDailyActivity(t *testing.T) {
 	}
 }
 
-// MEMORY.md：同一天合并进一个 `## 日期` 小节。
-func TestAppendBulletsToDaySection(t *testing.T) {
-	day := "2026-11-18"
-	cur := "# 长期记忆\n\n## " + day + "\n- 项目用 Vue 3\n"
-	out, ok := appendBulletsToDaySection(cur, day, []string{"数据库是 SQLite", "项目用 Vue 3"})
-	if !ok {
-		t.Fatal("应命中当天小节")
-	}
-	if strings.Count(out, "## "+day) != 1 {
-		t.Errorf("不该重复创建当天小节:\n%s", out)
-	}
-	if !strings.Contains(out, "数据库是 SQLite") {
-		t.Errorf("新条目没写进去:\n%s", out)
-	}
-	// 已存在的条目不重复写。
-	if strings.Count(out, "项目用 Vue 3") != 1 {
-		t.Errorf("重复条目被写了两次:\n%s", out)
-	}
-	// 没有当天小节时交给调用方新建。
-	if _, ok := appendBulletsToDaySection("# 长期记忆\n", "2026-01-01", []string{"x"}); ok {
-		t.Error("没有当天小节时不该命中")
-	}
-}
+// MEMORY.md 的分区模型见 ai_memory_doc_test.go：旧版「同一天合并进一个
+// `## 日期` 小节」的写法已废弃——日期只回答「什么时候记的」，不回答「这是什么」。

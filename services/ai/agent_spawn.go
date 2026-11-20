@@ -41,6 +41,13 @@ const agentSpawnTimeout = 20 * time.Minute
 // 根本来不及看这条提示。
 const agentWrapUpLead = 2 * time.Minute
 
+// aiToolsClosedMaxHints 收尾后还允许模型「再调一次工具」被拒绝几次。
+//
+// 工具在收尾轮仍然挂在工具面上（为了保住请求前缀缓存，见 runAgent 的 toolsClosed），
+// 所以模型有可能坚持调用。每次拒绝只花一轮、且几乎全是缓存命中；给两次机会，
+// 第三次还调就结束，避免病态模型把收尾拖成死循环。
+const aiToolsClosedMaxHints = 2
+
 // agentNodeTokenCap 单个子 agent 的 token 上限（软收尾）。
 //
 // 与窗口无关：1M 窗口算出的单轮预算是 19.3 万，子 agent 照着这个额度跑，

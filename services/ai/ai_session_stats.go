@@ -15,8 +15,9 @@ package ai
 //     这是最接近 DSH「模型用时」的近似；工具间隙也算进模型侧，宁可略高。
 //   - TTFT：done 事件的 firstTokenMs 平均值。
 //   - TPS：completion_tokens 总和 / 模型用时秒数。
-//   - Token：ai_messages 的 prompt/completion/cached 之和；未缓存输入 =
-//     prompt - cached，缓存命中率 = cached / prompt。
+//   - Token：ai_messages 的 prompt/completion/cached 之和（**含**并进消息行的
+//     记忆整理用量，见 AddAIMessageUsage）；未缓存输入 = prompt - cached，
+//     缓存命中率 = cached / prompt。
 
 import (
 	"encoding/json"
@@ -104,12 +105,27 @@ func (a *AIService) AISessionStats(convID string) *services.ApiResult {
 		}
 		v.RequestCount++
 	}
+	// —— 记忆整理调用的用量已经在消息行里 ——
+	//
+	// 记忆整理（kind=memory，见 ai_memory_auto.go）跑完会把用量并进它所属那条
+	// 助手回复的 prompt/completion/cached 列（AddAIMessageUsage）。所以上面按
+	// ai_messages 聚合出来的 token 已经包含它——这里不要再从 ai_usage 加一遍，
+	// 那会重复计算。轮 / 步 / 请求次数仍然只描述问答本身。
+	chatOutput := v.Output
+
 	v.CacheRead = cached
 	if prompt > cached {
 		v.UncachedInput = prompt - cached
 	}
 	if prompt > 0 {
-		v.CacheHitRate = cached * 100 / prompt
+		rate := cached * 100 / prompt
+		// cached 大于 prompt 只可能来自上游计数异常（个别网关把命中块重复累加，
+		// 或缓存命中数与 prompt 不是同一口径）。夹到 100：界面上出现 137%
+		// 比"缓存很好"更容易让人以为统计坏了。
+		if rate > 100 {
+			rate = 100
+		}
+		v.CacheHitRate = rate
 	}
 	for model, agg := range modelAggs {
 		v.ModelDetails = append(v.ModelDetails, AIModelUsage{
@@ -169,7 +185,9 @@ func (a *AIService) AISessionStats(convID string) *services.ApiResult {
 		v.AvgFirstMs = firstSum / firstN
 	}
 	if v.ModelMs >= 1000 {
-		v.TPS = v.Output * 1000 / v.ModelMs
+		// 分子用聊天自身的输出量：记忆整理并进消息行的那部分输出不是这段 run
+		// 时间里产生的，算进来会把 TPS 抬成一个不存在的速度。
+		v.TPS = chatOutput * 1000 / v.ModelMs
 	}
 
 	return services.Ok(v)

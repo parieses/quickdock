@@ -402,6 +402,9 @@ func (a *AIService) AIRegenerateTitle(convID string) *services.ApiResult {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+	// 起标题不经过 runAgent，手上没有 ctx 上的会话标识：用会话兜底，
+	// 别让这次调用在网关上变成「未提供会话标识」。
+	ctx = withSessionInfo(ctx, a.sessionInfoForConversation(convID))
 	// WP11：起标题不需要主模型的智力，换廉价档（没配就是原样）。
 	cfg = aiCheapProfile(cfg)
 	title, usage, err := a.callAIOnce(ctx, cfg, []map[string]string{
@@ -499,6 +502,8 @@ func (a *AIService) AISummarizeConversation(convID string) *services.ApiResult {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
+	// 同标题生成：这条也绕开了 runAgent，用会话兜底。
+	ctx = withSessionInfo(ctx, a.sessionInfoForConversation(convID))
 	summary, usage, err := a.callAIOnce(ctx, cfg, []map[string]string{
 		{"role": "system", "content": "你是对话摘要器，输出紧凑的要点列表。"},
 		{"role": "user", "content": b.String()},

@@ -153,6 +153,21 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 	if cfg.MaxTokens > 0 {
 		body["max_tokens"] = cfg.MaxTokens
 	}
+	// 会话标识：上游网关（magpie 一类）靠它把同一条会话的请求归到一起，
+	// 才算得出「前缀缓存命中率」——没有它，每一发在网关眼里都是孤立请求。
+	//
+	// `user` 放**可读名**（会话首条提问的前几个字），`X-Session-Id` 放 V 真实
+	// 会话 id：看板列表里显示前者、点开详情显示后者，与其他 agent 一致。
+	// 名字与 id 由 runAgent 挂进 ctx（见 ai_session_tag.go）；摘要、标题这类
+	// 不走 runAgent 的调用用会话 id 兜底。
+	si := sessionInfoOf(ctx)
+	sessionName := si.Name
+	if sessionName == "" {
+		sessionName = convID
+	}
+	if sessionName != "" {
+		body["user"] = sessionName
+	}
 	if cfg.TopP > 0 {
 		body["top_p"] = cfg.TopP
 	}
@@ -196,6 +211,22 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 		// 导致逐字流式退化成"一次性整段"。强制 identity 让上游返回原始分块 SSE。
 		req.Header.Set("Accept-Encoding", "identity")
 		req.Header.Set("Cache-Control", "no-store")
+		// 会话标识：magpie 只认 `X-Magpie-Session`（见它的
+		// docs/subsystems/gateway-sessions.md：identity = agent + session），
+		// 缺了这个 header 它**不会**替你编一个 id，请求就落进「未提供会话标识」，
+		// 也统计不出前缀缓存命中率。
+		//
+		// 值只用会话 id，不要掺名字：magpie 的列表标题由它自己推导
+		// （`sessions.GatewayTitle` 取最早记录里第一个非标签的用户文本，压成一行），
+		// 前提是开了 Sessions 页那个默认关闭的「记录会话内容」开关。掺进去的名字
+		// 反而会把会话 id 弄脏——点开详情看到的就是这个值。
+		if id := si.ID; id != "" {
+			req.Header.Set("X-Magpie-Session", id)
+			req.Header.Set("X-Session-Id", id)
+		} else if convID != "" {
+			req.Header.Set("X-Magpie-Session", convID)
+			req.Header.Set("X-Session-Id", convID)
+		}
 
 		if attempt == 0 {
 			logger.I("[ai] 请求 model=%s provider=%s conv=%s messages=%d", cfg.Model, cfg.Provider, convID, len(messages))
@@ -636,13 +667,17 @@ func (a *AIService) buildAIMessagesWithin(ctx context.Context, cfg AIProfile, co
 	// 数据目录下跨任务共享的那份（它们的 cwd 是系统新建的空目录，按 cwd 存等于每条
 	// 对话都从零开始——用户看到的就是「记忆全是默认的」）。
 	//
+	// 走 memoryBlockForConversation 而不是 memoryBlock：记忆块在 system 最前面，
+	// 而它每轮都会变（每日日志追加、MEMORY.md 新增），一变就把上游的前缀缓存
+	// 整段作废。会话内用快照，见 ai_memory.go 的说明。
+	//
 	// 先 ensureMemoryProfile：若整体记忆还不存在，确定性扫描项目写一份基线画像，
 	// 保证 .quickDock 一定被建起来（而不是让模型去根目录生成 AGENTS.md 当记忆）。
 	// 计划模式是只读的，不在此写任何文件（含 AI 自己的记忆目录）。
 	if mode != "plan" {
 		ensureMemoryProfile(conv.Cwd)
 	}
-	if mem := memoryBlock(conv.Cwd); mem != "" {
+	if mem := memoryBlockForConversation(convID, conv.Cwd); mem != "" {
 		system += "\n\n" + mem
 	}
 	// 技能：这条对话选中的 SKILL.md（没选过则回落 skills.json 的全局默认）。
@@ -653,7 +688,17 @@ func (a *AIService) buildAIMessagesWithin(ctx context.Context, cfg AIProfile, co
 	}
 
 	messages := []map[string]interface{}{{"role": "system", "content": system}}
-	for _, m := range hist {
+	// 最近一条带 wire 的助手回复：重建时把它的工具对话原样接回去（见 AIMessage.Wire）。
+	//
+	// 只还原这一条，不是每条都还原：更早的提问在历史里已经被摘要/压缩过，还原
+	// 它们既对不上任何一次真实请求的前缀（白算 token），又把上下文撑大一截。
+	// 而最近这一条正好是「上一发请求的尾部」——接回去之后，本次请求从 system 到
+	// 最后一个 tool 消息都与上一发逐字节相同，前缀缓存才真的能用上。
+	wireAt := lastWireMessageIndex(hist)
+	for idx, m := range hist {
+		if idx == wireAt {
+			messages = append(messages, decodeMessageWire(m.Wire)...)
+		}
 		// 带图片的 user 消息组装为 [text, image_url...] 块数组，其余保持纯字符串。
 		// 图片按当前档案能力转换：本地图重读 base64，URL 图直发；能力不匹配的跳过。
 		messages = append(messages, map[string]interface{}{
@@ -662,6 +707,35 @@ func (a *AIService) buildAIMessagesWithin(ctx context.Context, cfg AIProfile, co
 		})
 	}
 	return messages, nil
+}
+
+// lastWireMessageIndex 返回最近一条带 wire 的助手消息下标（没有则 -1）。
+//
+// 只取最后一条：wire 存的是「上一发请求的尾部」，只有它能与本次请求的前缀
+// 对上；更早的提问早就被摘要/压缩过，还原它们只会把上下文撑大。
+func lastWireMessageIndex(hist []db.AIMessage) int {
+	for i := len(hist) - 1; i >= 0; i-- {
+		if hist[i].Role == "assistant" && hist[i].Wire != "" {
+			return i
+		}
+	}
+	return -1
+}
+
+// decodeMessageWire 把库里存的「工具对话原文」解析成消息列表。
+//
+// 解析失败返回 nil 而不是报错：这份数据只影响前缀缓存的命中率，坏了就当没有
+// （退化为旧行为），不能让整条对话因此打不开。
+func decodeMessageWire(raw string) []map[string]interface{} {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var out []map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		logger.W("[ai] 工具对话原文解析失败，已按无 wire 处理: %v", err)
+		return nil
+	}
+	return out
 }
 
 // aiSummaryInputRune 单次摘要调用喂进去的字符上限。
@@ -752,6 +826,12 @@ func (a *AIService) callAIOnce(ctx context.Context, cfg AIProfile, messages []ma
 	}
 	applyThinkingSwitch(body, cfg)
 	applyReasoningLevel(body, cfg)
+	// 网关会话标识：摘要、标题、记忆整理都走这个端点，不带就会被网关归进
+	// 「未提供会话标识」——一次长任务下来这类调用能有几十发，全是黑户。
+	// 这里只放可读名（body.user），机器 id 走 header（见下方）。
+	if name := sessionInfoOf(ctx).Name; name != "" {
+		body["user"] = name
+	}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return "", db.TokenUsage{}, err
@@ -764,6 +844,12 @@ func (a *AIService) callAIOnce(ctx context.Context, cfg AIProfile, messages []ma
 	req.Header.Set("Content-Type", "application/json")
 	if authVal != "" {
 		req.Header.Set(authKey, authVal)
+	}
+	// 与流式路径同一组 header：magpie 按 X-Magpie-Session 归组，摘要/标题
+	// 也该落在自己那条会话下，否则它们会单独成为「未提供会话标识」的黑户。
+	if id := sessionInfoOf(ctx).ID; id != "" {
+		req.Header.Set("X-Magpie-Session", id)
+		req.Header.Set("X-Session-Id", id)
 	}
 
 	client := a.aiHTTPClient

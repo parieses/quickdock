@@ -469,6 +469,7 @@ var baseTables = []string{
 		stopped INTEGER NOT NULL DEFAULT 0,
 		tool_calls TEXT NOT NULL DEFAULT '',
 		tool_rounds INTEGER NOT NULL DEFAULT 0,
+		wire TEXT NOT NULL DEFAULT '',
 		reasoning_content TEXT NOT NULL DEFAULT '',
 		reasoning_rounds TEXT NOT NULL DEFAULT '',
 		images TEXT NOT NULL DEFAULT '',
@@ -1266,6 +1267,10 @@ func (d *Database) migrate() error {
 		// 笔记修改时间：老库补成空串，由 migrate 末尾统一回填成 created_at，
 		// 升级后「最近编辑」不会把所有历史笔记都挤到 1970。
 		{"notes", "updated_at", "TEXT NOT NULL DEFAULT ''"},
+		// ai_messages.wire: 这次提问里真正发给模型的工具对话原文
+		// （assistant.tool_calls + tool 结果，JSON 数组）。只为下次提问重建历史时
+		// 保住上游前缀缓存，老库补成空串 = 退回旧行为（历史里不含工具轮）。
+		{"ai_messages", "wire", "TEXT NOT NULL DEFAULT ''"},
 		// dl_tasks: 下载历史。status 为空的存量行（升级前只登记过元数据）在
 		// 读取时按「状态未知」处理，不假装成已完成。
 		{"dl_tasks", "status", "TEXT NOT NULL DEFAULT ''"},

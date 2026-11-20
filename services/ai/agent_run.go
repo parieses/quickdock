@@ -17,6 +17,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -192,6 +193,13 @@ func toolArgErrorHint(err error, records []aiToolRecord) string {
 	}
 	return fmt.Sprintf("\n\n本轮有 %d 个工具调用的参数不是合法 JSON（%s）。通常是模型输出被截断；已按空参数回传，模型会看到原始参数并重试。", len(names), strings.Join(names, "、"))
 }
+
+// aiWireMaxRune 单次提问「工具对话原文」落库的字符上限。
+//
+// 16 万字符 ≈ 10 万 token，已覆盖绝大多数任务的工具轮总量（看板典型提示词 30K）。
+// 超了就整份不存：这份数据只服务于前缀缓存，存半截反而会让重建出的历史与
+// 上一发不一致——既没命中，又白占库。
+const aiWireMaxRune = 160000
 
 // composeBaseSystem 把一段「干净 system」（firstSystem 的结果，含模式提示/摘要/记忆/技能）
 // 补上所有运行期行为约束，得到完整的 baseSystem。
@@ -777,15 +785,13 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 	// 提示词按「这次真的挂上了哪些域」生成，不再有三份手写常量跟着代码漂。
 	toolHint := buildToolHint(sf)
 	ctx = withToolSurface(ctx, sf)
-	// 原型副本：收尾轮会把 tools 置 nil（模型只该收尾），但用户中途插话时
-	// 工具得能挂回去——他新提的那句可能要读文件、跑命令（见循环里的插入接入点）。
-	baseTools := tools
 	// 这个模式本来有没有工具可用。收尾轮靠它区分「本来就没有工具」和
 	// 「有工具但轮次用完了」——后者必须给模型一句明确交代，否则它会把调用写成正文。
 	modeHasTools := len(tools) > 0
 	// system 的原始正文（还没贴任何提示段）。工具说明与目录说明改成每轮重建
-	// 而不是一次追加：收尾轮撤下 tools 之后，system 里那段「你可以调用 file_read」
-	// 也必须一起撤掉，否则模型会把这次调用输出成纯文本标记（见 ai_dsml.go）。
+	// 而不是一次追加：纯问答档（ScheduledNoTools）从头就没有工具，system 里
+	// 那段「你可以调用 file_read」必须不存在，否则模型会把这次调用输出成
+	// 纯文本标记（见 ai_dsml.go）。
 	// 项目规则（AGENTS.md / .quickdock/rules*）：读一次，贯穿本次 run。
 	// 压缩后重建复用的是同一份，不重新读盘——那次重建此刻正被超窗逼着做，
 	// 多加一次 IO 没有收益，还可能读到用户正在编辑的半截文件。
@@ -931,9 +937,27 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 	// segStart 是「这一段的工具记录从 records 的第几条开始」，segUsage 同理只算这一段。
 	var segStart int
 	var segUsage db.TokenUsage
+	// lastSavedMsgID 最后一段落库的助手消息 id。
+	//
+	// 记忆整理的用量要并进「这条回复」：输入框下方的 token 用量是前端按消息行
+	// 求和的，不落到某条消息上，那笔开销就永远不在用户看到的数字里。
+	// 一次提问被插话切成多段时挂最后一段——记忆整理针对的是整次提问。
+	var lastSavedMsgID string
 	// fullText 是整次提问的完整正文（含被切开的那几段）：通知、记忆、res.Text 要全文，
 	// 而 assistantBuf 每到一段结束就会被清空。
 	var fullText strings.Builder
+
+	// wireTail 本次提问里真正 append 到 messages 的工具对话
+	// （assistant.tool_calls + 对应的 tool 结果），发出去的原样。
+	//
+	// 为什么单独留一份：下次提问时 buildAIMessages 是从库里重建历史的，而 DB 里的
+	// assistant 只有「合并后的正文 + 界面用的工具摘要」。用那份重建，历史里的工具轮
+	// 全部消失，请求前缀从第一个工具轮就开始与上一发不同 —— 上游的缓存全废。
+	// 实测（看板 1198 请求）命中率 76%，而每次提问的首发几乎 0 命中。
+	// 原样留一份就能在重建时把它接回去，前缀一路对齐到最后一个 tool 消息。
+	//
+	// 只留内存，run 结束时一次落库（见 persistWire），更早的提问会被清空。
+	var wireTail []map[string]interface{}
 
 	saveSegment := func(content string, stopped bool) {
 		if req.Fresh {
@@ -959,7 +983,7 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 		}
 		segReasoningRounds := encodeReasoningRounds(roundReason)
 		finalReasoningRounds = segReasoningRounds
-		if _, e := a.App.DB.SaveAssistantTurn(res.ConvID, db.AssistantTurn{
+		if msg, e := a.App.DB.SaveAssistantTurn(res.ConvID, db.AssistantTurn{
 			Content:          content,
 			ReasoningContent: reasoningBuf.String(),
 			ReasoningRounds:  segReasoningRounds,
@@ -972,11 +996,41 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 		}); e != nil {
 			logger.W("[ai] 保存助手回复失败 conv=%s: %v", res.ConvID, e)
 			sink.Event("error", map[string]any{"message": e.Error()})
+		} else if msg != nil {
+			lastSavedMsgID = msg.ID
 		}
 		segStart = len(records)
 		segUsage = db.TokenUsage{}
 		// 分轮思考跟着这一段一起交出去，下一段重新计。
 		roundReason = roundReason[:0]
+	}
+
+	// persistWire 把本次提问的工具对话原文落到最后一段助手回复上。
+	//
+	// 三条收尾路径（正常结束 / 用户停止 / 上游报错）都要调：用户点停止之后接着
+	// 再问一句是常态，那一发同样重建历史——不落就等于这次的工具轮白跑一遍。
+	// 无论有没有 wire 都先清掉同会话其它消息上的：同一会话只留最近一次提问那份。
+	persistWire := func() {
+		if req.Fresh {
+			return
+		}
+		_ = a.App.DB.ClearAIMessageWires(res.ConvID, lastSavedMsgID)
+		if lastSavedMsgID == "" || len(wireTail) == 0 {
+			return
+		}
+		raw, err := json.Marshal(stripInternalMessageKeys(wireTail))
+		if err != nil {
+			logger.W("[ai] 工具对话原文序列化失败 conv=%s: %v", res.ConvID, err)
+			return
+		}
+		if n := len([]rune(string(raw))); n > aiWireMaxRune {
+			// 退化成旧行为：宁可丢这次命中率，也不让库被一次长任务撑爆。
+			logger.I("[ai] 工具对话原文 %d 字超上限（%d），跳过落库 conv=%s", n, aiWireMaxRune, res.ConvID)
+			return
+		}
+		if err := a.App.DB.SetAIMessageWire(lastSavedMsgID, string(raw)); err != nil {
+			logger.W("[ai] 写入工具对话原文失败 conv=%s: %v", res.ConvID, err)
+		}
 	}
 
 	var reasonCb func(text string)
@@ -1057,6 +1111,27 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 	budgetMark := 0
 	budgetClosed := false
 
+	// toolsClosed 这次 run 的工具「已经收回」，但请求里**仍然挂着**。
+	//
+	// 为什么不再把 tools 置 nil：撤下 tools 会让这一发请求的 tools 数组和 system
+	// 文案都跟上一发不同，上游的前缀缓存整段作废——而收尾轮往往正是 prompt 最大
+	// 的一发（前面十几轮攒下的缓存白省）。现在工具还在工具面上，只是**不执行**：
+	// 模型若真发起调用，由循环里的收尾闸门回一条「本轮不执行」并让它改写作答，
+	// 这样前缀始终一致，收尾那一发仍然几乎全是缓存命中。
+	toolsClosed := false
+	// toolsClosedHints 收尾提示已经给过几次。
+	//
+	// 给两次而不是一次：工具**还挂在工具面上**（这是保住缓存的前提），system 里
+	// 也仍然写着「你可以调用这些工具」，模型偶尔会坚持再调一次。两次之内它基本
+	// 都会改写作答；第三次还调就直接结束，避免无限循环。
+	// 每次拒绝只多花一轮、且那一轮几乎全是缓存命中，代价很小。
+	toolsClosedHints := 0
+	// emptyNudgeOnClosed 收尾后「一句正文都没有」时的补救是否已经用过。
+	//
+	// 只补一次：模型连续几次都只发工具调用、正文全空，再逼也不会突然开口，
+	// 而每多逼一轮都是一份全额输入的费用。
+	emptyNudgeOnClosed := false
+
 	// loopCompactShown 本次 run 是否已经出过「循环内折叠」的卡片（见循环里）。
 	loopCompactShown := false
 	// deadlineWarned 硬超时前的收尾提醒是否已发（只发一次，否则每轮都插一句）。
@@ -1089,6 +1164,16 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 
 	tagMessagesRound(messages, 0)
 
+	// 本次提问的网关会话标识：可读名（会话首问前几个字）+ 会话 id。
+	//
+	// 名字按**会话**取而不是按这次提问：看板上同一条会话的多次提问该显示成
+	// 同一个名字，否则列表里像好几个人在问。整个 run 内值不变，网关才能把
+	// 多轮工具调用的请求归成一条链（见 ai_session_tag.go）。
+	ctx = withSessionInfo(ctx, sessionInfo{
+		Name: a.sessionNameFor(res.ConvID, message),
+		ID:   res.ConvID,
+	})
+
 	// WP15 尾巴：把「正在重试」送到界面上。
 	//
 	// 挂在 ctx 上而不是加参数：只有对话这一条路径有 sink，其余调用方
@@ -1107,8 +1192,8 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 
 	for turnIdx := 1; turnIdx <= limit+1; turnIdx++ {
 		curTurn = turnIdx
-		// 预算兜底放在这一轮的最前面：必须在 applySystemHints 之前撤工具，
-		// 否则 system 里那段「可用工具」还留着，模型会把调用写成正文（DSML 标记）。
+		// 预算兜底放在这一轮的最前面：撞线后要先把「闸门」关上（toolsClosed），
+		// 否则这一轮模型真去调工具，钱就又花出去了。
 		//
 		// 与轮次预算同一条思路：**有进展就再给一段**，而不是到了就收尾。
 		// 之前一撞预算就收尾，用户看到的就是「活儿干到一半自己断了」，
@@ -1129,24 +1214,40 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 					chatBudget, res.ConvID, tokensOf(totalUsage))
 			} else {
 				budgetClosed = true
-				tools = nil
-				// limit 收到本轮：万一模型在没有 tools 的情况下仍返回工具调用，
-				// 底下 `turnIdx > limit` 那条兜底会忽略并跳出，不会再花一次工具的钱。
+				// limit 收到本轮：循环只再给一次「作答」机会；即便模型仍在调工具，
+				// 也会被收尾闸门拦下，不会真花一次工具的钱。
 				limit = turnIdx - 1
+				// 本来就没工具（定时任务的问答档）：没有「收回」可言，也不该插
+				// 一段「工具已收回」的提示——那只会让模型去找不存在的工具。
+				hasTools := len(tools) > 0
+				if hasTools {
+					toolsClosed = true
+				}
 				msg := fmt.Sprintf("本次提问已消耗约 %d token，达到单次预算，先收尾；没做完说一声「接着做」就行", tokensOf(totalUsage))
 				if req.Fresh {
 					// 子 agent 的收尾话术不能提用户：它看不到对话，也没人能回它一句。
 					msg = fmt.Sprintf("这个子任务已消耗约 %d token，达到上限：请立即用已经查到的信息给出结论，"+
 						"不要再检索；没查完的部分在结论里写明「未覆盖」。", tokensOf(totalUsage))
-					// 只撤 tools 还不够。实测（2026-11-19）四个 review 子任务各跑 8 轮、
+					// 光撤 tools 还不够。实测（2026-11-19）四个 review 子任务各跑 8 轮、
 					// 烧掉 27 万 prompt token，最后正文只剩一句「我先查看…再逐个审阅」——
 					// 思考模型把分析全写在 reasoning 里，正文永远是过渡语，tools 一消失
 					// 它就顺着过渡语收尾了。这里必须像硬超时那样明说「写结论」。
+					if hasTools {
+						messages = append(messages, map[string]interface{}{
+							"role": "user",
+							"content": "（系统提示）本子任务的额度已用完，工具已收回。现在请**在正文里**写出结论：" +
+								"你查到了什么、结论是什么、哪些部分没有覆盖到。不要只在思考里分析，" +
+								"发起方看不到你的思考过程。",
+						})
+					}
+				} else if hasTools {
+					// 主对话以前只弹通知、不告诉模型「工具没了」——因为 system 会被重建成
+					// 「无工具」版。现在 system 保持原样（为了缓存），必须用尾部消息说明，
+					// 否则模型会继续调工具、被闸门拦下，白多花一轮。
 					messages = append(messages, map[string]interface{}{
 						"role": "user",
-						"content": "（系统提示）本子任务的额度已用完，工具已收回。现在请**在正文里**写出结论：" +
-							"你查到了什么、结论是什么、哪些部分没有覆盖到。不要只在思考里分析，" +
-							"发起方看不到你的思考过程。",
+						"content": "（系统提示）本次提问已达到 token 预算，工具已收回（再调用不会被执行）。" +
+							"请直接用文字给出结论：做了什么、结论是什么、没做完的部分说明一声。",
 					})
 				}
 				sink.Event("notice", map[string]any{"message": msg})
@@ -1163,7 +1264,7 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 			if dl, ok := ctx.Deadline(); ok {
 				if remain := time.Until(dl); remain > 0 && remain <= agentWrapUpLead {
 					deadlineWarned = true
-					tools = nil
+					toolsClosed = true
 					messages = append(messages, map[string]interface{}{
 						"role": "user",
 						"content": "（系统提示）本子任务剩余的运行时间不足 " + fmtRemain(remain) +
@@ -1179,7 +1280,10 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 			}
 		}
 		// 每轮按「本轮到底有没有工具」重建 system（覆盖式，见 applySystemHints）。
-		// 这一句和上面撤 tools 是一对：只撤 tools 不撤提示，模型会把调用写成正文。
+		//
+		// 收尾不再把 tools 撤下（见 toolsClosed 的说明）：这里传进去的 withTools
+		// 在收尾轮仍是 true，system 与上一轮逐字节相同——正是为了让收尾那一发
+		// 还能命中前缀缓存。模型被告知「工具已收回」靠的是尾部那条 user 消息。
 		applySystemHints(messages, baseSystem, toolHint, cwd, len(tools) > 0, modeHasTools && len(tools) == 0)
 
 		// WP20：新的一轮开始，把上一轮的思考归档。
@@ -1201,36 +1305,42 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 		// 每轮开头压一次上下文：工具结果是在循环中间长出来的，
 		// buildAIMessages 里那次摘要压缩管不到这里。
 		//
+		// 收尾轮（toolsClosed）不折：那一轮不会再长出新的工具结果，体积与上一发
+		// 基本一样——上一发既然发得出去，这一发也不会超窗。而折叠会改写历史、
+		// 把缓存整段作废，正是这次改造要避免的事。
+		//
 		// 预算随「上一发的实测用量」收紧：compactLoopMessages 的默认预算是按
 		// 窗口的三分之一算的，那是个静态值——长会话里上一发可能已经占掉八成，
 		// 再按三分之一往里塞工具结果，这一发就撞线了。上游报过 prompt_tokens
 		// 之后，这一轮能给工具结果留的空间就是「上限 - 已用」，比固定值准。
 		loopBudgetNow := aiLoopBudgetThisTurn(cfg, res.ConvID, loopBudget, estimateLoopTokens(messages))
-		if cr := compactLoopMessages(messages, loopBudgetNow); cr.Folded+cr.Summarized > 0 {
-			// 每次折叠都要更新压缩状态（前端弹框读的是最新数字），但日志
-			// 一次 run 只记一条就够了——数字每轮都在变，逐条刷只会制造噪音。
-			if !loopCompactLogged {
-				loopCompactLogged = true
-				logger.I("[ai] 循环内上下文超预算：折叠 %d 条、摘要 %d 条（%d → %d tok）",
-					cr.Folded, cr.Summarized, cr.Before, cr.After)
-			}
-			// 记一笔给弹框的「压缩状态」（WP2）：用户看不到任何痕迹时，
-			// 「AI 忽然不记得前文」只会被当成 bug。
-			rememberCompaction(res.ConvID, cr.Before, cr.After, cr.Folded, cr.Summarized, false)
-			// 与历史摘要压缩共用 compact 事件，但多带 folded ids——
-			// §8 的「压缩后重查率」就是用这些 id 去比对「之后有没有重查同一调用」。
-			// start/done 成对发（虽然这里几乎是瞬时的）：前端按 phase 成对消费，
-			// 只发一条会让那张卡片永远停在「正在压缩」。
-			lim := contextLimitsOf(cfg)
-			// 一次 run 只在第一次折叠时出一张卡。
-			//
-			// 折叠是每轮都可能发生的常态操作（几毫秒、不花钱），每轮都发一对
-			// start/done 会让界面看起来「一直在压缩」，而用户根本无从判断
-			// 哪一次是严重事件。后续折叠只记日志，数字仍在 context 统计里更新。
-			if !loopCompactShown {
-				loopCompactShown = true
-				sink.Event("compact", loopCompactEvent("start", cr, lim, loopBudgetNow))
-				sink.Event("compact", loopCompactEvent("done", cr, lim, loopBudgetNow))
+		if !toolsClosed {
+			if cr := compactLoopMessages(messages, loopBudgetNow); cr.Folded+cr.Summarized > 0 {
+				// 每次折叠都要更新压缩状态（前端弹框读的是最新数字），但日志
+				// 一次 run 只记一条就够了——数字每轮都在变，逐条刷只会制造噪音。
+				if !loopCompactLogged {
+					loopCompactLogged = true
+					logger.I("[ai] 循环内上下文超预算：折叠 %d 条、摘要 %d 条（%d → %d tok）",
+						cr.Folded, cr.Summarized, cr.Before, cr.After)
+				}
+				// 记一笔给弹框的「压缩状态」（WP2）：用户看不到任何痕迹时，
+				// 「AI 忽然不记得前文」只会被当成 bug。
+				rememberCompaction(res.ConvID, cr.Before, cr.After, cr.Folded, cr.Summarized, false)
+				// 与历史摘要压缩共用 compact 事件，但多带 folded ids——
+				// §8 的「压缩后重查率」就是用这些 id 去比对「之后有没有重查同一调用」。
+				// start/done 成对发（虽然这里几乎是瞬时的）：前端按 phase 成对消费，
+				// 只发一条会让那张卡片永远停在「正在压缩」。
+				lim := contextLimitsOf(cfg)
+				// 一次 run 只在第一次折叠时出一张卡。
+				//
+				// 折叠是每轮都可能发生的常态操作（几毫秒、不花钱），每轮都发一对
+				// start/done 会让界面看起来「一直在压缩」，而用户根本无从判断
+				// 哪一次是严重事件。后续折叠只记日志，数字仍在 context 统计里更新。
+				if !loopCompactShown {
+					loopCompactShown = true
+					sink.Event("compact", loopCompactEvent("start", cr, lim, loopBudgetNow))
+					sink.Event("compact", loopCompactEvent("done", cr, lim, loopBudgetNow))
+				}
 			}
 		}
 
@@ -1255,12 +1365,13 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 		// 两串历史同时往里写就是互相踩。
 		if injects != nil {
 			if items := injects.drain(); len(items) > 0 {
-				// 插话是一个新诉求：它可能又要读文件、跑命令。收尾轮里工具已经被撤下
-				// （tools = nil），这里必须挂回去，否则模型只能空口答应「好的我去改」。
-				// 挂回去还要重贴一次 system：本轮开头那次提示说的是「你已经没有工具了」。
-				if tools == nil && len(baseTools) > 0 {
-					tools = baseTools
-					applySystemHints(messages, baseSystem, toolHint, cwd, true, false)
+				// 插话是一个新诉求：它可能又要读文件、跑命令。收尾只是把闸门关上
+				// （tools 一直挂在工具面上），这里把闸门重新打开即可——system 没变过，
+				// 不需要重贴（重贴反而会改动前缀，白丢一次缓存）。
+				if toolsClosed {
+					toolsClosed = false
+					toolsClosedHints = 0
+					logger.I("[ai] 用户插话：重新开放工具 conv=%s", res.ConvID)
 				}
 				// 轮次预算同理补一批：上一问跑满的是上一问的事，不该卡住新提的这句。
 				//
@@ -1536,6 +1647,58 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 			break
 		}
 
+		// 收尾闸门：工具仍挂在工具面上（为了保住前缀缓存），但已经不允许执行。
+		//
+		// 模型没读懂尾部那句「工具已收回」时仍会发起调用。这里不执行、只补一条
+		// 说明，并多给一轮让它把结论写出来；连续 aiToolsClosedMaxHints 次还在调，
+		// 说明它读不懂，再给多少轮都是同一句「我先调用一下」。
+		//
+		// 前 aiToolsClosedMaxHints 次不能直接 break：工具调用不回填的话，这一轮
+		// 的 assistant(tool_calls) 就凭空消失了，下次提问重建历史时与本次请求对不上。
+		// 最后一次也不再让它空转——但这一轮说的话必须按协议补进 wireTail，正文本身
+		// 早已通过 onToken 进了 assistantBuf，会随收尾一起落库。
+		if toolsClosed {
+			if toolsClosedHints >= aiToolsClosedMaxHints {
+				wireTail = append(wireTail,
+					stripInternalMessageKeys(closedToolMessages(turn.ToolCalls, turn.Content))...)
+				// 整段对话一句正文都没有：用户会拿到一条空回复。再逼一次（只一次），
+				// 否则「模型一直调工具」在界面上表现为「执行成功但什么都没有」。
+				if strings.TrimSpace(assistantBuf.String()) == "" && !emptyNudgeOnClosed {
+					emptyNudgeOnClosed = true
+					logger.I("[ai] 收尾后仍无正文，追加一次「直接作答」提示 conv=%s", res.ConvID)
+					messages = append(messages, map[string]interface{}{
+						"role": "user",
+						"content": "（系统提示）工具已收回，不要输出任何工具调用格式。请直接用文字说明这次任务的结论；" +
+							"如果确实什么都没做，也请说一句，不要留空。",
+					})
+					if turnIdx >= limit {
+						limit = turnIdx
+						if limit > maxRounds+1 {
+							limit = maxRounds + 1
+						}
+					}
+					continue
+				}
+				logger.W("[ai] 收尾轮仍在调用工具，忽略并结束 conv=%s", res.ConvID)
+				break
+			}
+			toolsClosedHints++
+			logger.I("[ai] 收尾轮返回 %d 个工具调用，拒绝执行以保持请求前缀不变 conv=%s",
+				len(turn.ToolCalls), res.ConvID)
+			tailStart := len(messages)
+			messages = append(messages, closedToolMessages(turn.ToolCalls, turn.Content)...)
+			tagMessagesRound(messages[tailStart:], turnIdx)
+			// 补一轮预算：continue 出去不能直接撞上 for 上界，否则这次收尾
+			// 等于什么都没留下（与旧实现里「无工具轮仍调工具」的重试同一处理）。
+			if turnIdx >= limit {
+				limit = turnIdx
+				if limit > maxRounds+1 {
+					limit = maxRounds + 1
+				}
+			}
+			continue
+		}
+
 		// 先告诉前端要调什么，再执行：一次工具可能跑几秒，
 		// 这期间界面上得有「正在用 xx」，否则看起来就是卡死了。
 		for _, c := range turn.ToolCalls {
@@ -1571,6 +1734,9 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 		records = append(records, recs...)
 		tailStart := len(messages)
 		messages = append(messages, toolMsgs...)
+		// 发出去的原样留一份：重建历史时按这份接回去，请求前缀才与上一发一致
+		// （理由见 wireTail 的说明）。strip 掉内部轮次标记——落的是要发的内容本身。
+		wireTail = append(wireTail, stripInternalMessageKeys(toolMsgs)...)
 		// WP4a：assistant(tool_calls) + 这批 tool 消息归入本轮。
 		// 只标新追加的尾巴：整表打标会在「列表被重建过」时把历史一起改成本轮。
 		// 标记只活在内存里，发请求前会被 stripInternalMessageKeys 剥掉。
@@ -1623,12 +1789,22 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 				sink.Event("notice", map[string]any{
 					"message": fmt.Sprintf("连续 %d 轮工具调用没有新进展（在重复或未获授权），先收尾", batchRounds),
 				})
-				tools = nil
+				toolsClosed = true
+				messages = append(messages, map[string]interface{}{
+					"role": "user",
+					"content": "（系统提示）工具已收回（再调用不会被执行）：不要继续调用工具，" +
+						"请直接用文字给出结论，并说明为什么停在这里。",
+				})
 			} else if limit >= maxRounds {
 				sink.Event("notice", map[string]any{
 					"message": fmt.Sprintf("本次提问已连续执行 %d 轮工具，达到单次预算，先收尾；没做完的部分说一声「接着做」就行", turnIdx),
 				})
-				tools = nil
+				toolsClosed = true
+				messages = append(messages, map[string]interface{}{
+					"role": "user",
+					"content": "（系统提示）本次提问已达到轮次上限，工具已收回（再调用不会被执行）。" +
+						"不要再调用工具，请直接用文字给出结论；没做完的部分说明一声。",
+				})
 			} else {
 				if !budgetClosed {
 					limit += batchRounds
@@ -1682,6 +1858,7 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 			// 工具调用不需要在这里额外打断：支持 ctx 的工具在取消那一刻就已经
 			// 停下了（见 ai_tools.go 的 callToolWithTimeout）。
 			saveSegment(assistant, true)
+			persistWire()
 			sink.Event("done", withReasoningRounds(withRunID(doneEvent(res.ConvID, firstTokenAt, totalUsage, cfg.Model, rounds, len(records), reasonRounds, reasonChars), res.RunID), finalReasoningRounds))
 			res.Text = allText
 			res.Stopped = true
@@ -1694,6 +1871,7 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 		// 而错误提示只说「请求失败」。它同样算「被打断的回复」，用 stopped 标记。
 		// 空正文但调过工具时 saveSegment 内部照样会落一条（见它的说明）。
 		saveSegment(assistant, true)
+		persistWire()
 		msg := lastErr.Error()
 		if hint := a.imageErrorHint(lastErr, req.Images); hint != "" {
 			msg += hint
@@ -1710,6 +1888,7 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 
 	// 正常结束，落库助手回复（用户消息已在调模型前落库）
 	saveSegment(assistant, false)
+	persistWire()
 	if !req.Fresh {
 		// 只对顶层刷会话更新时间：子 agent 结束时改父会话的 updated_at 会让
 		// 侧栏那条对话无缘无故跳到最前面，看起来像用户刚刚发过言。
@@ -1739,11 +1918,23 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 			dailyTitle = message
 		}
 		appendDailyMemory(res.ConvID, cwd, dailyTitle, req.Message, dailyFiles, rounds, len(records))
-		// 自动整理记忆：把这一轮里值得长期记住的结论 / 偏好摘进 MEMORY.md。
-		// 后台跑一次小调用——它跟「这次回答」无关，用户不该等它；失败也只是记忆少一条。
+		// 任务收尾补一段「工程笔记」（需求/做了什么/结论/坑/门禁）与几条常青条目。
+		// 后台跑一次调用——它跟「这次回答」无关，用户不该等它；失败也只是记忆少一段。
 		// 计划模式不写：那是只读模式，连 AI 自己的记忆目录都不该动（见 ai_chat.go 同款判断）。
 		if mode != "plan" {
-			a.consolidateMemoryAsync(cfg, res.ConvID, cwd, req.Message, allText, dailyFiles)
+			a.writeTaskMemoryAsync(cfg, taskMemoryInput{
+				ConvID:     res.ConvID,
+				MessageID:  lastSavedMsgID,
+				SessionTag: sessionInfoOf(ctx),
+				Cwd:        cwd,
+				Title:      dailyTitle,
+				User:       req.Message,
+				Reply:      allText,
+				Files:      dailyFiles,
+				Rounds:     rounds,
+				Tools:      len(records),
+				ToolLines:  summarizeToolActivity(records, memoryNoteToolMaxLines),
+			})
 		}
 	}
 

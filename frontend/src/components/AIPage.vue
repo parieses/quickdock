@@ -916,6 +916,10 @@ let offScheduleRunUpdated: (() => void) | null = null
 // 执行期步骤事件（见 services/schedule_ai.go 的 ScheduleRunProgressEvent）。
 // 与上面那条分开注销，原因同上：Off 按名字整体移除会互删。
 let offScheduleRunProgress: (() => void) | null = null
+// 记忆整理的用量事件（见 services/ai/ai_memory_auto.go 的 recordMemoryUsage）。
+// 它比回答晚到（回答结束后后台才跑），所以不能只靠「消息里已经带着」——
+// 不把这条增量加进消息行，输入框下方的 token 胶囊就要等下次打开会话才更新。
+let offMemoryUsage: (() => void) | null = null
 // 后发的请求可能先回（库在忙时尤其明显），用代数把过期结果丢掉——
 // 否则列表会停在上一两个关键词的命中上，看起来像「搜错了」。
 let msgSearchGen = 0
@@ -1777,7 +1781,7 @@ const convStatus = computed(() => {
 // 每个标签从上面的聚合里取，避免重复遍历消息；详情数字交给弹框从后端拉。
 // 「本轮用量」是第四处入口，挂在每条 assistant 回复末尾（openMessageUsage），不占状态栏。
 const statusPills = computed(() => {
-  let rounds = 0, steps = 0, tokens = 0, cached = 0
+  let rounds = 0, steps = 0, tokens = 0, promptTokens = 0, cached = 0
   for (const m of messages.value) {
     rounds += Number((m as any).tool_rounds) || 0
     const raw = (m as any).tool_calls
@@ -1787,7 +1791,9 @@ const statusPills = computed(() => {
         if (Array.isArray(list)) steps += list.length
       } catch { /* 坏数据不计步数 */ }
     }
-    tokens += (Number((m as any).prompt_tokens) || 0) + (Number((m as any).completion_tokens) || 0)
+    const p = Number((m as any).prompt_tokens) || 0
+    promptTokens += p
+    tokens += p + (Number((m as any).completion_tokens) || 0)
     cached += Number((m as any).cached_tokens) || 0
   }
   // 流式期间当前 run 的工具还没落库，先把它算进来——否则「轮/步」要等回答
@@ -1796,7 +1802,12 @@ const statusPills = computed(() => {
   if (live) {
     steps += live.tools.length
   }
-  const hit = tokens > 0 ? Math.round((cached / Math.max(1, tokens)) * 100) : 0
+  // 命中率的分母必须是**输入**（prompt）：缓存只能命中输入，输出永远不参与。
+  // 以前这里用的是 prompt+completion，于是「输出越多、命中率越低」——同一段
+  // 会话在胶囊上显示 77%、在弹框里显示 78%，对不上，也让人误以为缓存差一截。
+  // 夹到 100：cached_tokens 偶尔大于 prompt（上游计数口径异常），
+  // 不夹的话胶囊上会出现 "命中 137%"，看起来像统计坏了。
+  const hit = promptTokens > 0 ? Math.min(100, Math.round((cached / promptTokens) * 100)) : 0
   return {
     session: t('aiStatusRounds', { rounds, steps }),
     tokens: t('aiSessionPillTokens', { n: fmtTokens(tokens), pct: hit }),
@@ -3166,6 +3177,21 @@ onMounted(async () => {
   })
   // 设置在 SettingsModal 中保存配置后刷新下拉列表
   Events.On('ai:profiles-updated', loadProfiles)
+  // 记忆整理的用量：后端已把这次调用的 token 并进那条回复的库行，这里同步加上
+  // 本地那份——状态栏胶囊是按 messages 求和的（见 statusPills）。
+  // 只认当前会话与那条消息：后台整理可能在任何时候跑完，切走的会话不该被改。
+  offMemoryUsage = Events.On('ai:memory-usage', (ev: any) => {
+    const d = (ev?.data ?? ev) as {
+      convId?: string; messageId?: string
+      prompt?: number; completion?: number; cached?: number
+    }
+    if (!d || String(d.convId || '') !== activeId.value || !d.messageId) return
+    const m = messages.value.find((x) => x.id === d.messageId)
+    if (!m) return
+    m.prompt_tokens = (Number(m.prompt_tokens) || 0) + (Number(d.prompt) || 0)
+    m.completion_tokens = (Number(m.completion_tokens) || 0) + (Number(d.completion) || 0)
+    m.cached_tokens = (Number(m.cached_tokens) || 0) + (Number(d.cached) || 0)
+  })
   // 定时任务在 Go 侧无头跑完：它不走 SSE，ai:conv 事件收不到（执行用的是 nullSink），
   // 所以新的空间/会话必须靠这条事件主动拉一次，否则侧栏一直停在进页面时的快照。
   offScheduleRunUpdated = Events.On('schedule:run-updated', (ev: any) => {
@@ -3223,6 +3249,7 @@ onUnmounted(() => {
   Events.Off('ai:profiles-updated')
   offScheduleRunUpdated?.(); offScheduleRunUpdated = null
   offScheduleRunProgress?.(); offScheduleRunProgress = null
+  offMemoryUsage?.(); offMemoryUsage = null
   document.removeEventListener('mousedown', onDocMouseDown, true)
   document.removeEventListener('keydown', onGlobalKeydown)
   // 这里的 abort 现在只会在「应用退出」时跑到：切到别的导航页是 deactivate，

@@ -111,3 +111,51 @@ func TestSessionStatsModelDetails(t *testing.T) {
 		t.Errorf("top1 应与明细第一行一致（m2），实际 %q", v.Model)
 	}
 }
+
+// 记忆整理的 token 要算进会话总量与输入框下方那个胶囊。
+//
+// 它不属于任何一条回复本身，但是真实计费：不并进来，用户看到的消耗永远比账单少，
+// 而且「我就问了几句怎么花了这么多」无法解释。落点是「并进那条回复的消息行」——
+// 前端的胶囊是把消息行的 token 求和算出来的，单开一张表它永远不认。
+func TestSessionStatsIncludesMemoryUsage(t *testing.T) {
+	svc, d := newTestAIService(t)
+	conv, err := d.CreateAIConversation(db.NewAIConversation{Mode: "chat", Title: "含记忆整理"})
+	if err != nil {
+		t.Fatalf("建会话失败: %v", err)
+	}
+	msg, err := d.SaveAssistantTurn(conv.ID, db.AssistantTurn{
+		Content: "x", Model: "chat-model", ToolRounds: 2, ToolCalls: `[{"id":"1"}]`,
+		Usage: db.TokenUsage{Prompt: 1000, Completion: 100, Cached: 400},
+	})
+	if err != nil || msg == nil {
+		t.Fatalf("建消息失败: %v", err)
+	}
+	// 记忆整理在回答结束之后才跑完：后台把这次调用的用量并回那条回复。
+	if ok, err := d.AddAIMessageUsage(msg.ID, db.TokenUsage{Prompt: 500, Completion: 120}); err != nil || !ok {
+		t.Fatalf("并进用量失败: ok=%v err=%v", ok, err)
+	}
+
+	v, ok := svc.AISessionStats(conv.ID).Data.(AISessionStatsView)
+	if !ok {
+		t.Fatal("返回类型不对")
+	}
+	// 总量 = 消息 1100 + 记忆整理 620 = 1720；输出 = 100 + 120 = 220。
+	if v.TotalTokens != 1720 {
+		t.Errorf("总量应含记忆整理调用，实际 %d（期望 1720）", v.TotalTokens)
+	}
+	if v.Output != 220 {
+		t.Errorf("输出应含记忆整理，实际 %d（期望 220）", v.Output)
+	}
+	// 未缓存 = (1000+500) - 400 = 1100。缓存读取不因记忆调用变化（它没命中缓存）。
+	if v.UncachedInput != 1100 || v.CacheRead != 400 {
+		t.Errorf("未缓存/缓存读取不对: %+v", v)
+	}
+	// 聊天口径不受影响：轮/步/请求次数只描述问答本身。
+	if v.Rounds != 2 || v.Steps != 1 || v.RequestCount != 1 {
+		t.Errorf("轮/步/请求次数不该被记忆调用污染: %+v", v)
+	}
+	// 并进消息行之后，模型明细仍只有聊天模型——记忆调用用哪个模型由 ai_usage 记录。
+	if len(v.ModelDetails) != 1 || v.ModelDetails[0].Model != "chat-model" {
+		t.Errorf("模型明细应只含聊天模型: %+v", v.ModelDetails)
+	}
+}

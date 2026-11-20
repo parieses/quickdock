@@ -709,6 +709,40 @@ func (a *AIService) runToolCalls(ctx context.Context, calls []aiToolCall, round 
 	return out, records
 }
 
+// closedToolMessages 收尾轮「工具已收回、调用不执行」的回执。
+//
+// 为什么不能像以前那样把 tools 撤掉：撤掉之后这一发请求的 tools 数组与 system
+// 都和上一发不同，上游的前缀缓存整段作废——而收尾轮往往正是 prompt 最大的一发
+// （全量重算一次 = 前面十几轮攒下的缓存全部白省）。现在工具仍然挂在工具面上，
+// 只是不执行。
+//
+// 协议上必须把 assistant.tool_calls 与对应的 tool 消息补齐：只给 assistant 不带
+// tool 结果，部分网关会直接 400（tool_calls must be followed by tool messages）。
+func closedToolMessages(calls []aiToolCall, assistantText string) []map[string]interface{} {
+	wireCalls := make([]map[string]any, 0, len(calls))
+	for _, c := range calls {
+		wireCalls = append(wireCalls, map[string]any{
+			"id":   c.ID,
+			"type": "function",
+			"function": map[string]any{
+				"name":      c.Name,
+				"arguments": wireToolArguments(c.Args),
+			},
+		})
+	}
+	out := make([]map[string]interface{}, 0, len(calls)+1)
+	out = append(out, map[string]interface{}{
+		"role":       "assistant",
+		"content":    assistantText,
+		"tool_calls": wireCalls,
+	})
+	for _, c := range calls {
+		out = append(out, toolMessage(c.ID, "（系统提示）本次提问已进入收尾：工具调用不会被执行。"+
+			"不要继续调用工具，请直接用文字给出结论；没做完的部分说明一声。"))
+	}
+	return out
+}
+
 // spawnHeartbeatInterval 派活组心跳间隔。
 //
 // 8 秒：子 agent 一轮通常十几秒，更密没有新信息；更疏则「刚派出去」那半分钟
@@ -1542,6 +1576,14 @@ const (
 	compactSummarizeAfter = 8
 	// compactSummaryRune 摘要层每条保留多少字（够认出「做过什么」）。
 	compactSummaryRune = 120
+	// compactFoldTargetPercent 触发折叠后要压到预算的百分之多少。
+	//
+	// 为什么不是「压到刚好不超」：折叠会就地改写历史里的工具结果，而改写点
+	// 之后的上游前缀缓存全部作废。压到刚好不超的话，下一轮新增一条工具结果
+	// 就又超了，于是**每轮都折一次、每轮都丢缓存**——实测 202 轮发生过折叠，
+	// 那些轮次平均命中率 66.7%，没折叠的是 80.9%。
+	// 一次压到 60%，可以撑好几轮才再次越线，把「省上下文」的成本从每轮摊成每几轮。
+	compactFoldTargetPercent = 60
 )
 
 // compactLoopMessages 压住循环内的上下文增长，返回压缩明细。
@@ -1551,6 +1593,10 @@ const (
 //	最近 2 轮   不动：模型正要用它们，折了等于让它重查一次（多花一轮的钱）；
 //	3–8 轮      折叠到 compactFoldRune：留工具名 + 结论首段；
 //	更早        只留一行：正文全部走 WP3 的 result id（或重新调用）。
+//
+// 触发条件是「本轮估算超过 budget」，触发后**一次压到 budget 的 60%**
+// （见 compactFoldTargetPercent）：压到刚好不超会让下一轮又超、又折一次，
+// 而每折一次都会改写历史、丢掉上游的前缀缓存。
 //
 // budget 由 aiLoopBudget 按模型窗口算出来传进来：固定 24000 对 1M 窗口的模型
 // 是白白折叠（本可以塞进更多文件原文），对 8K 模型则根本压不住。
@@ -1564,6 +1610,9 @@ func compactLoopMessages(messages []map[string]interface{}, budget int) compactR
 	if res.Before <= budget {
 		return res
 	}
+	// 一次折到位：目标不是 budget，而是更低的 60%。budget 很小时（单测会传 1）
+	// 目标会算成 0，等于「能折多少折多少」——与旧行为一致，不会死循环。
+	target := budget * compactFoldTargetPercent / 100
 
 	// WP4a：用显式轮次索引代替「反向扫数组」。
 	rounds := resolveMessageRounds(messages)
@@ -1604,7 +1653,7 @@ func compactLoopMessages(messages []map[string]interface{}, budget int) compactR
 		if id := argString(m, "tool_call_id"); id != "" {
 			res.FoldedIDs = append(res.FoldedIDs, id)
 		}
-		if estimateLoopTokens(messages) <= budget {
+		if estimateLoopTokens(messages) <= target {
 			break
 		}
 	}

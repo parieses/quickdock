@@ -1,37 +1,36 @@
 package ai
 
-// 自动整理记忆：一轮对话结束后，用一次小调用把「以后还用得上」的事摘进 MEMORY.md。
+// 任务收尾的「工程笔记」：一次模型调用，同时产出两样东西。
 //
-// 为什么非要有这一步：确定性的每日日志（见 ai_memory.go 的 appendDailyMemory）
-// 只记得住「用户问了什么、改了哪些文件」，而记忆真正值钱的是**结论、偏好、踩过的坑**
-// ——哪些值得记需要判断，机器归纳不了。于是每轮多花一次很便宜的调用：输入是
-// 本轮对话 + 现有记忆，输出最多几条 `- ` 条目。
+//  1. 当天的**工程笔记**（写进 memory/YYYY-MM-DD.md 对应任务小节）：
+//     需求 / 做了什么 / 结论 / 坑 / 门禁。这是「下次要复用」的那部分知识。
+//  2. 值得长期记住的**常青条目**（写进 MEMORY.md 的硬规则 / 坑 / 事实 / 决策）。
 //
-// 三条硬约束：
-//   - **永不阻塞对话**：跑在 goroutine 里，失败只记日志。记忆整理失败不该让回答发不出去，
-//     也不该让用户多等一秒。
-//   - **不写空话**：模型输出 NONE 时一个字都不写；输出逐行过滤，只认 `- ` 开头的条目，
-//     模型顺手写的标题、解释、代码块全部丢掉。
-//   - **文件有界**：MEMORY.md 超过 memoryAutoFileCap 就从**最旧**的 `## ` 段丢起。
-//     注入时是按 memoryCapOverall 从头截的，让它无限长等于把最近的记忆裁掉。
+// 为什么两地都写：原来的每日记忆只有「用户说了什么、改了几个文件、跑了几轮」，
+// 结论和根因一个字都没有——下次遇到同一个坑，记忆帮不上任何忙，
+// 用户看到的就是「这记忆很简陋」。而 MEMORY.md 如果把这些细节全塞进去，
+// 6000 字的注入上限很快会被过程记录占满，真正该一眼看到的规则反而被裁掉。
+// 所以：过程与细节进每日笔记，结论与规则进 MEMORY.md。
 //
-// 第四条是后来补的——**调用次数有界**：每次整理都是一次完整计费调用，早先「每轮
-// 结束跑一次」让一次二十轮的编码任务多付二十次费用。现在按作用域攒批，攒够 3 轮
-// 或距上次 ≥90 秒才真跑（见 consolidateMemoryAsync）。
+// 三次返工留下的三条硬约束（别再违反）：
+//   - **永不阻塞对话**：跑在 goroutine 里，失败只记日志。记忆整理失败不该让回答发不出去。
+//   - **解析宁严勿宽**：只认固定标记块与 `- ` 行，模型顺手写的解释、代码块全部丢掉。
+//     宁可这次少记一条，也不要往记忆里灌一段「以下是提炼结果」。
+//   - **不写空话**：两块都可能是 NONE；笔记为空就只更新 MEMORY.md，反之亦然。
 //
-// 开关是 ai_memory_auto（默认开）。关掉之后只剩每日日志，MEMORY.md 只由模型
-// 在对话里主动调 project_memory 才会变——那正是用户抱怨的「记忆跟当前提问没关系」。
+// 开关是 ai_memory_auto（默认开）。关掉之后只剩确定性的活动日志。
 
 import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
 
+	"quickdock/internal/db"
 	"quickdock/internal/logger"
 	"quickdock/services"
 )
@@ -40,91 +39,39 @@ const (
 	// aiMemoryAutoKey 设置项：""/"1" 开，"0" 关。
 	aiMemoryAutoKey = "ai_memory_auto"
 
-	// memoryAutoUserRune 喂给整理器的用户消息上限（太长的提问人自己都记不住）。
-	memoryAutoUserRune = 800
-	// memoryAutoReplyRune 喂给整理器的助手回复上限：要的是结论，不是全文。
-	memoryAutoReplyRune = 4000
-	// memoryAutoExistingRune 喂给整理器的现有记忆上限：够它去重就行。
-	memoryAutoExistingRune = 3000
-	// memoryAutoFileCap MEMORY.md 的体积上限，超出从最旧的段落丢起。
-	//
-	// 必须 ≤ memoryCapOverall（注入时 clipRunes 从头截的上限）：文件比注入上限
-	// 还长的话，被截掉的正好是文件末尾，也就是**最新**的那几段——与这里
-	// 「宁可删旧的」的意图完全相反，症状是「刚记住的事下一轮就不见了」。
-	memoryAutoFileCap = memoryCapOverall
-	// memoryAutoBulletMax / memoryAutoBulletRune 单次最多写几条、每条多长。
-	memoryAutoBulletMax  = 6
-	memoryAutoBulletRune = 220
-	// memoryAutoMinUserRune 太短的提问不值得单独跑一次整理（「继续」「谢谢」）。
-	memoryAutoMinUserRune = 6
+	// memoryNoteTimeout 单次整理调用的超时。编码任务的最终回答可能很长，
+	// 输入裁剪之后仍然要给它几十秒——但不能无限等：goroutine 会一直挂着。
+	memoryNoteTimeout = 60 * time.Second
+	// memoryNoteMaxTokens 输出上限。两块内容加起来大约 12 行，900 够用，
+	// 也给不出「写成一篇总结」的空间。
+	memoryNoteMaxTokens = 900
 
-	// memoryAutoMinInterval 两次整理之间的最小间隔。
+	// memoryNoteUserRune 用户诉求上限（太长的提问人自己都记不住）。
+	memoryNoteUserRune = 900
+	// memoryNoteReplyRune 最终回答上限：要的是结论，不是全文。
+	memoryNoteReplyRune = 5000
+	// memoryNoteExistingRune 喂进去的现有 MEMORY.md 上限。
 	//
-	// 这是省钱的主力：早先是「每轮结束跑一次完整计费调用」，一次 20 轮的编码任务
-	// 就是 20 次额外调用（每次输入 = 3000 字旧记忆 + 4000 字回复）。现在改成
-	// 攒着一起整理，常规节奏下同样的任务只跑 2-3 次。
-	memoryAutoMinInterval = 90 * time.Second
-	// memoryAutoMinTurns 攒够几轮强制整理一次。
+	// 给到 5000（文件上限是 7000）：模型要能用「[取代]」改掉旧条目，就得先看见它。
+	// 截得太狠会让它以为没记过，于是又追加一条新的——正是「功能改了、记忆没改」
+	// 那个毛病的来源。代价是每次整理多花约 1500 token，换的是记忆不会自相矛盾。
+	memoryNoteExistingRune = 5000
+	// memoryNoteToolMaxLines 工具活动摘要最多几行。
+	memoryNoteToolMaxLines = 18
+	// memoryNoteFilesMax 改动文件最多列几个。
+	memoryNoteFilesMax = 10
+	// memoryNoteLineRune 单行笔记的长度上限。
+	memoryNoteLineRune = 140
+	// memoryNoteLineMax 单份笔记最多几行。
+	memoryNoteLineMax = 6
+	// memoryEntryMax 单次最多写几条常青条目。
 	//
-	// 只有时间间隔不够：用户十分钟里连问八句短问题，八轮都落在 90 秒内就会一直
-	// 攒着不整理，一旦进程退出这几轮的结论全丢。按轮数兜一道，最坏坏掉一轮。
-	memoryAutoMinTurns = 3
+	// 6 而不是 4：一次改动常常是「2 条新事实 + 1 条取代 + 1 条作废」，
+	// 卡在 4 会让模型自己删掉最该留的那条。
+	memoryEntryMax = 6
+	// memoryNoteMinUserRune 太短的提问不值得单独跑一次调用（「继续」「谢谢」）。
+	memoryNoteMinUserRune = 12
 )
-
-// memoryBatch 待整理的一批轮次（一轮或多轮攒在一起）。
-type memoryBatch struct {
-	user  string
-	reply string
-	files []string
-	turns int
-}
-
-// add 把一轮对话并进这一批，总量按注入上限截断。
-//
-// 超长时从**前面**截而不是后面：攒起来的几轮是同一件事的连续追问，结论基本
-// 落在最后那轮；截尾等于把最该记的部分丢掉。
-func (b *memoryBatch) add(user, reply string, files []string) {
-	b.turns++
-	b.user = appendCapped(b.user, user, memoryAutoUserRune)
-	b.reply = appendCapped(b.reply, reply, memoryAutoReplyRune)
-	b.files = append(b.files, files...)
-}
-
-// memoryScopeState 一个记忆作用域的攒批与在跑状态。
-type memoryScopeState struct {
-	pending memoryBatch
-	// lastAt 上一次真正发起整理的时刻（零值 = 从没整理过，第一轮就该跑）。
-	lastAt time.Time
-	// running 该作用域已有一轮在跑：网络调用慢的时候不再叠加第二次，
-	// 新来的轮次继续往 pending 里攒，下一次触发时一起喂进去。
-	running bool
-}
-
-var (
-	// memoryAutoStateMu 只保护下面那张 pending 表。
-	//
-	// 原先是「整理全程持一把全局锁」（锁在发请求前加、收到回复后才解），三个会话
-	// 同时结束就串行 3×45 秒。现在这把锁只覆盖几次内存读写，网络调用期间不持锁。
-	memoryAutoStateMu sync.Mutex
-	memoryAutoStates  = map[string]*memoryScopeState{}
-
-	// memoryAutoFileMu 串行化「读 MEMORY.md → 追加 → 裁回上限」这一整段。
-	//
-	// 这一段的正确性靠锁（各自读旧内容、各自覆盖就是丢条目），而它只有几次
-	// 本地文件 IO，几十微秒，排队没有代价。锁下沉到这里之后，代价是去重依据
-	// 可能来自几百毫秒前的快照——后果只是偶尔多一条重复条目，比串行 45 秒划算。
-	memoryAutoFileMu sync.Mutex
-)
-
-// memoryAutoStateLocked 取（必要时创建）某个作用域的状态。调用方持 memoryAutoStateMu。
-func memoryAutoStateLocked(root string) *memoryScopeState {
-	st, ok := memoryAutoStates[root]
-	if !ok {
-		st = &memoryScopeState{}
-		memoryAutoStates[root] = st
-	}
-	return st
-}
 
 // memoryAutoOn 读开关。读不到设置时按「开」处理：默认行为应该是用户要的那个。
 func (a *AIService) memoryAutoOn() bool {
@@ -164,79 +111,154 @@ func (a *AIService) AISetMemoryAuto(on bool) *services.ApiResult {
 	return services.Ok(on)
 }
 
-// consolidateMemoryAsync 把这一轮对话攒进待整理批，够了就丢到后台整理一次。
+// taskMemoryInput 一次任务收尾要整理的全部素材。//
+// 用结构体而不是十个参数：这些字段是「从 agent_run 的收尾现场搬过来」的，
+// 后续要加素材（比如报错原文）时，加字段不会牵动调用链上的每一处。
+type taskMemoryInput struct {
+	ConvID string
+	// MessageID 这次提问最后一条助手消息：记忆整理的用量要并进它，
+	// 否则「输入框下方的 token 用量」永远不含这笔开销（见 recordMemoryUsage）。
+	MessageID string
+	// SessionTag 这次提问的网关会话标识（见 ai_session_tag.go）。
+	//
+	// 记忆整理自己造 ctx（要单独的超时），不带上这个标识的话，它就成了网关
+	// 里那条「未提供会话标识」的黑户——而它每次带几千字已有记忆，token 不小。
+	SessionTag sessionInfo
+	Cwd        string
+	Title      string
+	User       string
+	Reply      string
+	Files      []string
+	Rounds     int
+	Tools      int
+	ToolLines  []string
+}
+
+// summarizeToolActivity 把工具调用记录压成几行「做了什么」。
+//
+// 只留名字 + 目标 + 报错：这次整理要判断的是「这个任务做成了什么」，
+// 不需要完整参数与输出（那些在最终回答里已经复述过一遍）。
+func summarizeToolActivity(records []aiToolRecord, max int) []string {
+	if max <= 0 {
+		max = memoryNoteToolMaxLines
+	}
+	lines := make([]string, 0, len(records))
+	seen := make(map[string]bool, len(records))
+	for _, rec := range records {
+		if rec.Dedup || rec.Denied {
+			continue
+		}
+		line := strings.TrimSpace(rec.Name)
+		if line == "" {
+			continue
+		}
+		if t := toolMemoryTarget(rec); t != "" {
+			line += " " + t
+		}
+		if rec.Error != "" {
+			line += "（失败：" + clipRunes(collapseSpaces(rec.Error), 60) + "）"
+		}
+		if seen[line] {
+			continue
+		}
+		seen[line] = true
+		lines = append(lines, line)
+	}
+	if len(lines) > max {
+		// 折叠的是「被省掉的调用」，不是调用总数：写总数会让模型以为这次跑了那么多命令。
+		lines = append(lines[:max:max], fmt.Sprintf("…还有 %d 条调用", len(lines)-max))
+	}
+	return lines
+}
+
+// toolMemoryTarget 从一条调用记录里抠出「对象」：文件路径优先，其次是命令名。
+func toolMemoryTarget(rec aiToolRecord) string {
+	if p := strings.TrimSpace(rec.Path); p != "" {
+		return collapseSpaces(p)
+	}
+	args := strings.TrimSpace(rec.Args)
+	if args == "" {
+		return ""
+	}
+	// 参数是模型给的 JSON 原文，可能被截断：只在能抠到明显字段时才用，
+	// 抠不到就只显示工具名——总比在记忆里留一段半截 JSON 好。
+	for _, key := range []string{`"path":"`, `"command":"`, `"pattern":"`, `"query":"`} {
+		if i := strings.Index(args, key); i >= 0 {
+			rest := args[i+len(key):]
+			if j := strings.Index(rest, `"`); j > 0 {
+				return clipRunes(collapseSpaces(rest[:j]), 80)
+			}
+		}
+	}
+	return ""
+}
+
+// memoryAutoSlots 同时在跑的记忆整理上限（2 = 一个前台任务 + 一个后台留守）。
+//
+// 为什么要有上限：每次整理都是一次完整计费调用，而且输入里还带着几千字已有
+// 记忆。没有上限时，连点几次「结束」或几个短任务接连收尾就会并发发出好几份
+// 账单，而它们写的是同一个 MEMORY.md。
+var memoryAutoSlots = make(chan struct{}, 2)
+
+// memoryAutoInflight 正在整理的「会话|消息」，防同一条回复被整理多次。
+var memoryAutoInflight sync.Map
+
+// writeTaskMemoryAsync 任务收尾后，把这次任务的笔记与常青条目丢到后台整理。
 //
 // 传 cfg 的值而不是指针：用户可能在整理期间切档案 / 改配置，而这次调用属于
 // 已经结束的那一轮，应该用当时的模型与参数。
-//
-// 触发条件是「攒够 memoryAutoMinTurns 轮 **或** 距上次整理 ≥ memoryAutoMinInterval」
-// ——不满足就只入批不发请求。
-//
-// 「动过文件」**不**作为即时触发条件：编码类任务几乎每轮都改文件，拿它当触发
-// 等于退回「每轮一次」，一分钱都省不下来。文件清单只是随那一轮内容一起攒进
-// pending，下一次触发时一并喂给整理器。
-func (a *AIService) consolidateMemoryAsync(cfg AIProfile, convID, cwd, user, reply string, files []string) {
-	if strings.TrimSpace(cwd) == "" || strings.TrimSpace(reply) == "" {
+func (a *AIService) writeTaskMemoryAsync(cfg AIProfile, in taskMemoryInput) {
+	if strings.TrimSpace(in.Cwd) == "" || strings.TrimSpace(in.Reply) == "" {
 		return
 	}
-	if utf8.RuneCountInString(strings.TrimSpace(user)) < memoryAutoMinUserRune && len(files) == 0 {
-		// 「继续」「谢谢」这类话不单独跑一次整理——但**动了文件就照整理**：
-		// 续跑往往就是同一件事的后半段，跳过它等于那半段永远进不了长期记忆。
+	// 纯寒暄 / 续跑口令不值得一次完整计费调用。动了文件或调了工具的照整理：
+	// 那往往就是「继续做」的后半段，跳过它等于那半段永远进不了记忆。
+	if in.Rounds == 0 && len(in.Files) == 0 &&
+		utf8.RuneCountInString(strings.TrimSpace(in.User)) < memoryNoteMinUserRune {
 		return
 	}
 	if !a.memoryAutoOn() {
 		return
 	}
-	sc := resolveMemoryScope(cwd)
+	sc := resolveMemoryScope(in.Cwd)
 	if sc.root == "" {
 		return
 	}
-
-	memoryAutoStateMu.Lock()
-	st := memoryAutoStateLocked(sc.root)
-	st.pending.add(user, reply, files)
-	// 已经有一轮在跑就不再叠加：新内容留在 pending 里，等下一次触发一起喂。
-	// 这里不排队等它跑完——等就是让「一轮结束」这件事被一次网络调用挡住。
-	run := !st.running && (st.pending.turns >= memoryAutoMinTurns ||
-		time.Since(st.lastAt) >= memoryAutoMinInterval)
-	var batch memoryBatch
-	if run {
-		batch = st.pending
-		st.pending = memoryBatch{}
-		st.running = true
-		st.lastAt = time.Now()
-	}
-	memoryAutoStateMu.Unlock()
-	if !run {
+	// 同一条回复只整理一次：用户连点几次「结束」、或前端重连触发二次收尾时，
+	// 每次都会走到这里，而每次都是一份完整计费调用（还带 5000 字已有记忆）。
+	inflightKey := in.ConvID + "|" + in.MessageID
+	if _, busy := memoryAutoInflight.LoadOrStore(inflightKey, struct{}{}); busy {
+		logger.I("[ai] 同一任务已在整理记忆，跳过重复 conv=%s msg=%s", in.ConvID, in.MessageID)
 		return
 	}
-
 	go func() {
-		// 后台协程里 panic 会带走整个进程：一个摘要失败不值得让桌面应用退出。
-		// running 的复位必须在这里做（不在 consolidateMemory 里）：那次调用提前
-		// return 的路径太多，漏一条这个作用域就永远不再整理了。
+		defer memoryAutoInflight.Delete(inflightKey)
+		// 并发上限之外直接跳过，不排队：排队只会在内存里攒起一串等待的
+		// goroutine，而它们醒来时记忆早就被前面那几份改过了。
+		select {
+		case memoryAutoSlots <- struct{}{}:
+			defer func() { <-memoryAutoSlots }()
+		default:
+			logger.I("[ai] 记忆整理并发已满（%d），本次跳过 conv=%s", cap(memoryAutoSlots), in.ConvID)
+			return
+		}
+		// 后台协程里 panic 会带走整个进程：一次摘要失败不值得让桌面应用退出。
 		defer func() {
-			memoryAutoStateMu.Lock()
-			st.running = false
-			memoryAutoStateMu.Unlock()
 			if r := recover(); r != nil {
-				logger.W("[ai] 记忆整理 panic conv=%s: %v", convID, r)
+				logger.W("[ai] 工程笔记 panic conv=%s: %v", in.ConvID, r)
 			}
 		}()
-		a.consolidateMemory(cfg, convID, sc, batch)
+		a.writeTaskMemory(cfg, sc, in)
 	}()
 }
 
-// consolidateMemory 真正干活的那一次调用（同步，能单测）。
-//
-// 不在整段调用期间持锁：读文件拿的是快照，网络调用更是别人的时间。
-// 写回时由 appendOverallMemory 自己加锁（见那里的说明）。
-func (a *AIService) consolidateMemory(cfg AIProfile, convID string, sc memoryScope, batch memoryBatch) {
+// writeTaskMemory 真正干活的那一次调用（同步，方便单测覆盖解析与落盘）。
+func (a *AIService) writeTaskMemory(cfg AIProfile, sc memoryScope, in taskMemoryInput) {
 	if sc.root == "" {
 		return
 	}
 	existing := ""
-	if data, err := os.ReadFile(overallMemoryPath(sc.root)); err == nil {
+	if data, rerr := os.ReadFile(overallMemoryPath(sc.root)); rerr == nil {
 		existing = strings.TrimSpace(string(data))
 		if isPlaceholderProfile(existing) {
 			// 自动生成的空画像不是记忆：既别喂给模型（它会照着抄），也别拿来去重。
@@ -244,313 +266,369 @@ func (a *AIService) consolidateMemory(cfg AIProfile, convID string, sc memorySco
 		}
 	}
 
-	var b strings.Builder
-	b.WriteString("【已有长期记忆】\n")
-	if existing == "" {
-		b.WriteString("（空）\n")
-	} else {
-		b.WriteString(clipRunes(existing, memoryAutoExistingRune))
-		b.WriteString("\n")
-	}
-	// 攒了多轮时用「最近的对话」而不是「本轮」：标注与内容不符时模型会只摘最后一段，
-	// 前面几轮的结论就被它自己忽略了。
-	if batch.turns > 1 {
-		b.WriteString("\n【最近 ")
-		b.WriteString(fmt.Sprint(batch.turns))
-		b.WriteString(" 轮对话】\n用户：")
-	} else {
-		b.WriteString("\n【本轮对话】\n用户：")
-	}
-	b.WriteString(clipRunes(strings.TrimSpace(batch.user), memoryAutoUserRune))
-	b.WriteString("\n")
-	if uniq := dedupKeepOrder(batch.files); len(uniq) > 0 {
-		b.WriteString("改动文件：")
-		b.WriteString(clipRunes(strings.Join(uniq, "、"), 600))
-		b.WriteString("\n")
-	}
-	b.WriteString("助手：")
-	b.WriteString(clipRunes(strings.TrimSpace(batch.reply), memoryAutoReplyRune))
-	b.WriteString("\n")
-
-	// 输出必须极短：这次调用的唯一产出是几行条目，给个 300 token 就绰绰有余，
-	// 越短的输出也越不容易跑成「一段解释」。
-	memCfg := cfg
-	memCfg.MaxTokens = 300
+	memCfg := aiCheapProfile(cfg)
+	memCfg.MaxTokens = memoryNoteMaxTokens
 	memCfg.Temperature = 0.2
 
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), memoryNoteTimeout)
 	defer cancel()
+	// 把提问的会话标识带进去：这次整理属于哪一次提问，网关上要能看出来。
+	ctx = withSessionInfo(ctx, in.SessionTag)
 	out, usage, err := a.callAIOnce(ctx, memCfg, []map[string]string{
-		{"role": "system", "content": memoryAutoSystemPrompt(sc)},
-		{"role": "user", "content": b.String()},
+		{"role": "system", "content": taskMemorySystemPrompt(sc)},
+		{"role": "user", "content": taskMemoryUserPrompt(in, existing)},
 	})
 	if err != nil {
-		logger.W("[ai] 记忆整理调用失败 conv=%s: %v", convID, err)
+		logger.W("[ai] 工程笔记调用失败 conv=%s: %v", in.ConvID, err)
 		return
 	}
 	// 这也是一次完整计费的调用，不记就会系统性少算（同标题生成）。
-	a.recordAIUsage(convID, usageKindMemory, memCfg, usage)
+	a.recordAIUsage(in.ConvID, usageKindMemory, memCfg, usage)
+	a.recordMemoryUsage(in, usage)
 
-	bullets := memoryBullets(out, existing)
-	if len(bullets) == 0 {
+	note, entries := parseTaskMemoryOutput(out)
+	if len(note) > 0 {
+		appendDailyNote(in.ConvID, in.Cwd, in.Title, in.User, time.Now(), note)
+	}
+	if len(entries) > 0 {
+		if werr := updateOverallMemory(sc.root, entries); werr != nil {
+			logger.W("[ai] 写入记忆失败 root=%s: %v", sc.root, werr)
+		}
+	}
+}
+
+// recordMemoryUsage 把记忆整理的用量并进那条回复，并推一条事件让前端立刻算进
+// 「输入框下方的 token 用量」。
+//
+// 两个落点缺一不可：并进消息行是为了**刷新后仍然算得对**（前端那个数字是把消息行
+// 求和出来的），事件是为了**本次会话不必等刷新**——记忆整理在回答结束之后才跑完，
+// 等下次打开会话才更新，用户会以为自己记错了。
+func (a *AIService) recordMemoryUsage(in taskMemoryInput, u db.TokenUsage) {
+	if u.Empty() {
 		return
 	}
-	if err := appendOverallMemory(sc.root, bullets); err != nil {
-		logger.W("[ai] 写入记忆失败 root=%s: %v", sc.root, err)
+	if in.MessageID != "" && a.App != nil && a.App.DB != nil {
+		ok, err := a.App.DB.AddAIMessageUsage(in.MessageID, u)
+		switch {
+		case err != nil:
+			logger.W("[ai] 记忆用量并进消息失败 msg=%s: %v", in.MessageID, err)
+		case !ok:
+			// 目标消息行已经不在了。总账（ai_usage）已经记过，这里只是不再
+			// 往前端推那条增量——推了会让本次会话的数字虚高，刷新后又消失。
+			logger.I("[ai] 记忆用量目标消息已不存在，跳过事件 msg=%s", in.MessageID)
+			return
+		}
 	}
+	a.emitAI("ai:memory-usage", map[string]interface{}{
+		"convId":     in.ConvID,
+		"messageId":  in.MessageID,
+		"prompt":     u.Prompt,
+		"completion": u.Completion,
+		"cached":     u.Cached,
+	})
 }
 
-// appendCapped 把 add 接到 cur 后面，总量不超过 cap（超了从前面截）。
+// taskMemorySystemPrompt 工程笔记的指令。
 //
-// 用 "\n---\n" 分隔而不是直接拼：连续几轮的用户消息直接粘在一起，模型会把
-// 上一轮的结尾和下一轮的开头读成一句话。
-func appendCapped(cur, add string, cap int) string {
-	add = strings.TrimSpace(add)
-	if add == "" {
-		return cur
-	}
-	if cur == "" {
-		return clipRunes(add, cap)
-	}
-	s := cur + "\n---\n" + add
-	r := []rune(s)
-	if cap <= 0 || len(r) <= cap {
-		return s
-	}
-	return "…" + string(r[len(r)-cap:])
-}
-
-// memoryAutoSystemPrompt 两个作用域分开写：项目里该记的是技术栈与坑，
-// 跨任务的共享记忆里该记的是「这个人是谁、偏好什么、问过什么结论」。
-func memoryAutoSystemPrompt(sc memoryScope) string {
+// 两个作用域分开写：项目里该记的是技术栈与坑，跨任务的共享记忆里该记的是
+// 「这个人是谁、偏好什么、上次给了什么结论」。
+func taskMemorySystemPrompt(sc memoryScope) string {
 	what := "用户的偏好与禁忌、他在做什么事、明确要求过的做法、你给出的结论与决定、踩过的坑"
 	if sc.project {
 		what = "这个项目的事实：技术栈、关键文件路径、约定、踩过的坑、已经做过的决策"
 	}
-	return "你是长期记忆整理器。从「本轮对话」里挑出**以后还用得上**的事实，供下次直接使用。\n" +
-		"只输出条目：每行以 \"- \" 开头，最多 " + fmt.Sprint(memoryAutoBulletMax) + " 行，每行不超过 60 字。\n" +
-		"不要标题、不要编号、不要解释、不要代码块、不要复述过程。\n" +
-		"「已有长期记忆」里已经有的不要重复。\n" +
-		"该记的是：" + what + "。\n" +
-		"不该记的是：一次性的问题与寒暄、你这次做了哪些操作、临时路径、代码内容、从对话里明显读得出的临时上下文。\n" +
-		"如果本轮没有任何值得长期记住的内容，只输出一行：NONE"
+	return "你是工程记忆整理器。根据「本次任务」输出两块内容，用固定标记包裹。\n\n" +
+		"输出格式（严格遵守，不要写任何别的东西）：\n" +
+		"<笔记>\n" +
+		"- 需求：用户要解决什么（一句话）\n" +
+		"- 做了什么：改了哪些文件/模块、关键做法（一到两行）\n" +
+		"- 结论：最终结果或验证到的结论\n" +
+		"- 坑：踩到的坑与根因（没有就省略这一行）\n" +
+		"- 门禁：跑过的验证命令与结果（没有就省略这一行）\n" +
+		"</笔记>\n" +
+		"<长期>\n" +
+		"- [规则] 一句话规则 ｜ 为什么：违反它会出什么事\n" +
+		"- [坑] 现象 ｜ 根因：… ｜ 修法：…\n" +
+		"- [事实] 一句话事实\n" +
+		"- [决策] 已拍板的取舍 ｜ 理由：…\n" +
+		"- [取代] 旧条目的开头几个字 → 改后的完整内容\n" +
+		"- [作废] 旧条目的开头几个字\n" +
+		"</长期>\n\n" +
+		"约束：\n" +
+		"- 笔记写 3-" + fmt.Sprint(memoryNoteLineMax) + " 行，每行不超过 80 字，只写这次任务的真实产出；" +
+		"不要复述寒暄与过程流水账，不要贴代码，不要写 Markdown 标题或代码块。\n" +
+		"- 长期最多 " + fmt.Sprint(memoryEntryMax) + " 条，只写「以后的轮次还会用到」的东西；" +
+		"确实没有就整块只写一行 NONE。\n" +
+		"- **这次改动让「已有长期记忆」里的某条不再成立时（功能行为变了、方案换了、结论被推翻），" +
+		"必须用 [取代] 把那条改掉，而不是再追加一条新的**——两条互相矛盾的记忆比没有记忆更糟。" +
+		"[取代] 后面的旧片段要能唯一定位到那一行（复制它开头十来个字即可）。\n" +
+		"- [规则] 必须写清为什么：写不出理由的，说明它还不是规则，别写。\n" +
+		"- 只写结论，不要「我检查了/我尝试了」这类叙述。\n" +
+		"- 「已有长期记忆」里已经有的不要重复，也不要换个说法再写一遍。\n" +
+		"- 该记的是：" + what + "。\n" +
+		"- 不该记的是：一次性的问题与寒暄、临时路径、代码内容、这次跑了哪几条命令的细节。"
 }
 
-// memoryBullets 从模型输出里抽出条目：只要 `- ` / `* ` / `• ` 开头的行，
-// 去掉已有的、去重、限长限量。模型偶尔会加一句「以下是提炼结果」，这类行没有
-// 项目符号，自然被丢掉——比按行号猜哪行是正文可靠。
-func memoryBullets(raw, existing string) []string {
-	out := make([]string, 0, memoryAutoBulletMax)
-	seen := make(map[string]bool, memoryAutoBulletMax)
-	for _, line := range strings.Split(raw, "\n") {
+// taskMemoryUserPrompt 拼「本次任务」素材。
+func taskMemoryUserPrompt(in taskMemoryInput, existing string) string {
+	var b strings.Builder
+	b.WriteString("【任务】")
+	b.WriteString(clipRunes(collapseSpaces(in.Title), 80))
+	b.WriteString("\n【用户】")
+	b.WriteString(clipRunes(strings.TrimSpace(in.User), memoryNoteUserRune))
+	b.WriteString("\n")
+	if len(in.ToolLines) > 0 {
+		b.WriteString("\n【工具活动】\n")
+		for _, l := range in.ToolLines {
+			b.WriteString("- " + l + "\n")
+		}
+	}
+	if files := dedupKeepOrder(in.Files); len(files) > 0 {
+		if len(files) > memoryNoteFilesMax {
+			files = files[:memoryNoteFilesMax]
+		}
+		b.WriteString("\n【改动文件】" + strings.Join(files, "、") + "\n")
+	}
+	if in.Rounds > 0 || in.Tools > 0 {
+		fmt.Fprintf(&b, "\n【投入】%d 轮 / %d 次调用\n", in.Rounds, in.Tools)
+	}
+	b.WriteString("\n【最终回答】\n")
+	b.WriteString(clipRunes(strings.TrimSpace(in.Reply), memoryNoteReplyRune))
+	b.WriteString("\n")
+	b.WriteString("\n【已有长期记忆】\n")
+	if existing == "" {
+		b.WriteString("（空）\n")
+	} else {
+		b.WriteString(clipRunes(existing, memoryNoteExistingRune))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// ---- 解析模型输出 ----
+
+// parseTaskMemoryOutput 把模型输出拆成「笔记行」与「常青条目」。
+//
+// 标记缺失时的兜底是**只取笔记、不写 MEMORY.md**：模型没按格式输出说明这次
+// 它没打算分类，把一堆无法归类的长句塞进常青记忆，比少记一次糟糕得多。
+func parseTaskMemoryOutput(raw string) (note []string, entries []memoryEntry) {
+	noteBlock, okNote := extractMarkedBlock(raw, "笔记")
+	longBlock, okLong := extractMarkedBlock(raw, "长期")
+	if !okNote && !okLong {
+		// 有开标签却没闭合：基本是撞了 memoryNoteMaxTokens 被截断。半截块的
+		// 最后一行通常是被切开的残句，硬解析等于把残句永久钉进记忆文件。
+		// 整份丢弃，下一次任务结束时再整理。
+		if strings.Contains(raw, "<笔记>") || strings.Contains(raw, "<长期>") {
+			logger.W("[ai] 工程笔记输出被截断（标签未闭合），本次不写记忆：%d 字",
+				utf8.RuneCountInString(raw))
+			return nil, nil
+		}
+		// 完全没标记：整段当作笔记候选（仍然只认 `- ` 行）。
+		noteBlock, okNote = raw, true
+	}
+	if okNote {
+		note = parseNoteLines(noteBlock)
+	}
+	if okLong {
+		entries = parseMemoryEntryLines(longBlock)
+	}
+	return note, entries
+}
+
+// extractMarkedBlock 取 `<标签>…</标签>` 之间的内容。
+func extractMarkedBlock(raw, tag string) (string, bool) {
+	open := "<" + tag + ">"
+	closeTag := "</" + tag + ">"
+	i := strings.Index(raw, open)
+	if i < 0 {
+		return "", false
+	}
+	rest := raw[i+len(open):]
+	j := strings.Index(rest, closeTag)
+	if j < 0 {
+		// 未闭合 = 不是「有内容的块」，而是被截断的半截输出。
+		// 当成有内容交给解析器，会产出以残句结尾的条目（见调用点的处理）。
+		return "", false
+	}
+	return rest[:j], true
+}
+
+// noteLinePrefixRe 去掉笔记里的项目符号（含全角、编号）。
+var noteLinePrefixRe = regexp.MustCompile(`^([-*•·]|\d+[.、)]|第[一二三四五六七八九十]+[、.])\s*`)
+
+// parseNoteLines 清洗笔记行：只留 `- ` 条目，去掉 Markdown 装饰，限长限量。
+func parseNoteLines(block string) []string {
+	out := make([]string, 0, memoryNoteLineMax)
+	seen := make(map[string]bool, memoryNoteLineMax)
+	for _, line := range strings.Split(block, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" {
+		if line == "" || strings.HasPrefix(line, "```") || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if strings.EqualFold(line, "NONE") || line == "无" || line == "（无）" {
+		// 只认列表行：模型偶尔会先寒暄一句（「以下是提炼结果」），那行没有项目符号。
+		if !strings.HasPrefix(line, "- ") && !strings.HasPrefix(line, "* ") && !strings.HasPrefix(line, "• ") {
 			continue
 		}
-		var body string
-		switch {
-		case strings.HasPrefix(line, "- "):
-			body = line[2:]
-		case strings.HasPrefix(line, "* "), strings.HasPrefix(line, "• "):
-			body = line[2:]
-		case line == "-" || line == "*" || line == "•":
-			continue
-		default:
-			continue
-		}
-		body = strings.TrimSpace(body)
-		if body == "" || seen[body] {
-			continue
-		}
-		if existing != "" && strings.Contains(existing, body) {
+		body := strings.TrimSpace(noteLinePrefixRe.ReplaceAllString(line, ""))
+		if body == "" || isNoneText(body) || seen[body] {
 			continue
 		}
 		seen[body] = true
-		out = append(out, clipRunes(body, memoryAutoBulletRune))
-		if len(out) >= memoryAutoBulletMax {
+		out = append(out, clipRunes(collapseSpaces(body), memoryNoteLineRune))
+		if len(out) >= memoryNoteLineMax {
 			break
 		}
 	}
 	return out
 }
 
-// appendOverallMemory 把条目追加到 MEMORY.md 的当天小节下，并把文件裁回上限。
-//
-// 每次追加都开一个新的 `## 日期 时间` 段而不是往今天那一段里塞：找「今天那段」
-// 要解析文件结构，而模型自己写的内容不一定守格式，解析错了就写进别的小节里。
-func appendOverallMemory(root string, bullets []string) error {
-	// 锁在这里而不是在调用方：这一段是 read-modify-write，两个作用域同时结束
-	// （或同一作用域连着跑两次）不串行就会各自读到旧内容、各自覆盖，丢条目。
-	// 锁只罩文件读写，不罩那次模型调用——那才是原先串行 45 秒的原因。
-	memoryAutoFileMu.Lock()
-	defer memoryAutoFileMu.Unlock()
+// entryTagRe 匹配 `[规则] 正文`。
+var entryTagRe = regexp.MustCompile(`^\[\s*([^\]]{1,12})\s*\]\s*(.+)$`)
 
-	p := overallMemoryPath(root)
-	cur := ""
-	if data, err := os.ReadFile(p); err == nil {
-		cur = string(data)
-	}
-	if strings.TrimSpace(cur) == "" || isPlaceholderProfile(cur) {
-		// 空画像没有保留价值，直接换成一个干净标题：留着它会被当成正文第一段。
-		cur = "# 长期记忆\n"
-	}
-	if !strings.HasSuffix(cur, "\n") {
-		cur += "\n"
-	}
-	// 同一天共用一个 `## 日期` 小节。
-	//
-	// 原来每整理一次就追加一个 `## 日期 15:04`，一天下来 MEMORY.md 变成几十个
-	// 小节、每节一两条——「记忆记得很垃圾」的观感有一半来自这里。合并之后同一天
-	// 的事实聚在一起，去重也在这一个范围内做。
-	day := time.Now().Format("2006-01-02")
-	if merged, ok := appendBulletsToDaySection(cur, day, bullets); ok {
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			return err
-		}
-		return os.WriteFile(p, []byte(trimMemoryToCap(merged, memoryAutoFileCap)), 0o644)
-	}
-	var b strings.Builder
-	b.WriteString(cur)
-	fmt.Fprintf(&b, "\n## %s\n", day)
-	for _, l := range bullets {
-		b.WriteString("- " + l + "\n")
-	}
-	content := trimMemoryToCap(b.String(), memoryAutoFileCap)
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(p, []byte(content), 0o644)
-}
+// entryWordRe 匹配 `规则：正文` 这种没用方括号的写法（模型很常见）。
+var entryWordRe = regexp.MustCompile(`^([^\s：:]{1,4})\s*[：:]\s*(.+)$`)
 
-// appendBulletsToDaySection 把条目追加进已有的 `## day` 小节；没有该小节时返回 false。
+// parseMemoryEntryLines 解析常青条目：必须有可识别的类别标签。
 //
-// 插入位置是该小节的末尾（下一个 `## ` 之前），而不是文件末尾：否则「今天的记忆」
-// 会被后来的其它日期小节隔开，人读的时候要来回跳。
-func appendBulletsToDaySection(content, day string, bullets []string) (string, bool) {
-	// 按**整行**匹配 `## 日期`，不能用前缀匹配：旧格式的小节标题是
-	// `## 2026-11-18 09:12`，前缀匹配会把新条目塞进当天**最旧**那一节，
-	// 而 trimMemoryToCap 恰恰从最旧开始丢——升级当天写进去的记忆最先被裁掉。
-	lines := strings.Split(content, "\n")
-	start := -1
-	for i, l := range lines {
-		if strings.TrimRight(l, " \r") == "## "+day {
-			start = i
-			break
-		}
-	}
-	if start < 0 {
-		return content, false
-	}
-	end := len(lines)
-	for i := start + 1; i < len(lines); i++ {
-		if strings.HasPrefix(lines[i], "## ") {
-			end = i
-			break
-		}
-	}
-	section := strings.Join(lines[start+1:end], "\n")
-	add := make([]string, 0, len(bullets))
-	for _, l := range bullets {
-		// 同一天内去重：模型换个说法重复同一件事很常见。
-		if strings.Contains(section, l) {
+// 没有标签的行一律丢弃——它不是「没分类」，而是「模型在写散文」。
+func parseMemoryEntryLines(block string) []memoryEntry {
+	out := make([]memoryEntry, 0, memoryEntryMax)
+	seen := make(map[string]bool, memoryEntryMax)
+	for _, line := range strings.Split(block, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "```") || strings.HasPrefix(line, "#") {
 			continue
 		}
-		add = append(add, "- "+l)
+		if !strings.HasPrefix(line, "- ") && !strings.HasPrefix(line, "* ") && !strings.HasPrefix(line, "• ") {
+			continue
+		}
+		body := strings.TrimSpace(noteLinePrefixRe.ReplaceAllString(line, ""))
+		if body == "" || isNoneText(body) {
+			continue
+		}
+		e, ok := parseMemoryEntryBody(body)
+		if !ok {
+			continue
+		}
+		key := normalizeMemoryText(e.Text)
+		if e.Replace != "" {
+			key = "replace:" + normalizeMemoryText(e.Replace)
+		}
+		if e.Drop != "" {
+			key = "drop:" + normalizeMemoryText(e.Drop)
+		}
+		if key == "" || key == "replace:" || key == "drop:" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		if e.Text != "" {
+			e.Text = clipRunes(e.Text, memoryEntryMaxRune)
+		}
+		out = append(out, e)
+		if len(out) >= memoryEntryMax {
+			break
+		}
 	}
-	if len(add) == 0 {
-		return content, true
-	}
-	insert := end
-	for insert > start+1 && strings.TrimSpace(lines[insert-1]) == "" {
-		insert--
-	}
-	out := make([]string, 0, len(lines)+len(add))
-	out = append(out, lines[:insert]...)
-	out = append(out, add...)
-	out = append(out, lines[insert:]...)
-	return strings.Join(out, "\n"), true
+	return out
 }
 
-// trimMemoryToCap 超出 cap 时丢掉**最旧**的 `## ` 段，保留开头那段说明与最新的几节。
-//
-// 为什么不直接截尾：注入时是 `clipRunes(s, 6000)` 从头截的，文件越长，
-// 被截掉的就是越新的记忆——正是最该留的那部分。所以宁可自己删旧的。
-func trimMemoryToCap(content string, cap int) string {
-	if cap <= 0 || utf8.RuneCountInString(content) <= cap {
-		return content
-	}
-	idx := strings.Index(content, "\n## ")
-	if idx < 0 {
-		// 没有分节（模型用 project_memory 整份重写过）：只能从尾巴截，保住开头的标题。
-		return clipRunes(content, cap)
-	}
-	head := content[:idx]   // 标题 + 说明
-	rest := content[idx+1:] // 以 "## " 开头
-	parts := strings.Split(rest, "\n## ")
-	for i := 1; i < len(parts); i++ {
-		parts[i] = "## " + parts[i]
-	}
-	kept := make([]string, 0, len(parts))
-	used := utf8.RuneCountInString(head)
-	for i := len(parts) - 1; i >= 0; i-- {
-		sec := parts[i]
-		n := utf8.RuneCountInString(sec)
-		if used+n > cap {
-			if len(kept) > 0 {
-				break
+// parseMemoryEntryBody 把一行拆成条目（三种形态之一）。
+func parseMemoryEntryBody(body string) (memoryEntry, bool) {
+	if m := entryTagRe.FindStringSubmatch(body); m != nil {
+		tag := m[1]
+		rest := strings.TrimSpace(m[2])
+		switch {
+		case isReplaceWord(tag):
+			// `[取代] 旧片段 → 改后的内容`：箭头前是定位旧条目的片段，箭头后是新内容。
+			// 旧条目可能跨分区，类别由「找到的那条」决定，所以这里不填 Category。
+			old, text := splitEntryArrow(rest)
+			if strings.TrimSpace(old) == "" {
+				return memoryEntry{}, false
 			}
-			// 最新这一节自己就超了 cap：不能整节丢（那是刚记住的东西），
-			// 也不能整节留（文件会无界增长、注入时被从头截掉）。
-			// 按**条目**裁：保留小节标题 + 最新的若干条，从最旧那条删起。
-			sec = trimSectionToCap(sec, cap-used)
-			n = utf8.RuneCountInString(sec)
+			if strings.TrimSpace(text) == "" {
+				// 只给了旧片段没有新内容：当作用一条「作废」处理，别写出一条空条目。
+				return memoryEntry{Drop: old}, true
+			}
+			return memoryEntry{Replace: strings.TrimSpace(old), Text: strings.TrimSpace(text)}, true
+		case isDropWord(tag):
+			if rest == "" {
+				return memoryEntry{}, false
+			}
+			return memoryEntry{Drop: rest}, true
 		}
-		kept = append([]string{sec}, kept...)
-		used += n
+		cat, ok := memoryCategoryFromWord(tag)
+		if !ok {
+			return memoryEntry{}, false
+		}
+		return memoryEntry{Category: cat, Text: rest}, true
 	}
-	return head + "\n" + strings.Join(kept, "\n")
+	if m := entryWordRe.FindStringSubmatch(body); m != nil {
+		if cat, ok := memoryCategoryFromWord(m[1]); ok {
+			return memoryEntry{Category: cat, Text: strings.TrimSpace(m[2])}, true
+		}
+	}
+	return memoryEntry{}, false
 }
 
-// trimSectionToCap 把单个小节裁到 budget 字以内：保留标题行 + 最新的条目行。
+// splitEntryArrow 按第一个箭头切成「旧片段 / 新内容」。
 //
-// 为什么从最旧那条删：记忆的价值随时间递减，而这一节的最后几条正是刚刚
-// 发生的事——注入时被截掉的恰恰是它们（原实现只做整节丢弃，碰到「单节超限」
-// 就无处可裁）。
-func trimSectionToCap(section string, budget int) string {
-	if budget <= 0 {
-		return ""
-	}
-	lines := strings.Split(section, "\n")
-	if len(lines) == 0 {
-		return clipRunes(section, budget)
-	}
-	header := lines[0]
-	if !strings.HasPrefix(header, "## ") {
-		// 结构不认识：退回整体截断，至少不破坏文件。
-		return clipRunes(section, budget)
-	}
-	body := lines[1:]
-	// 从尾部（最新）往前收，直到放得下。
-	kept := make([]string, 0, len(body))
-	used := utf8.RuneCountInString(header) + 1
-	for i := len(body) - 1; i >= 0; i-- {
-		l := body[i]
-		n := utf8.RuneCountInString(l) + 1
-		if strings.TrimSpace(l) == "" {
-			continue
+// 不能切最后一个箭头：改后的内容里本身可能带箭头（「A → B」这种流程描述），
+// 从后面切会把旧片段切进新内容里。
+func splitEntryArrow(s string) (string, string) {
+	for _, sep := range []string{"→", "->", "⇒", "=>"} {
+		if i := strings.Index(s, sep); i >= 0 {
+			return strings.TrimSpace(s[:i]), strings.TrimSpace(s[i+len(sep):])
 		}
-		if used+n > budget && len(kept) > 0 {
-			break
+	}
+	return "", ""
+}
+
+// isReplaceWord 这条是在「改掉旧的」。
+func isReplaceWord(tag string) bool {
+	t := strings.ToLower(strings.TrimSpace(tag))
+	for _, w := range []string{"取代", "更新", "替换", "修正", "replace", "update", "supersede"} {
+		if strings.Contains(t, w) {
+			return true
 		}
-		kept = append([]string{l}, kept...)
-		used += n
 	}
-	out := header
-	if len(kept) > 0 {
-		out += "\n" + strings.Join(kept, "\n")
+	return false
+}
+
+// isDropWord 这条是在「作废旧的」。
+func isDropWord(tag string) bool {
+	t := strings.ToLower(strings.TrimSpace(tag))
+	for _, w := range []string{"作废", "删除", "废弃", "移除", "drop", "remove", "obsolete"} {
+		if strings.Contains(t, w) {
+			return true
+		}
 	}
-	return out
+	return false
+}
+
+// memoryCategoryFromWord 只在词面明确对应某个分区时才返回（与 normalizeMemoryCategory
+// 的区别：后者对认不出来的词会兜底到「项目事实」，这里必须能说「我不认识」）。
+func memoryCategoryFromWord(word string) (string, bool) {
+	c := strings.ToLower(strings.TrimSpace(word))
+	switch {
+	case strings.Contains(c, "规则"), strings.Contains(c, "rule"), strings.Contains(c, "约束"):
+		return sectionRules, true
+	case strings.Contains(c, "坑"), strings.Contains(c, "pitfall"), strings.Contains(c, "故障"), strings.Contains(c, "bug"):
+		return sectionPits, true
+	case strings.Contains(c, "决策"), strings.Contains(c, "decision"), strings.Contains(c, "取舍"):
+		return sectionDecisions, true
+	case strings.Contains(c, "事实"), strings.Contains(c, "fact"), strings.Contains(c, "技术栈"):
+		return sectionFacts, true
+	}
+	return "", false
+}
+
+// isNoneText 模型表示「没有」的几种写法。
+func isNoneText(s string) bool {
+	t := strings.ToLower(strings.TrimSpace(s))
+	t = strings.Trim(t, "。.!！:：")
+	switch t {
+	case "none", "n/a", "na", "无", "没有", "无内容", "（无）", "(无)", "-", "空":
+		return true
+	}
+	return false
 }

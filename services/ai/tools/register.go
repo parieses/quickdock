@@ -58,6 +58,11 @@ type Deps struct {
 	// 而不是空目录里再建一个 .quickDock（那会让每条对话的记忆都从零开始）。
 	// 未注入时退回 <cwd>/.quickDock，与旧行为一致。
 	MemoryRoot func(cwd string) string
+	// MemoryRefresh 让 MEMORY.md 的「分册索引」立刻跟上（工具刚写了分册时）。
+	//
+	// 索引由扫描 memory/_distill/ 得出，那条逻辑在 services/ai；工具不去复刻一份
+	// （两份实现迟早对不上），只回调宿主刷新。
+	MemoryRefresh func(cwd string)
 }
 
 // db 取数据库：手给的那份优先，否则问宿主（见 Deps.DB 的说明）。
