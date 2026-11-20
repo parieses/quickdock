@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -392,6 +393,13 @@ func (f *Forward) handle(ctx context.Context, client *Client, inbound net.Conn) 
 		addr, err = socks5Handshake(inbound)
 		if err == nil {
 			outbound, err = client.SSH().DialContext(ctx, "tcp", addr)
+			// 成功响应必须等拨号落地再发：原来握手里就写 rep=0，客户端据此开始
+			// 发数据，随后拨号失败只是被关连接，看不到任何 SOCKS 错误码。
+			if err == nil {
+				socksReply(inbound, 0)
+			} else {
+				socksReply(inbound, socksReplyForError(err))
+			}
 		}
 	case ForwardKindLocal:
 		addr := net.JoinHostPort(f.rule.TargetHost, strconv.Itoa(f.rule.TargetPort))
@@ -442,7 +450,8 @@ func bridge(a, b net.Conn, in, out *atomic.Int64) {
 // ASSOCIATE —— 浏览器与绝大多数客户端只用 CONNECT，多写的那两种没有实际用户，
 // 却要各自维护一套生命周期。
 //
-// 返回值是「让 SSH 服务器去拨」的 host:port。回复在握手里直接写回。
+// 返回值是「让 SSH 服务器去拨」的 host:port。协议级错误（版本/命令/地址类型）
+// 在握手里直接回失败码；成功的 rep=0 由调用方在拨号落地后写，见 handle。
 func socks5Handshake(c net.Conn) (string, error) {
 	_ = c.SetDeadline(time.Now().Add(10 * time.Second))
 	defer func() { _ = c.SetDeadline(time.Time{}) }()
@@ -520,8 +529,25 @@ func socks5Handshake(c net.Conn) (string, error) {
 		socksReply(c, 5) // connection refused
 		return "", fmt.Errorf("%w: 空目标", ErrForwardSocks)
 	}
-	socksReply(c, 0)
 	return net.JoinHostPort(host, strconv.Itoa(int(port))), nil
+}
+
+// socksReplyForError 把拨号失败映射成 RFC 1928 的 REP 码。
+// 客户端拿到明确错误码才能区分「目标拒绝」「主机不可达」与「整体失败」，
+// 而不是只见连接被关、把问题算到 SOCKS 代理头上。
+func socksReplyForError(err error) byte {
+	switch {
+	case err == nil:
+		return 0 // succeeded
+	case errors.Is(err, context.DeadlineExceeded):
+		return 6 // TTL expired
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return 5 // connection refused
+	case errors.Is(err, syscall.EHOSTUNREACH), errors.Is(err, syscall.ENETUNREACH):
+		return 4 // host unreachable
+	default:
+		return 1 // general SOCKS server failure
+	}
 }
 
 func socksReply(c net.Conn, rep byte) {

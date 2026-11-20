@@ -199,11 +199,19 @@ func (m *forwardManager) startAuto(svc *SshService) {
 		m.mu.Unlock()
 		return
 	}
+	// 检查与置位必须在同一临界区：原来先解锁、循环建完实例才置位，并发拉两次
+	// 列表就会各自建一套 Forward 去抢同一个监听端口。先置位让后来者直接返回。
+	m.autoStarted = true
 	m.mu.Unlock()
 
 	rules, err := m.load()
 	if err != nil {
-		return // 下次拉列表再试，不把「启动失败」固化下来
+		// 读规则失败要回滚置位，保留「下次拉列表再试」的语义（DB 刚注入时可能
+		// 还没就绪）。同一时刻仍只有一个调用在建实例，不会有两个并发重试。
+		m.mu.Lock()
+		m.autoStarted = false
+		m.mu.Unlock()
+		return
 	}
 	for _, r := range rules {
 		if !r.AutoStart || sshcore.ValidateForwardRule(r) != nil {

@@ -29,7 +29,17 @@ type connPool struct {
 	mu      sync.Mutex
 	entries map[string]*connEntry
 	// dialing 按 hostID 串行化同主机的建连过程，见上文规则 1。
-	dialing map[string]*sync.Mutex
+	// 带 waiters 计数：最后一个等待者离开时把自己从 map 里摘掉，避免每个
+	// 曾经连过的 hostID 永久留一把锁（主机删了也不回收）。
+	dialing map[string]*dialLock
+}
+
+// dialLock 一把按 hostID 共享的建连锁 + 当前持有/等待它的调用数。
+// waiters 由 connPool.mu 保护，只在 0 时才能安全从 map 移除：只要还有人
+// 持有或等待，就不能换锁，否则两个调用会各拿一把锁并发拨同一台主机。
+type dialLock struct {
+	mu      sync.Mutex
+	waiters int
 }
 
 // connEntry 一条被复用的连接及其引用计数。
@@ -48,7 +58,7 @@ type connEntry struct {
 func newConnPool() *connPool {
 	return &connPool{
 		entries: make(map[string]*connEntry),
-		dialing: make(map[string]*sync.Mutex),
+		dialing: make(map[string]*dialLock),
 	}
 }
 
@@ -169,17 +179,30 @@ func (p *connPool) evict(hostID string, e *connEntry) {
 	p.mu.Unlock()
 }
 
-// lockDialing 拿到该主机的建连锁（可重入保护：同一 hostID 串行，不同并行）。
+// lockDialing 拿到该主机的建连锁（同一 hostID 串行，不同主机并行）。
+// 返回的 unlock 必须调用恰好一次；它同时负责引用计数归零后的锁回收。
 func (p *connPool) lockDialing(hostID string) func() {
 	p.mu.Lock()
-	mu, ok := p.dialing[hostID]
+	dl, ok := p.dialing[hostID]
 	if !ok {
-		mu = &sync.Mutex{}
-		p.dialing[hostID] = mu
+		dl = &dialLock{}
+		p.dialing[hostID] = dl
 	}
+	dl.waiters++
 	p.mu.Unlock()
-	mu.Lock()
-	return mu.Unlock
+
+	dl.mu.Lock()
+	return func() {
+		dl.mu.Unlock()
+		p.mu.Lock()
+		dl.waiters--
+		// 只有最后一个持有者能摘锁，且只摘自己那把：期间若有新调用进来，
+		// 它拿到的仍是这把、waiters 也不会是 0，绝不会把别人的锁删掉。
+		if dl.waiters == 0 && p.dialing[hostID] == dl {
+			delete(p.dialing, hostID)
+		}
+		p.mu.Unlock()
+	}
 }
 
 // CloseAll 关闭全部连接（应用退出）。
