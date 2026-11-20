@@ -473,6 +473,7 @@ var baseTables = []string{
 		reasoning_content TEXT NOT NULL DEFAULT '',
 		reasoning_rounds TEXT NOT NULL DEFAULT '',
 		images TEXT NOT NULL DEFAULT '',
+		attached_files TEXT NOT NULL DEFAULT '',
 		skills TEXT NOT NULL DEFAULT '',
 		action TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL
@@ -1137,6 +1138,8 @@ func (d *Database) migrate() error {
 		{"ai_messages", "action", "TEXT DEFAULT ''"},
 		// ai_messages: images（图片引用 JSON 数组，仅 user 消息；字节落盘不落库）
 		{"ai_messages", "images", "TEXT DEFAULT ''"},
+		// ai_messages: 用户插入的文件（JSON 数组，只存 name/path，字节不落库）
+		{"ai_messages", "attached_files", "TEXT DEFAULT ''"},
 		// ai_conversations: token 用量统计
 		{"ai_conversations", "prompt_tokens", "INTEGER DEFAULT 0"},
 		{"ai_conversations", "completion_tokens", "INTEGER DEFAULT 0"},

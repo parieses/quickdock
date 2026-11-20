@@ -10,7 +10,8 @@ import {
   LayoutList, Link as LinkIcon, ListChecks, Network, PenLine, Play, Plus, Search, Square,
   Terminal, Wrench,
 } from '@lucide/vue'
-import type { AIArtifact, AIMessage, AIRuleFile, AIToolCall } from '../types/ai'
+import type { AIArtifact, AIMessage, AIRuleFile, AISource, AIToolCall } from '../types/ai'
+import { compactPastedBlocks } from './aiPaste'
 
 // toolList 把消息里的 tool_calls 解析成数组。
 //
@@ -129,6 +130,78 @@ export function artifactsOf(m: AIMessage): AIArtifact[] {
   return artifactsFromCalls(toolList(m))
 }
 
+// —— 来源徽标：从 web 类工具的结果里提取 URL ——
+//
+// 数据就在 tool_calls 里（同 artifacts），不另开表、不发事件。两个坑：
+//  1. 后端把工具结果截到 2000 字，截断后通常不是合法 JSON，不能 JSON.parse；
+//     用宽松正则扫（同 jobIdOf 的写法）。
+//  2. 只从「网络类」调用取，别把 file_read 的 path 当 URL；外部 MCP 搜索工具
+//     以 mcp_ 开头，结果被包成 {"text":"...\"url\":..."}，正则同样能扫到。
+
+const WEB_TOOLS = new Set(['web_fetch', 'web_links', 'web_head'])
+function isWebTool(name: string): boolean {
+  return WEB_TOOLS.has(name) || name.startsWith('mcp_')
+}
+
+// JSON 字符串值里的转义还原（URL 里的 \/ 和 \u0026 等）。
+function unescapeJSON(s: string): string {
+  return s.replace(/\\\//g, '/').replace(/\\"/g, '"').replace(/\\n/g, ' ')
+}
+
+// 扫一个字符串里所有 "url"/"finalUrl"/"link"/"href" 键的 http(s) 值。
+function scanURLs(s: string): string[] {
+  const out: string[] = []
+  const re = /"(?:finalUrl|url|link|href)"\s*:\s*"(https?:\/\/[^"\\]+)"/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(s)) !== null) out.push(unescapeJSON(m[1]))
+  return out
+}
+
+export function sourcesFromCalls(list: AIToolCall[]): AISource[] {
+  const map = new Map<string, AISource>()
+  for (const tc of list) {
+    if (tc.dedup || tc.denied || tc.error || !isWebTool(tc.name) || !tc.result) continue
+    const r = tc.result
+    // web_links 的 links 数组里每条是 {"text":链接文字,"url":...}（字母序 text 在前）。
+    // 先把这种「标题 + URL」配对抓出来，标题就是链接文字。
+    const pairRe = /"text"\s*:\s*"([^"\\]{0,120})"\s*,\s*"url"\s*:\s*"(https?:\/\/[^"\\]+)"/g
+    let pm: RegExpExecArray | null
+    let paired = false
+    while ((pm = pairRe.exec(r)) !== null) {
+      paired = true
+      const url = unescapeJSON(pm[2])
+      if (!map.has(url)) map.set(url, { url, title: unescapeJSON(pm[1]) || undefined })
+    }
+    if (paired) continue
+
+    // 单 URL（web_fetch / web_head / 外部 MCP 搜索）：finalUrl 与 url 可能重复，
+    // 靠 map 去重。标题只取 title 字段——text 是正文，抓它会把文章开头当标题。
+    const urls = scanURLs(r)
+    if (!urls.length) continue
+    const titleM = /"title"\s*:\s*"([^"\\]{1,120})"/.exec(r)
+    const title = titleM ? unescapeJSON(titleM[1]) : undefined
+    for (const url of urls) {
+      if (!map.has(url)) map.set(url, { url, title })
+    }
+  }
+  return [...map.values()]
+}
+
+// sourcesOf 历史消息的来源。v-memo 依赖里已有 m.tool_calls，派生量不用再进依赖数组。
+export function sourcesOf(m: AIMessage): AISource[] {
+  if (m.role !== 'assistant') return []
+  return sourcesFromCalls(toolList(m))
+}
+
+// hostOf 来源没有标题时的兜底显示：取域名，比甩一长串 URL 好认。
+export function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return url.slice(0, 40)
+  }
+}
+
 const TOOL_ICON: Record<string, Component> = {
   file_edit: PenLine, file_write: FilePlus, file_read: FileText, file_search: FileSearch, file_find: FileSearch, file_grep: FileSearch,
   dir_list: FolderTree, git_status: GitBranch, git_diff: GitBranch,
@@ -227,7 +300,9 @@ export function spawnArgs(raw?: string): SpawnArgs | null {
 
 /** 摘要行用的任务短句：取第一个非空行、压掉多余空白，超过 48 字截断。 */
 export function spawnTaskBrief(task: string): string {
-  const line = (task || '').split(/\r?\n/).map((l) => l.trim()).find(Boolean) || ''
+  // 用户粘的长文在 task 里是 <pasted_text> 块；先压掉再取首行，
+  // 否则派活摘要变成「lead = // Package kb ...」一整行代码片段。
+  const line = compactPastedBlocks(task || '').split(/\r?\n/).map((l) => l.trim()).find(Boolean) || ''
   const flat = line.replace(/\s+/g, ' ')
   return flat.length > 48 ? flat.slice(0, 48) + '…' : flat
 }
@@ -283,13 +358,15 @@ export function toolTarget(tc: AIToolCall): string {
       const brief = spawnTaskBrief(s.task)
       return brief ? `${s.role} · ${brief}` : s.role
     }
-    return raw.length > 80 ? raw.slice(0, 80) + '…' : raw
+    const brief = compactPastedBlocks(raw)
+    return brief.length > 80 ? brief.slice(0, 80) + '…' : brief
   }
   let obj: Record<string, any> | null = null
   try { obj = JSON.parse(raw) } catch { obj = null }
   if (!obj) {
     // 参数解析失败时至少给原文的前一段：模型写坏了 JSON 也要能看出它想动谁。
-    return raw.length > 80 ? raw.slice(0, 80) + '…' : raw
+    const brief = compactPastedBlocks(raw)
+    return brief.length > 80 ? brief.slice(0, 80) + '…' : brief
   }
   // file_find：用户关心的是「找什么」（name），path 只是搜索范围。
   // 不特判的话会按 TOOL_TARGET_KEYS 的顺序命中 path，卡片上只剩一个目录名。

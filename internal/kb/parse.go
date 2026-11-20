@@ -59,13 +59,34 @@ var (
 // 而检索质量并不会因为多这几万块变好，只会让噪声变多。
 const MaxTextRunes = 2_000_000
 
+// plainTextExts 走 parsePlain 的扩展名（文档 + 代码源文件 + 配置）。
+//
+// 代码文件没有独立解析器，语义上就是带换行的纯文本，唯一要 care 的是
+// 编码探测（GBK/UTF-8），parsePlain 已处理。这份清单是唯一信源：
+// SupportedExts 与 ParseFile 的分派都由它派生，改这里一处即可。
+var plainTextExts = map[string]bool{
+	".txt": true, ".text": true, ".log": true, ".csv": true, ".json": true, ".yaml": true, ".yml": true,
+	".toml": true, ".ini": true, ".conf": true, ".xml": true, ".html": true, ".htm": true,
+	".css": true, ".scss": true, ".less": true,
+	".go": true, ".php": true, ".js": true, ".mjs": true, ".cjs": true, ".ts": true, ".tsx": true, ".jsx": true,
+	".py": true, ".java": true, ".kt": true, ".kts": true, ".cs": true, ".c": true, ".h": true,
+	".cpp": true, ".hpp": true, ".cc": true, ".rs": true, ".rb": true, ".swift": true, ".dart": true,
+	".lua": true, ".pl": true, ".sh": true, ".bash": true, ".ps1": true, ".bat": true, ".cmd": true,
+	".sql": true, ".vue": true, ".svelte": true, ".scala": true, ".groovy": true, ".r": true,
+}
+
 // SupportedExts 支持导入的扩展名（含点，小写）。
 var SupportedExts = map[string]bool{
 	".md": true, ".markdown": true,
-	".txt": true, ".text": true, ".log": true, ".csv": true, ".json": true, ".yaml": true, ".yml": true,
 	".docx": true,
 	".xlsx": true,
 	".pdf":  true,
+}
+
+func init() {
+	for ext := range plainTextExts {
+		SupportedExts[ext] = true
+	}
 }
 
 // IsSupported 判断扩展名是否支持。
@@ -85,18 +106,18 @@ func ParseFile(path string) (*Document, error) {
 
 	ext := strings.ToLower(filepath.Ext(path))
 	var doc *Document
-	switch ext {
-	case ".md", ".markdown":
+	switch {
+	case ext == ".md" || ext == ".markdown":
 		doc, err = parseMarkdown(path)
-	case ".txt", ".text", ".log", ".csv", ".json", ".yaml", ".yml":
+	case plainTextExts[ext]:
 		doc, err = parsePlain(path)
-	case ".docx":
+	case ext == ".docx":
 		doc, err = parseDocx(path)
-	case ".xlsx":
+	case ext == ".xlsx":
 		doc, err = parseXlsx(path)
-	case ".pdf":
+	case ext == ".pdf":
 		doc, err = parsePDF(path)
-	case ".doc", ".xls", ".ppt", ".pptx", ".wps", ".et":
+	case ext == ".doc" || ext == ".xls" || ext == ".ppt" || ext == ".pptx" || ext == ".wps" || ext == ".et":
 		// 老二进制格式（OLE2）与演示文稿，纯 Go 没有可靠的抽取路径。
 		return nil, fmt.Errorf("%w: %s 请另存为 %s", ErrUnsupported, ext, modernExt(ext))
 	default:

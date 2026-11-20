@@ -520,6 +520,31 @@
 .ai-side-home .ai-artifact:hover { background: var(--color-bg-tertiary); }
 .ai-side-home .ai-artifact-op { margin-left: auto; padding-left: var(--space-5); }
 
+/* 联网来源：结构照抄产物条（默认折叠的一行汇总 + 展开后的 chip 列表）。
+   与产物条并列挂在回答下方，文案用火焰图标 + 「N 个来源」。 */
+.ai-sources { margin-top: var(--space-2); width: 100%; max-width: 100%; }
+.ai-sources-sum {
+  display: flex; align-items: center; gap: var(--space-2); width: fit-content;
+  padding: 3px 0; font-size: var(--text-sm); color: var(--color-text-muted);
+  cursor: pointer; user-select: none; list-style: none;
+}
+.ai-sources-sum::-webkit-details-marker { display: none; }
+.ai-sources-flame { font-size: var(--text-sm); line-height: 1; }
+.ai-sources-chev { transition: transform 0.15s; }
+.ai-sources[open] > .ai-sources-sum .ai-sources-chev { transform: rotate(180deg); }
+.ai-sources-list { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding: var(--space-2) 0; }
+.ai-source {
+  display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 280px;
+  padding: 3px var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary); color: var(--color-text-primary);
+  font-size: var(--text-xs); text-decoration: none;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+.ai-source:hover { background: var(--color-bg-hover); border-color: var(--color-accent); color: var(--color-accent); }
+.ai-source > svg:first-child { flex: none; color: var(--color-text-muted); }
+.ai-source-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-source-ext { flex: none; opacity: 0.6; }
+
 /* 输入相关控件：落地页 hero（AiHero）与输入区（AiComposer）共用同一套
    缩略图 / 链接输入 / 图标按钮；.ai-go-settings 还被消息区的「没配 key」空态用。
    放非 scoped 块是因为两个子组件各有一份 scoped 作用域，写在哪一边另一半都命不中。 */
@@ -551,6 +576,10 @@
 .ai-rich-chip:hover .ai-rich-chip-x { opacity: 1; }
 
 .ai-rich-chip-x:hover { color: var(--color-danger); }
+
+/* 粘贴折叠 chip：用告警色区别于技能胶囊（技能=指令，粘贴=外部数据、需留意）。 */
+.ai-rich-paste-chip { background: var(--color-warning-bg); border-color: var(--color-warning-border); }
+.ai-rich-paste-chip .ai-rich-chip-icon { color: var(--color-warning); }
 
 .ai-go-settings {
   padding: 7px var(--space-6); border: none; border-radius: var(--radius-md);

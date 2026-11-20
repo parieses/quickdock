@@ -39,6 +39,16 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
+// —— 大段文字粘贴折叠（对齐 Claude Code 的 [Pasted text #N]）——
+// 超过阈值就 preventDefault，把全文收进一枚原子 chip，输入框只显示短标签；
+// serialize 时再展开成带标注的块，随 modelValue 一起发给 AI（发送路径零改动）。
+// 目的不是省 token（全文照发），是别让几百行日志把输入框撑到没法用。
+const PASTE_MIN_CHARS = 800
+// Claude Code 终端是 3 行就折（终端视口小）；这里是图形输入框有滚动条，
+// 阈值放宽到 12 行，免得随手粘个短配置也被折成 chip。
+const PASTE_MIN_LINES = 12
+let pasteSeq = 0
+
 const el = ref<HTMLDivElement | null>(null)
 const isEmpty = ref(true)
 // 最近一次由本组件抛出去的文本：用来区分「自己输入」与「外部赋值」
@@ -63,6 +73,15 @@ function serialize(): { text: string; skills: string[] } {
       // 胶囊不参与正文：发送时只把名字带过去（正文由模型自己 file_read）
       if (child.dataset.skill) {
         skills.push(child.dataset.skill)
+        continue
+      }
+      // 粘贴折叠 chip：展开成带标注的块，全文随正文一起发出。
+      // 标注是 prompt-injection 防线——告诉模型这段是用户从别处粘贴的数据，
+      // 不是他手写的指令，里面的「忽略以上要求」之类不算授权。
+      if (child.dataset.paste) {
+        if (text && !text.endsWith('\n')) text += '\n'
+        text += `<pasted_text lines="${child.dataset.pasteLines || ''}">\n${child.dataset.pasteFull || ''}\n</pasted_text>`
+        if (!text.endsWith('\n')) text += '\n'
         continue
       }
       if (child.tagName === 'BR') {
@@ -119,6 +138,12 @@ function snapshotChips(): { name: string; offset: number }[] {
       if (!(child instanceof HTMLElement)) continue
       if (child.dataset.skill) {
         out.push({ name: child.dataset.skill, offset: text.length })
+        continue
+      }
+      // 粘贴 chip 不保留到重建后（发送即清空，跟 skill 不同）；偏移按它展开后的
+      // 全文长度算，避免它后面的 skill 胶囊位置错乱。
+      if (child.dataset.paste) {
+        text += `<pasted_text lines="${child.dataset.pasteLines || ''}">\n${child.dataset.pasteFull || ''}\n</pasted_text>\n`
         continue
       }
       if (child.tagName === 'BR') {
@@ -266,6 +291,91 @@ function buildChip(name: string): HTMLElement {
 
   chip.append(icon, label, del)
   return chip
+}
+
+/**
+ * 造一枚「已粘贴」chip：全文存在 data-pasteFull（serialize 时展开），
+ * 界面只显示「已粘贴 · N 行」。原子节点、带 × 删除，复用 skill 胶囊的样式语言。
+ */
+function buildPasteChip(full: string): HTMLElement {
+  const id = ++pasteSeq
+  const lines = full.split('\n').length
+  const chip = document.createElement('span')
+  chip.className = 'ai-rich-chip ai-rich-paste-chip'
+  chip.contentEditable = 'false'
+  chip.dataset.paste = String(id)
+  chip.dataset.pasteFull = full
+  chip.dataset.pasteLines = String(lines)
+  chip.title = t('aiPasteChipTip')
+
+  const icon = document.createElement('span')
+  icon.className = 'ai-rich-chip-icon'
+  icon.textContent = '≡'
+
+  const label = document.createElement('span')
+  label.className = 'ai-rich-chip-name'
+  label.textContent = t('aiPasteChip', { n: lines })
+
+  const del = document.createElement('button')
+  del.type = 'button'
+  del.className = 'ai-rich-chip-x'
+  del.textContent = '×'
+  del.title = t('delete')
+  del.addEventListener('mousedown', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    deleteChip(chip)
+  })
+
+  chip.append(icon, label, del)
+  return chip
+}
+
+/**
+ * 粘贴大段纯文字时折叠成 chip。返回 true 表示已接管（调用方应 preventDefault，
+ * 且不再把这次粘贴当普通文字处理）。图片粘贴不在这里——交回给父组件的 paste emit。
+ */
+function foldLargePaste(e: ClipboardEvent): boolean {
+  if (props.disabled || e.defaultPrevented) return false
+  // 剪贴板里有文件（从资源管理器复制的文档/图片）时不要按「大段文字」折叠：
+  // 文件粘贴的 text/plain 常是文件名或多行路径，会被误判成超长文本折成 chip，
+  // 还 preventDefault 吞掉 paste，父组件的 addDroppedFiles 就永远收不到（「粘贴没反应」）。
+  // 文件一律交给父组件处理：文档走插入文件通道，图片走图片附件通道。
+  if (Array.from(e.clipboardData?.items ?? []).some((it) => it.kind === 'file')) return false
+  const text = e.clipboardData?.getData('text/plain') ?? ''
+  if (!text) return false
+  const lines = text.split('\n').length
+  if (text.length < PASTE_MIN_CHARS && lines < PASTE_MIN_LINES) return false
+
+  // 同样内容再粘贴一次 = 展开（对齐 Claude Code 的手势）：把已有 chip 换成原文，
+  // 用户能看清、改完再发；不这么做的话，粘贴过的日志永远只是一枚看不到的 chip。
+  const root = el.value
+  if (root) {
+    for (const chip of Array.from(root.querySelectorAll<HTMLElement>('[data-paste]'))) {
+      if (chip.dataset.pasteFull === text) {
+        const full = document.createTextNode(text)
+        chip.replaceWith(full)
+        const space = full.nextSibling
+        placeCaretAfter(space && space.nodeType === Node.TEXT_NODE && SPACE_RE.test(space.textContent || '') ? space : full)
+        emitAll()
+        return true
+      }
+    }
+  }
+
+  el.value?.focus()
+  insertChipAtCaret(buildPasteChip(text))
+  emitAll()
+  return true
+}
+
+function onPasteInternal(e: ClipboardEvent) {
+  if (foldLargePaste(e)) {
+    e.preventDefault()
+    return
+  }
+  // 图片等其它粘贴照旧抛给父组件（useAiAttachments 会拦图片附件）
+  emit('paste', e)
 }
 
 function placeCaretAfter(node: Node) {
@@ -416,7 +526,9 @@ defineExpose({
 // 输入法组合（isComposing / keyCode 229）一律放行给原生，绝不干预，否则拼音回车会被吞。
 
 function isChip(n: Node | null | undefined): n is HTMLElement {
-  return !!n && n.nodeType === Node.ELEMENT_NODE && !!(n as HTMLElement).dataset?.skill
+  if (!n || n.nodeType !== Node.ELEMENT_NODE) return false
+  const ds = (n as HTMLElement).dataset
+  return !!ds && (!!ds.skill || !!ds.paste)
 }
 
 const SPACE_RE = /^[ \u00a0]$/
@@ -586,7 +698,7 @@ function onKeyDown(e: KeyboardEvent) {
     aria-multiline="true"
     @input="onInput"
     @keydown="onKeyDown"
-    @paste="emit('paste', $event)"
+    @paste="onPasteInternal"
   ></div>
 </template>
 

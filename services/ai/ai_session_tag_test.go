@@ -11,6 +11,8 @@ package ai
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -61,6 +63,52 @@ func TestSessionIDStaysClean(t *testing.T) {
 	}
 	if strings.Contains(si.ID, si.Name) {
 		t.Error("id 里不该出现名字")
+	}
+}
+
+// 网关身份 header：agent / 会话 / 工作区三类都设上；会话 id 仍保持纯净，
+// 名字不掺进任何 id header（点开详情看到的就是这个值）。
+func TestApplyGatewayIdentity(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader("{}"))
+	applyGatewayIdentity(req, sessionInfo{
+		Name: "缓存命中原因为何",
+		ID:   "2923d858-5f52-4e31-a06c-27e14046b081",
+		Cwd:  `D:\project\quickdock-v3`,
+	})
+	want := map[string]string{
+		"User-Agent":         gatewayUserAgent,
+		"X-Agent-Name":       gatewayAgentName,
+		"X-Agent-Session-Id": "2923d858-5f52-4e31-a06c-27e14046b081",
+		"X-Magpie-Session":   "2923d858-5f52-4e31-a06c-27e14046b081",
+		"X-Session-Id":       "2923d858-5f52-4e31-a06c-27e14046b081",
+		"X-Workspace-ID":     `D:\project\quickdock-v3`,
+	}
+	for k, v := range want {
+		if got := req.Header.Get(k); got != v {
+			t.Errorf("header %s = %q, want %q", k, got, v)
+		}
+	}
+	// 可读名不能出现在任何 header 值里：网关列表标题由它自己从记录推。
+	for k, v := range req.Header {
+		if len(v) > 0 && strings.Contains(v[0], "缓存命中") {
+			t.Errorf("header %s 掺进了可读名: %q", k, v[0])
+		}
+	}
+}
+
+// 没绑目录时不带 X-Workspace-ID；没有会话 id 时也不带任何 id header，
+// 但 agent 身份头照发——测试连接这类无会话请求也要能识别来源。
+func TestApplyGatewayIdentityNoSession(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader("{}"))
+	applyGatewayIdentity(req, sessionInfo{})
+	if got := req.Header.Get("User-Agent"); got != gatewayUserAgent {
+		t.Errorf("User-Agent = %q, want %q", got, gatewayUserAgent)
+	}
+	if got := req.Header.Get("X-Workspace-ID"); got != "" {
+		t.Errorf("没绑目录不该带 X-Workspace-ID, got %q", got)
+	}
+	if got := req.Header.Get("X-Session-Id"); got != "" {
+		t.Errorf("没会话 id 不该带 X-Session-Id, got %q", got)
 	}
 }
 

@@ -139,6 +139,10 @@ type AIMessage struct {
 	// 每条调用旁边能显示「模型当时在想什么」。空串表示没有分轮信息（旧数据）。
 	ReasoningRounds  string `json:"reasoning_rounds"`
 	Images           string `json:"images"`
+	// AttachedFiles 用户主动插入的文件引用，JSON 数组：[{"name":"a.pdf","path":"D:/x/a.pdf"}]。
+	// 只存元信息不存字节（粘贴/拖入的来源原文只在本次请求里展开进上下文）。
+	// 与 Images 一样只出现在 user 消息上，用于刷新/重启后气泡里还能看到文件 chip。
+	AttachedFiles    string `json:"attached_files"`
 	Model            string `json:"model"`
 	PromptTokens     int    `json:"prompt_tokens"`
 	CompletionTokens int    `json:"completion_tokens"`
@@ -228,6 +232,7 @@ func mapToAIMessage(m map[string]interface{}) AIMessage {
 		ReasoningRounds:  str(m["reasoning_rounds"]),
 		Action:           str(m["action"]),
 		Images:           str(m["images"]),
+		AttachedFiles:    str(m["attached_files"]),
 		Model:            str(m["model"]),
 		PromptTokens:     integer(m["prompt_tokens"]),
 		CompletionTokens: integer(m["completion_tokens"]),
@@ -1477,14 +1482,22 @@ func (d *Database) AddAIMessageImages(convID, role, content, images string) (*AI
 // 单独一个入口而不是继续加参数：AddAIMessageImages 还有别的调用点，
 // 而「图片 + 技能」只出现在用户消息这一条路径上。
 func (d *Database) AddAIMessageUser(convID, content, images, skills string) (*AIMessage, error) {
+	return d.AddAIMessageUserAttached(convID, content, images, skills, "")
+}
+
+// AddAIMessageUserAttached 追加用户消息，并记下这条消息插入过的文件（name/path JSON）。
+// 与 AddAIMessageUser 分开：其余调用点（SSH 问答、重试补写等）没有文件，签名上
+// 不该多一个空字符串参数让人猜。
+func (d *Database) AddAIMessageUserAttached(convID, content, images, skills, attachedFiles string) (*AIMessage, error) {
 	m := &AIMessage{
-		ID:        newID(),
-		ConvID:    convID,
-		Role:      "user",
-		Content:   content,
-		Images:    images,
-		Skills:    skills,
-		CreatedAt: now(),
+		ID:            newID(),
+		ConvID:        convID,
+		Role:          "user",
+		Content:       content,
+		Images:        images,
+		AttachedFiles: attachedFiles,
+		Skills:        skills,
+		CreatedAt:     now(),
 	}
 	if err := d.BulkInsert("ai_messages", []map[string]interface{}{structToMap(m)}); err != nil {
 		return nil, err

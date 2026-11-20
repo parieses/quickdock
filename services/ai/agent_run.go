@@ -99,6 +99,9 @@ type AgentRunReq struct {
 	// Mentions 本次提问里用 @ 显式引用的文件 / 目录 / 历史对话（见 ai_mentions.go）。
 	// 只影响这一次请求的上下文，不落库：引用是「这次要看它」，不是长期状态。
 	Mentions []AIMention
+	// AttachedFiles 用户主动插入的本地文件（见 ai_attached_files.go）。
+	// 与 Mentions 一样只影响本次上下文、不落库。
+	AttachedFiles []AIAttachedFile
 	// Worktree 本次是否要求「在隔离工作区里干活」（见 ai_worktree.go）。
 	//
 	// 只在**还没建**工作区时起作用：一旦会话上记了 worktree_path，后续轮次无论
@@ -674,7 +677,7 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 	if !req.Fresh {
 		// 这一轮真正挂上的技能名，跟着用户消息落库，聊天里据此标出「用了哪个技能」。
 		// 取的就是提示词那份 conv.Skills（上面刚回填过），两边不会对不上。
-		if err := a.saveUserTurn(res.ConvID, message, imagesJSON, convSkillNamesJSON(conv.Skills)); err != nil {
+		if err := a.saveUserTurnAttached(res.ConvID, message, imagesJSON, convSkillNamesJSON(conv.Skills), attachedFilesHistoryJSON(req.AttachedFiles)); err != nil {
 			logger.W("[ai] 保存用户消息失败 conv=%s: %v", res.ConvID, err)
 			sink.Event("error", map[string]any{"message": err.Error()})
 			res.Err = err
@@ -713,6 +716,12 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 	var mentionBlock string
 	if !req.Fresh && len(req.Mentions) > 0 {
 		mentionBlock = a.buildMentionBlock(cwd, req.Mentions, sink)
+	}
+	// 插入文件与 @ 引用都是「这次的材料」，拼成一块贴到最后一条 user 消息。
+	if !req.Fresh && len(req.AttachedFiles) > 0 {
+		mentionBlock += buildAttachedFilesBlock(req.AttachedFiles, sink)
+	}
+	if mentionBlock != "" {
 		applyMentionBlock(messages, mentionBlock)
 	}
 
@@ -1172,6 +1181,7 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 	ctx = withSessionInfo(ctx, sessionInfo{
 		Name: a.sessionNameFor(res.ConvID, message),
 		ID:   res.ConvID,
+		Cwd:  cwd,
 	})
 
 	// WP15 尾巴：把「正在重试」送到界面上。

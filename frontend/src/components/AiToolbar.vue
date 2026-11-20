@@ -37,6 +37,8 @@ const props = defineProps<{
   traceLabel: string
   /** 轨迹入口状态：决定圆点颜色与是否脉冲 */
   traceState: 'empty' | 'running' | 'done'
+  /** 整段会话派出去的子 agent 总数，0 时不显示徽标 */
+  childTaskCount: number
   /** 有没有工作目录可以清理辅助文件（没有就不显示那个按钮） */
   canCleanScratch: boolean
   /** 清理按钮是否处在「再点一次确认」的状态 */
@@ -101,6 +103,7 @@ const startedClock = computed(() => {
       >
         <Users :size="12" />
         <span class="ai-trace-name">{{ t('aiSubtasksTitle') }}</span>
+        <span v-if="props.childTaskCount > 0" class="ai-child-count">{{ props.childTaskCount }}</span>
       </button>
     </div>
     <div class="ai-toolbar-right">
@@ -239,6 +242,16 @@ const startedClock = computed(() => {
 .ai-trace-name {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+/* 子任务数量徽标：胶囊小圆点，0 时不渲染（见模板）。
+   独立上色而非继承按钮色，没子任务时按钮仍是中性灰。 */
+.ai-child-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent-bg); color: var(--color-accent-text);
+  font-size: var(--text-2xs); font-variant-numeric: tabular-nums;
 }
 
 /* 运行中：图标用呼吸动画提示「还在跑」。

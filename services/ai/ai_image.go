@@ -385,12 +385,18 @@ func (a *AIService) AILoadImage(relPath string) *services.ApiResult {
 // 聊天里才能标出「这条用到了哪个技能」。技能本身只活在提示词里，不记这一笔，
 // 用户就只能靠「模型有没有恰好读过 SKILL.md」来猜它生效了没有。
 func (a *AIService) saveUserTurn(convID, content, imagesJSON, skillsJSON string) error {
+	return a.saveUserTurnAttached(convID, content, imagesJSON, skillsJSON, "")
+}
+
+// saveUserTurnAttached 与 saveUserTurn 相同，但把用户插入的文件元信息一并落库，
+// 让刷新/重启之后气泡里仍能列出「这条问话带了哪几份文件」。
+func (a *AIService) saveUserTurnAttached(convID, content, imagesJSON, skillsJSON, attachedJSON string) error {
 	// 只取最后一条而不是 ListAIMessages 之后取末位：那条路每轮发送都要把整个
 	// 会话的历史读一遍（含 reasoning 与工具结果），长会话里这一步会越来越慢，
 	// 而它要的只是「最后一行是不是我」。
 	last, err := a.App.DB.LastAIMessage(convID)
 	if err == nil && last != nil {
-		if last.Role == "user" && last.Content == content && last.Images == imagesJSON {
+		if last.Role == "user" && last.Content == content && last.Images == imagesJSON && last.AttachedFiles == attachedJSON {
 			// WP17 尾巴：只有「刚刚」的同内容才算重试。
 			//
 			// 原来的判据只有内容相同，于是用户在上一轮**失败且没产出任何回复**
@@ -402,7 +408,7 @@ func (a *AIService) saveUserTurn(convID, content, imagesJSON, skillsJSON string)
 			}
 		}
 	}
-	_, e := a.App.DB.AddAIMessageUser(convID, content, imagesJSON, skillsJSON)
+	_, e := a.App.DB.AddAIMessageUserAttached(convID, content, imagesJSON, skillsJSON, attachedJSON)
 	return e
 }
 

@@ -14,6 +14,8 @@ import { AlarmClock, ArrowUp, ChevronDown, Folder, FolderOpen, GitBranch, Image 
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { AIConnector, AIMentionItem, AIPrompt, AISkill, AISpace } from '../types/ai'
 import type { PendingImage } from '../types'
+import type { AttachedFile } from '../composables/useAiAttachedFiles'
+import AiAttachedFileChips from './AiAttachedFileChips.vue'
 import AiPlusPanel from './AiPlusPanel.vue'
 import AiSlashPanel from './AiSlashPanel.vue'
 import AiRichInput from './AiRichInput.vue'
@@ -28,6 +30,8 @@ const props = defineProps<{
   input: string
   /** @ 引用：已选 chip 与补全弹层（与聊天输入框共用同一份状态） */
   mentions: AIMentionItem[]
+  /** 插入的本地文件（后端按后缀解析成文本，与聊天输入框共用同一份状态） */
+  attachedFiles: AttachedFile[]
   mentionOpen: boolean
   mentionItems: AIMentionItem[]
   mentionIdx: number
@@ -89,6 +93,8 @@ const emit = defineEmits<{
   (e: 'drop', ev: DragEvent): void
   (e: 'confirm-url'): void
   (e: 'remove-attachment', i: number): void
+  (e: 'remove-attached-file', i: number): void
+  (e: 'pick-local-file'): void
   (e: 'pick-dir'): void
   (e: 'open-file-picker'): void
   (e: 'toggle-url'): void
@@ -231,6 +237,11 @@ function onModelSelect(e: Event) {
           @pick="emit('pick-mention', $event)"
           @remove="emit('remove-mention', $event)"
         />
+        <!-- 插入的本地文件：发送时由后端按后缀解析成文本展开 -->
+        <AiAttachedFileChips
+          :files="props.attachedFiles"
+          @remove="emit('remove-attached-file', $event)"
+        />
         <AiRichInput
           ref="heroInputEl"
           :model-value="props.input"
@@ -365,7 +376,7 @@ function onModelSelect(e: Event) {
             </button>
             <button
               class="ai-hero-send"
-              :disabled="!props.hasKey || (!props.canSend && !props.attachments.length)"
+              :disabled="!props.hasKey || (!props.canSend && !props.attachments.length && !props.attachedFiles.length)"
               :title="t('send')"
               @click="emit('send')"
             >
@@ -394,6 +405,7 @@ function onModelSelect(e: Event) {
           @pick-skill="emit('pick-skill', $event)"
           @pick-prompt="emit('pick-prompt', $event)"
           @pick-file="emit('pick-file', $event)"
+          @pick-local-file="emit('pick-local-file')"
           @toggle-connector="emit('toggle-connector', $event)"
           @install-skill="emit('install-skill')"
           @manage-connectors="emit('manage-connectors')"

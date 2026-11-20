@@ -13,19 +13,20 @@ import { computed, nextTick, ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAiCostPreference } from '../composables/useAiCostPreference'
 import {
-  ArrowDown, Bot, Check, ChevronDown, ChevronRight, Copy, FileText, Loader2, Play, Sparkles, StickyNote, Undo2, Users, Wrench,
+  ArrowDown, Bot, Check, ChevronDown, ChevronRight, Copy, ExternalLink, FileText, Globe, Loader2, Play, Sparkles, StickyNote, Undo2, Users, Wrench,
 } from '@lucide/vue'
 import AgentRunTree from './AgentRunTree.vue'
 import AiDiffView from './AiDiffView.vue'
+import AiPastedContent from './AiPastedContent.vue'
 import type { LiveBlock } from '../composables/useAiMarkdownBlocks'
 import type { AICompact, AIRun } from '../utils/aiRuns'
 import { pickActiveRun } from '../utils/aiRuns'
 import { fmtElapsed } from '../utils/aiRunTree'
 import type {
-  AIArtifact, AICheckpointView, AIJobRow, AIMessage, AIMsgImage, AIRuleFile, AIStreamStat, AIToolCall,
+  AIArtifact, AICheckpointView, AIJobRow, AIMessage, AIMsgImage, AIRuleFile, AISource, AIStreamStat, AIToolCall,
 } from '../types/ai'
 import {
-  artifactsFromCalls, artifactsOf, jobIdOf, rulesOf, rulesTitle, runIDOf, spawnArgs,
+  artifactsFromCalls, artifactsOf, hostOf, jobIdOf, rulesOf, rulesTitle, runIDOf, sourcesFromCalls, sourcesOf, spawnArgs,
   spawnPartial, spawnResultText, toolIcon, toolList, toolOutput, toolResultLang, toolTarget, toolVerb as aiToolVerb,
 } from '../utils/aiTools'
 
@@ -104,6 +105,7 @@ const runCompacts = computed<AICompact[]>(() => activeRun.value?.compacts ?? NO_
 // 流式期的产物：file_write 返回的当下就挂出来，等 done 再显示会让
 // 「文件已经写完了」和「看得见」之间隔一整轮回答。
 const streamArtifacts = computed<AIArtifact[]>(() => artifactsFromCalls(streamTools.value))
+const streamSources = computed<AISource[]>(() => sourcesFromCalls(streamTools.value))
 
 // 命令在跑的时候输出在卡片里往下长：不跟着滚，用户看到的永远是开头几行，
 // 而这恰恰是最没信息量的部分（pip 真正在动的进度在最后一行）。
@@ -259,6 +261,28 @@ function skillsOf(m: AIMessage): string[] {
   return list
 }
 
+// 用户消息插入过的文件：本地刚发的消息只有 attached_files JSON，
+// 历史消息由 AIPage 解析成 attachedList。两种都吃，坏 JSON 当空。
+const attachedCache = new Map<string, { sig: string; list: { name: string; path?: string }[] }>()
+function attachedOf(m: AIMessage): { name: string; path?: string }[] {
+  if (m.attachedList?.length) return m.attachedList
+  const raw = m.attached_files || ''
+  if (!raw) return []
+  const hit = attachedCache.get(m.id)
+  if (hit && hit.sig === raw) return hit.list
+  let list: { name: string; path?: string }[] = []
+  try {
+    const v = JSON.parse(raw)
+    if (Array.isArray(v)) {
+      list = v
+        .filter((x: any) => x && typeof x.name === 'string' && !!x.name)
+        .map((x: any) => ({ name: x.name, path: typeof x.path === 'string' ? x.path : '' }))
+    }
+  } catch { list = [] }
+  attachedCache.set(m.id, { sig: raw, list })
+  return list
+}
+
 // 分轮思考的解析缓存（与 toolsOf 同一个理由：模板里一条消息会取好几次）。
 interface ReasonRound {
   round: number
@@ -333,6 +357,16 @@ function artsOf(m: AIMessage): AIArtifact[] {
   if (hit && hit.sig === sig) return hit.list
   const list = artifactsOf(m)
   artCache.set(m.id, { sig, list })
+  return list
+}
+
+const sourceCache = new Map<string, { sig: string; list: AISource[] }>()
+function sourcesOfMsg(m: AIMessage): AISource[] {
+  const sig = `${m.id}:${m.role}:${(m.tool_calls || '').length}`
+  const hit = sourceCache.get(m.id)
+  if (hit && hit.sig === sig) return hit.list
+  const list = sourcesOf(m)
+  sourceCache.set(m.id, { sig, list })
   return list
 }
 
@@ -697,7 +731,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
           v-for="m in shownMessages"
           :key="m.id"
           :data-msg-id="m.id"
-          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), costLines.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, m.skills, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id, expandedInMessage(m), schedTimes, m.created_at]"
+          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), costLines.get(m.id), locale, (m.imgList?.length ?? 0), m.attached_files, m.attachedList?.length, m.tool_calls, m.skills, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id, expandedInMessage(m), schedTimes, m.created_at]"
           :class="['ai-msg', m.role]"
         >
           <div class="ai-msg-role">
@@ -713,6 +747,14 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
             <span v-for="n in skillsOf(m)" :key="n" class="ai-msg-skill">
               <Sparkles :size="10" />
               {{ n }}
+            </span>
+          </div>
+          <!-- 插入的文件：选中时在输入框上方有 chip，发出去后同样要在气泡里留痕，
+               否则刷新后只剩一句问题，看不出当时递给 AI 的是哪份文档。 -->
+          <div v-if="m.role === 'user' && attachedOf(m).length" class="ai-msg-attached">
+            <span v-for="(f, fi) in attachedOf(m)" :key="fi" class="ai-msg-attached-chip" :title="f.path || t('aiAttachPastedHint')">
+              <FileText :size="11" />
+              <span class="ai-msg-attached-name">{{ f.name }}</span>
             </span>
           </div>
           <!-- 图片缩略图：url 类直发链接，file 类用已加载的 dataUrl；历史 file 图由 loadMessages 懒加载填回 -->
@@ -823,7 +865,9 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
           <div v-if="m.role === 'assistant'" class="ai-msg-content ai-md">
             <div v-for="(b, bi) in renderMessageBlocks(m)" :key="bi" class="ai-md-block" v-html="b"></div>
           </div>
-          <div v-else class="ai-msg-content ai-plain">{{ m.content }}</div>
+          <!-- 用户消息：粘贴的大段文字在发送时按约定展开成 <pasted_text> 发给模型，
+               这里按同一标记折回 chip，点开看全文；正文原文不动（复制/重试照旧）。 -->
+          <div v-else class="ai-msg-content ai-plain"><AiPastedContent :content="m.content" /></div>
           <!-- 回答产物：靠右贴边的可折叠列表（同常见 AI IDE 的产物区样式）。
                数据就在 tool_calls 里，不用后端另发事件；点击预览（读磁盘现状）。 -->
           <details v-if="m.role === 'assistant' && artsOf(m).length" class="ai-artifacts" open>
@@ -837,6 +881,31 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
                 <span class="ai-artifact-name">{{ a.name }}</span>
                 <span class="ai-artifact-op">{{ t(a.op === 'edit' ? 'aiArtifactEdited' : 'aiArtifactWritten') }}</span>
               </button>
+            </div>
+          </details>
+          <!-- 联网来源：AI 调用 web_fetch / web_links / 外部搜索工具时结果里带 URL。
+               和产物一样从 tool_calls 就地解析，不另开表、不发事件。默认折叠成一行
+               「🔥 N 个来源」，点开看链接列表。 -->
+          <details v-if="m.role === 'assistant' && sourcesOfMsg(m).length" class="ai-sources">
+            <summary class="ai-sources-sum">
+              <span class="ai-sources-flame">🔥</span>
+              {{ t('aiSourcesCount', { n: sourcesOfMsg(m).length }) }}
+              <ChevronDown :size="12" class="ai-sources-chev" />
+            </summary>
+            <div class="ai-sources-list">
+              <a
+                v-for="s in sourcesOfMsg(m)"
+                :key="s.url"
+                class="ai-source"
+                :href="s.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                :title="s.url"
+              >
+                <Globe :size="13" />
+                <span class="ai-source-title">{{ s.title || hostOf(s.url) }}</span>
+                <ExternalLink :size="11" class="ai-source-ext" />
+              </a>
             </div>
           </details>
           <!-- 操作按钮同一行：.ai-msg 是纵向 flex，不包一层的话每个按钮都会各占一行 -->
@@ -1054,6 +1123,29 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
                 <span class="ai-artifact-name">{{ a.name }}</span>
                 <span class="ai-artifact-op">{{ t(a.op === 'edit' ? 'aiArtifactEdited' : 'aiArtifactWritten') }}</span>
               </button>
+            </div>
+          </details>
+          <!-- 流式期来源：web 工具一返回就出现，不等回答收尾 -->
+          <details v-if="streamSources.length" class="ai-sources" open>
+            <summary class="ai-sources-sum">
+              <span class="ai-sources-flame">🔥</span>
+              {{ t('aiSourcesCount', { n: streamSources.length }) }}
+              <ChevronDown :size="12" class="ai-sources-chev" />
+            </summary>
+            <div class="ai-sources-list">
+              <a
+                v-for="s in streamSources"
+                :key="s.url"
+                class="ai-source"
+                :href="s.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                :title="s.url"
+              >
+                <Globe :size="13" />
+                <span class="ai-source-title">{{ s.title || hostOf(s.url) }}</span>
+                <ExternalLink :size="11" class="ai-source-ext" />
+              </a>
             </div>
           </details>
         </div>
@@ -1587,6 +1679,18 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 .ai-msg-skills { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 2px 0 var(--space-2); }
 
 .ai-msg.user .ai-msg-skills { justify-content: flex-end; }
+
+/* 插入文件 chip 与输入框上方那排同款：消息区里只留名字，路径放 title。 */
+.ai-msg-attached { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 2px 0 var(--space-2); }
+.ai-msg.user .ai-msg-attached { justify-content: flex-end; }
+.ai-msg-attached-chip {
+  display: inline-flex; align-items: center; gap: 4px; max-width: 260px;
+  padding: 0 6px; height: 20px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary); color: var(--color-text-secondary);
+  font-size: var(--text-2xs);
+}
+.ai-msg-attached-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); }
 
 .ai-msg-skill {
   display: inline-flex;

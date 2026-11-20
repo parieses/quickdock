@@ -158,6 +158,9 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 		// Mentions 用 @ 显式引用的文件 / 目录 / 历史对话（见 ai_mentions.go）。
 		// 引用内容由后端展开进上下文，前端只送引用目标，不送文件内容。
 		Mentions []AIMention `json:"mentions"`
+		// AttachedFiles 用户主动插入的本地文件（见 ai_attached_files.go）。
+		// 前端只送路径，后端按后缀解析成文本展开进上下文，不回传原文。
+		AttachedFiles []AIAttachedFile `json:"attachedFiles"`
 		// Skills 这条消息要用的技能名，来自输入框里打的 /名字。前端每次都带
 		// （含空数组 =「这条不用技能」）；缺这个字段 = 前端没表态，后端沿用
 		// 会话上存的选择（老会话因此不会因为升级就丢掉技能）。
@@ -278,6 +281,7 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 		Cwd:            req.Cwd,
 		Images:         req.Images,
 		Mentions:       req.Mentions,
+		AttachedFiles:  req.AttachedFiles,
 		Skills:         req.Skills,
 		Permission:     req.Permission,
 		ProfileID:      req.ProfileID,

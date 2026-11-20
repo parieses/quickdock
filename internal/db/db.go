@@ -150,6 +150,7 @@ var validColumns = map[string]bool{
 	"reasoning_content": true,
 	"reasoning_rounds":  true,
 	"images":            true, // ai_messages：图片引用 JSON 数组（仅 user 消息）
+	"attached_files":    true, // ai_messages：插入文件引用 JSON 数组（仅 user 消息）
 	"cwd":               true, // ai_conversations / ai_spaces：绑定的工作目录
 	// ai_conversations：所属空间 id（空 = 普通任务）与创建时选定的模式。
 	// 白名单是全局的、不按表分，漏一个就是写入时「非法列名」。

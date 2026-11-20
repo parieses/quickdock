@@ -33,6 +33,20 @@ import {
   ListKBLibraries, CreateKBLibrary, RenameKBLibrary, DeleteKBLibrary, MoveKBSource,
 } from '../../bindings/quickdock/services/kb/kbservice'
 
+// 与 internal/kb.SupportedExts 对齐（后端是权威，这里只是选择器过滤）。
+const KB_PICK_FILTER = [
+  '*.md', '*.markdown',
+  '*.txt', '*.text', '*.log', '*.csv', '*.json', '*.yaml', '*.yml',
+  '*.toml', '*.ini', '*.conf', '*.xml', '*.html', '*.htm',
+  '*.css', '*.scss', '*.less',
+  '*.go', '*.php', '*.js', '*.mjs', '*.cjs', '*.ts', '*.tsx', '*.jsx',
+  '*.py', '*.java', '*.kt', '*.kts', '*.cs', '*.c', '*.h',
+  '*.cpp', '*.hpp', '*.cc', '*.rs', '*.rb', '*.swift', '*.dart',
+  '*.lua', '*.pl', '*.sh', '*.bash', '*.ps1', '*.bat', '*.cmd',
+  '*.sql', '*.vue', '*.svelte', '*.scala', '*.groovy', '*.r',
+  '*.docx', '*.xlsx', '*.pdf',
+].join(';')
+
 const emit = defineEmits<{ (e: 'open-settings', page?: string): void }>()
 
 const { t } = useI18n()
@@ -344,7 +358,7 @@ async function moveSelected(ev: Event) {
 
 async function addFiles() {
   try {
-    const picked = unwrap<string[]>(await SelectLocalFiles(t('kbPickFileTitle'), t('kbPickFileFilter'), '*.md;*.markdown;*.txt;*.csv;*.json;*.log;*.docx;*.xlsx;*.pdf'))
+    const picked = unwrap<string[]>(await SelectLocalFiles(t('kbPickFileTitle'), t('kbPickFileFilter'), KB_PICK_FILTER))
     if (!picked || !picked.length) return
     const res = unwrap<{ added: number; skipped: number; unsupported: string[] }>(await AddKBFiles(libId.value, picked))
     if (res) {

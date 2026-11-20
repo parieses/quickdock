@@ -27,7 +27,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AtSign, ChevronRight, FileText, FolderPlus, MessageSquare, Network, Search, Settings2 } from '@lucide/vue'
+import { AtSign, ChevronRight, FileText, FileUp, FolderPlus, MessageSquare, Network, Search, Settings2 } from '@lucide/vue'
 import type { AIConnector, AIMentionItem, AIPrompt, AISkill } from '../types/ai'
 
 // 四个列表都给默认值：模板里直接读 `props.prompts.length`，一旦某个父组件漏传
@@ -61,6 +61,7 @@ const emit = defineEmits<{
   (e: 'pick-skill', sk: AISkill): void
   (e: 'pick-prompt', p: AIPrompt): void
   (e: 'pick-file', it: AIMentionItem): void
+  (e: 'pick-local-file'): void
   (e: 'toggle-connector', c: AIConnector): void
   (e: 'install-skill'): void
   (e: 'manage-connectors'): void
@@ -280,6 +281,15 @@ onBeforeUnmount(() => {
       <!-- 引用：本对话碰过的文件在前，工作目录候选在后（与手打 @ 同源）。
            点任一条 = 走 pickMention 挂 chip，发送时由后端把内容展开进上下文。 -->
       <template v-if="section === 'file'">
+        <!-- 置顶：从本地选任意文档（含 pdf/docx/xlsx），与下面限工作目录的 @ 引用互补。
+             粘贴 / 拖入的文件也汇入同一份插入文件列表，入口统一收在这里。 -->
+        <button class="ai-plus-item ai-plus-pick-local" @click="emit('pick-local-file')">
+          <span class="ai-plus-badge is-local"><FileUp :size="12" /></span>
+          <span class="ai-plus-item-body">
+            <span class="ai-plus-item-name">{{ t('aiPickLocalFile') }}</span>
+            <span class="ai-plus-item-desc">{{ t('aiPickLocalFileHint') }}</span>
+          </span>
+        </button>
         <template v-if="shown.convFiles.length">
           <div class="ai-plus-group">{{ t('aiPlusConvFiles') }}</div>
           <button
@@ -578,6 +588,20 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-xs);
   background: var(--color-bg-hover);
   color: var(--color-accent);
+}
+
+/* 置顶「从本地选文件」：图标方块用强调色，和普通引用的字母块区分开 */
+.ai-plus-badge.is-local {
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+}
+
+/* 置顶入口与下面的引用列表之间留一道分隔，避免连成一串看不出它是动作 */
+.ai-plus-pick-local {
+  margin-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  padding-bottom: calc(var(--space-3) + 2px);
 }
 
 /* 引用列表的分组标题：两组一样式的条目挨在一起时，不写清哪组是哪组会看串 */

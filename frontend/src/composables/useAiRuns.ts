@@ -26,6 +26,7 @@ import { getErrorMessage } from '../utils/error'
 import { countToolRounds, serializeTools } from '../utils/aiTools'
 import { aiFinishedUnread } from './bridge'
 import type { MentionSnapshot } from './useAiMention'
+import type { AttachedFile } from './useAiAttachedFiles'
 import type { LiveBlock } from './useAiMarkdownBlocks'
 import type { AIConversation, AIMentionItem, AIMessage, AIMsgImage, AIStreamStat } from '../types/ai'
 import type { PendingImage, ToastAPI } from '../types'
@@ -61,6 +62,8 @@ export interface AiRunsDeps {
   // —— 输入区 ——
   input: Ref<string>
   attachments: Ref<PendingImage[]>
+  /** 插入的本地文件（只送路径，后端按后缀解析成文本） */
+  attachedFiles: Ref<AttachedFile[]>
   mentions: Ref<AIMentionItem[]>
   lastMentions: Ref<MentionSnapshot[]>
   pickedSkills: Ref<string[]>
@@ -128,7 +131,7 @@ export function useAiRuns(deps: AiRunsDeps) {
   // 摊平后仍然只有一个名字可写错，而它会在类型检查里立刻暴露。
   const {
     activeId, conversations, messages, runs, draftRunId,
-    input, attachments, mentions, lastMentions, pickedSkills, lastSkills, stripSkillTokens,
+    input, attachments, attachedFiles, mentions, lastMentions, pickedSkills, lastSkills, stripSkillTokens,
     hasKey, mode, permissionLevel, worktreeEnabled, worktreeActive, worktreeBranch,
     pendingSpaceId, convCwd, streamModelOf, profileIdOf,
     planCards, statMap, setConvError, markConvRunning, markConvFinished,
@@ -140,6 +143,9 @@ export function useAiRuns(deps: AiRunsDeps) {
   } = deps
 
   let runSeq = 0
+  // 上一次发出的插入文件：重试时输入框已清空，从这里沿用（同 lastMentions）。
+  // 重试沿用：只需 path/name（发给后端的就是这两个字段），不带前端展示用的 id。
+  let lastAttachedFiles: { path: string; name: string; content?: string }[] = []
 
   function runOf(convId: string): AIRun | undefined {
     if (!convId) return undefined
@@ -537,6 +543,13 @@ export function useAiRuns(deps: AiRunsDeps) {
     }))
     if (mentionSnapshot.length) lastMentions.value = mentionSnapshot
     const mentionPayload = mentionSnapshot.length ? mentionSnapshot : (reuseUserBubble ? lastMentions.value : [])
+    // 插入文件送路径 + 名字（对话框选中）或名字 + content（粘贴/拖入只有字节），
+    // 后端按后缀解析原文展开进上下文。快照先取再清空，重试时沿用上一次的。
+    const attachedSnapshot = attachedFiles.value.map((f) => ({
+      path: f.path, name: f.name, ...(f.content ? { content: f.content } : {}),
+    }))
+    if (attachedSnapshot.length) lastAttachedFiles = attachedSnapshot
+    const attachedPayload = attachedSnapshot.length ? attachedSnapshot : (reuseUserBubble ? lastAttachedFiles : [])
     // 立即把用户消息显示出来，随后在消息区内等待 AI 流式回复
     const msg: AIMessage = {
       id: 'usr-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), conv_id: convId, role: 'user', content: text,
@@ -544,6 +557,11 @@ export function useAiRuns(deps: AiRunsDeps) {
       // 本地气泡立刻标出技能，别等刷新才出现——「我选的技能到底生效了没有」
       // 正是用户在发出这一句时最想知道的事。
       skills: skillPayload.length ? JSON.stringify(skillPayload) : '',
+      // 插入的文件也跟着用户气泡显示：只写 name/path，粘贴来源的 base64 原文
+      // 不进消息（也就不进 DB），刷新后 chip 还在但不会把库撑大。
+      attached_files: attachedPayload.length
+        ? JSON.stringify(attachedPayload.map((f) => ({ name: f.name, path: f.path || undefined })))
+        : '',
     }
     // 重试：那条 user 消息本来就在列表里，别再插一个重复气泡。
     // （后端 saveUserTurn 对「同内容 + 同图片」幂等，DB 里也不会多出一行）
@@ -551,6 +569,7 @@ export function useAiRuns(deps: AiRunsDeps) {
     scrollToBottom()
     input.value = ''
     attachments.value = []
+    attachedFiles.value = []
     mentions.value = []
     // 技能胶囊随这一条消息一起用掉：输入框清空时里面的胶囊已经被富输入框一并清掉了
     // （它会 emit update:skills []），这里同步一份，避免面板在你还没看到新内容时还标「已选」。
@@ -586,6 +605,8 @@ export function useAiRuns(deps: AiRunsDeps) {
           cwd: convCwd.value || undefined,
           images: imagesPayload,
           mentions: mentionPayload,
+          // 插入的本地文件：只送路径 + 名字，后端按后缀解析成文本展开进上下文。
+          attachedFiles: attachedPayload,
           // 技能：本次输入框里选的那些（可能为空数组 = 这条不用技能）。
           // 总是显式带上，后端就不必再猜「沿用上次」还是「这次没选」。
           skills: skillPayload,

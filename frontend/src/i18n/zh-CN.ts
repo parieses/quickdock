@@ -2738,7 +2738,16 @@ export default {
   aiTraceChildModel: '模型',
   aiTraceChildTokens: '输入 {input} / 输出 {output} tok',
   aiTraceChildResult: '产出',
+  // 运行轨迹里粘贴长文的压缩标记（AiPastedContent 里仍可点开看全文）
+  aiTracePastedBlock: '粘贴文本 · {n} 行',
   aiTraceChildStop: '停止这个子任务',
+  // 步骤详情分段标签（替代裸 <pre> 瀑布，见 TraceStepDetail.vue）
+  aiTraceDetailError: '错误',
+  aiTraceDetailResult: '结论',
+  aiTraceDetailArgs: '参数',
+  aiTraceDetailOutput: '输出',
+  aiTraceDetailDiff: '差异',
+  aiTraceDetailText: '文本',
   // —— 工具栏「子任务」入口（与轨迹共用抽屉，只看派出去的子 agent）——
   aiSubtasksTitle: '子任务',
   aiSubtasksTip: '查看这段会话派出去的所有子任务：完整指令、目录、产出与各自的执行步骤',
@@ -2832,6 +2841,7 @@ export default {
   aiCompactTitle: '模型窗口 {window} · 本次历史预算 {limit} · 压缩下限 {floor}',
   // 回答产物（这条回复写过/改过的文件，点击预览；见后端 ai_preview.go）
   aiArtifactsCount: '产物 ({n})',
+  aiSourcesCount: '{n} 个来源',
   aiArtifactWritten: '写入',
   aiArtifactEdited: '修改',
   aiPreviewBinary: '二进制文件，无法直接预览。可以在系统里打开查看。',
@@ -3082,6 +3092,21 @@ export default {
   aiThresholdHint: '留 0 或留空即用默认值（12 万 / 85% / 8 / 40）。触发线是「占可用上下文多少时先压缩」——调低会压得更早、更省钱但更容易忘事；调高则相反。不同模型的窗口差一个数量级，所以这几个数字跟着模型档案走。',
   aiContextWindowHint: '留 0 自动识别：按模型名查内置表（主流模型 128K–1M），认不出按 128K 估。万一估大了被模型拒绝，会从报错里读出真实窗口自动校正，不用手动填。自建网关或本地小模型（8K/32K）建议直接填，避免先撞一次。每次请求发出前都会按真实载荷（历史 + 系统提示 + 工具定义 + 引用的文件内容）实测一遍，超过可用输入空间就自动摘要压缩，并把压缩前后的量标在对话里。',
   aiAttachImage: '添加图片',
+  aiPickLocalFile: '从本地选文件',
+  aiPickLocalFileHint: 'PDF / Word / Excel / 文本 · 也可直接粘贴或拖入',
+  aiAttachPastedHint: '来自粘贴或拖入 · 发送时读取内容',
+  aiAttachFileTitle: '选择要插入的文件',
+  aiAttachFileFilter: '文档 / 文本（PDF、Word、Excel、Markdown、纯文本）',
+  aiAttachFileAdded: '已插入 {n} 个文件',
+  // 粘贴大量文字折叠成 chip（见 AiRichInput.vue，对齐 Claude Code 的 [Pasted text #N]）
+  aiPasteChip: '已粘贴 · {n} 行',
+  aiPasteChipTip: '大段文字已折叠。发送时会把全文一并交给 AI；点 × 删除，或把同样内容再粘贴一次展开。',
+  aiPasteExpandTip: '把相同内容再粘贴一次即可展开编辑',
+  // 已发送的消息里，粘贴块同样折成 chip（见 AiPastedContent.vue）
+  aiPastedMsgChip: '[Pasted text #{n}] · {lines} 行',
+  aiPastedMsgPreview: '粘贴文本 #{n}',
+  aiPastedMsgTip: '点击预览粘贴的全文',
+  aiPastedMsgChars: '{n} 字',
   aiAddImageUrl: '图片链接',
   aiAddImageUrlPh: '粘贴图片的公网链接（https://…）',
   aiAttachHint: '发送图片，让 AI 识别图中内容（需模型支持图片输入）',

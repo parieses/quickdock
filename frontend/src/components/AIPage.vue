@@ -33,6 +33,7 @@ import { getErrorMessage } from '../utils/error'
 import { downloadText, safeFileName } from '../utils/download'
 import { useAiMarkdownBlocks } from '../composables/useAiMarkdownBlocks'
 import { useAiAttachments } from '../composables/useAiAttachments'
+import { useAiAttachedFiles, hasDocFiles } from '../composables/useAiAttachedFiles'
 import { useAiMention } from '../composables/useAiMention'
 import { useAiRuns } from '../composables/useAiRuns'
 import type { PlanCardState } from '../composables/useAiRuns'
@@ -110,6 +111,7 @@ import {
   AIGetExtServers,
   AISetExtServerEnabled,
   AIJobsList,
+  AISessionTimeline,
 } from '../../bindings/quickdock/services/ai/aiservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
@@ -636,6 +638,37 @@ const {
   onPickFiles, openFilePicker, toggleUrlInput, confirmUrlImage,
 } = useAiAttachments({ imageInputMode, toast, t })
 
+// —— 插入文件（本地文档 → 后端按后缀解析成文本）——
+const { attachedFiles, pickFiles: pickAttachedFiles, addDroppedFiles, removeFile: removeAttachedFile } = useAiAttachedFiles({ toast, t })
+
+// 粘贴 / 拖入文档文件 → 走插入文件通道；图片 / 纯文本仍交回原 handler。
+// WebView 里粘贴的 File 没有本地路径，只有字节，所以读成 data URL 发给后端临时落盘解析。
+// 注意 preventDefault 必须在同步阶段做——FileReader 是异步的，等读完再拦就晚了。
+function onPasteWithDocs(e: ClipboardEvent) {
+  const files: File[] = []
+  for (const it of Array.from(e.clipboardData?.items ?? [])) {
+    if (it.kind === 'file') {
+      const f = it.getAsFile()
+      if (f) files.push(f)
+    }
+  }
+  if (files.length && hasDocFiles(files)) {
+    e.preventDefault()
+    void addDroppedFiles(files)
+    return
+  }
+  onInputPaste(e)
+}
+function onDropWithDocs(e: DragEvent) {
+  const files = Array.from(e.dataTransfer?.files ?? [])
+  if (files.length && hasDocFiles(files)) {
+    e.preventDefault()
+    void addDroppedFiles(files)
+    return
+  }
+  onInputDrop(e)
+}
+
 // —— @ 引用 ——
 // 补全弹层、@token 识别、会话/文件候选与方向键交互都在 useAiMention 里，
 // 这里只把输入框与工作目录这两份状态注入进去。
@@ -665,6 +698,19 @@ async function resolveMessageImages(msgs: AIMessage[]) {
       if (img.kind === 'file' && img.path) pending.push({ img, path: img.path })
     }
     m.imgList = arr
+    // 插入文件：库里只存 name/path 的 JSON，解析出来给气泡渲染 chip。
+    // 失败就当没有——历史记录不该因为一条坏 JSON 整个加载不出来。
+    m.attachedList = []
+    if (m.attached_files) {
+      try {
+        const rawFiles = JSON.parse(m.attached_files)
+        if (Array.isArray(rawFiles)) {
+          m.attachedList = rawFiles
+            .filter((x: any) => x && typeof x.name === 'string' && x.name)
+            .map((x: any) => ({ name: x.name, path: typeof x.path === 'string' ? x.path : '' }))
+        }
+      } catch { m.attachedList = [] }
+    }
   }
   // 同一张图可能在多条消息里被引用（同一张贴图问了两次），去重少读一次盘。
   const byPath = new Map<string, AIMsgImage[]>()
@@ -1866,6 +1912,30 @@ const traceRunId = computed(() => {
 // 那个函数，于是入口一直是空的——用户看到的就是「轨迹只能看当前对话、换一个就没了」。
 watch(activeId, (id) => { void loadLatestRunId(id || '') }, { immediate: true })
 
+// 工具栏「子任务」入口的数量徽标：整段会话派出去的子 agent 总数。
+// 口径与抽屉 children 视图一致（timeline 每条 run 的 children 求和），
+// 复用切会话时已在拉的 timeline 数据形状，不新增后端接口。
+// 运行时不 1Hz 轮询（徽标不必秒级实时），只在切会话与本页一轮生成结束时刷新。
+const childTaskCount = ref(0)
+let childCountGen = 0
+async function loadChildTaskCount(convId: string) {
+  const gen = ++childCountGen
+  if (!convId) { childTaskCount.value = 0; return }
+  try {
+    const res = unwrap<{ runs?: { children?: number }[] } | null>(
+      await AISessionTimeline(convId, 0) as never,
+    )
+    if (gen !== childCountGen) return
+    childTaskCount.value = (res?.runs ?? []).reduce((n, r) => n + (r.children || 0), 0)
+  } catch (e) {
+    if (gen === childCountGen) childTaskCount.value = 0
+    logErr('ai:childCount', e)
+  }
+}
+watch(activeId, (id) => { void loadChildTaskCount(id || '') }, { immediate: true })
+// 本页一轮生成结束：子任务可能刚跑完/刚登记，刷新一次徽标。
+watch(streamingHere, (now, was) => { if (was && !now && activeId.value) void loadChildTaskCount(activeId.value) })
+
 const traceState = computed<'empty' | 'running' | 'done'>(() => {
   if (!traceRunId.value) return 'empty'
   // 只有「这一页正在生成」才算运行中：后台别的会话在跑时不该让这里闪。
@@ -2766,7 +2836,7 @@ const {
   forgetRun,
 } = useAiRuns({
   activeId, conversations, messages, runs, draftRunId,
-  input, attachments, mentions, lastMentions, pickedSkills, lastSkills, stripSkillTokens,
+  input, attachments, attachedFiles, mentions, lastMentions, pickedSkills, lastSkills, stripSkillTokens,
   hasKey, mode, permissionLevel: permLevel, worktreeEnabled, worktreeActive, worktreeBranch,
   pendingSpaceId, convCwd,
   streamModelOf: () => aiProfiles.value.find((x) => x.id === aiActive.value)?.model || '',
@@ -3343,6 +3413,7 @@ onUnmounted(() => {
         :running-job-started-at="runningJobList[0]?.startedAt || ''"
         :trace-label="traceLabel"
         :trace-state="traceState"
+        :child-task-count="childTaskCount"
         :can-clean-scratch="!!convCwd"
         :scratch-armed="scratchArmed"
         @open-cwd="openCwd"
@@ -3391,6 +3462,7 @@ onUnmounted(() => {
         :url-input-open="urlInputOpen"
         :attachments="attachments"
         :mentions="mentions"
+        :attached-files="attachedFiles"
         :mention-open="mentionOpen"
         :mention-items="mentionItems"
         :mention-idx="mentionIdx"
@@ -3432,10 +3504,11 @@ onUnmounted(() => {
         @change-permission="onChangePermission"
         @key="onHeroKey"
         @send="heroSend"
-        @paste="onInputPaste"
-        @drop="onInputDrop"
+        @paste="onPasteWithDocs"
+        @drop="onDropWithDocs"
         @confirm-url="confirmUrlImage"
         @remove-attachment="removeAttachment"
+        @remove-attached-file="removeAttachedFile"
         @remove-mention="removeMention"
         @pick-mention="pickMention"
         @pick-dir="pickNewTaskDir"
@@ -3448,6 +3521,7 @@ onUnmounted(() => {
         @pick-skill="onPickSkill"
         @pick-prompt="onPickPrompt"
         @pick-file="onPickFile"
+        @pick-local-file="pickAttachedFiles"
         @manage-prompts="managePrompts"
         @update:skills="onSkillsChange"
         @toggle-connector="toggleConnector"
@@ -3673,6 +3747,7 @@ onUnmounted(() => {
         :attachments="attachments"
         :url-input-open="urlInputOpen"
         :mentions="mentions"
+        :attached-files="attachedFiles"
         :mention-open="mentionOpen"
         :mention-items="mentionItems"
         :mention-idx="mentionIdx"
@@ -3709,20 +3784,22 @@ onUnmounted(() => {
         @model-change="onModelChange"
         @approve-hooks="approveHooks"
         @remove-attachment="removeAttachment"
+        @remove-attached-file="removeAttachedFile"
         @confirm-url="confirmUrlImage"
         @remove-mention="removeMention"
         @pick-mention="pickMention"
         @composer-key="onComposerKey($event, send)"
         @send="send"
         @stop="stop"
-        @paste="onInputPaste"
-        @drop="onInputDrop"
+        @paste="onPasteWithDocs"
+        @drop="onDropWithDocs"
         @open-file-picker="openFilePicker"
         @toggle-url="toggleUrlInput"
         @toggle-plus="togglePlus"
         @pick-skill="onPickSkill"
         @pick-prompt="onPickPrompt"
         @pick-file="onPickFile"
+        @pick-local-file="pickAttachedFiles"
         @manage-prompts="managePrompts"
         @update:skills="onSkillsChange"
         @toggle-connector="toggleConnector"

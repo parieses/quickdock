@@ -14,10 +14,12 @@ import { useI18n } from 'vue-i18n'
 import { Activity, ChevronDown, ChevronRight, CircleStop, X } from '@lucide/vue'
 import { AIAgentRunTree, AICancelAgentNode, AISessionTimeline } from '../../bindings/quickdock/services/ai/aiservice'
 import { useDialogFocus } from '../composables/useDialogFocus'
+import TraceStepDetail from './TraceStepDetail.vue'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { toolTarget, toolVerb } from '../utils/aiTools'
+import { compactPastedBlocks } from '../utils/aiPaste'
 import type { AIToolCall } from '../types/ai'
 import {
   childTasksFromNodes,
@@ -191,6 +193,27 @@ const topChildModel = computed(() => {
 })
 
 /**
+ * 顶部汇总：一眼看清「几个成了、几个失败、几个还在跑」，不用逐条数徽标。
+ * 口径与 childRunning/statusText 一致：pending / 缺省归「进行中」。
+ * 数据全来自现有 ChildTask.status，不需要后端改动。
+ */
+const childSummary = computed(() => {
+  const tasks = topChildModel.value?.tasks ?? []
+  let done = 0, failed = 0, canceled = 0, running = 0
+  let tokens = 0
+  let elapsed = 0
+  for (const c of tasks) {
+    if (c.status === 'done') done++
+    else if (c.status === 'failed') failed++
+    else if (c.status === 'canceled') canceled++
+    else running++
+    tokens += c.tokens
+    elapsed = Math.max(elapsed, c.elapsedMs) // 并发任务：用时取最长那条，不是求和
+  }
+  return { total: tasks.length, done, failed, canceled, running, tokens, elapsed }
+})
+
+/**
  * 每个子 agent 的步骤预先算好，避免 v-for 里重复 filter + eventsToSteps。
  *
  * 原来三处模板（步骤列表 / 空态 / 隐藏计数）各对每条事件全量 filter 一次，
@@ -263,6 +286,11 @@ function stepTitle(step: RunStep): string {
   if (step.kind === 'tool') return toolVerb(step.name, t)
   if (step.kind === 'compact') return step.compactKind === 'loop' ? t('aiCompactFolded') : t('aiCompacted')
   return step.name
+}
+
+/** 单行摘要里的粘贴块压成标记（全文仍在任务里，展开详情可点 chip 看）。 */
+function traceText(task: string): string {
+  return compactPastedBlocks(task || '', (n) => t('aiTracePastedBlock', { n }))
 }
 
 /** 步骤的操作目标：复用气泡卡片的 shortPath 口径，绝对路径压成末两段。 */
@@ -468,17 +496,32 @@ onBeforeUnmount(() => {
              派出去的子 agent。点开看完整任务、目录/模型、产出和它自己的步骤。
              「子任务」入口下列的是整段会话的全部子 agent。 -->
         <section v-if="topChildModel && topChildModel.tasks.length" class="trace-top-children" :class="{ 'is-children-view': props.view === 'children' }">
-          <div class="trace-top-children-label">{{ t('aiTraceSessionChildren', { n: topChildModel.tasks.length }) }}</div>
+          <!-- 汇总条：一眼看清成/败/跑，不逐条数徽标；进度条按状态分段。 -->
+          <div class="trace-summary">
+            <div class="trace-summary-top">
+              <span class="trace-summary-title">{{ t('aiTraceSessionChildren', { n: childSummary.total }) }}</span>
+              <span class="trace-summary-stats">
+                <span class="is-done">{{ childSummary.done }} {{ t('aiRunStatusDone') }}</span>
+                <span v-if="childSummary.failed" class="is-failed">{{ childSummary.failed }} {{ t('aiRunStatusFailed') }}</span>
+                <span v-if="childSummary.canceled" class="is-canceled">{{ childSummary.canceled }} {{ t('aiRunStatusCanceled') }}</span>
+                <span v-if="childSummary.running" class="is-running">{{ childSummary.running }} {{ t('aiRunStatusRunning') }}</span>
+              </span>
+            </div>
+            <div class="trace-summary-bar" :title="`${fmtTokens(childSummary.tokens)} tok · ${fmtElapsed(childSummary.elapsed)}`">
+              <span v-if="childSummary.done" class="seg is-done" :style="{ width: (childSummary.done / childSummary.total * 100) + '%' }" />
+              <span v-if="childSummary.failed" class="seg is-failed" :style="{ width: (childSummary.failed / childSummary.total * 100) + '%' }" />
+              <span v-if="childSummary.canceled" class="seg is-canceled" :style="{ width: (childSummary.canceled / childSummary.total * 100) + '%' }" />
+              <span v-if="childSummary.running" class="seg is-running" :style="{ width: (childSummary.running / childSummary.total * 100) + '%' }" />
+            </div>
+          </div>
           <ul class="trace-child-tasks">
             <li v-for="c in topChildModel.tasks" :key="c.id" class="trace-child-task">
               <div v-key-click class="trace-child-task-head" @click="toggleChild(c.id)">
-                <span class="trace-child-task-task" :title="c.task">{{ c.task }}</span>
-                <span class="trace-child-task-role">{{ c.role }}</span>
-                <span class="trace-child-task-metrics">
-                  <span v-if="c.tokens">{{ fmtTokens(c.tokens) }} tok</span>
-                  <span v-if="c.elapsedMs">{{ fmtElapsed(c.elapsedMs) }}</span>
-                  <span class="trace-node-status" :class="`is-${c.status}`">{{ statusText(c.status) }}</span>
-                </span>
+                <component :is="childOpen[c.id] ? ChevronDown : ChevronRight" :size="12" class="trace-child-task-arrow" />
+                <!-- 状态单一信源：一枚色点表达状态，徽标补文字，不再左侧色条 + 圆点 + 文字三处重复。 -->
+                <span class="trace-child-dot" :class="`is-${c.status || 'running'}`" />
+                <span class="trace-child-task-task" :title="traceText(c.task)">{{ traceText(c.task) }}</span>
+                <span class="trace-child-badge" :class="`is-${c.status || 'running'}`">{{ statusText(c.status) }}</span>
                 <!-- 只停这一个：整行可点展开，所以必须 stop 掉冒泡。 -->
                 <button
                   v-if="childRunning(c.status)"
@@ -489,11 +532,17 @@ onBeforeUnmount(() => {
                 >
                   <CircleStop :size="12" />
                 </button>
-                <!-- 右箭头沿用 DSH 子任务面板的读法：整行可点，箭头只提示「还能展开」。 -->
-                <ChevronRight :size="12" class="trace-child-task-arrow" :class="{ 'is-open': childOpen[c.id] }" />
+              </div>
+              <!-- 副行放次要信息：role · token · 耗时。主行不再塞 7 个元素互相挤压。 -->
+              <div class="trace-child-task-sub">
+                <span class="trace-child-task-role">{{ c.role }}</span>
+                <span v-if="c.tokens" class="trace-sub-metric">{{ fmtTokens(c.tokens) }} tok</span>
+                <span v-if="c.elapsedMs" class="trace-sub-metric">{{ fmtElapsed(c.elapsedMs) }}</span>
               </div>
               <div v-if="childOpen[c.id]" class="trace-child-task-detail">
-                <div class="trace-child-task-full">{{ c.task }}</div>
+                <!-- 完整任务里可能夹着粘贴的长文：压成一行标记（抽屉本身是 dialog，
+                     不再嵌弹窗；全文在消息气泡里可点开看）。 -->
+                <div class="trace-child-task-full">{{ traceText(c.task) }}</div>
                 <div class="trace-child-task-meta">
                   <span v-if="c.node.cwd">{{ t('aiTraceChildCwd') }}: {{ c.node.cwd }}</span>
                   <span v-if="c.node.model">{{ t('aiTraceChildModel') }}: {{ c.node.model }}</span>
@@ -502,7 +551,7 @@ onBeforeUnmount(() => {
                 </div>
                 <template v-if="c.node.result">
                   <div class="trace-child-task-result-label">{{ t('aiTraceChildResult') }}</div>
-                  <pre class="trace-child-task-result">{{ c.node.result }}</pre>
+                  <pre class="trace-child-task-result">{{ traceText(c.node.result) }}</pre>
                 </template>
                 <ol class="trace-timeline trace-child-task-steps">
                   <li
@@ -515,7 +564,7 @@ onBeforeUnmount(() => {
                     <div v-key-click class="trace-step-main" @click="stepHasDetail(step) && toggleStep(step.key)">
                       <div class="trace-step-line">
                         <span class="trace-step-title">{{ stepTitle(step) }}</span>
-                        <span v-if="step.kind === 'tool' && stepTarget(step)" class="trace-step-target" :title="step.path || step.args">
+                        <span v-if="step.kind === 'tool' && stepTarget(step)" class="trace-step-target" :title="step.path || traceText(step.args)">
                           {{ stepTarget(step) }}
                         </span>
                         <span v-if="stepBadge(step)" class="trace-step-badge">{{ stepBadge(step) }}</span>
@@ -527,13 +576,7 @@ onBeforeUnmount(() => {
                         />
                       </div>
                       <div v-if="!step.ok" class="trace-step-err">{{ step.error || t('aiTraceEventFail') }}</div>
-                      <div v-if="stepOpen[step.key] && stepHasDetail(step)" class="trace-step-detail">
-                        <pre v-if="step.text">{{ step.text }}</pre>
-                        <pre v-if="step.args">{{ step.args }}</pre>
-                        <pre v-if="step.output">{{ step.output }}</pre>
-                        <pre v-else-if="step.result">{{ step.result }}</pre>
-                        <pre v-if="step.diff">{{ step.diff }}</pre>
-                      </div>
+                      <TraceStepDetail v-if="stepOpen[step.key] && stepHasDetail(step)" :step="step" />
                     </div>
                   </li>
                   <li v-if="!stepsForChild(c.id).steps.length" class="trace-event is-empty">
@@ -587,7 +630,7 @@ onBeforeUnmount(() => {
                   <div v-key-click class="trace-step-main" @click="stepHasDetail(step) && toggleStep(step.key)">
                     <div class="trace-step-line">
                       <span class="trace-step-title">{{ stepTitle(step) }}</span>
-                      <span v-if="step.kind === 'tool' && stepTarget(step)" class="trace-step-target" :title="step.path || step.args">
+                      <span v-if="step.kind === 'tool' && stepTarget(step)" class="trace-step-target" :title="step.path || traceText(step.args)">
                         {{ stepTarget(step) }}
                       </span>
                       <span v-if="stepBadge(step)" class="trace-step-badge">{{ stepBadge(step) }}</span>
@@ -599,13 +642,9 @@ onBeforeUnmount(() => {
                       />
                     </div>
                     <div v-if="!step.ok" class="trace-step-err">{{ step.error || t('aiTraceEventFail') }}</div>
-                    <div v-if="stepOpen[step.key] && stepHasDetail(step)" class="trace-step-detail">
-                      <pre v-if="step.text">{{ step.text }}</pre>
-                      <pre v-if="step.args">{{ step.args }}</pre>
-                      <pre v-if="step.output">{{ step.output }}</pre>
-                      <pre v-else-if="step.result">{{ step.result }}</pre>
-                      <pre v-if="step.diff">{{ step.diff }}</pre>
-                    </div>
+                    <!-- 与另外两条时间线共用分段详情；此前这里五段裸 <pre>，
+                         粘贴长文会把整个抽屉糊成一片。 -->
+                    <TraceStepDetail v-if="stepOpen[step.key] && stepHasDetail(step)" :step="step" />
                   </div>
                 </li>
                 <li v-if="!stepsOfRun(r).steps.length" class="trace-event is-empty">
@@ -648,7 +687,7 @@ onBeforeUnmount(() => {
                 <div v-key-click class="trace-node-head" @click="toggleNode(n.id)">
                   <component :is="expanded[n.id] ? ChevronDown : ChevronRight" :size="11" class="trace-node-caret" />
                   <span class="trace-node-role">{{ n.role }}</span>
-                  <span class="trace-node-task">{{ n.task }}</span>
+                  <span class="trace-node-task">{{ traceText(n.task) }}</span>
                   <span class="trace-node-status" :class="`is-${n.status}`">{{ statusText(n.status) }}</span>
                 </div>
                 <ol v-if="expanded[n.id]" class="trace-timeline">
@@ -662,7 +701,7 @@ onBeforeUnmount(() => {
                     <div v-key-click class="trace-step-main" @click="stepHasDetail(step) && toggleStep(step.key)">
                       <div class="trace-step-line">
                         <span class="trace-step-title">{{ stepTitle(step) }}</span>
-                        <span v-if="step.kind === 'tool' && stepTarget(step)" class="trace-step-target" :title="step.path || step.args">
+                        <span v-if="step.kind === 'tool' && stepTarget(step)" class="trace-step-target" :title="step.path || traceText(step.args)">
                           {{ stepTarget(step) }}
                         </span>
                         <span v-if="stepBadge(step)" class="trace-step-badge">{{ stepBadge(step) }}</span>
@@ -674,13 +713,7 @@ onBeforeUnmount(() => {
                         />
                       </div>
                       <div v-if="!step.ok" class="trace-step-err">{{ step.error || t('aiTraceEventFail') }}</div>
-                      <div v-if="stepOpen[step.key] && stepHasDetail(step)" class="trace-step-detail">
-                        <pre v-if="step.text">{{ step.text }}</pre>
-                        <pre v-if="step.args">{{ step.args }}</pre>
-                        <pre v-if="step.output">{{ step.output }}</pre>
-                        <pre v-else-if="step.result">{{ step.result }}</pre>
-                        <pre v-if="step.diff">{{ step.diff }}</pre>
-                      </div>
+                      <TraceStepDetail v-if="stepOpen[step.key] && stepHasDetail(step)" :step="step" />
                     </div>
                   </li>
                   <li v-if="!(stepsByNode.get(n.id)?.steps ?? []).length" class="trace-event is-empty">
@@ -948,10 +981,41 @@ onBeforeUnmount(() => {
   border-bottom: 0;
   overflow-y: auto;
 }
-.trace-top-children-label {
+/* 汇总条：标题 + 状态计数在同一行，下面一条分段进度条。
+   并发子任务「用时」取最长那条，与 childSummary.elapsed 一致。 */
+.trace-summary { padding-top: var(--space-1); }
+.trace-summary-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.trace-summary-title { font-size: var(--text-2xs); color: var(--color-text-muted); }
+.trace-summary-stats {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
   font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
   color: var(--color-text-muted);
 }
+.trace-summary-stats .is-done { color: var(--color-success); }
+.trace-summary-stats .is-failed { color: var(--color-danger); }
+.trace-summary-stats .is-canceled { color: var(--color-warning); }
+.trace-summary-stats .is-running { color: var(--color-accent); }
+.trace-summary-bar {
+  display: flex;
+  height: 4px;
+  margin-top: var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-hover);
+  overflow: hidden;
+}
+.trace-summary-bar .seg { height: 100%; }
+.trace-summary-bar .seg.is-done { background: var(--color-success); }
+.trace-summary-bar .seg.is-failed { background: var(--color-danger); }
+.trace-summary-bar .seg.is-canceled { background: var(--color-warning); }
+.trace-summary-bar .seg.is-running { background: var(--color-accent); }
 
 /* 子任务详情（对标 DSH 轨迹顶部那块，一个子 agent 一行）。 */
 .trace-child-tasks {
@@ -967,11 +1031,35 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2);
+  padding: var(--space-2) var(--space-2) 0;
   font-size: var(--text-xs);
   cursor: pointer;
 }
 .trace-child-task-head:hover { background: var(--color-bg-hover); }
+.trace-child-task-arrow {
+  flex-shrink: 0;
+  color: var(--color-text-disabled);
+  transition: transform var(--transition-fast);
+}
+/* 状态色点：单一信源。徽标只补文字，不再重复上色。 */
+.trace-child-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--color-text-disabled);
+}
+.trace-child-dot.is-done { background: var(--color-success); }
+.trace-child-dot.is-failed { background: var(--color-danger); }
+.trace-child-dot.is-canceled { background: var(--color-warning); }
+.trace-child-dot.is-running {
+  background: var(--color-accent);
+  animation: trace-pulse 1.6s ease-in-out infinite;
+}
+@keyframes trace-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .35; }
+}
 .trace-child-task-task {
   flex: 1;
   min-width: 0;
@@ -979,6 +1067,26 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-text-primary);
+}
+.trace-child-badge {
+  flex-shrink: 0;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-2xs);
+  line-height: 1.6;
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
+}
+.trace-child-badge.is-done { background: var(--color-success-bg); color: var(--color-success); }
+.trace-child-badge.is-failed { background: var(--color-danger-bg); color: var(--color-danger); }
+.trace-child-badge.is-canceled { background: var(--color-warning-bg, var(--color-bg-hover)); color: var(--color-warning); }
+.trace-child-badge.is-running { background: var(--color-accent-bg); color: var(--color-accent-text); }
+/* 副行：role 胶囊 + token/耗时，等宽数值对齐，不挤主行。 */
+.trace-child-task-sub {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px var(--space-2) var(--space-2) calc(var(--space-2) + 12px + var(--space-2));
 }
 .trace-child-task-role {
   padding: 0 var(--space-2);
@@ -988,20 +1096,11 @@ onBeforeUnmount(() => {
   font-size: var(--text-2xs);
   flex-shrink: 0;
 }
-.trace-child-task-metrics {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-shrink: 0;
+.trace-sub-metric {
   font-size: var(--text-2xs);
   color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
 }
-.trace-child-task-arrow {
-  flex-shrink: 0;
-  color: var(--color-text-disabled);
-  transition: transform var(--transition-fast);
-}
-.trace-child-task-arrow.is-open { transform: rotate(90deg); }
 
 /* 单个子任务的停止：默认淡出，悬停整行时才显形——子任务一多，一排红图标
    比任务标题还抢眼。::after 不用，直接靠 opacity + pointer-events 控制命中。 */
@@ -1207,26 +1306,6 @@ onBeforeUnmount(() => {
   color: var(--color-danger);
 }
 
-.trace-step-detail {
-  margin-top: var(--space-2);
-  padding: var(--space-2);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-secondary);
-  max-height: 240px;
-  overflow: auto;
-}
-
-.trace-step-detail pre {
-  margin: 0 0 var(--space-2);
-  font-size: var(--text-2xs);
-  line-height: 1.5;
-  color: var(--color-text-secondary);
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: var(--font-mono);
-}
-.trace-step-detail pre:last-child { margin-bottom: 0; }
-
 .trace-step-hidden {
   padding: var(--space-1) 0 var(--space-1) 28px;
   font-size: var(--text-2xs);
@@ -1240,5 +1319,6 @@ onBeforeUnmount(() => {
   .trace-child-stop,
   .trace-mode { transition: none; }
   .trace-child-task-arrow.is-open { transform: none; }
+  .trace-child-dot.is-running { animation: none; }
 }
 </style>

@@ -242,9 +242,16 @@ export interface AIConnector {
 
 export interface AIMsgImage { kind: 'file' | 'url'; url?: string; path?: string; name?: string; dataUrl?: string }
 
+// 历史消息里的一条插入文件（只存元信息，原文不进 DB）
+export interface AIAttachedMsgFile { name: string; path?: string }
+
 export interface AIMessage {
   id: string; conv_id: string; role: string; content: string; created_at: string
   reasoning_content?: string; images?: string; imgList?: AIMsgImage[]
+  // 这条用户消息插入过的文件：库里存 JSON 原文（name/path），解析后的数组放 attachedList。
+  // 与 skills 同样的口径——前端展示用，原文不解析成对象避免每条消息都多一份副本。
+  attached_files?: string
+  attachedList?: AIAttachedMsgFile[]
   // 按轮拆开的思考（JSON 数组 `[{round,text}]`，空 = 没有分轮信息）。
   // 界面用它把「第 N 轮在想什么」摆到第 N 轮的工具卡片上方；
   // 没有它时回落到 reasoning_content 那一段整块。
@@ -354,6 +361,13 @@ export interface AIArtifact {
   // 这次调用是否已结束。流式期 file_write 还在跑时是 false：此时磁盘上
   // 可能只有半截内容，列表可以先列出来，但重读文件要等它变 true。
   done?: boolean
+}
+
+// 回答里引用过的网页来源：从 web_fetch / web_links / 外部 MCP 搜索工具的
+// 结果里提取 URL，聚合后挂在回答下方（「🔥 N 个来源」徽标）。
+export interface AISource {
+  url: string
+  title?: string
 }
 
 // 大纲里的一条：从「用户提过的每一句」里取首行，点它跳到该条消息。

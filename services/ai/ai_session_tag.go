@@ -17,6 +17,7 @@ package ai
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"sync"
 	"unicode"
@@ -30,6 +31,10 @@ type sessionInfo struct {
 	Name string
 	// ID 会话 id，与 ai_conversations.id 一致。
 	ID string
+	// Cwd 会话绑定的工作目录（绝对路径）。网关靠它把会话归属到项目，
+	// 看板上才能显示「项目名 + 目录」而不是一串裸 session id。
+	// 空 = 未绑定，请求里就不带该 header。
+	Cwd string
 }
 
 // usable 两样都空时说明调用方没提供（测试连接等），请求里就不带。
@@ -53,6 +58,41 @@ func sessionInfoOf(ctx context.Context) sessionInfo {
 	si, _ := ctx.Value(sessionInfoKey{}).(sessionInfo)
 	return si
 }
+
+// applyGatewayIdentity 给一次模型请求盖上 agent / 会话 / 工作区三类身份 header。
+//
+// 流式（streamAIChat）与非流式（callAIOnce）两条路径都走这里：以前只在流式路径
+// 设 X-Magpie-Session，非流式漏掉，摘要/标题请求在网关上全成了「未提供会话标识」
+// 的黑户。身份 header 必须两条路径一字不差，所以收口到一个函数。
+//
+// header 取值参考主流 coding agent 的网关惯例（Claude Code / Codex CLI / OpenCode）：
+//   - User-Agent + X-Agent-Name：agent 身份，网关据此识别来源、套用对应的文件解析规则
+//   - X-Agent-Session-Id：会话归属，与会话详情里的 id 一致
+//   - X-Magpie-Session / X-Session-Id：magpie 按它归组（兼容旧名）
+//   - X-Workspace-ID：工作目录，网关靠它把会话归属到项目、显示「项目名 + 目录」
+//
+// 这些 header 网关自行消费，不会转发给模型。
+func applyGatewayIdentity(req *http.Request, si sessionInfo) {
+	if req == nil {
+		return
+	}
+	req.Header.Set("User-Agent", gatewayUserAgent)
+	req.Header.Set("X-Agent-Name", gatewayAgentName)
+	if si.ID == "" {
+		return
+	}
+	req.Header.Set("X-Agent-Session-Id", si.ID)
+	req.Header.Set("X-Magpie-Session", si.ID)
+	req.Header.Set("X-Session-Id", si.ID)
+	if si.Cwd != "" {
+		req.Header.Set("X-Workspace-ID", si.Cwd)
+	}
+}
+
+const (
+	gatewayUserAgent = "quickdock/3"
+	gatewayAgentName = "quickdock"
+)
 
 // sessionNames 会话 id → 可读名（进程内缓存）。
 //
@@ -110,7 +150,13 @@ func (a *AIService) sessionInfoForConversation(convID string) sessionInfo {
 	if convID == "" {
 		return sessionInfo{}
 	}
-	return sessionInfo{Name: a.sessionNameFor(convID, ""), ID: convID}
+	si := sessionInfo{Name: a.sessionNameFor(convID, ""), ID: convID}
+	if a != nil && a.App != nil && a.App.DB != nil {
+		if conv, err := a.App.DB.GetAIConversation(convID); err == nil && conv != nil {
+			si.Cwd = strings.TrimSpace(conv.Cwd)
+		}
+	}
+	return si
 }
 
 // tagPrefix 取文本的可读前缀：只留字母 / 数字 / 汉字，最多 8 个字。

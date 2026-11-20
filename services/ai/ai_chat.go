@@ -211,22 +211,14 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 		// 导致逐字流式退化成"一次性整段"。强制 identity 让上游返回原始分块 SSE。
 		req.Header.Set("Accept-Encoding", "identity")
 		req.Header.Set("Cache-Control", "no-store")
-		// 会话标识：magpie 只认 `X-Magpie-Session`（见它的
-		// docs/subsystems/gateway-sessions.md：identity = agent + session），
-		// 缺了这个 header 它**不会**替你编一个 id，请求就落进「未提供会话标识」，
-		// 也统计不出前缀缓存命中率。
-		//
-		// 值只用会话 id，不要掺名字：magpie 的列表标题由它自己推导
-		// （`sessions.GatewayTitle` 取最早记录里第一个非标签的用户文本，压成一行），
-		// 前提是开了 Sessions 页那个默认关闭的「记录会话内容」开关。掺进去的名字
-		// 反而会把会话 id 弄脏——点开详情看到的就是这个值。
-		if id := si.ID; id != "" {
-			req.Header.Set("X-Magpie-Session", id)
-			req.Header.Set("X-Session-Id", id)
-		} else if convID != "" {
-			req.Header.Set("X-Magpie-Session", convID)
-			req.Header.Set("X-Session-Id", convID)
+		// agent / 会话 / 工作区三类身份 header 统一在 applyGatewayIdentity 设置，
+		// 流式与非流式两条路径共用，避免一处改了另一处漏掉。
+		// si.ID 为空时用 convID 兜底（early 调用还没挂上 sessionInfo）。
+		gatewaySI := si
+		if gatewaySI.ID == "" {
+			gatewaySI.ID = convID
 		}
+		applyGatewayIdentity(req, gatewaySI)
 
 		if attempt == 0 {
 			logger.I("[ai] 请求 model=%s provider=%s conv=%s messages=%d", cfg.Model, cfg.Provider, convID, len(messages))
@@ -845,12 +837,9 @@ func (a *AIService) callAIOnce(ctx context.Context, cfg AIProfile, messages []ma
 	if authVal != "" {
 		req.Header.Set(authKey, authVal)
 	}
-	// 与流式路径同一组 header：magpie 按 X-Magpie-Session 归组，摘要/标题
-	// 也该落在自己那条会话下，否则它们会单独成为「未提供会话标识」的黑户。
-	if id := sessionInfoOf(ctx).ID; id != "" {
-		req.Header.Set("X-Magpie-Session", id)
-		req.Header.Set("X-Session-Id", id)
-	}
+	// 与流式路径同一组 header：摘要/标题也落在自己那条会话下，
+	// 否则它们会单独成为「未提供会话标识」的黑户。
+	applyGatewayIdentity(req, sessionInfoOf(ctx))
 
 	client := a.aiHTTPClient
 	resp, err := client.Do(req)

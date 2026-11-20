@@ -12,7 +12,9 @@ import { useI18n } from 'vue-i18n'
 import { GitBranch, Image as ImageIcon, Link2, ArrowUp, Plus, Square } from '@lucide/vue'
 import type { AIConnector, AIHooksInfo, AIMentionItem, AIPrompt, AISkill } from '../types/ai'
 import type { PendingImage } from '../types'
+import type { AttachedFile } from '../composables/useAiAttachedFiles'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
+import AiAttachedFileChips from './AiAttachedFileChips.vue'
 import AiPlusPanel from './AiPlusPanel.vue'
 import AiSlashPanel from './AiSlashPanel.vue'
 import AiRichInput from './AiRichInput.vue'
@@ -26,6 +28,8 @@ const props = defineProps<{
   urlInputOpen: boolean
   urlDraft: string
   mentions: AIMentionItem[]
+  /** 插入的本地文件（后端按后缀解析成文本，与落地页共用同一份状态） */
+  attachedFiles: AttachedFile[]
   mentionOpen: boolean
   mentionItems: AIMentionItem[]
   mentionIdx: number
@@ -75,6 +79,8 @@ const emit = defineEmits<{
   (e: 'update:aiActive', v: string): void
   (e: 'approve-hooks', on: boolean): void
   (e: 'remove-attachment', i: number): void
+  (e: 'remove-attached-file', i: number): void
+  (e: 'pick-local-file'): void
   (e: 'confirm-url'): void
   (e: 'remove-mention', i: number): void
   (e: 'pick-mention', it: AIMentionItem): void
@@ -171,6 +177,11 @@ defineExpose({
       @pick="emit('pick-mention', $event)"
       @remove="emit('remove-mention', $event)"
     />
+    <!-- 插入的本地文件：发送时由后端按后缀解析成文本展开 -->
+    <AiAttachedFileChips
+      :files="props.attachedFiles"
+      @remove="emit('remove-attached-file', $event)"
+    />
     <!-- 输入框本体：透明、无边框，靠外层圆角框承载容器质感（与「新建任务」输入框同款）。 -->
     <!-- 运行中**不禁用**输入：这一句会被插进正在跑的那一轮（见 ai_inject.go），
          而不是另起一轮。禁用输入等于告诉用户「现在只能看着」，而他往往正是要
@@ -266,7 +277,7 @@ defineExpose({
         <button
           v-else
           class="ai-send"
-          :disabled="!props.hasKey || (!props.canSend && !props.attachments.length)"
+          :disabled="!props.hasKey || (!props.canSend && !props.attachments.length && !props.attachedFiles.length)"
           :title="t('send')"
           @click="emit('send')"
         >
@@ -295,6 +306,7 @@ defineExpose({
       @pick-skill="emit('pick-skill', $event)"
       @pick-prompt="emit('pick-prompt', $event)"
       @pick-file="emit('pick-file', $event)"
+      @pick-local-file="emit('pick-local-file')"
       @toggle-connector="emit('toggle-connector', $event)"
       @install-skill="emit('install-skill')"
       @manage-connectors="emit('manage-connectors')"
