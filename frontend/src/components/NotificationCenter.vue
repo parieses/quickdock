@@ -218,13 +218,15 @@ async function activate(n: NotifyItem) {
   busy.value = true
   try {
     if (!n.read) {
-      const prevUnread = unread.value
+      const before = unread.value
+      unread.value = Math.max(0, before - 1)
+      const decrement = before - unread.value // 本次真正扣掉的量（0 或 1）
       n.read = true
-      unread.value = Math.max(0, unread.value - 1)
       try { unwrap(await NotifyMarkRead(n.id)) } catch (e) {
-        // 后端没标上已读就把乐观更新回滚，否则刷新后红点又回来且没有任何解释。
+        // 只回滚本次扣掉的那一份：await 期间若有新通知抬高 unread，直接写回
+        // before 会把并发新增的未读一起抹掉。
         n.read = false
-        unread.value = prevUnread
+        unread.value += decrement
         logErr('notify.markRead', e)
         toast.error(getErrorMessage(e))
       }

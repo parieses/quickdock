@@ -181,7 +181,8 @@ async function load() {
 
 // ── 派生数据 ───────────────────────────────────────────────────────
 interface Overall {
-  labelKey: string
+  labelKey: string // 文案 i18n key
+  bannerClass: string // 横幅样式 class（与文案解耦，「全部停用」套黄色而非红色）
   total: number
   online: number
   uptime: number
@@ -193,8 +194,18 @@ const overall = computed<Overall>(() => {
   const online = enabled.filter((m) => m.lastStatus === 'up').length
   const down = enabled.filter((m) => m.lastStatus === 'down').length
   let labelKey = 'statusAllDown'
-  if (online > 0 && down === 0) labelKey = 'statusAllUp'
-  else if (online > 0 && down > 0) labelKey = 'statusPartial'
+  let bannerClass = 'statusAllDown'
+  if (list.length > 0 && enabled.length === 0) {
+    // 有监控项但全被停用：online / down 都是 0，既不是「全部离线」也不是「全部正常」。
+    // 复用现有 mon_disabled（已停用）文案 + statusPartial 的黄色样式，不误报红横幅；
+    // 不新增 i18n key，也不动全局样式。
+    labelKey = 'mon_disabled'
+    bannerClass = 'statusPartial'
+  } else if (online > 0 && down === 0) {
+    labelKey = bannerClass = 'statusAllUp'
+  } else if (online > 0 && down > 0) {
+    labelKey = bannerClass = 'statusPartial'
+  }
   // 整体 24h 在线率用「成功次数 / 总次数」聚合，而不是把各监控的百分比再平均：
   // 10 次里挂 1 次与 10000 次里挂 10 次不该得到一样的权重。
   let totalChecks = 0, upChecks = 0
@@ -205,6 +216,7 @@ const overall = computed<Overall>(() => {
   const uptimeSample = totalChecks > 0
   return {
     labelKey,
+    bannerClass,
     total: list.length,
     online,
     uptime: uptimeSample ? (upChecks / totalChecks) * 100 : 0,
@@ -301,7 +313,7 @@ function metricHtml(label: string, value: string): string {
  */
 function buildSnapshotHtml(): string {
   const o = overall.value
-  const banner = `<div class="banner ${esc(o.labelKey)}">
+  const banner = `<div class="banner ${esc(o.bannerClass)}">
     <div class="bhead"><span class="bdot"></span>${esc(t(o.labelKey))}</div>
     <div class="bmeta">
       <span><b>${o.total}</b> ${esc(t('statusTotal'))}</span>
@@ -435,7 +447,7 @@ function exportSnapshot() {
 
     <!-- 只读：整页没有任何新建 / 编辑 / 删除 / 启停入口。 -->
     <template v-if="showContent">
-      <div :class="['st-banner', overall.labelKey]">
+      <div :class="['st-banner', overall.bannerClass]">
         <div class="st-banner-head">
           <span class="st-banner-dot"></span>
           <span class="st-banner-text">{{ t(overall.labelKey) }}</span>
