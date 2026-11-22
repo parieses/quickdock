@@ -5,8 +5,7 @@ import { Events } from '@wailsio/runtime'
 import { KEEP_ALIVE } from '../pages/keepAlive'
 import {
   Copy, Image as ImageIcon, X, Download, MessageSquare,
-  Languages, FileText, ScanSearch, Lightbulb, Check,
-  ChevronDown, ListChecks,
+  Languages, FileText, ScanSearch, Lightbulb,
 } from '@lucide/vue'
 import { Marked } from 'marked'
 import { unwrap } from '../utils/api'
@@ -164,34 +163,9 @@ const draftRunId = ref('')
 // 情况不少，跟着 run 一起消失太急；切走的会话切回来也还在。
 const planCards = reactive(new Map<string, PlanCardState>())
 
-/** 当前这一页的清单（新建任务在 conv 事件之前用 rid 当键）。 */
-const planHere = computed<PlanCardState | null>(() => {
-  const key = activeId.value || draftRunId.value
-  return key ? planCards.get(key) ?? null : null
-})
-
-function planDoneCount(p: PlanCardState): number {
-  return p.items.filter((x) => x.status === 'done').length
-}
-
-// 折叠状态只属于「当前这条会话的这张卡」：切任务、新建任务都重新展开，
-// 否则上一条会话里点过收起，会把新任务的清单也一起藏掉。
-// 同一会话里清单被清空后重新生成时同样重置（watch planHere 从无到有）。
-// 清单持续打勾时不自动展开——用户主动收起了就别再弹回来。
-const planCollapsed = ref(false)
-watch(
-  () => activeId.value || draftRunId.value,
-  () => { planCollapsed.value = false },
-)
-watch(planHere, (now, was) => {
-  if (now && !was) planCollapsed.value = false
-})
-function onPlanToggle(e: Event) {
-  const el = e.target as HTMLDetailsElement
-  // 与期望状态一致 = 我们自己改 :open 引起的，不是用户点的
-  if (el.open === !planCollapsed.value) return
-  planCollapsed.value = !el.open
-}
+// 清单卡本身已抽成 AiPlanCard.vue，挂在各自那条回复里：本会话内由 SSE 固化时
+// 写到 m.plan，刷新后由 loadMessages 回填到最后一条 assistant 消息。
+// 这里不再需要「当前页那张卡」的状态与折叠控制——每张卡自带折叠。
 
 // —— 清单恢复（WP17） ——
 //
@@ -247,6 +221,8 @@ const streaming = computed(() => runs.value.length > 0)
 const convErrors = ref<Record<string, string>>({})
 /** 页面级错误（拉档案 / 搜消息 / 拉会话列表失败）：不属于任何一条任务。 */
 const pageError = ref('')
+/** 触发上面那条错误的加载：落地页错误横条的「重试」据此重调对应 load 函数。 */
+const pageErrorRetry = ref<(() => void) | null>(null)
 function setConvError(convId: string, msg: string) {
   if (msg) convErrors.value[convId] = msg
   else delete convErrors.value[convId]
@@ -256,6 +232,13 @@ const errorMsg = computed(() => {
   if (r?.error) return r.error
   return convErrors.value[activeId.value] || pageError.value || ''
 })
+/** 落地页错误横条的「重试」：重跑失败的那次加载，成功则横条自然消失。 */
+function retryPageLoad() {
+  pageError.value = ''
+  const fn = pageErrorRetry.value
+  pageErrorRetry.value = null
+  if (fn) fn()
+}
 
 // 每条会话的运行状态，只用来给左栏画一个点：
 //   running = 还在生成（用户已经切走了，或者正看着）
@@ -863,6 +846,7 @@ async function loadProfiles() {
   } catch (e) {
     aiProfiles.value = []
     pageError.value = getErrorMessage(e)
+    pageErrorRetry.value = () => { void loadProfiles() }
   }
 }
 
@@ -982,6 +966,7 @@ async function runMsgSearch(kw: string) {
     if (gen === msgSearchGen) {
       msgHits.value = []
       pageError.value = getErrorMessage(e)
+      pageErrorRetry.value = () => { void runMsgSearch(kw) }
     }
   } finally {
     if (gen === msgSearchGen) msgHitsLoading.value = false
@@ -1022,6 +1007,7 @@ async function loadConversations() {
     for (const c of conversations.value) hydratePlanOf(c)
   } catch (e) {
     pageError.value = getErrorMessage(e)
+    pageErrorRetry.value = () => { void loadConversations() }
   }
 }
 
@@ -1036,6 +1022,20 @@ async function loadMessages(convID: string) {
     const list = msgs ?? []
     await resolveMessageImages(list)
     if (gen !== messagesGen) return // 等待图片加载期间用户已切换会话，丢弃过期响应
+    // 清单跟着「生成它的回复」走：本会话内由 SSE 固化时写到 m.plan，
+    // 刷新后库里没有这个字段，就把会话清单挂到最后一条 assistant 消息上——
+    // 至少它还是在某条具体回复里、跟着消息滚，不会浮在输入框上方。
+    const convForPlan = conversations.value.find((c) => c.id === convID)
+    const restored = parsePlanCard(convForPlan?.plan)
+    if (restored) {
+      for (let i = list.length - 1; i >= 0; i--) {
+        const m = list[i]
+        if (m.role === 'assistant') {
+          if (!m.plan) m.plan = restored
+          break
+        }
+      }
+    }
     messages.value = list
   } catch (e) {
     if (gen !== messagesGen) return
@@ -1177,12 +1177,11 @@ async function copyPath(dir: string) {
     toast.error(t('aiConvNoDir'))
     return
   }
-  try {
-    await navigator.clipboard.writeText(dir)
-    toast.success(t('copied'))
-  } catch (e) {
-    toast.error(getErrorMessage(e))
-  }
+  // 与同页 copy() 共用一个入口：navigator.clipboard 在 WebView2 里权限受限，
+  // 直接 writeText 会静默失败；copyToClipboard 走 Go 桥写剪贴板，并以 navigator 兜底。
+  const ok = await copyToClipboard(dir)
+  if (ok) toast.success(t('copied'))
+  else toast.error(t('copyFailed'))
 }
 
 // ---- 新建任务（落地页，不是弹窗）----
@@ -3452,6 +3451,13 @@ onUnmounted(() => {
         @jump="jumpToMsg"
       />
 
+      <!-- 落地页错误横条：pageError 此前只传给「已进入会话」才渲染的 AiMessageList，
+           落地页拉档案/会话失败时没有任何可见提示。这里补顶部横条 + 重试。 -->
+      <div v-if="isNewTask && pageError" class="ai-landing-error" role="alert">
+        <span class="ai-landing-error-text">{{ pageError }}</span>
+        <button class="ai-landing-error-retry" @click="retryPageLoad">{{ t('aiRetry') }}</button>
+      </div>
+
       <!-- 空态落地页：新建任务不走弹窗，直接在这一页选空间/提问，提示词从输入框
            左侧的 + 面板取。空间随首条请求落库；标题下面直接是输入框，没有模式排。 -->
       <AiHero
@@ -3587,42 +3593,7 @@ onUnmounted(() => {
         @msg-click="onMsgClick"
         @msg-mouseup="onMsgMouseUp"
         @msg-contextmenu="onMsgContextMenu"
-      >
-        <template #plan>
-          <!-- 任务清单：AI 用 plan_update 把大任务拆成步骤，边做边勾。
-               位置由 AiMessageList 的 #plan 插槽提供——它现在是消息流里的一个
-               节点，回看历史会跟着一起滚走，也不再挤占消息区高度。
-               与工具卡 / 产物卡同用 details+summary：默认展开、点标题行收起；
-               收起后标题行仍留着「n/m 已完成」，不会连进度一起藏掉。 -->
-          <details
-            v-if="planHere"
-            class="ai-plan-card"
-            :open="!planCollapsed"
-            @toggle="onPlanToggle"
-          >
-            <summary
-              class="ai-plan-head"
-              :title="planCollapsed ? t('aiPlanExpand') : t('aiPlanCollapse')"
-            >
-              <ListChecks :size="13" class="ai-plan-ico" />
-              <span class="ai-plan-title">{{ t('aiPlanTitle') }}</span>
-              <span class="ai-plan-count">{{ t('aiPlanCount', { done: planDoneCount(planHere), total: planHere.items.length }) }}</span>
-              <ChevronDown :size="13" class="ai-plan-chev" />
-            </summary>
-            <ul class="ai-plan-list">
-              <li v-for="(it, i) in planHere.items" :key="i" class="ai-plan-item" :class="`is-${it.status}`">
-                <span class="ai-plan-box">
-                  <Check v-if="it.status === 'done'" :size="10" />
-                  <span v-else-if="it.status === 'doing'" class="ai-plan-doing" />
-                  <span v-else-if="it.status === 'stopped'" class="ai-plan-stopped" />
-                </span>
-                <span class="ai-plan-text">{{ it.text }}</span>
-              </li>
-            </ul>
-            <div v-if="planHere.note" class="ai-plan-note">{{ planHere.note }}</div>
-          </details>
-        </template>
-      </AiMessageList>
+      ></AiMessageList>
 
       <!-- 「回到底部」按钮由 AiMessageList 自己渲染：它跟着消息容器的滚动状态走，
            放在父组件里要靠事件回传，反而多一层状态。 -->
@@ -3919,112 +3890,6 @@ onUnmounted(() => {
    原来写 left/right:10% 是专门配 80% 的算法，输入框一换口径就立刻错位。 */
 /* 后台任务横条的样式随组件一起搬到 AiJobsBar.vue，这里只保留一份实现。 */
 
-/* 任务清单：消息流里的一张可折叠卡片（位置见 AiMessageList 的 #plan 插槽）。
-   宽度直接 100%——父级 .ai-msg-content-wrap 已经被 .ai-messages 的 padding 夹过
-   一次，再套 --ai-column-w 会比正文窄一截。圆角+描边与工具卡 / 产物卡同一层级，
-   收起后只剩一行标题，不再占着输入区上方的固定高度。 */
-.ai-plan-card {
-  width: 100%;
-  padding: var(--space-4) var(--space-5) 10px;
-  border: 1px solid var(--card-border-color);
-  border-radius: var(--radius-md);
-  background: var(--color-card-bg);
-  font-size: var(--text-sm);
-}
-
-.ai-plan-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  list-style: none;
-  cursor: pointer;
-  user-select: none;
-  outline: none;
-  color: var(--color-text-secondary);
-}
-.ai-plan-head::-webkit-details-marker { display: none; }
-.ai-plan-head:hover { color: var(--color-text-primary); }
-.ai-plan-ico { flex-shrink: 0; color: var(--color-text-muted); }
-.ai-plan-title { font-weight: 600; color: var(--color-text-primary); }
-
-/* 计数紧跟标题：收起时也要能一眼看到做到第几步 */
-.ai-plan-count {
-  color: var(--color-text-muted);
-  font-variant-numeric: tabular-nums;
-}
-/* 箭头靠右、收起时转 90°：与工具卡同一套开合语言 */
-.ai-plan-chev {
-  flex: 0 0 auto;
-  margin-left: auto;
-  color: var(--color-text-disabled);
-  transition: transform var(--transition-fast);
-}
-.ai-plan-card:not([open]) .ai-plan-chev { transform: rotate(-90deg); }
-
-.ai-plan-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin: 9px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.ai-plan-item {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  min-width: 0;
-  color: var(--color-text-secondary);
-}
-
-/* 三态圆圈：未完成空心、进行中呼吸点、完成细勾（参考任务面板的清单样式，
-   不用实心色块抢正文的视觉重心）。 */
-.ai-plan-box {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  margin-top: var(--space-1);
-  border: 1px solid var(--color-border);
-  border-radius: 50%;
-  color: var(--color-accent-text);
-}
-
-.ai-plan-item.is-done .ai-plan-box {
-  border-color: var(--color-success);
-  color: var(--color-success);
-}
-
-.ai-plan-item.is-done .ai-plan-text { color: var(--color-text-muted); }
-
-.ai-plan-item.is-doing .ai-plan-box { border-color: var(--color-accent); }
-
-.ai-plan-doing {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-accent);
-  animation: ai-inject-pulse 1.2s ease-in-out infinite;
-}
-
-/* 这一轮结束时还挂在「正在做」的那一条：停掉呼吸动画，改成一根静止的短横。
-   留一个还在动的圈最误导——任务已经结束了，界面上不该有东西看起来还在跑。 */
-.ai-plan-item.is-stopped .ai-plan-box { border-color: var(--color-warning-border); }
-
-.ai-plan-stopped {
-  width: 6px;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--color-warning);
-}
-
-.ai-plan-text { min-width: 0; overflow-wrap: anywhere; }
-
-.ai-plan-note { margin-top: 7px; color: var(--color-text-muted); font-size: var(--text-sm); }
-
 /* 等待插入的消息：贴在输入框正上方，宽度与输入框同口径（--ai-column-w + margin auto），
    否则它会从窗口左边一直拉到右边，比输入框宽一截，看起来像另一块区域。
    只靠一条浅底与左侧圆点分层，不加边框——它是一条临时状态，不是一张卡片。 */
@@ -4227,5 +4092,41 @@ onUnmounted(() => {
   color: var(--color-text-muted);
   cursor: pointer;
 }
-.ai-status-pill:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }</style>
+.ai-status-pill:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+
+/* 落地页顶部错误横条：拉档案/会话失败时唯一可见的反馈，重试按钮重跑对应加载。 */
+.ai-landing-error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin: var(--space-3) var(--space-5) 0;
+  padding: 8px var(--space-4);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+.ai-landing-error-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+  line-height: 1.5;
+}
+.ai-landing-error-retry {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-danger);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.ai-landing-error-retry:hover {
+  background: var(--color-danger);
+  color: var(--color-bg-primary);
+}
+</style>
 

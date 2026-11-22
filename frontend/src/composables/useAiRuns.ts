@@ -649,7 +649,11 @@ export function useAiRuns(deps: AiRunsDeps) {
               .filter((it: { text: string }) => it.text)
             if (!items.length) break
             const key = run.convId || run.rid
-            planCards.set(key, { items, note: String(data.note || '') })
+            const card = { items, note: String(data.note || '') }
+            planCards.set(key, card)
+            // 同时记到这一轮：固化消息时挂到「生成它的那条回复」上，
+            // 清单才跟着对话走，而不是浮在消息流末尾的下一轮下面。
+            run.plan = card
             break
           }
           case 'token':
@@ -979,6 +983,9 @@ export function useAiRuns(deps: AiRunsDeps) {
                   // 规则文件跟着这条回复走，而不是挂在页面顶上：用户事后想问的是
                   // 「这条回答当时读了什么约定」，刷新后消失也无所谓（下次提问会重读）。
                   if (run.rules.length) msg.rules = run.rules.slice()
+                  // 清单跟着「生成它的这条回复」走。plan 事件与正文同属这一轮，
+                  // 挂在这条消息上，下一轮回答就不会平白顶着上一轮的清单。
+                  if (run.plan) msg.plan = run.plan
                   messages.value.push(msg as AIMessage)
                   // 复用流式期已渲染好的块 HTML，避免落地瞬间整条重新解析
                   primeMessageBlocks(msg.id as string, content, run.blocks.map((b) => b.html))
@@ -1081,6 +1088,8 @@ export function useAiRuns(deps: AiRunsDeps) {
             msg.tool_calls = serializeTools(run.tools)
             msg.tool_rounds = countToolRounds(run.tools)
           }
+          // 与正常完成同口径：清单挂到这条中断的回复上。
+          if (run.plan) msg.plan = run.plan
           messages.value.push(msg as AIMessage)
           // 同样复用流式期已渲染的块
           primeMessageBlocks(aid, run.text || '', run.blocks.map((b) => b.html))

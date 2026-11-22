@@ -257,7 +257,15 @@ async function reloadTab(tab: SideTab) {
   if (!tab.path) return
   try {
     const data = unwrap(await AIReadPreviewFile(tab.path)) as AIFilePreview
-    tab.data = data
+    // 内容没变就别换 data 对象：iframe 的 srcdoc 绑在它上面，无意义的对象
+    // 替换会让 Vue 重写 attribute → iframe 白白重载一次（AI 写文件期间尤其明显）。
+    if (tab.data && tab.data.kind === data.kind &&
+        tab.data.content === data.content && tab.data.dataUrl === data.dataUrl) {
+      tab.data.size = data.size
+      tab.data.modTime = data.modTime
+    } else {
+      tab.data = data
+    }
     tab.stale = false
     if (tab.editing) tab.draft = data.content ?? ''
     // CM 只在挂载时读 value：不重挂的话编辑框还停在旧文本上
@@ -333,6 +341,47 @@ watch(
     }
   },
 )
+
+// —— HTML 渲染 iframe 的 srcdoc ——
+// 直接在模板里绑 data.content 时，iframe 创建与 srcdoc 赋值挤在同一帧：
+// WebView2 会先导航 about:blank 再导航 srcdoc，大页面两次导航互相盖，表现就是
+// 「点开白屏好久，切一次源码再切回来就好了」。这里把用户手动切回来的有效路径
+// 固化下来——iframe 先以空文档挂上，下一拍再写内容。
+const frameSrcDoc = ref('')
+let frameTimer: ReturnType<typeof setTimeout> | null = null
+let frameTabKey = 0
+
+const frameKey = computed(() => {
+  const d = activeTab.value
+  return d && d.data?.kind === 'html' && !d.source ? d.id : 0
+})
+const frameContent = computed(() => {
+  const d = activeTab.value
+  return d && d.data?.kind === 'html' && !d.source ? (d.data.content ?? '') : ''
+})
+
+watch([frameKey, frameContent], ([key, content]) => {
+  if (frameTimer !== null) { clearTimeout(frameTimer); frameTimer = null }
+  if (!key) {
+    frameTabKey = 0
+    frameSrcDoc.value = ''
+    return
+  }
+  if (key !== frameTabKey) {
+    // 新开 / 从源码切回：先空后写，跟手动切换走同一条路径
+    frameTabKey = key
+    frameSrcDoc.value = ''
+    frameTimer = setTimeout(() => {
+      frameTimer = null
+      frameSrcDoc.value = frameContent.value
+    }, 0)
+    return
+  }
+  // 同一页内容真被 AI 改了：直接换 srcdoc（字符串相同 Vue 会跳过，不会误重载）
+  frameSrcDoc.value = content
+}, { immediate: true })
+
+onUnmounted(() => { if (frameTimer !== null) clearTimeout(frameTimer) })
 
 // HTML 标签页：渲染视图 ↔ 源码视图。切回渲染前先把未保存的改动存掉，
 // 否则 iframe 读的还是 data.content（旧内容），用户会以为改动丢了。
@@ -464,7 +513,8 @@ defineExpose({ ensureTab, openArtifact })
             v-if="activeTab.data.kind === 'html' && !activeTab.source"
             class="ai-side-frame"
             sandbox="allow-scripts"
-            :srcdoc="activeTab.data.content"
+            :srcdoc="frameSrcDoc"
+            referrerpolicy="no-referrer"
           ></iframe>
           <div v-else-if="activeTab.data.kind === 'image'" class="ai-side-imgwrap">
             <img class="ai-side-img" :src="activeTab.data.dataUrl" :alt="activeTab.data.name" />

@@ -89,6 +89,27 @@ var readOnlyExcludes = map[string]bool{
 	"plan_update":    true,
 }
 
+// noFileWriteExcludes 给「能跑命令、但不能用文件工具改代码」的角色（tester / ops）。
+// run_command 本身是 LevelWrite，必须留着才能跑测试、查端口；shell 里理论上仍能
+// 写盘，所以这里撤的是 file_edit / file_write 这两个显式写工具，不是假装命令无副作用。
+var noFileWriteExcludes = map[string]bool{
+	"file_write":     true,
+	"file_edit":      true,
+	"project_memory": true,
+	"plan_update":    true,
+}
+
+// noCommandExcludes 给「能写文件、但不跑命令」的角色（writer）。
+//
+// agent 注册表里**没有 file 域**：file_edit / file_write 与 run_command 同在 code 域，
+// 所以不能靠关掉 code 域来禁命令，只能按工具名逐个撤。也正因如此，writer 的写权限
+// 覆盖工作区内任意文件——ToolFilter 没有路径白名单，别把它描述成「只能写文档目录」。
+var noCommandExcludes = map[string]bool{
+	"run_command":    true,
+	"project_memory": true,
+	"plan_update":    true,
+}
+
 // code 域里的**只读**工具（git_status / git_diff / dir_list / check_workdir /
 // job_status / job_output / tool_result_read）。只读角色要能拿到它们：
 //
@@ -104,16 +125,40 @@ var agentRoleSpecs = map[string]agentRoleSpec{
 		exclude:    readOnlyExcludes,
 		summary:    "只读排查：读文件、搜代码、看目录、看 git 改动、查网页，不改任何东西",
 	},
-	"code": {
-		maxLevel:   mcpsrv.LevelWrite,
-		categories: []string{mcpsrv.CategoryFile, mcpsrv.CategoryWeb, mcpsrv.CategoryCode},
-		summary:    "读写代码：读文件、改文件、跑命令（高危命令仍被拒）",
-	},
 	"review": {
 		maxLevel:   mcpsrv.LevelRead,
 		categories: []string{mcpsrv.CategoryFile, mcpsrv.CategoryWeb, mcpsrv.CategoryCode},
 		exclude:    readOnlyExcludes,
 		summary:    "只读审阅：读代码、看 diff、给结论，不改任何东西",
+	},
+	"auditor": {
+		maxLevel:   mcpsrv.LevelRead,
+		categories: []string{mcpsrv.CategoryFile, mcpsrv.CategoryWeb, mcpsrv.CategoryCode},
+		exclude:    readOnlyExcludes,
+		summary:    "只读安全审计：查依赖漏洞、危险配置与敏感信息，给风险清单，不改任何东西",
+	},
+	"tester": {
+		maxLevel:   mcpsrv.LevelWrite,
+		categories: []string{mcpsrv.CategoryFile, mcpsrv.CategoryWeb, mcpsrv.CategoryCode},
+		exclude:    noFileWriteExcludes,
+		summary:    "测试验证：可跑测试与只读命令、读代码，撤掉了显式文件写入工具（shell 里仍可能写盘）",
+	},
+	"ops": {
+		maxLevel:   mcpsrv.LevelWrite,
+		categories: []string{mcpsrv.CategoryFile, mcpsrv.CategoryWeb, mcpsrv.CategoryCode},
+		exclude:    noFileWriteExcludes,
+		summary:    "运维排查：可跑命令、看服务/端口/后台任务与日志，撤掉了显式文件写入工具",
+	},
+	"writer": {
+		maxLevel:   mcpsrv.LevelWrite,
+		categories: []string{mcpsrv.CategoryFile, mcpsrv.CategoryWeb, mcpsrv.CategoryCode},
+		exclude:    noCommandExcludes,
+		summary:    "文档写作：可读写文件、查网页，不跑命令、不改计划与项目记忆（写权限没有路径白名单）",
+	},
+	"code": {
+		maxLevel:   mcpsrv.LevelWrite,
+		categories: []string{mcpsrv.CategoryFile, mcpsrv.CategoryWeb, mcpsrv.CategoryCode},
+		summary:    "读写代码：读文件、改文件、跑命令（高危命令仍被拒）",
 	},
 }
 
@@ -134,7 +179,28 @@ func (s agentRoleSpec) filter() *ToolFilter {
 //
 // map 遍历无序，而这段文案会进每轮请求的 system/工具描述：顺序随机会让上游的
 // 前缀缓存每轮都失效，白付一遍钱。
-var agentRoleOrder = []string{"explore", "review", "code"}
+var agentRoleOrder = []string{"explore", "review", "auditor", "tester", "ops", "writer", "code"}
+
+// agentRoleNames 生成短名单（explore（只读排查）/ ...），工具 schema 与错误提示共用。
+//
+// 这两处曾经各写死一份角色说明，加角色时漏了一处——模型看到的是旧名单，
+// 用户却已经能用新角色。从 specs 生成：summary 的中文冒号前就是短说明。
+// 顺序取 agentRoleOrder，固定不变，避免每轮请求的前缀缓存因 map 遍历顺序失效。
+func agentRoleNames() string {
+	parts := make([]string, 0, len(agentRoleOrder))
+	for _, name := range agentRoleOrder {
+		spec, ok := agentRoleSpecs[name]
+		if !ok {
+			continue
+		}
+		brief := spec.summary
+		if i := strings.Index(brief, "："); i > 0 {
+			brief = brief[:i]
+		}
+		parts = append(parts, name+"（"+brief+"）")
+	}
+	return strings.Join(parts, " / ")
+}
 
 // agentRoleBrief 渲染「每个角色能干什么、不能干什么」。
 //
@@ -174,14 +240,15 @@ func (a *AIService) registerSpawnTool() {
 			// 于是串行分治的大任务全留在主循环里硬跑（实机反馈 U2）。
 			"什么时候值得派：任务超过三步，或者要分别去看多个目录/多个问题/多个文件——" +
 			"**默认把能独立完成的条目派出去**，主对话只留需要串起来判断的部分。串行分治也算，不要求能同时跑。" +
-			"按条目性质选角色：调研/排查/审阅用只读的 explore / review，要动手改代码的独立条目用 code；" +
+			"按条目性质选角色（" + agentRoleNames() + "）：排查/审阅/安全审计用只读角色，" +
+			"跑测试、查环境用 tester / ops，写文档用 writer，动手改代码的独立条目用 code；" +
 			"别因为怕子 agent 改文件就把活全留给自己。" +
 			"不适合：需要你来判断的取舍、需要跟用户确认的事、一句话就能答完的问题。",
 		InputSchema: mcpsrv.Schema(
-			"派子 agent。role 决定它能用哪些工具：explore/review 只读，code 可改文件。",
+			"派子 agent。role 决定它能用哪些工具："+agentRoleNames()+"。",
 			[]string{"role", "task"},
 			map[string]any{
-				"role": mcpsrv.Str("角色：explore（只读排查）/ code（读写代码）/ review（只读审阅）"),
+				"role": mcpsrv.Str("角色：" + agentRoleNames()),
 				"task": mcpsrv.Str("交给子 agent 的完整任务：写清目标、要看的范围、期望产出。它看不到当前对话"),
 				"cwd":  mcpsrv.Str("子 agent 的工作目录（必须在当前工作目录之内）。不传则继承当前目录"),
 			},
@@ -224,7 +291,7 @@ func (a *AIService) handleSpawnAgent(ctx context.Context, args map[string]any) (
 	role := strings.ToLower(strings.TrimSpace(mcpsrv.Arg(args, "role")))
 	spec, ok := agentRoleSpecs[role]
 	if !ok {
-		return nil, fmt.Errorf("未知角色 %q。可用：explore（只读排查）/ code（读写代码）/ review（只读审阅）", role)
+		return nil, fmt.Errorf("未知角色 %q。可用：%s", role, agentRoleNames())
 	}
 	task := strings.TrimSpace(mcpsrv.Arg(args, "task"))
 	if task == "" {

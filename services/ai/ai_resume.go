@@ -147,6 +147,14 @@ func resumeHintFor(conv *db.AIConversation, message string) string {
 	var b strings.Builder
 	if isResumeCommand(message) {
 		b.WriteString("\n\n【续跑】用户这句话是在让你接着上一次做，不是新任务。\n")
+		// 硬性约束必须前置：整段提示有 aiResumeSegmentRune 的硬上限，清单条目
+		// 多时尾部会被 clipRunes 截掉。原先「不要另起新清单」写在末尾，恰好是
+		// 超长时最先丢的那句——模型看不到就照旧重建，这正是续跑后清单变新的
+		// 一个成因。前置后即使后半被截，约束仍一定留在模型能看到的地方。
+		b.WriteString("硬性要求：用 plan_update 更新下面这份清单——" +
+			"保留每条的文字与顺序，只改各条的 status（完成的标 done、接着做的标 doing）；" +
+			"不要改写条目、不要增删、不要重新编号，更不要另起一份新清单。" +
+			"只有确认用户换了目标时才允许重建。\n")
 	} else {
 		b.WriteString("\n\n【已有清单】这条对话的清单还没做完（见下）。\n")
 	}
@@ -168,10 +176,7 @@ func resumeHintFor(conv *db.AIConversation, message string) string {
 		b.WriteString(clipRunes(note, aiResumeItemRunes))
 		b.WriteString("\n")
 	}
-	if isResumeCommand(message) {
-		b.WriteString("请先调用 plan_update 更新这份清单（把已完成的标 done、下一条标 doing），" +
-			"不要另起一份新清单；若用户其实想做别的事，再重建。")
-	} else {
+	if !isResumeCommand(message) {
 		b.WriteString("若用户这次仍是同一件事，请更新这份清单而不是重建；若明显是另一件事，可以重建。")
 	}
 	return clipRunes(b.String(), aiResumeSegmentRune)

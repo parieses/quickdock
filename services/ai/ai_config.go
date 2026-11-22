@@ -33,13 +33,15 @@ const (
 
 // AIProfile 一个完整的 AI 配置档案（含 API Key，前端回填时为明文）
 type AIProfile struct {
-	ID               string  `json:"id"`
-	Name             string  `json:"name"`
-	Provider         string  `json:"provider"`
-	BaseURL          string  `json:"baseURL"`
-	APIKey           string  `json:"apiKey"`
-	Model            string  `json:"model"`
-	Temperature      float64 `json:"temperature"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Provider    string  `json:"provider"`
+	BaseURL     string  `json:"baseURL"`
+	APIKey      string  `json:"apiKey"`
+	Model       string  `json:"model"`
+	Temperature float64 `json:"temperature"`
+	// MaxTokens 已废弃：老档案里可能还有非零值，但加载时一律按模型重推，
+	// 保存时统一清零。字段本身保留是为了兼容旧数据与运行期副本调整。
 	MaxTokens        int     `json:"maxTokens"`
 	SystemPrompt     string  `json:"systemPrompt"`
 	TopP             float64 `json:"topP"`
@@ -320,11 +322,12 @@ func (a *AIService) buildAIProfile(s AIProfile) (AIProfile, bool) {
 		}
 		cfg.APIKey = dec
 	}
-	if cfg.MaxTokens <= 0 {
-		// 缺省不再写死 8192：按模型给（见 ai_model_caps.go）。
-		// 认不出来的模型仍回落到 aiDefaultMax，行为与以前一致。
-		cfg.MaxTokens = autoMaxTokensOf(cfg.Model, contextWindowOf(cfg))
-	}
+	// MaxTokens 输入项已下线：历史档案里留下的旧值不再生效。
+	// 每次构建都按**当前模型**重新推导，换模型后无需清缓存或手改配置；
+	// 认不出来的模型仍回落到 aiDefaultMax（见 ai_model_caps.go）。
+	// 这里只覆盖「配置来源」，不影响运行期的预算预留 / 截断抬高——那些改的是
+	// 本次调用手上的 cfg 副本，不回写档案。
+	cfg.MaxTokens = autoMaxTokensOf(cfg.Model, contextWindowOf(cfg))
 	if cfg.Temperature == 0 {
 		cfg.Temperature = aiDefaultTemp
 	}
@@ -499,9 +502,9 @@ func (a *AIService) AIListProfiles() *services.ApiResult {
 				p.APIKey = maskAPIKey(dec)
 			}
 		}
-		if p.MaxTokens <= 0 {
-			p.MaxTokens = aiDefaultMax
-		}
+		// 输出上限已改成按模型自动：给前端 0 表示「自动」，别用 aiDefaultMax
+		// 填回去——前端保存时会把非零值原样写回，老配置就一轮轮复活。
+		p.MaxTokens = 0
 		if p.Temperature == 0 {
 			p.Temperature = aiDefaultTemp
 		}
@@ -547,13 +550,14 @@ func (a *AIService) AISaveProfiles(req AISaveProfilesRequest) *services.ApiResul
 			id = uuid.New().String()
 		}
 		s := aiProfileStored{
-			ID:               id,
-			Name:             p.Name,
-			Provider:         p.Provider,
-			BaseURL:          strings.TrimRight(p.BaseURL, "/"),
-			Model:            p.Model,
-			Temperature:      p.Temperature,
-			MaxTokens:        p.MaxTokens,
+			ID:          id,
+			Name:        p.Name,
+			Provider:    p.Provider,
+			BaseURL:     strings.TrimRight(p.BaseURL, "/"),
+			Model:       p.Model,
+			Temperature: p.Temperature,
+			// 配置项已下线：落库统一清零，顺手迁移老档案里的 8192。
+			MaxTokens:        0,
 			SystemPrompt:     p.SystemPrompt,
 			TopP:             p.TopP,
 			FrequencyPenalty: p.FrequencyPenalty,
@@ -629,7 +633,7 @@ func (a *AIService) AIGetConfig() *services.ApiResult {
 	}
 	cfg, ok := a.getActiveAIProfile()
 	if !ok {
-		return services.Ok(AIConfig{Provider: "openai", Temperature: aiDefaultTemp, MaxTokens: aiDefaultMax})
+		return services.Ok(AIConfig{Provider: "openai", Temperature: aiDefaultTemp})
 	}
 	return services.Ok(AIConfig{
 		Provider:    cfg.Provider,
@@ -637,7 +641,8 @@ func (a *AIService) AIGetConfig() *services.ApiResult {
 		APIKey:      maskAPIKey(cfg.APIKey),
 		Model:       cfg.Model,
 		Temperature: cfg.Temperature,
-		MaxTokens:   cfg.MaxTokens,
+		// 输出上限按模型自动，不再回显持久值（否则旧接口拿到 8192 又会写回去）。
+		MaxTokens: 0,
 	})
 }
 
@@ -705,9 +710,8 @@ func (a *AIService) AISetConfig(cfg AIConfig) *services.ApiResult {
 		if cfg.Temperature != 0 {
 			cur.Temperature = cfg.Temperature
 		}
-		if cfg.MaxTokens != 0 {
-			cur.MaxTokens = cfg.MaxTokens
-		}
+		// MaxTokens 配置项已下线：旧接口的这个字段不再写进档案。
+		// 落库由 AISaveProfiles 统一清零，这里别再给老值一条复活路径。
 		profiles[idx] = cur
 	} else {
 		profiles = append(profiles, AIProfile{
@@ -718,7 +722,7 @@ func (a *AIService) AISetConfig(cfg AIConfig) *services.ApiResult {
 			APIKey:      cfg.APIKey,
 			Model:       cfg.Model,
 			Temperature: cfg.Temperature,
-			MaxTokens:   cfg.MaxTokens,
+			MaxTokens:   0,
 		})
 	}
 	active := "default"

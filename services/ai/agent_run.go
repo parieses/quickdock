@@ -116,7 +116,8 @@ type AgentRunReq struct {
 	// 顶层为空 → 第一次派活时由 agentScope 懒创建（见 agent_scope.go）。
 	RunID  string
 	NodeID string
-	// Role 子 agent 的角色（explore / code / review），只用于系统提示里的自我说明。
+	// Role 子 agent 的角色（见 agentRoleSpecs：explore / review / auditor /
+	// tester / ops / writer / code），只用于系统提示里的自我说明。
 	// 工具面由 ToolFilter 决定——提示词说「你是只读的」而工具其实可写，
 	// 是比不说更糟的谎。
 	Role string
@@ -641,6 +642,11 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 				status, errMsg := finalRunStatus(res)
 				if uerr := a.App.DB.UpdateAgentRunStatus(runID, status, errMsg); uerr != nil {
 					logger.W("[ai] 回填 run 终态失败 run=%s: %v", runID, uerr)
+				}
+				// run 终态不等于 lead 节点终态：子 agent 各有自己的写入点，
+				// 顶层节点只由这里收口，否则「已完成」的组里 lead 一直转圈。
+				if uerr := a.App.DB.FinishRootNode(runID, status); uerr != nil {
+					logger.W("[ai] 回填 lead 节点终态失败 run=%s: %v", runID, uerr)
 				}
 			}()
 		}

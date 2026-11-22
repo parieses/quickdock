@@ -18,7 +18,7 @@ import TraceStepDetail from './TraceStepDetail.vue'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
-import { toolTarget, toolVerb } from '../utils/aiTools'
+import { agentRoleLabel, toolTarget, toolVerb } from '../utils/aiTools'
 import { compactPastedBlocks } from '../utils/aiPaste'
 import type { AIToolCall } from '../types/ai'
 import {
@@ -536,6 +536,7 @@ onBeforeUnmount(() => {
               <!-- 副行放次要信息：role · token · 耗时。主行不再塞 7 个元素互相挤压。 -->
               <div class="trace-child-task-sub">
                 <span class="trace-child-task-role">{{ c.role }}</span>
+                <span v-if="agentRoleLabel(c.role, t)" class="trace-role-label">{{ agentRoleLabel(c.role, t) }}</span>
                 <span v-if="c.tokens" class="trace-sub-metric">{{ fmtTokens(c.tokens) }} tok</span>
                 <span v-if="c.elapsedMs" class="trace-sub-metric">{{ fmtElapsed(c.elapsedMs) }}</span>
               </div>
@@ -687,6 +688,7 @@ onBeforeUnmount(() => {
                 <div v-key-click class="trace-node-head" @click="toggleNode(n.id)">
                   <component :is="expanded[n.id] ? ChevronDown : ChevronRight" :size="11" class="trace-node-caret" />
                   <span class="trace-node-role">{{ n.role }}</span>
+                  <span v-if="agentRoleLabel(n.role, t)" class="trace-role-label">{{ agentRoleLabel(n.role, t) }}</span>
                   <span class="trace-node-task">{{ traceText(n.task) }}</span>
                   <span class="trace-node-status" :class="`is-${n.status}`">{{ statusText(n.status) }}</span>
                 </div>
@@ -967,17 +969,23 @@ onBeforeUnmount(() => {
 .trace-node-status.is-failed { color: var(--color-danger); }
 .trace-node-status.is-canceled { color: var(--color-warning); }
 
-/* 抽屉顶部的子任务区：固定在头部下方，不随下面的 run 列表滚动。 */
+/* 抽屉顶部的子任务区：固定在头部下方，不随下面的 run 列表滚动。
+   这里要限高！一轮派十几个子 agent 时，整列铺开会把下面的「运行轨迹」挤出
+   弹窗——用户点开轨迹是想逐条看步骤的，结果只能看到子任务名单。限高后自己
+   内部滚，两种视图都保住下方的轨迹区。 */
 .trace-top-children {
   padding: var(--space-2) var(--space-4) 0;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
+  max-height: min(240px, 34vh);
+  overflow-y: auto;
 }
 /* 「子任务」入口下这是唯一的内容区：整段会话的子任务可能很多，
    让它自己吃掉剩余高度并滚动，不能像轨迹模式那样只占一小条。 */
 .trace-top-children.is-children-view {
   flex: 1;
   min-height: 0;
+  max-height: none;
   border-bottom: 0;
   overflow-y: auto;
 }
@@ -1100,6 +1108,13 @@ onBeforeUnmount(() => {
   font-size: var(--text-2xs);
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
+}
+/* 角色后的中文职能（排查/测试/开发…）：role 是英文标识，补一个中文让
+   一眼能看出这个子任务是干什么的两个字。两处列表共用。 */
+.trace-role-label {
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
 }
 
 /* 单个子任务的停止：默认淡出，悬停整行时才显形——子任务一多，一排红图标

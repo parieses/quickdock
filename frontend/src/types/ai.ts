@@ -274,6 +274,10 @@ export interface AIMessage {
   tool_calls?: string
   // 用了几轮工具调用（0/undefined = 纯文本回答）
   tool_rounds?: number
+  // 这一轮产生的任务清单快照（本会话内固化时挂上）。清单按会话存一份，
+  // 但显示要跟着「生成它的那条回复」走，否则下一轮回答下面会挂着上一轮的清单。
+  // 刷新后由父组件按会话的 plan 回填到最后一条 assistant 消息上。
+  plan?: { items: Array<{ text: string; status: string }>; note: string }
 }
 
 // 一条工具调用（前端展示用）。running 只在流式期间为 true：

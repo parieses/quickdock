@@ -254,6 +254,9 @@ const TOOL_VERB: Record<string, string> = {
   note_search: 'aiToolVerbSearch', note_create: 'aiToolVerbAdd',
   clipboard_list: 'aiToolVerbQuery', clipboard_search: 'aiToolVerbSearch',
   robot_notify: 'aiToolVerbNotify', app_info: 'aiToolVerbQuery', diag_run: 'aiToolVerbCheck',
+  // 编排清单是运行轨迹里最常见的一步：没映射的话二十多个步骤全写「调用」，
+  // 等于什么都没说。plan（事件）与 plan_update（工具）在下面各自有中文名。
+  plan_update: 'aiToolVerbPlan',
 }
 
 // toolVerb 按工具名前缀兜底：新工具没登记时至少能看出它是读、改、跑还是查。
@@ -261,6 +264,25 @@ const TOOL_VERB: Record<string, string> = {
 export function toolVerb(name: string, t: (key: string) => string): string {
   const k = TOOL_VERB[name]
   return k ? t(k) : t('aiToolVerbCall')
+}
+
+// 子 agent 角色的职能说明：成员行只显示角色名（Explore/Code），用户看不出
+// 这个角色到底能干什么。7 种派活角色与后端 agentRoleSpecs 对应，另有 lead
+// 是编排树里的主 agent；未知角色返回空串（卡片上就不显示这一行，不硬塞「未知」）。
+const AGENT_ROLE_VERB: Record<string, string> = {
+  lead: 'aiAgentRoleLead',
+  explore: 'aiAgentRoleExplore',
+  review: 'aiAgentRoleReview',
+  auditor: 'aiAgentRoleAuditor',
+  tester: 'aiAgentRoleTester',
+  ops: 'aiAgentRoleOps',
+  writer: 'aiAgentRoleWriter',
+  code: 'aiAgentRoleCode',
+}
+
+export function agentRoleLabel(role: string, t: (key: string) => string): string {
+  const k = AGENT_ROLE_VERB[(role || '').trim().toLowerCase()]
+  return k ? t(k) : ''
 }
 
 // 目标：从参数里挑一个「这条卡片在说谁」的值。

@@ -13,11 +13,13 @@ import { computed, nextTick, ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAiCostPreference } from '../composables/useAiCostPreference'
 import {
-  ArrowDown, Bot, Check, ChevronDown, ChevronRight, Copy, ExternalLink, FileText, Globe, Loader2, Play, Sparkles, StickyNote, Undo2, Users, Wrench,
+  ArrowDown, Bot, Check, ChevronDown, ChevronRight, Copy, ExternalLink, FileText, Globe, Loader2, Play, Sparkles, StickyNote, Undo2, Wrench,
 } from '@lucide/vue'
 import AgentRunTree from './AgentRunTree.vue'
+import AgentTeamCard from './AgentTeamCard.vue'
 import AiDiffView from './AiDiffView.vue'
 import AiPastedContent from './AiPastedContent.vue'
+import AiPlanCard from './AiPlanCard.vue'
 import type { LiveBlock } from '../composables/useAiMarkdownBlocks'
 import type { AICompact, AIRun } from '../utils/aiRuns'
 import { pickActiveRun } from '../utils/aiRuns'
@@ -26,8 +28,8 @@ import type {
   AIArtifact, AICheckpointView, AIJobRow, AIMessage, AIMsgImage, AIRuleFile, AISource, AIStreamStat, AIToolCall,
 } from '../types/ai'
 import {
-  artifactsFromCalls, artifactsOf, hostOf, jobIdOf, rulesOf, rulesTitle, runIDOf, sourcesFromCalls, sourcesOf, spawnArgs,
-  spawnPartial, spawnResultText, toolIcon, toolList, toolOutput, toolResultLang, toolTarget, toolVerb as aiToolVerb,
+  artifactsFromCalls, artifactsOf, hostOf, jobIdOf, rulesOf, rulesTitle, runIDOf, sourcesFromCalls, sourcesOf,
+  toolIcon, toolList, toolOutput, toolResultLang, toolTarget, toolVerb as aiToolVerb,
 } from '../utils/aiTools'
 
 const props = defineProps<{
@@ -95,6 +97,8 @@ const reasoningText = computed(() => activeRun.value?.reasoning ?? '')
 // 已归档的各轮思考（后端在轮次边界发 reasoning_round）。
 const streamReasonRounds = computed(() => activeRun.value?.reasonRounds ?? NO_REASON_ROUNDS)
 const streamTools = computed<AIToolCall[]>(() => activeRun.value?.tools ?? NO_TOOLS)
+/** 流式普通工具：派活交给 AgentTeamCard 单独成卡，不混进工具列表。 */
+const plainStreamTools = computed(() => streamTools.value.filter((tc) => tc.name !== 'spawn_agent'))
 const streamBlocks = computed<LiveBlock[]>(() => activeRun.value?.blocks ?? NO_BLOCKS)
 const runRules = computed<AIRuleFile[]>(() => activeRun.value?.rules ?? NO_RULES)
 // 这一轮的上下文压缩记录：通常一行都没有，长会话里才会有 1～2 行。
@@ -376,39 +380,20 @@ function toolVerb(name: string): string {
   return aiToolVerb(name, t)
 }
 
-/**
- * spawnProgress 单个派活卡片的实时进度行。
- *
- * **只讲这个子 agent 自己在干什么**（第 N 轮 · 正在搜代码 · 2.1s）。
- * 「这一组完成几个」属于整组的状态，曾经也拼在这里，结果同组五六张卡各写一遍
- * 「3/5」——看起来像五个不同的任务都做到 3/5。它现在由 `spawnGroup` 统一渲染在
- * 组尾一行（见模板里的 ai-spawn-group）。
- */
-function spawnProgress(tc: AIToolCall): string {
-  const bits: string[] = []
-  const c = tc.child
-  if (c?.round) bits.push(t('aiSpawnRound', { n: c.round }))
-  if (c?.phase === 'tool' && c.tool) bits.push(toolVerb(c.tool))
-  else if (c?.phase === 'tool_done' && c.ms) bits.push(fmtElapsed(c.ms))
-  return bits.join(' · ')
+// —— 派活 = 团队成员卡片 ——
+// 编排树（AgentRunTree.vue）是消息底部按 run_id 拉的完整树，流式期看不到；
+// 消息里的派活走 AgentTeamCard.vue：一人一卡的成员视图，流式/历史都渲染。
+// 这里只负责把 tool_calls 拆成「普通工具」和「派活」两拨，分别交给两处模板。
+
+/** 派活调用子集，交给 AgentTeamCard 渲染成团队成员卡。 */
+function spawnsOf(list: AIToolCall[]): AIToolCall[] {
+  return list.filter((tc) => tc.name === 'spawn_agent')
 }
 
-/**
- * spawnGroup 本轮派活组的汇总（贴在整个工具列表最下方那一行）。
- *
- * 进度帧是按组广播的：同组每条 spawn_agent 卡片拿到的 groupDone/groupTotal
- * 完全一样，所以随便取一条就行。取最后一条是因为它最可能带最新帧
- * （后面的卡片是同一轮里更晚创建的那几条）。
- */
-const spawnGroup = computed(() => {
-  const spawns = streamTools.value.filter((tc) => tc.name === 'spawn_agent')
-  if (!spawns.length) return null
-  const last = spawns[spawns.length - 1]
-  const total = last.groupTotal || 0
-  // 只派了一个时不报「0/1 完成」——那一路的卡片自己就有耗时。
-  if (total < 2) return null
-  return { done: last.groupDone || 0, total, elapsedMs: last.groupElapsedMs || 0 }
-})
+/** 普通工具子集：工具列表只显示这些，派活不混在里面。 */
+function plainToolsOf(m: AIMessage): AIToolCall[] {
+  return toolsOf(m).filter((tc) => tc.name !== 'spawn_agent')
+}
 
 // —— 工具输出的折叠 ——
 //
@@ -469,6 +454,21 @@ function expandToolRes(id: string) {
 // 比慢一点糟得多。分批渲染没有动态高度问题，代价只是「翻到很早的历史要多点一次」。
 const aiMsgRenderTail = 200
 
+/**
+ * 最后一条带清单的 assistant 消息 = 当前清单，更早的是历史归档。
+ *
+ * 续跑（用户发「继续」）时模型可能另建一份新清单：旧清单跟着旧消息留在历史里，
+ * 冻结在 0/5 看着像没做完。把非最新的清单标记成归档，默认折叠并注明「历史」，
+ * 避免同一屏里两张清单并排时误以为任务又回到起点。
+ */
+const latestPlanMsgId = computed(() => {
+  for (let i = shownMessages.value.length - 1; i >= 0; i--) {
+    const m = shownMessages.value[i]
+    if (m.role === 'assistant' && m.plan) return m.id
+  }
+  return ''
+})
+
 const renderLimit = ref(aiMsgRenderTail)
 const olderHidden = computed(() => Math.max(0, props.messages.length - renderLimit.value))
 const shownMessages = computed(() =>
@@ -528,6 +528,19 @@ function msgClock(s: string | undefined): string {
   const v = (s || '').trim()
   if (v.length < 16 || v[7] !== '-' || v[13] !== ':') return ''
   return v.slice(5, 10) + ' ' + v.slice(11, 16)
+}
+
+/**
+ * 回复完成时刻：给消息脚注的统计行补上「这条什么时候跑完的」。
+ * 不走 msgClock 的切片——切会话刚定格的消息 created_at 是 new Date().toISOString()
+ * （UTC 的 Z 结尾），库里读回的却是带 +08:00 的字面量；直接切片会把新消息
+ * 显示成 UTC，差 8 小时。交给 Date 解析，两种格式都落到本地 HH:mm。
+ */
+function finishClock(s: string | undefined): string {
+  if (!s) return ''
+  const d = new Date(s)
+  if (Number.isNaN(d.getTime())) return ''
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
 }
 
 // —— 工具卡片的展开状态 ——
@@ -731,7 +744,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
           v-for="m in shownMessages"
           :key="m.id"
           :data-msg-id="m.id"
-          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), costLines.get(m.id), locale, (m.imgList?.length ?? 0), m.attached_files, m.attachedList?.length, m.tool_calls, m.skills, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id, expandedInMessage(m), schedTimes, m.created_at]"
+          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), costLines.get(m.id), locale, (m.imgList?.length ?? 0), m.attached_files, m.attachedList?.length, m.tool_calls, m.skills, m.plan, m.id !== latestPlanMsgId, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id, expandedInMessage(m), schedTimes, m.created_at]"
           :class="['ai-msg', m.role]"
         >
           <div class="ai-msg-role">
@@ -774,17 +787,18 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
           <!-- 工具调用卡片：放在正文之前，因为调用发生在作答之前。
                默认折叠——一段回答调了五个工具时，全展开会把正文挤出屏幕；
                摘要行只说「调了几个」，要看细节自己点开。 -->
-          <details v-if="m.role === 'assistant' && toolsOf(m).length" class="ai-tools">
+          <details v-if="m.role === 'assistant' && plainToolsOf(m).length" class="ai-tools">
             <summary class="ai-tools-sum">
               <Wrench :size="12" class="ai-tools-ico" />
-              <span>{{ t('aiToolSummary', { n: toolsOf(m).length }) }}</span>
+              <span>{{ t('aiToolSummary', { n: plainToolsOf(m).length }) }}</span>
               <ChevronDown :size="13" class="ai-tools-chev" />
             </summary>
             <div class="ai-tools-body">
               <!-- 每条调用自带折叠：一次回答调了五六个工具时，用户只想展开
                    其中一条看细节，而不是要么全看要么全不看。
                    有分轮思考时，在「这一轮的第一个调用」上方插一段思考——这样
-                   「它当时在想什么」就贴在那一步旁边，而不是全堆在回复顶部。 -->
+                   「它当时在想什么」就贴在那一步旁边，而不是全堆在回复顶部。
+                   派活不在这里：它们交给下方的 AgentTeamCard 单独成卡。 -->
               <template v-for="(tc, ti) in toolsOf(m)" :key="tc.id">
               <details v-if="reasoningBefore(m, ti)" class="ai-reasoning is-round">
                 <summary>
@@ -793,7 +807,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
                 </summary>
                 <div class="ai-reasoning-content">{{ reasoningBefore(m, ti) }}</div>
               </details>
-              <details class="ai-tool" :class="{ 'is-err': !!tc.error }">
+              <details v-if="tc.name !== 'spawn_agent'" class="ai-tool" :class="{ 'is-err': !!tc.error }">
                 <summary class="ai-tool-line">
                   <component :is="toolIcon(tc.name)" :size="12" class="ai-tool-icon" />
                   <span class="ai-tool-verb">{{ toolVerb(tc.name) }}</span>
@@ -816,16 +830,6 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
                 <!-- 行级 diff：结果串只说「改成功了」，这里说「改成了什么」。 -->
                 <AiDiffView v-if="tc.diff" :diff="tc.diff" />
                 <div v-if="tc.error" class="ai-tool-err">{{ tc.error }}</div>
-                <!-- 派活：结果是 {run_id,node_id,tokens,result} 一坨 JSON，直接铺原文
-                     等于让用户自己在里面找那句结论。这里只蒸馏「任务全文 + 子 agent 结论」；
-                     结论还没回来（流式期 result 未推送）也给一句提示，否则展开像没反应。 -->
-                <div v-else-if="tc.name === 'spawn_agent'" class="ai-spawn">
-                  <div v-if="spawnArgs(tc.args)?.task" class="ai-spawn-task">{{ spawnArgs(tc.args)?.task }}</div>
-                  <div v-if="tc.running && spawnProgress(tc)" class="ai-spawn-progress">{{ spawnProgress(tc) }}</div>
-                  <div v-if="spawnPartial(tc)" class="ai-spawn-partial">{{ t('aiSpawnPartial') }}</div>
-                  <pre v-if="spawnResultText(tc)" class="ai-tool-res">{{ spawnResultText(tc) }}</pre>
-                  <div v-else class="ai-spawn-hint">{{ tc.running ? t('aiSpawnPending') : t('aiSpawnNoResult') }}</div>
-                </div>
                 <!-- 有 diff 时不再重放一句「已编辑 xxx（替换 1 处）」：
                      路径在摘要行上已经有了，改动在 diff 里已经有了。 -->
                 <pre v-else-if="toolOutput(tc) && !tc.diff" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ toolResText(tc) }}</pre>
@@ -845,6 +849,9 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
               </template>
             </div>
           </details>
+          <!-- 团队卡独立于工具列表：普通工具（如「列出」）留在上面的工具列表里，
+               派活单独成卡放下面，不把普通工具卷进团队分组。 -->
+          <AgentTeamCard v-if="spawnsOf(toolsOf(m)).length" :calls="spawnsOf(toolsOf(m))" />
           <!-- 没被任何工具卡片消费掉的思考：通常是最后一轮（作答轮）的推理，
                它没有对应的工具调用，挂在工具列表之后、正文之前。 -->
           <details v-if="trailingReasoning(m)" class="ai-reasoning">
@@ -935,9 +942,10 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
             <button v-if="m.role === 'assistant' && m.content" class="ai-copy" @click="emit('save-note', m.content)" :title="t('aiSaveToNote')">
               <StickyNote :size="12" /> {{ t('aiSaveToNote') }}
             </button>
-            <!-- 单条回复统计：耗时 / 首字延迟 / token 用量 -->
+            <!-- 单条回复统计：耗时 / 首字延迟 / token 用量。末尾补完成时刻：
+                 同屏里日期都一样，只给 HH:mm，回答「这条几点跑完的」。 -->
             <span v-if="msgStat(m)" class="ai-msg-stat">
-              {{ formatStat(statWithoutCost(msgStat(m)!)) }}
+              {{ formatStat(statWithoutCost(msgStat(m)!)) }}<template v-if="finishClock(m.created_at)"> · {{ t('aiStatFinishedAt', { t: finishClock(m.created_at) }) }}</template>
             </span>
             <!-- 本轮用量：这条回复自己的 token 明细（提供方/模型、命中率、缓存读写）。
                  点开弹框，数据由父组件从这条消息的 usage 现取，不走会话级聚合。 -->
@@ -951,15 +959,14 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
           <!-- 气泡尾部：这一轮的费用（模型名 + 金额 + token）。文案由 costLines
                预生成，这里只查一次表；关掉设置里的开关后整行不渲染。 -->
           <div v-if="costLines.get(m.id)" class="ai-msg-cost">{{ costLines.get(m.id) }}</div>
+          <!-- 任务清单挂在**生成它的这条回复**里，跟着对话一起滚。
+               早先它是消息流末尾一个固定插槽，上一轮的清单会一直挂在最新回复下面。
+               本会话内由 SSE 固化时写到 m.plan；刷新后由父组件回填到最后一条。 -->
+          <AiPlanCard v-if="m.role === 'assistant' && m.plan" :card="m.plan" :archived="m.id !== latestPlanMsgId" class="ai-msg-plan" />
         </div>
 
-        <!-- 任务清单卡片由父组件通过 #plan 提供。数据（planCards，按会话存）归
-             AIPage，但它必须渲染在这个滚动容器里才「跟着聊天记录」——挂在输入区
-             上方就是一块永远挡着、还挤掉消息区高度的固定面板。
-             位置放在历史消息之后、流式气泡之前：语义上就是「AI 先列了清单，
-             然后开始动手」，往上翻历史时它会跟着一起滚走。 -->
-        <slot name="plan" />
-
+        <!-- 历史消息之后、流式气泡之前：上下文压缩分隔行按自己的时间线落位。
+             任务清单不再放这里——它属于某一条具体回复，见上面的 .ai-msg-plan。 -->
         <!-- 上下文压缩：一条分隔行插在流式气泡之前。
              位置和语义都对：压缩发生在「这一问的上下文刚组装完、还没调模型」那一刻，
              所以它在时间线上就是回答之前的一件事。
@@ -1028,17 +1035,17 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
             <span class="ai-rules-name">{{ runRules.map((r) => r.name).join('、') }}</span>
           </div>
           <!-- 流式期与历史消息同一口径：默认收起。摘要行给出工具数，
-               想看正在跑哪个、看输出，点开一层即可。 -->
-          <details v-if="streamTools.length" class="ai-tools">
+               想看正在跑哪个、看输出，点开一层即可。派活不在这里，见下方团队卡。 -->
+          <details v-if="plainStreamTools.length" class="ai-tools">
             <summary class="ai-tools-sum">
               <Wrench :size="12" class="ai-tools-ico" />
-              <span>{{ t('aiToolSummary', { n: streamTools.length }) }}</span>
+              <span>{{ t('aiToolSummary', { n: plainStreamTools.length }) }}</span>
               <ChevronDown :size="13" class="ai-tools-chev" />
             </summary>
             <div class="ai-tools-body">
               <!-- 每条也默认收起，交给原生 details 自己记展开状态。
                    is-run / is-ask 只改图标与状态文字，不再驱动自动展开。 -->
-              <details v-for="tc in streamTools" :key="tc.id" class="ai-tool" :class="{ 'is-err': !!tc.error, 'is-run': tc.running, 'is-ask': tc.approval === 'pending' }">
+              <details v-for="tc in plainStreamTools" :key="tc.id" class="ai-tool" :class="{ 'is-err': !!tc.error, 'is-run': tc.running, 'is-ask': tc.approval === 'pending' }">
                 <summary class="ai-tool-line">
                   <component :is="toolIcon(tc.name)" :size="12" class="ai-tool-icon" />
                   <span class="ai-tool-verb">{{ toolVerb(tc.name) }}</span>
@@ -1049,8 +1056,6 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
                   </span>
                   <span v-if="tc.approval === 'pending'" class="ai-tool-ms is-ask">{{ t('aiApprovalWaiting') }}</span>
                   <span v-else-if="tc.approval === 'denied'" class="ai-tool-ms is-denied">{{ t('aiToolDenied') }}</span>
-                  <!-- 派活组进度不放在这里：同一轮五六张派活卡会长得一模一样。
-                       整组的「完成几个 / 已等多久」统一贴在工具列表最下方。 -->
                   <span v-else-if="tc.running" class="ai-tool-ms">{{ t('aiToolRunning') }}</span>
                   <span v-else-if="tc.dedup" class="ai-tool-ms">{{ t('aiToolDedup') }}</span>
                   <span v-else-if="tc.ms" class="ai-tool-ms">{{ fmtElapsed(tc.ms) }}</span>
@@ -1072,16 +1077,6 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
                 <div v-else-if="tc.approval === 'allowed'" class="ai-approval-done">{{ t('aiApprovalAllowed') }}</div>
                 <AiDiffView v-if="tc.diff" :diff="tc.diff" />
                 <div v-if="tc.error" class="ai-tool-err">{{ tc.error }}</div>
-                <!-- 与历史卡片同一口径：派活只给任务全文与结论，不铺 JSON 原文。 -->
-                <div v-else-if="tc.name === 'spawn_agent'" class="ai-spawn">
-                  <div v-if="spawnArgs(tc.args)?.task" class="ai-spawn-task">{{ spawnArgs(tc.args)?.task }}</div>
-                  <!-- 实时进度：第 N 轮 · 正在用什么工具 · 这一组还剩几个。
-                       没有它，十几分钟的等待里这张卡只有「执行中」三个字。 -->
-                  <div v-if="tc.running && spawnProgress(tc)" class="ai-spawn-progress">{{ spawnProgress(tc) }}</div>
-                  <div v-if="spawnPartial(tc)" class="ai-spawn-partial">{{ t('aiSpawnPartial') }}</div>
-                  <pre v-if="spawnResultText(tc)" class="ai-tool-res">{{ spawnResultText(tc) }}</pre>
-                  <div v-else class="ai-spawn-hint">{{ tc.running ? t('aiSpawnPending') : t('aiSpawnNoResult') }}</div>
-                </div>
                 <pre v-else-if="toolOutput(tc) && !tc.diff" :ref="(el) => setToolResEl(tc.id, el)" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ toolOutput(tc) }}</pre>
                 <!-- 后台任务：卡片上明写「关闭应用会终止」。工具描述里也写了同一句，
                      但用户看的是这张卡；不在这里再说一次，关窗口时他一定以为
@@ -1092,18 +1087,10 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
                   <button class="ai-job-note-open" @click.stop.prevent="emit('open-jobs', jobIdOf(tc))">{{ t('aiJobBgView') }}</button>
                 </div>
               </details>
-              <!-- 派活组汇总：整组一条，贴在列表最下方。
-                   主 agent 在等 wg.Wait 期间界面上唯一的「还剩几个」就在这，
-                   放在每张卡片里会让同组的卡各写一遍相同的 3/5。 -->
-              <div v-if="spawnGroup" class="ai-spawn-group">
-                <Users :size="11" class="ai-spawn-group-ico" />
-                <span>{{ t('aiSpawnGroupProgress', { done: spawnGroup.done, total: spawnGroup.total }) }}</span>
-                <span v-if="spawnGroup.elapsedMs" class="ai-spawn-group-ms">
-                  {{ t('aiSpawnGroupElapsed', { t: fmtElapsed(spawnGroup.elapsedMs) }) }}
-                </span>
-              </div>
             </div>
           </details>
+          <!-- 团队卡独立于工具列表：派活一人一卡，普通工具留在上面的工具列表里。 -->
+          <AgentTeamCard v-if="spawnsOf(streamTools).length" :calls="spawnsOf(streamTools)" />
           <div v-if="hasStreamText" class="ai-msg-content ai-md">
             <!-- key 只用序号：内容变了由 v-html 的字符串比较兜住（Vue 会就地更新）。
                  早先把「长度 + 前缀」拼进 key，末尾那块每来一个字就换一次 key，
@@ -1148,6 +1135,9 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
               </a>
             </div>
           </details>
+          <!-- 流式清单：这一轮 plan 事件一到就显示在这条流式气泡里，收尾固化后
+               转成对应历史消息上的卡片，位置不会跳到消息流末尾。 -->
+          <AiPlanCard v-if="activeRun?.plan" :card="activeRun.plan" :archived="false" class="ai-msg-plan" />
         </div>
 
         <div v-if="errorMsg" class="ai-error">
@@ -1444,60 +1434,6 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 .ai-tool-err {
   font-size: var(--text-xs); color: var(--color-danger);
   word-break: break-word;
-}
-
-/* 派活卡片：任务原文 + 子 agent 结论。
-   任务用一条左侧细线做引用（它是「用户当初要的东西」，不是输出），结论沿用
-   结果区的等宽小字。两者都在 .ai-spawn 里重排，所以要把 .ai-tool-res 自带的
-   缩进与下边距清掉，否则会缩两层。 */
-.ai-spawn {
-  display: flex; flex-direction: column; gap: var(--space-2);
-  margin: 0 var(--space-3) var(--space-3) 18px;
-}
-
-.ai-spawn-task {
-  max-height: 180px; overflow: auto;
-  padding-left: var(--space-4);
-  border-left: 2px solid var(--color-border);
-  font-size: var(--text-xs); line-height: 1.6;
-  color: var(--color-text-secondary);
-  white-space: pre-wrap; word-break: break-word;
-}
-
-.ai-spawn .ai-tool-res { margin: 0; }
-
-.ai-spawn-hint { font-size: var(--text-xs); color: var(--color-text-muted); }
-
-/* 派活组汇总：整组一条，贴在工具列表底部，与上面每张卡留一道细线。
-   主 agent 在 wg.Wait 期间这里会一直刷新（8 秒一帧），是唯一的组级进度。 */
-.ai-spawn-group {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-  padding-top: var(--space-2);
-  border-top: 1px dashed var(--color-border-light);
-  font-size: var(--text-xs);
-  color: var(--color-text-secondary);
-}
-.ai-spawn-group-ico { flex-shrink: 0; color: var(--color-accent); }
-.ai-spawn-group-ms { color: var(--color-text-muted); font-family: var(--font-mono); }
-
-/* 实时进度：等子 agent 的十几分钟里，用户能看到的唯一「它在动」的迹象。
-   用等宽字体 + 次要色，读起来像一行状态而不是又一段正文。 */
-.ai-spawn-progress {
-  font-size: var(--text-xs); font-family: var(--font-mono);
-  color: var(--color-text-muted);
-}
-
-/* 残本标记：子任务超时 / 被停时结论只跑了一半，必须一眼看出来。 */
-.ai-spawn-partial {
-  align-self: flex-start;
-  font-size: var(--text-xs);
-  padding: 1px var(--space-2);
-  border-radius: var(--radius-sm);
-  color: var(--color-warning);
-  background: var(--color-warning-bg);
 }
 
 .ai-tool-res {

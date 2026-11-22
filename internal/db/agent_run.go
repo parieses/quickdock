@@ -306,6 +306,24 @@ func (d *Database) UpdateAgentRunStatus(id, status, errMsg string) error {
 	)
 }
 
+// FinishRootNode 把 run 的根节点（lead）收口到 run 的终态。
+//
+// 子 agent 节点各自在结束时由 UpdateAgentNodeResult 写终态，唯独顶层 lead 的
+// sink 只往事件表落记录、不写节点表——结果是 run 已经 done，lead 却永远停在
+// running，运行轨迹上呈现「整组已完成、lead 还在继续处理」。
+// 只动还开着的根节点，不覆盖已经写好的结果与 token。
+func (d *Database) FinishRootNode(runID, status string) error {
+	st := normAgentStatus(status)
+	if st != AgentStatusDone && st != AgentStatusFailed && st != AgentStatusCanceled {
+		return nil
+	}
+	return d.ExecuteParams(
+		`UPDATE agent_nodes SET status = ?, ended_at = ?
+		 WHERE run_id = ? AND parent_id = '' AND status IN (?, ?)`,
+		[]interface{}{st, now(), strings.TrimSpace(runID), AgentStatusPending, AgentStatusRunning},
+	)
+}
+
 // AddAgentRunUsage 累加一次 run 已消耗的 token。
 func (d *Database) AddAgentRunUsage(id string, tokens int) error {
 	if tokens <= 0 {

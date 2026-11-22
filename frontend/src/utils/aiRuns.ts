@@ -50,6 +50,9 @@ export interface AIRun extends RunLike {
   done: boolean
   /** 本次运行对应的轨迹 runId（done 事件带回；WP1 修复） */
   runId: string
+  /** 这一轮产生的清单快照（plan 事件到达时填）。固化消息时挂到那条消息上，
+   *  这样清单跟着「生成它的回复」走，而不是浮在消息流末尾。 */
+  plan?: { items: Array<{ text: string; status: string }>; note: string }
   /** 用户自己点了停止。
    *
    *  收尾时要靠它区分「用户停的」和「流断了」：两者都是没收到 done 就结束，
