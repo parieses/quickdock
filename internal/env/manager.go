@@ -48,6 +48,11 @@ type ServiceStatus struct {
 	MemBytes int64 `json:"memBytes"`
 	// ProcCount 进程树内的进程数，>1 表示服务派生了子进程。
 	ProcCount int `json:"procCount"`
+	// Health 健康探活结论（E-4）：""=非服务/无端口不判定；ok=端口可连；
+	// pending=进程在但端口没监听（启动中或配置错）。仅诊断用，不改 running 语义。
+	Health string `json:"health"`
+	// HealthDetail pending 时的一句中文诊断，前端放状态徽标 title。
+	HealthDetail string `json:"healthDetail"`
 }
 
 // RuntimeAdapter 单一受管运行时的统一接口。支持多版本：安装落到 runtime/<rt>/<version>，
@@ -1289,6 +1294,8 @@ func (m *Manager) Status(rt Runtime, version string) (ServiceStatus, error) {
 	}
 	// 填充进程树资源占用（内存 / 进程数 / CPU 增量）
 	m.attachUsage(&st)
+	// 健康探活（诊断增强）：带 2s TTL 缓存，状态表 3s 轮询不会每次都拨号。
+	st.Health, st.HealthDetail = probeServiceHealth(string(rt), version, st.Running, st.Ports)
 	return st, nil
 }
 

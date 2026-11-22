@@ -381,10 +381,10 @@ async function confirmDeleteVar(name: string) {
           <span class="maint-src" :title="it.url || it.error">{{ it.source }}</span>
           <span
             class="maint-status"
-            :class="it.ok ? 'ok' : (it.mirrorOk ? 'warn' : 'bad')"
+            :class="it.ok ? 'ok' : (it.mirrorOk || it.versionMissing ? 'warn' : 'bad')"
             :title="!it.ok && it.mirrorOk ? t('maintMirrorOnlyHint', { ms: it.mirrorMs }) : it.error"
           >
-            {{ it.ok ? t('maintOK') : (it.mirrorOk ? t('maintMirrorOnly') : (it.code ? 'HTTP ' + it.code : t('maintUnreachable'))) }}
+            {{ it.ok ? t('maintOK') : (it.versionMissing ? t('maintVersionMissing') : (it.mirrorOk ? t('maintMirrorOnly') : (it.code ? 'HTTP ' + it.code : t('maintUnreachable')))) }}
           </span>
           <span class="maint-lat">{{ it.latencyMs }}ms</span>
         </div>

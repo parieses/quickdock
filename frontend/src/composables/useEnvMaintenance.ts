@@ -39,6 +39,7 @@ interface SourceCheckItem {
   latencyMs: number
   mirrorOk: boolean
   mirrorMs: number
+  versionMissing: boolean
 }
 interface VersionCheckItem {
   runtime: string

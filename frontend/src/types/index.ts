@@ -359,6 +359,9 @@ export interface EnvServiceStatus {
   // ports 后端按运行时配置文件解析出的全部侦听端口（caddy 首项 admin 2019 + 站点端口）
   ports?: number[]
   version: string
+  // 健康探活诊断（E-4）：ok=端口可连；pending=进程在但端口没监听；空=不判定。
+  health?: string
+  healthDetail?: string
 }
 
 export interface EnvRuntimeInfo {

@@ -122,6 +122,7 @@ function loadCollapsedGroups(): Record<string, boolean> {
 function onPickCategory(id: string) {
   selectedId.value = id
   openMenu.value = null
+  showUpdateOverview.value = false
 }
 
 function persistCollapsed() {
@@ -252,6 +253,9 @@ interface ServiceStatus {
   memBytes?: number
   // procCount 进程树内的进程数
   procCount?: number
+  // health 健康探活诊断（E-4）：ok=端口可连；pending=进程在但端口没监听；空=不判定。
+  health?: string
+  healthDetail?: string
 }
 interface RuntimeInfo {
   id: string
@@ -377,6 +381,16 @@ const selectedId = ref<string>(props.initialSection || STATIC_CATALOG[0].id)
 // 首次 EnvList 返回前不渲染「未安装版本」空状态：页面重挂载时数据从后端检测结果缓存
 // 毫秒级回填，但仍有一个异步帧的空窗，避免空状态闪现后又被版本表替换。
 const loadedOnce = ref(false)
+// 首次 EnvList 失败要留下持久的错误说明，否则详情区空白 + 一闪而过的 toast，
+// 用户会以为什么都没装。失败后显示「加载失败 + 重试」，成功拉取后清除。
+const loadFailed = ref(false)
+
+// E-8 全局更新总览：true 时右侧详情区改渲染「已装 vs 最新」清单。
+// 选中任意运行时（侧栏点击 / 深链定位 / DSH 跳转）都要退回详情，见 onPickCategory 与下方 selectedId watch。
+const showUpdateOverview = ref(false)
+const overviewLoading = ref(false) // 批量拉取版本列表进行中（按钮防连点）
+const bulkUpdating = ref(false)    // 一键更新全部进行中（串行队列防重入）
+const overviewFetched = new Set<string>() // 已发起过拉取的 id：available 可能确实为空，别每次开总览都重试
 
 const selected = computed<RuntimeInfo | null>(() => {
   return runtimes.value.find((r) => r.id === selectedId.value) || runtimes.value[0] || null
@@ -529,7 +543,11 @@ onUnmounted(() => {
 })
 
 // 切运行时立刻收起：留着上一个运行时的介绍就是错误信息。
-watch(selectedId, closeDoc)
+// 同时退出更新总览：走 locateSection / DSH @goto 这类直接改 selectedId 的路径也能回到详情。
+watch(selectedId, () => {
+  closeDoc()
+  showUpdateOverview.value = false
+})
 
 // 每个运行时的交互态，按 id 索引
 interface UiState {
@@ -751,6 +769,12 @@ function svcOn(r: RuntimeInfo, version: string): boolean {
 }
 function svcPort(r: RuntimeInfo, version: string): number {
   return ui[r.id]?.svc?.[version]?.port || 0
+}
+// 健康诊断只做提示，不接管 svcOn 的运行判定：进程在但端口没起来时给黄色 pending。
+function svcHealth(r: RuntimeInfo, version: string): { pending: boolean; detail: string } {
+  const st = ui[r.id]?.svc?.[version]
+  const pending = st?.health === 'pending'
+  return { pending, detail: pending ? (st?.healthDetail || t('svcHealthPending')) : '' }
 }
 
 // svcPorts 返回实际侦听端口列表：优先用后端按配置文件解析出的 ports，无则回退单 port。
@@ -1162,6 +1186,7 @@ async function openHTTP(s: HTTPServerItem) {
 async function load() {
   try {
     const list = unwrap<RuntimeInfo[]>(await EnvList())
+    loadFailed.value = false
     if (list) {
       loadedOnce.value = true
       // 动态数据合并进静态目录：保持侧栏既有节点稳定，仅更新版本/源等会变的数据
@@ -1202,6 +1227,7 @@ async function load() {
   } catch (e: any) {
     // toast 只给了「前缀: 错误」，完整堆栈写日志，便于定位偶发的 EnvList 失败。
     logErr('EnvironmentPage.load', e)
+    loadFailed.value = true
     toast.error(t('envLoadFailed') + ': ' + getErrorMessage(e))
   }
 }
@@ -1421,6 +1447,147 @@ async function install(r: RuntimeInfo) {
     unwrap(await EnvInstall(r.id, s.version, s.source, custom))
   } catch (e: any) {
     failState(r, e)
+  }
+}
+
+// ---- E-8 全局「已装 vs 最新」清单 + 一键更新全部 ----
+// 清单只做只读判定，不复用 newestUpdate（它跟随 selected，只服务单个详情面板）。
+type OverviewStatus = 'update' | 'latest' | 'notInstalled' | 'unavailable' | 'loading'
+interface OverviewRow {
+  id: string
+  name: string
+  installed: string
+  latest: string
+  status: OverviewStatus
+  statusKey: string
+  statusClass: string
+  installing: boolean
+}
+// 状态 -> i18n key + badge 色（badge.ok / badge.warn 是详情区已有的两种状态色）
+const OVERVIEW_STATUS_META: Record<OverviewStatus, { key: string; cls: string }> = {
+  update: { key: 'envUpdStUpdate', cls: 'warn' },
+  latest: { key: 'envUpdStLatest', cls: 'ok' },
+  notInstalled: { key: 'envUpdStNotInstalled', cls: '' },
+  unavailable: { key: 'envUpdStUnavailable', cls: '' },
+  loading: { key: 'envUpdLoading', cls: '' },
+}
+const OVERVIEW_BATCH = 6 // 每批并发上限，避免几十个版本查询同时打到后端
+
+function installedLatest(r: RuntimeInfo): string {
+  return r.installed.reduce((m, i) => (cmpVer(i.version, m) > 0 ? i.version : m), '')
+}
+
+const overviewRows = computed<OverviewRow[]>(() => {
+  return runtimes.value.map((r) => {
+    const st = ui[r.id]
+    const installed = installedLatest(r)
+    const latest = st?.available?.[0] || ''
+    // 只有拉到 available 才能判定「有更新」；fetching 是加载中的瞬时态，
+    // loadError / available 为空归为暂不可用，避免把「没数据」误报成「已是最新」。
+    let status: OverviewStatus
+    if (st?.fetching && !latest && !st.loadError) status = 'loading'
+    else if (st?.loadError || !latest) status = 'unavailable'
+    else if (!installed) status = 'notInstalled'
+    else status = cmpVer(latest, installed) > 0 ? 'update' : 'latest'
+    const meta = OVERVIEW_STATUS_META[status]
+    return {
+      id: r.id, name: r.name, installed, latest,
+      status, statusKey: meta.key, statusClass: meta.cls,
+      installing: !!st?.installing,
+    }
+  })
+})
+// 页头角标：只数「有更新」，而该状态要求 available 已加载，天然不会误报未加载项。
+const overviewUpdateCount = computed(() => overviewRows.value.filter((r) => r.status === 'update').length)
+
+async function ensureOverviewVersions() {
+  if (overviewLoading.value) return
+  // loadAvailable 直接读写 ui[id]，未点开过的运行时可能还没有状态，先统一建好。
+  for (const r of runtimes.value) stateFor(r.id, r)
+  // 已有 available / loadError / 正在拉取 / 本会话已拉取过的都不重复请求，之后走缓存。
+  const targets = runtimes.value.filter((r) => {
+    const st = ui[r.id]
+    return !overviewFetched.has(r.id) && !st.available.length && !st.loadError && !st.fetching
+  })
+  if (!targets.length) return
+  overviewLoading.value = true
+  try {
+    // 复用本页已有的 chunk 分批：每批 6 个并发，loadAvailable 自带 fetching 守卫。
+    for (const batch of chunk(targets, OVERVIEW_BATCH)) {
+      await Promise.all(batch.map((r) => {
+        overviewFetched.add(r.id)
+        return loadAvailable(r.id)
+      }))
+    }
+  } finally {
+    overviewLoading.value = false
+  }
+}
+
+function openUpdateOverview() {
+  showUpdateOverview.value = true
+  closeDoc()
+  void ensureOverviewVersions()
+}
+
+function closeUpdateOverview() {
+  showUpdateOverview.value = false
+}
+
+// EnvInstall 是异步的：立即返回，完成/失败经 quickdock:env:progress 事件把 s.installing 置回 false。
+// 所以「await install(r)」并不代表装完，必须等 installing 归位，下一个才能开始，否则并发会互相踩。
+async function waitInstallSettled(r: RuntimeInfo, timeoutMs = 20 * 60 * 1000): Promise<boolean> {
+  const s = stateFor(r.id, r)
+  const start = Date.now()
+  while (s.installing && Date.now() - start < timeoutMs) {
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  return !s.installing
+}
+
+async function updateOne(id: string) {
+  if (bulkUpdating.value) return
+  const r = runtimes.value.find((x) => x.id === id)
+  if (!r) return
+  const s = stateFor(r.id, r)
+  const latest = ui[r.id]?.available?.[0]
+  if (!latest || s.installing) return
+  s.version = latest
+  await install(r)
+}
+
+async function updateAll() {
+  if (bulkUpdating.value) return
+  // 以点击瞬间「有更新」的清单为准，先快照 id：安装过程中 load() 会刷新 installed，
+  // 直接遍历 computed 会因判定变化漏项或重复。
+  const targets = overviewRows.value.filter((row) => row.status === 'update').map((row) => row.id)
+  if (!targets.length) return
+  bulkUpdating.value = true
+  let ok = 0
+  let fail = 0
+  try {
+    for (const id of targets) {
+      const r = runtimes.value.find((x) => x.id === id)
+      if (!r) continue
+      const s = stateFor(r.id, r)
+      const latest = ui[r.id]?.available?.[0]
+      if (s.installing || !latest) { fail++; continue }
+      try {
+        s.version = latest
+        await install(r)
+        const settled = await waitInstallSettled(r)
+        // install() 每次开头会清零 s.error；done 事件不改它，error 事件/failState 会置位。
+        if (settled && !s.error) ok++
+        else fail++
+      } catch {
+        fail++ // 单个失败不能中断队列，继续下一个
+      }
+    }
+  } finally {
+    bulkUpdating.value = false
+    const msg = t('envUpdBulkDone', { ok, fail })
+    if (fail) toast.error(msg)
+    else toast.success(msg)
   }
 }
 
@@ -1924,6 +2091,11 @@ const dialogCtx = reactive({
            窗口一窄还会挤到第二行。次要动作只留图标，含义靠 title 兜住。 -->
       <div class="qd-page-actions">
         <div class="qd-action-group">
+          <!-- E-8 更新总览：角标只数已加载 available 且确有更新项 -->
+          <button class="qd-icon-btn" :class="{ on: showUpdateOverview }" @click="openUpdateOverview" :title="t('envUpdTitle')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7h-9M14 17H5"/><path d="m17 4 3 3-3 3M7 14l-3 3 3 3"/></svg>
+            <span v-if="overviewUpdateCount" class="qd-upd-badge">{{ overviewUpdateCount }}</span>
+          </button>
           <button class="qd-icon-btn" @click="projectCheck.open = true" :title="t('projectCheck')">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m9 14 2 2 4-4"/></svg>
           </button>
@@ -1959,6 +2131,51 @@ const dialogCtx = reactive({
 
       <!-- 右侧：所选分类详情 -->
       <main class="env-detail">
+        <!-- E-8 更新总览：与详情区互斥，复用 detail-head / detail-block / ver-row 保持同构 -->
+        <section v-if="showUpdateOverview" class="detail-block update-overview">
+          <header class="detail-head update-overview-head">
+            <span class="block-title">{{ t('envUpdTitle') }}</span>
+            <span class="block-count">{{ overviewRows.length }}</span>
+            <span v-if="overviewUpdateCount" class="badge warn">{{ t('envUpdNeedUpdate', { n: overviewUpdateCount }) }}</span>
+            <button class="link-btn overview-close" :disabled="bulkUpdating" @click="closeUpdateOverview">{{ t('envUpdBack') }}</button>
+            <button
+              class="env-install-btn overview-update-all"
+              :class="{ busy: bulkUpdating }"
+              :disabled="!overviewUpdateCount || overviewLoading || bulkUpdating"
+              @click="updateAll"
+            >{{ bulkUpdating ? t('installing') : t('envUpdUpdateAll', { n: overviewUpdateCount }) }}</button>
+          </header>
+          <div class="block-head">
+            <span class="overview-hint">{{ t('envUpdHint') }}</span>
+            <button class="link-btn" :disabled="overviewLoading" @click="ensureOverviewVersions">
+              {{ overviewLoading ? t('loading') : t('refreshList') }}
+            </button>
+          </div>
+          <div class="ver-table overview-table">
+            <div class="ver-row ver-head overview-row">
+              <span class="ov-col-name">{{ t('envUpdName') }}</span>
+              <span class="ov-col-ver">{{ t('envUpdInstalled') }}</span>
+              <span class="ov-col-ver">{{ t('envUpdLatest') }}</span>
+              <span class="ov-col-status">{{ t('envUpdStatus') }}</span>
+              <span class="ov-col-op">{{ t('envUpdOperation') }}</span>
+            </div>
+            <div v-for="row in overviewRows" :key="row.id" class="ver-row overview-row">
+              <span class="ov-col-name ov-name">{{ row.name }}<small class="ov-id">{{ row.id }}</small></span>
+              <span class="ov-col-ver ov-ver">{{ row.installed || '—' }}</span>
+              <span class="ov-col-ver ov-ver">{{ row.latest || (row.status === 'loading' ? t('envUpdLoading') : '—') }}</span>
+              <span class="ov-col-status"><span class="badge" :class="row.statusClass">{{ t(row.statusKey) }}</span></span>
+              <span class="ov-col-op">
+                <button
+                  v-if="row.status === 'update'"
+                  class="link-btn"
+                  :disabled="bulkUpdating || row.installing"
+                  @click="updateOne(row.id)"
+                >{{ row.installing ? t('installing') : t('envUpdateTo') }}</button>
+              </span>
+            </div>
+          </div>
+        </section>
+        <template v-else>
         <!-- DeepSeek Harness 区块：复用 SettingsDSH 组件，外壳（detail-head + detail-block）与其它区块保持同构 -->
         <template v-if="isHarness">
           <header class="detail-head">
@@ -2029,15 +2246,15 @@ const dialogCtx = reactive({
                 <div v-key-click class="col-path clickable" :title="t('openInExplorer') + ': ' + s.dir" @click="reveal(s.dir)">{{ s.dir }}</div>
                 <div class="col-env">
                   <span class="env-badge" :class="httpRunning[s.id] ? 'on' : 'off'">{{ httpRunning[s.id] ? t('httpRunning') : t('httpStopped') }}</span>
-                  <a
+                  <!-- 走 openHTTP 交系统浏览器，避免 <a target=_blank> 在 WebView 内打开顶掉主界面（与同排「打开」按钮一致）。 -->
+                  <button
+                    type="button"
                     class="svc-port svc-port-link"
-                    :href="'http://localhost:' + s.port + '/'"
-                    target="_blank"
-                    rel="noopener"
                     :class="{ disabled: !httpRunning[s.id] }"
                     :title="httpRunning[s.id] ? t('httpOpen') : t('httpOpenStoppedHint')"
-                    @click="!httpRunning[s.id] && $event.preventDefault()"
-                  >http://localhost:{{ s.port }}</a>
+                    :disabled="!httpRunning[s.id]"
+                    @click="openHTTP(s)"
+                  >http://localhost:{{ s.port }}</button>
                 </div>
                 <div class="col-ops">
                   <button v-if="!httpRunning[s.id]" class="op-btn" @click="startHTTP(s.id)">{{ t('httpStart') }}</button>
@@ -2370,13 +2587,21 @@ const dialogCtx = reactive({
               <div class="col-svc" v-if="selected.hasService && (ins.scope !== 'linked' || selected.id === 'php')">
                 <span
                   class="status"
-                  :class="{ on: svcOn(selected, ins.version), unknown: svcUnknown[selected.id + ins.version] }"
-                  :title="svcUnknown[selected.id + ins.version] ? t('svcUnknownHint') : ''"
+                  :class="{
+                    on: svcOn(selected, ins.version),
+                    unknown: svcUnknown[selected.id + ins.version],
+                    'health-pending': svcHealth(selected, ins.version).pending
+                  }"
+                  :title="svcUnknown[selected.id + ins.version]
+                    ? t('svcUnknownHint')
+                    : (svcHealth(selected, ins.version).detail || '')"
                 >
                   <span class="status-dot"></span>
                   {{ svcUnknown[selected.id + ins.version]
                     ? t('svcUnknown')
-                    : (svcOn(selected, ins.version) ? t('svcRunning') : t('svcStopped')) }}
+                    : (svcOn(selected, ins.version)
+                      ? (svcHealth(selected, ins.version).pending ? t('svcHealthPendingShort') : t('svcRunning'))
+                      : t('svcStopped')) }}
                 </span>
                 <template v-if="svcOn(selected, ins.version)">
                   <button
@@ -2488,7 +2713,14 @@ const dialogCtx = reactive({
             </div>
           </div>
 
-          <div v-if="loadedOnce && !selected.installed.length" class="empty-state">
+          <!-- 首次 EnvList 失败：给出持久的错误说明与重试入口，别让详情区一片空白 -->
+          <div v-if="loadFailed" class="empty-state env-load-error">
+            <div class="empty-icon">!</div>
+            <div class="empty-text">{{ t('envLoadFailed') }}</div>
+            <button class="op-btn" @click="load()">{{ t('retry') }}</button>
+          </div>
+
+          <div v-else-if="loadedOnce && !selected.installed.length" class="empty-state">
             <div class="empty-icon">∅</div>
             <div class="empty-text">{{ t('noInstalledVersion') }}</div>
             <div class="empty-hint">{{ t('installHint') }}</div>
@@ -2972,6 +3204,7 @@ const dialogCtx = reactive({
           <div class="empty-icon">∅</div>
           <div class="empty-text">{{ t('noInstalledVersion') }}</div>
         </div>
+        </template>
       </main>
 
       <!-- 运行时介绍资料卡：Teleport 到 body 绕过 .env-detail 滚动裁剪。放在所有页头条件分支
@@ -3083,12 +3316,20 @@ const dialogCtx = reactive({
 /* 运行时介绍：标题右边的小问号。默认跟次级文字同色，hover 才亮成强调色，
    不跟标题抢注意力；尺寸固定 16px，避免不同字号的运行时名把标题行撑高。 */
 .doc-btn {
+  position: relative;
   width: 16px; height: 16px; flex-shrink: 0; padding: 0; margin: 0;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: 50%; border: 1px solid var(--color-border);
   background: transparent; color: var(--color-text-disabled);
   font-size: var(--text-xs); font-weight: 600; line-height: 1; cursor: pointer;
   transition: color .15s ease, border-color .15s ease;
+}
+/* 视觉仍是 16px 小问号，透明热区外扩 4px → 可点区域 24×24，高 DPI 下更易命中。 */
+.doc-btn::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
 }
 .doc-btn:hover, .doc-btn.on { color: var(--color-accent); border-color: var(--color-accent); }
 /* 浮层走 popover 面层：卡片是 card-bg，浮层要再上一层才不会看起来"挖"进卡片。
@@ -3361,6 +3602,9 @@ const dialogCtx = reactive({
 .status.on .status-dot { background: var(--color-success); box-shadow: 0 0 5px var(--color-success-border); }
 .status.unknown { color: var(--color-warning); }
 .status.unknown .status-dot { background: var(--color-warning); box-shadow: 0 0 5px var(--color-warning-border); }
+/* 健康探活 pending：进程在但端口没监听，用黄色区别于「运行中」的绿与「停止」的灰 */
+.status.health-pending, .status.on.health-pending { color: var(--color-warning); }
+.status.health-pending .status-dot, .status.on.health-pending .status-dot { background: var(--color-warning); box-shadow: 0 0 5px var(--color-warning-border); }
 .status-dot.ok { background: var(--color-success); box-shadow: 0 0 5px var(--color-success-border); }
 .status-dot.warn { background: var(--color-warning); box-shadow: 0 0 5px var(--color-warning-border); }
 .status-dot.fail { background: var(--color-danger); box-shadow: 0 0 5px var(--color-danger-border); }
@@ -3393,7 +3637,15 @@ const dialogCtx = reactive({
 }
 .dark .port-conflict-banner { color: var(--color-warning); }
 .pc-icon { font-size: var(--text-base); line-height: 1; }
-.svc-port-link { text-decoration: none; transition: color var(--transition-fast); }
+.svc-port-link {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
 .svc-port-link:hover { color: var(--color-accent); text-decoration: underline; }
 .svc-port-link.disabled { cursor: default; opacity: 0.5; }
 .svc-port-link.disabled:hover { color: var(--color-text-disabled); text-decoration: none; }
@@ -3574,6 +3826,27 @@ const dialogCtx = reactive({
 .env-update-dot {
   width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent); flex: none;
 }
+
+/* E-8 更新总览：页头角标 + 全局清单 */
+.qd-icon-btn { position: relative; }
+.qd-icon-btn.on { color: var(--color-accent); background: var(--color-accent-bg); }
+.qd-upd-badge {
+  position: absolute; top: -4px; right: -4px;
+  min-width: 14px; height: 14px; padding: 0 3px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-full); background: var(--color-warning); color: var(--color-accent-text);
+  font-size: var(--text-2xs); line-height: 1;
+}
+.update-overview { display: flex; flex-direction: column; gap: var(--space-5); }
+.update-overview-head { flex-wrap: wrap; }
+.overview-close { margin-left: auto; }
+.overview-update-all { padding: var(--space-3) var(--space-5); font-size: var(--text-sm); }
+.overview-hint { font-size: var(--text-xs); color: var(--color-text-muted); }
+.overview-table { gap: var(--space-2); }
+.overview-row { grid-template-columns: 1.4fr 1.1fr 1.1fr 1fr auto; }
+.ov-name { display: inline-flex; align-items: center; gap: var(--space-3); min-width: 0; color: var(--color-text-primary); font-weight: 600; }
+.ov-id { font-size: var(--text-2xs); font-weight: 400; color: var(--color-text-muted); }
+.ov-ver { font-size: var(--text-sm); color: var(--color-text-secondary); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
 /* 弹窗（通用遮罩，供各类子弹窗复用） */
 
