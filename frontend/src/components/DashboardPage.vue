@@ -31,7 +31,8 @@ import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage, isDialogCanceled } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { openExternal } from '../utils/externalLinks'
-import { navigate, navigateTo, pendingTarget } from '../composables/bridge'
+import { navigate, navigateTo, pendingTarget, pendingOpenTodoId, pendingCreateTodo } from '../composables/bridge'
+import { dashPrefs, DASH_CARDS, type DashCardId } from '../composables/useDashPrefs'
 import { useToast } from '../composables/useToast'
 import { describeDay, localISO } from '../utils/lunar'
 import type { LunarDay } from '../utils/lunar'
@@ -48,7 +49,7 @@ import { ListMonitors, ListMonitorStats, GetMonitorLogsSince } from '../../bindi
 import { EnvList, EnvEverythingStatus } from '../../bindings/quickdock/services/env/environmentservice'
 import { DSHStatus } from '../../bindings/quickdock/services/dsh/dshservice'
 import { ListListeningPorts } from '../../bindings/quickdock/services/port/portservice'
-import { GetValue, GetMostUsedItems, SetValue } from '../../bindings/quickdock/services/appservice'
+import { GetValue, GetMostUsedItems, SetValue, ListScheduledTasks, GetAllScheduleRuns } from '../../bindings/quickdock/services/appservice'
 import { OpenItem } from '../../bindings/quickdock/services/collection/collectionservice'
 import { GitListRepos, GitRepoStatus } from '../../bindings/quickdock/services/git/gitservice'
 import {
@@ -59,7 +60,7 @@ import {
   Open as OpenShelf, Reveal as RevealShelf,
 } from '../../bindings/quickdock/services/shelf/shelfservice'
 import { AIListProfiles, AIUsageStats } from '../../bindings/quickdock/services/ai/aiservice'
-import type { Todo, Monitor } from '../../bindings/quickdock/internal/db/models'
+import type { Todo, Monitor, ScheduledTask } from '../../bindings/quickdock/internal/db/models'
 import type { CollectionItem } from '../types'
 import type { AIUsageStatsResult, AICostEntry } from '../types/ai'
 import {
@@ -67,7 +68,7 @@ import {
   FolderGit2, CalendarDays, Settings2, MapPin, X,
   Sun, CloudSun, Cloud, CloudFog, CloudRain, CloudSnow, CloudLightning, CloudOff,
   Mail, Layers, Copy, Trash2, Plus, File, Folder, AlertCircle, ShieldAlert,
-  Coins, ExternalLink,
+  Coins, ExternalLink, LayoutGrid, Eye, EyeOff, ArrowUp, ArrowDown, RotateCcw,
 } from '@lucide/vue'
 import TypeIcon from './TypeIcon.vue'
 import MailDetailDialog from './MailDetailDialog.vue'
@@ -430,6 +431,18 @@ async function copyCode(m: MailCode) {
   }
 }
 
+/** 快捷复制最新一条验证码：邮件卡里按账号分组，这里只取列表首条（loadMailCodes 已按时间倒序）。 */
+async function quickCopyCode() {
+  const first = mailCodes.value[0]
+  if (first) await copyCode(first)
+}
+
+/** 快捷新建待办：写标志切到待办页，由 TodoPage 打开新建弹窗（复用同一套桥接）。 */
+function quickNewTodo() {
+  pendingCreateTodo.value = true
+  navigate('todo')
+}
+
 async function dismissCode(id: string) {
   try {
     unwrap(await Dismiss(id))
@@ -790,7 +803,8 @@ const greeting = computed(() => {
 // ---- 指标 ----
 const openTodos = computed(() => todos.value.filter(x => x.status !== 'done'))
 const todayDue = computed(() => openTodos.value.filter(x => x.dueDate === todayStr.value).length)
-const overdue = computed(() => openTodos.value.filter(x => x.dueDate && x.dueDate < todayStr.value).length)
+const overdueTodos = computed(() => openTodos.value.filter(x => x.dueDate && x.dueDate < todayStr.value))
+const overdue = computed(() => overdueTodos.value.length)
 const enabledMonitors = computed(() => monitors.value.filter(m => m.enabled))
 const downMonitors = computed(() => enabledMonitors.value.filter(m => m.lastStatus === 'down'))
 const residentRuntimes = computed(() => runtimes.value.filter(r => r.enabled))
@@ -807,12 +821,34 @@ const dayNote = computed(() => {
 })
 const overviewAlert = computed(() => overdue.value > 0 || downMonitors.value.length > 0)
 const dirtyRepos = computed(() => gitRepos.value.filter(r => r.changes > 0 || r.ahead > 0 || !!r.error).length)
+const firstDirtyRepoPath = computed(() => gitRepos.value.find(r => r.changes > 0 || r.ahead > 0 || !!r.error)?.path || '')
 const lastRefresh = ref<Date | null>(null)
 const lastRefreshText = computed(() => lastRefresh.value
   ? lastRefresh.value.toLocaleTimeString(locale.value === 'en-US' ? 'en-US' : 'zh-CN', {
       hour: '2-digit', minute: '2-digit',
     })
   : '--')
+// 数据新鲜度：读数带只显示数字+更新时间，过期的数字会被当成实时状态。
+// nowTick 由 60s 轮询推进，5/30 分钟两档对应「稍旧」和「明显过期」。
+const DASH_DATA_STALE_MS = 5 * 60 * 1000
+const DASH_DATA_OLD_MS = 30 * 60 * 1000
+const dataFreshness = computed<'fresh' | 'stale' | 'old' | 'unknown'>(() => {
+  if (!lastRefresh.value) return 'unknown'
+  const age = nowTick.value - lastRefresh.value.getTime()
+  if (age >= DASH_DATA_OLD_MS) return 'old'
+  if (age >= DASH_DATA_STALE_MS) return 'stale'
+  return 'fresh'
+})
+// 哪些读数块本次拉取失败：读数本身仍显示上次的值，必须就地标注，
+// 否则「加载失败」只写在下面的卡片里，用户扫读数时看不到。
+const readoutFailed = computed(() => ({
+  todo: !!failed.value.todo,
+  monitor: !!failed.value.monitor,
+  env: !!failed.value.env,
+  item: !!failed.value.item,
+  git: !!failed.value.git,
+  port: !!failed.value.port,
+}))
 
 // ---- 24h 可用率图表（纯 CSS 热力条，不引图表库：桌面端无外网，CDN 图表库不可用）----
 /** 热力格数：48 格 = 30 分钟/格，与后端 logWindowSec(24h) 对齐；mini 条共用同一份格。 */
@@ -946,8 +982,15 @@ const monitorList = computed(() => {
   return [...monitors.value].sort((a, b) => rank(a) - rank(b)).slice(0, 6)
 })
 
+// 常用开发端口：只看前 6 条时它们不该被系统进程的上百个端口挤出去。
+const COMMON_DEV_PORTS = [3000, 5173, 8080, 8000, 8888, 4200]
 const portList = computed(() =>
-  [...ports.value].sort((a, b) => a.port - b.port).slice(0, 6))
+  [...ports.value].sort((a, b) => {
+    // 本应用自己的端口最优先，其次常用开发端口，其余按端口号升序。
+    const rank = (p: (typeof ports.value)[number]) =>
+      p.self ? 0 : (COMMON_DEV_PORTS.includes(p.port) ? 1 : 2)
+    return rank(a) - rank(b) || a.port - b.port
+  }).slice(0, 6))
 
 /** 需要关注的仓库：有改动 / 领先落后 / 出错的排前面，干净的沉底。 */
 const gitList = computed(() =>
@@ -1146,6 +1189,78 @@ async function loadAIUsage() {
     aiUsageFailed.value = true
     logErr('dashboard.aiUsage', e)
   }
+}
+
+// ---- B1「接下来」+ B2「近 7 天活动」----
+// 都用已有绑定，不新增后端方法。定时任务nextRun由后端算好，直接读。
+interface DashScheduleRun { runAt: string; status: string }
+const schedules = ref<ScheduledTask[]>([])
+const scheduleRuns = ref<DashScheduleRun[]>([])
+const activityFailed = ref(false)
+async function loadActivity() {
+  activityFailed.value = false
+  try {
+    const [tasks, runs] = await Promise.allSettled([
+      ListScheduledTasks(), GetAllScheduleRuns(1000),
+    ])
+    schedules.value = tasks.status === 'fulfilled'
+      ? (unwrap<ScheduledTask[]>(tasks.value) ?? []) : []
+    scheduleRuns.value = runs.status === 'fulfilled'
+      ? ((unwrap<DashScheduleRun[]>(runs.value) ?? [])) : []
+    const failedOne = [tasks, runs].find(r => r.status === 'rejected')
+    if (failedOne?.status === 'rejected') {
+      activityFailed.value = true
+      logErr('dashboard.activity', failedOne.reason)
+    }
+  } catch (e) {
+    activityFailed.value = true
+    logErr('dashboard.activity', e)
+  }
+}
+
+/** 近 7 天定时任务执行次数（skipped 不算执行，与 SchedulePage 统计口径一致）。 */
+const schedRuns7d = computed(() => {
+  const cutoff = new Date(nowTick.value)
+  cutoff.setDate(cutoff.getDate() - 7)
+  const cut = cutoff.getTime()
+  return scheduleRuns.value.filter(r => {
+    const ts = new Date(r.runAt.replace(' ', 'T')).getTime()
+    return ts >= cut && r.status !== 'skipped'
+  }).length
+})
+
+interface NextItem { id: string; label: string; sub: string; ts: number; page: string; target: string }
+/** 接下来要做的事：启用的定时任务下次触发 + 今日/逾期待办（有时刻的排前面）。 */
+const nextItems = computed<NextItem[]>(() => {
+  const out: NextItem[] = []
+  for (const s of schedules.value) {
+    if (!s.enabled || !s.nextRun) continue
+    const ts = new Date(s.nextRun.replace(' ', 'T')).getTime()
+    if (!Number.isFinite(ts) || ts < nowTick.value) continue
+    out.push({ id: 'sched-' + s.id, label: s.name, sub: t('dashNextSchedule'), ts, page: 'schedule', target: s.id })
+  }
+  for (const x of overdueTodos.value.slice(0, 3)) {
+    out.push({
+      id: 'todo-' + x.id, label: x.title, sub: t('dash_overdue'),
+      ts: new Date(x.dueDate + 'T00:00:00').getTime(), page: 'todo', target: x.id,
+    })
+  }
+  for (const x of openTodos.value.filter(x => x.dueDate === todayStr.value && x.startTime).slice(0, 3)) {
+    const ts = new Date((x.dueDate + ' ' + x.startTime.slice(11)).replace(' ', 'T')).getTime()
+    if (!Number.isFinite(ts)) continue
+    out.push({ id: 'todo-today-' + x.id, label: x.title, sub: t('dash_due_today'), ts, page: 'todo', target: x.id })
+  }
+  return out.sort((a, b) => a.ts - b.ts).slice(0, 5)
+})
+function openNext(item: NextItem) {
+  if (item.page === 'todo') { pendingOpenTodoId.value = item.target; navigate('todo') }
+  else navigateTo(item.page, item.target)
+}
+function nextTimeText(ts: number): string {
+  const d = new Date(ts)
+  return d.toLocaleString(locale.value === 'en-US' ? 'en-US' : 'zh-CN', {
+    month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
 }
 
 /** 今日那一行（daily 的 key 是 YYYY-MM-DD，与 todayStr 同一口径，可直接查）。 */
@@ -1430,7 +1545,7 @@ async function refreshAll(silent = false) {
   // 手动那一次得把它带上，否则卡片上的钱数会停在进来时的那个值。
   await Promise.all([
     loadTodos(), loadMonitors(), loadRuntimes(), loadTools(), loadPorts(), loadItems(), loadGit(),
-    loadAIConfig(), loadAIUsage(),
+    loadAIConfig(), loadAIUsage(), loadActivity(),
   ])
   loading.value = false
   lastRefresh.value = new Date()
@@ -1441,6 +1556,42 @@ async function refreshAll(silent = false) {
 function go(page: string, target = '') {
   if (target) navigateTo(page, target)
   else navigate(page)
+}
+
+/** 逾期读数：落到第一条逾期待办并高亮，而不是只切到待办页的默认「今天」。
+ *  复用命令面板同一条 pendingOpenTodoId 通道，目标页已有滚动定位与取消高亮逻辑。 */
+function goOverdue() {
+  const first = overdueTodos.value[0]
+  if (first) pendingOpenTodoId.value = first.id
+  navigate('todo')
+}
+
+// ---- 卡片显隐/排序 ----
+const showCardSettings = ref(false)
+const cardSettingsEl = ref<HTMLElement | null>(null)
+const cardGearEl = ref<HTMLElement | null>(null)
+function cardVisible(id: DashCardId) { return dashPrefs.visibleCards.value.includes(id) }
+function cardOrder(id: DashCardId): number {
+  // 排序走 CSS order（grid item 支持），避免重排 DOM 打断各卡内部状态（展开的菜单等）。
+  return dashPrefs.orderedCards.value.indexOf(id)
+}
+function cardTitle(id: DashCardId): string {
+  const keys: Record<DashCardId, string> = {
+    next: 'dashNextTitle', recent: 'dash_recent', shelf: 'shelfTitle', todo: 'dash_today_todo', mail: 'mailTitle',
+    ports: 'dash_ports', resident: 'dash_env_resident', git: 'dash_git',
+    monitor: 'dash_health', ai: 'dash_ai_usage',
+  }
+  return t(keys[id])
+}
+function closeCardSettings() { showCardSettings.value = false }
+function onCardSettingsDocDown(e: MouseEvent) {
+  if (!showCardSettings.value) return
+  const el = e.target as HTMLElement
+  if (el.closest?.('.dash-card-settings') || el.closest?.('.dash-card-gear')) return
+  closeCardSettings()
+}
+function onCardSettingsKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') closeCardSettings()
 }
 
 async function toggleTodo(x: Todo) {
@@ -1585,6 +1736,8 @@ function attachGlobal() {
   window.addEventListener('scroll', onDayScroll, true)
   document.addEventListener('mousedown', onDayDocDown, true)
   document.addEventListener('keydown', onDayKeydown)
+  document.addEventListener('mousedown', onCardSettingsDocDown, true)
+  document.addEventListener('keydown', onCardSettingsKeydown)
   // 后端换快照 / 拖入文件后主动推事件，前端不必轮询外网。
   offMailChanged = Events.On('mailbox:changed', () => { void loadMailCodes() })
   offShelfChanged = Events.On('shelf:changed', () => { void loadShelf() })
@@ -1606,6 +1759,8 @@ function detachGlobal() {
   window.removeEventListener('scroll', onDayScroll, true)
   document.removeEventListener('mousedown', onDayDocDown, true)
   document.removeEventListener('keydown', onDayKeydown)
+  document.removeEventListener('mousedown', onCardSettingsDocDown, true)
+  document.removeEventListener('keydown', onCardSettingsKeydown)
   offMailChanged?.(); offMailChanged = null
   offShelfChanged?.(); offShelfChanged = null
   offDshExited?.(); offDshExited = null
@@ -1671,6 +1826,13 @@ onUnmounted(() => {
         <span class="qd-page-sub">{{ t('dash_subtitle') }}</span>
       </template>
       <div class="qd-page-actions">
+        <button class="qd-btn qd-btn-ghost" :title="t('dashQuickNewTodo')" @click="quickNewTodo">
+          <ListTodo :size="13" />{{ t('dashQuickNewTodo') }}
+        </button>
+        <button class="qd-btn qd-btn-ghost" :disabled="!mailCodes.length" :title="t('dashQuickCopyCode')"
+                @click="quickCopyCode">
+          <Copy :size="13" />{{ t('dashQuickCopyCode') }}
+        </button>
         <button class="qd-btn qd-btn-ghost" :disabled="loading" @click="refreshAll()">
           <RefreshCw :size="13" :class="{ spin: loading }" />
           {{ t('dash_refresh') }}
@@ -1805,47 +1967,91 @@ onUnmounted(() => {
             <span class="band-head-dot" :class="{ alert: overviewAlert }"></span>
             <span class="band-head-title">{{ t('dash_overview_title') }}</span>
             <span class="band-head-hint">{{ t('dash_overview_hint') }}</span>
-            <span class="band-head-meta">{{ t('dash_overview_updated', { time: lastRefreshText }) }}</span>
+            <span class="band-head-meta" :class="dataFreshness"
+                  :title="t('dash_freshness_hint')">{{ t('dash_overview_updated', { time: lastRefreshText }) }}</span>
+            <button v-if="dataFreshness === 'stale' || dataFreshness === 'old'" class="qc-link band-refresh"
+                    :title="t('dash_refresh')" @click="() => refreshAll()">{{ t('retry') }}</button>
+            <button ref="cardGearEl" class="db-icon-btn dash-card-gear" :title="t('dashCardSettingsTitle')"
+                    :aria-expanded="showCardSettings" @click="showCardSettings = !showCardSettings">
+              <LayoutGrid :size="14" />
+            </button>
           </div>
           <div class="band-grid">
-            <button class="readout" @click="go('todo')">
+            <button class="readout" :class="{ 'is-failed': readoutFailed.todo }" @click="goOverdue">
               <span class="r-label"><ListTodo :size="12" />{{ t('dash_stat_todo') }}</span>
-              <span class="r-num">{{ openTodos.length }}</span>
-              <span class="r-foot" :class="{ danger: overdue > 0 }">
+              <span class="r-num">{{ readoutFailed.todo ? '—' : openTodos.length }}</span>
+              <span v-if="readoutFailed.todo" class="r-foot danger">{{ t('dash_load_failed') }}</span>
+              <span v-else class="r-foot" :class="{ danger: overdue > 0 }">
                 <template v-if="overdue">{{ t('dash_stat_overdue', { n: overdue }) }}</template>
                 <template v-else>{{ t('dash_stat_due_today', { n: todayDue }) }}</template>
               </span>
             </button>
 
-            <button class="readout" :class="{ alert: downMonitors.length > 0 }" @click="go('monitor')">
+            <button class="readout" :class="{ alert: downMonitors.length > 0, 'is-failed': readoutFailed.monitor }"
+                    @click="go('monitor', downMonitors.length ? downMonitors[0].id : '')">
               <span class="r-label"><Activity :size="12" />{{ t('dash_stat_monitor') }}</span>
-              <span class="r-num">{{ downMonitors.length }}</span>
-              <span class="r-foot">{{ t('dash_stat_monitor_foot', { n: enabledMonitors.length }) }}</span>
+              <span class="r-num">{{ readoutFailed.monitor ? '—' : downMonitors.length }}</span>
+              <span v-if="readoutFailed.monitor" class="r-foot danger">{{ t('dash_load_failed') }}</span>
+              <span v-else class="r-foot">{{ t('dash_stat_monitor_foot', { n: enabledMonitors.length }) }}</span>
             </button>
 
-            <button class="readout" @click="go('environments')">
+            <button class="readout" :class="{ 'is-failed': readoutFailed.env }" @click="go('environments')">
               <span class="r-label"><Server :size="12" />{{ t('dash_stat_env') }}</span>
-              <span class="r-num">{{ residentServices.length }}</span>
-              <span class="r-foot">{{ t('dash_stat_env_foot', { n: installedRuntimes.length }) }}</span>
+              <span class="r-num">{{ readoutFailed.env ? '—' : residentServices.length }}</span>
+              <span v-if="readoutFailed.env" class="r-foot danger">{{ t('dash_load_failed') }}</span>
+              <span v-else class="r-foot">{{ t('dash_stat_env_foot', { n: installedRuntimes.length }) }}</span>
             </button>
 
-            <div class="readout static">
+            <button class="readout" :class="{ 'is-failed': readoutFailed.port }" @click="go('environments', 'ports')">
               <span class="r-label"><Plug :size="12" />{{ t('dash_stat_port') }}</span>
-              <span class="r-num">{{ ports.length }}</span>
-              <span class="r-foot">{{ t('dash_stat_port_foot') }}</span>
-            </div>
+              <span class="r-num">{{ readoutFailed.port ? '—' : ports.length }}</span>
+              <span v-if="readoutFailed.port" class="r-foot danger">{{ t('dash_load_failed') }}</span>
+              <span v-else class="r-foot">{{ t('dash_stat_port_foot') }}</span>
+            </button>
 
-            <button class="readout" @click="go('workspace')">
+            <button class="readout" :class="{ 'is-failed': readoutFailed.item }" @click="go('workspace')">
               <span class="r-label"><FolderOpen :size="12" />{{ t('dash_stat_items') }}</span>
-              <span class="r-num">{{ items.length }}</span>
-              <span class="r-foot">{{ t('dash_stat_items_foot') }}</span>
+              <span class="r-num">{{ readoutFailed.item ? '—' : items.length }}</span>
+              <span v-if="readoutFailed.item" class="r-foot danger">{{ t('dash_load_failed') }}</span>
+              <span v-else class="r-foot">{{ t('dash_stat_items_foot') }}</span>
             </button>
 
-            <button class="readout" @click="go('git')">
+            <button class="readout" :class="{ 'is-failed': readoutFailed.git }"
+                    @click="go('git', firstDirtyRepoPath)">
               <span class="r-label"><FolderGit2 :size="12" />{{ t('dash_git') }}</span>
-              <span class="r-num">{{ gitRepos.length }}</span>
-              <span class="r-foot">{{ t('dash_git_dirty', { n: dirtyRepos }) }}</span>
+              <span class="r-num">{{ readoutFailed.git ? '—' : gitRepos.length }}</span>
+              <span v-if="readoutFailed.git" class="r-foot danger">{{ t('dash_load_failed') }}</span>
+              <span v-else class="r-foot">{{ t('dash_git_dirty', { n: dirtyRepos }) }}</span>
             </button>
+          </div>
+        </section>
+
+        <!-- 卡片显隐/排序：展开在读数带与卡片网格之间，改完即时生效。
+             隐藏的卡片整块 v-if 移除，span 网格自动补位，不留空格。 -->
+        <section v-if="showCardSettings" class="dash-card-settings">
+          <div class="dcs-head">
+            <span>{{ t('dashCardSettingsTitle') }}</span>
+            <span class="dcs-hint">{{ t('dashCardSettingsHint') }}</span>
+            <button class="qc-link" @click="dashPrefs.resetCards(); showCardSettings = false">
+              <RotateCcw :size="11" />{{ t('dashCardReset') }}
+            </button>
+            <button class="db-icon-btn" :title="t('daybarClose')" @click="closeCardSettings"><X :size="13" /></button>
+          </div>
+          <div class="dcs-list">
+            <div v-for="id in dashPrefs.orderedCards.value" :key="id" class="dcs-row"
+                 :class="{ 'is-hidden': !cardVisible(id) }">
+              <span class="dcs-name">{{ cardTitle(id) }}</span>
+              <div class="dcs-actions">
+                <button class="db-icon-btn" :title="t('dashCardMoveUp')" :disabled="!dashPrefs.canMoveUp(id)"
+                        @click="dashPrefs.moveCard(id, -1)"><ArrowUp :size="12" /></button>
+                <button class="db-icon-btn" :title="t('dashCardMoveDown')" :disabled="!dashPrefs.canMoveDown(id)"
+                        @click="dashPrefs.moveCard(id, 1)"><ArrowDown :size="12" /></button>
+                <button v-if="cardVisible(id)" class="db-icon-btn" :title="t('dashCardHide')"
+                        @click="dashPrefs.hideCard(id)"><EyeOff :size="12" /></button>
+                <button v-else class="db-icon-btn" :title="t('dashCardShow')"
+                        @click="dashPrefs.showCard(id)"><Eye :size="12" /></button>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -2053,9 +2259,38 @@ onUnmounted(() => {
              → 状态（端口 / 健康 / 常驻 / Git）→ 回顾（AI 用量）。 -->
           <div class="cards">
 
+            <!-- 接下来：把分散在待办与定时任务里的「下一件要做的事」按时间合成一条，
+                 通栏是因为它是决策入口而非状态清单，横向排布比挤在半行更易扫。 -->
+            <section v-if="cardVisible('next')" class="card span-6" :style="{ order: cardOrder('next') }">
+              <header class="card-head">
+                <CalendarDays :size="13" class="t-ic" />
+                <span class="card-title">{{ t('dashNextTitle') }}</span>
+                <span v-if="!activityFailed && !nextItems.length" class="card-count">{{ t('dashNextEmptyCount') }}</span>
+              </header>
+              <p v-if="activityFailed" class="empty">
+                {{ t('dash_load_failed') }} <button class="qc-link" @click="loadActivity()">{{ t('retry') }}</button>
+              </p>
+              <p v-else-if="!nextItems.length" class="empty">{{ t('dashNextEmpty') }}</p>
+              <div v-else class="next-grid">
+                <button v-for="n in nextItems" :key="n.id" class="next-item" @click="openNext(n)">
+                  <span class="next-time mono">{{ nextTimeText(n.ts) }}</span>
+                  <span class="next-label">{{ n.label }}</span>
+                  <span class="next-sub">{{ n.sub }}</span>
+                </button>
+              </div>
+              <!-- B2 近 7 天活动：只报真实拿得到的数（定时任务执行、AI 调用、仓库待处理），
+                   没有完成时间字段就不编「完成 N 项待办」。 -->
+              <div class="activity-strip">
+                <span class="activity-label">{{ t('dashActivity7d') }}</span>
+                <span class="activity-pill">{{ t('dashActivitySched', { n: schedRuns7d }) }}</span>
+                <span class="activity-pill">{{ t('dashActivityAI', { n: aiWeekCalls }) }}</span>
+                <span class="activity-pill">{{ t('dashActivityGit', { n: gitBusyCount }) }}</span>
+              </div>
+            </section>
+
             <!-- 最近使用排第一：这一页被点得最多的是「把我昨天在弄的东西打开」，
                  磁贴等分铺满半行（与置物架各占一半），比竖列表少一次扫读。 -->
-            <section class="card span-6">
+            <section v-if="cardVisible('recent')" class="card span-6" :style="{ order: cardOrder('recent') }">
               <header class="card-head">
                 <FolderOpen :size="13" class="t-ic" />
                 <span class="card-title">{{ t('dash_recent') }}</span>
@@ -2085,7 +2320,7 @@ onUnmounted(() => {
 
             <!-- 置物架：手边要用的文件/目录（拖进来即存路径）。与最近使用同为入口型，
                  一个按「用过」排、一个按「我放这儿」排，所以并排占据第一行。 -->
-            <section class="card span-3">
+            <section v-if="cardVisible('shelf')" class="card span-3" :style="{ order: cardOrder('shelf') }">
               <header class="card-head">
                 <Layers :size="13" class="t-ic" />
                 <span class="card-title">{{ t('shelfTitle') }}</span>
@@ -2135,7 +2370,7 @@ onUnmounted(() => {
             </section>
 
             <!-- 待办：到期分布条用颜色直接回答「紧不紧张」，不必逐行读日期 -->
-            <section class="card span-3">
+            <section v-if="cardVisible('todo')" class="card span-3" :style="{ order: cardOrder('todo') }">
               <header class="card-head">
                 <ListTodo :size="13" class="t-ic" />
                 <span class="card-title">{{ t('dash_today_todo') }}</span>
@@ -2169,7 +2404,7 @@ onUnmounted(() => {
 
             <!-- 验证码：有时效、拿到就复制走，属于「扫一眼就处理」的卡，
                  所以紧跟两个入口卡，排在需要细读的状态卡之前。 -->
-            <section class="card span-3">
+            <section v-if="cardVisible('mail')" class="card span-3" :style="{ order: cardOrder('mail') }">
               <header class="card-head">
                 <Mail :size="13" class="t-ic" />
                 <span class="card-title">{{ t('mailTitle') }}</span>
@@ -2248,7 +2483,7 @@ onUnmounted(() => {
 
             <!-- wide-sm：端口在 2 列布局里独占一行。span-2 的卡共 5 张（奇数），
                  不留这张全宽的话，最后一张会在 2 列里落单、右边空半格。 -->
-            <section class="card span-3">
+            <section v-if="cardVisible('ports')" class="card span-3" :style="{ order: cardOrder('ports') }">
               <header class="card-head">
                 <Plug :size="13" class="t-ic" />
                 <span class="card-title">{{ t('dash_ports') }}</span>
@@ -2273,7 +2508,7 @@ onUnmounted(() => {
             <!-- 常驻服务：仪表带给了数字，这里给「具体是哪几个」——
                  数字只能说明「有几个在跑」，排查时要知道是哪个在跑。
                  除了 env 的常驻运行时，Everything 与 DSH 这两个自带常驻进程也一并列出 -->
-            <section class="card span-3">
+            <section v-if="cardVisible('resident')" class="card span-3" :style="{ order: cardOrder('resident') }">
               <header class="card-head">
                 <Server :size="13" class="t-ic" />
                 <span class="card-title">{{ t('dash_env_resident') }}</span>
@@ -2299,7 +2534,7 @@ onUnmounted(() => {
 
             <!-- Git：有没有忘提交的、落后没拉的。属于「开工前确认」的卡，
                  排在这些状态卡的末尾、报表卡之前。 -->
-            <section class="card span-3">
+            <section v-if="cardVisible('git')" class="card span-3" :style="{ order: cardOrder('git') }">
               <header class="card-head">
                 <FolderGit2 :size="13" class="t-ic" />
                 <span class="card-title">{{ t('dash_git') }}</span>
@@ -2331,7 +2566,8 @@ onUnmounted(() => {
                  每行再给单项的 24h 条与可用率，列表就有了时间维度。
                  与 AI 卡配对占一行；AI 卡不显示（没配模型）时它独占整行，
                  否则右边会空半格。 -->
-            <section :class="['card', aiConfigured ? 'span-3' : 'span-6']">
+            <section v-if="cardVisible('monitor')" :class="['card', aiConfigured && cardVisible('ai') ? 'span-3' : 'span-6']"
+                     :style="{ order: cardOrder('monitor') }">
               <header class="card-head">
                 <Activity :size="13" class="t-ic" />
                 <span class="card-title">{{ t('dash_health') }}</span>
@@ -2373,7 +2609,7 @@ onUnmounted(() => {
             <!-- AI 用量：今日 / 七日两个钱数 + 七日柱 + 模型占比。
                  纯回顾型，放最后一行；没配模型时整张卡不出现——一张恒为 ¥0.00 的卡
                  对没在用 AI 的人是噪音。钱是估算（内置价目表线性折算），口径在设置页。 -->
-            <section v-if="aiConfigured" class="card span-3">
+            <section v-if="aiConfigured && cardVisible('ai')" class="card span-3" :style="{ order: cardOrder('ai') }">
               <header class="card-head" :title="t('dash_ai_bars_title')">
                 <Coins :size="13" class="t-ic" />
                 <span class="card-title">{{ t('dash_ai_usage') }}</span>
@@ -2509,6 +2745,59 @@ onUnmounted(() => {
  * 6 列基底 + 跨列：健康卡 4 格、其余 2 格，重要内容拿大位，不再是六张同构卡片平铺。
  * align-items 保持默认 stretch —— 同一行的卡片等高，底边对齐，比参差的下边缘好读。
  */
+/* 数据新鲜度：过期数字不能被当成实时状态 */
+.band-head-meta.stale { color: var(--color-warning); }
+.band-head-meta.old { color: var(--color-danger); }
+.band-head-meta.unknown { color: var(--color-text-muted); }
+.band-refresh { margin-left: var(--space-1); }
+.readout.is-failed { opacity: 0.72; }
+.readout.is-failed .r-num { color: var(--color-text-muted); }
+.dash-card-gear { margin-left: var(--space-2); }
+
+/* 接下来 + 近 7 天活动 */
+.next-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--space-2); }
+.next-item {
+  display: flex; flex-direction: column; gap: 2px; text-align: left;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm); cursor: pointer;
+}
+.next-item:hover { border-color: var(--color-accent); }
+.next-time { font-size: var(--text-2xs); color: var(--color-text-muted); }
+.next-label { font-size: var(--text-sm); color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.next-sub { font-size: var(--text-2xs); color: var(--color-text-secondary); }
+.activity-strip {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
+  margin-top: var(--space-3); padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border-light);
+}
+.activity-label { font-size: var(--text-xs); color: var(--color-text-muted); }
+.activity-pill {
+  font-size: var(--text-xs); color: var(--color-text-secondary);
+  padding: 2px var(--space-2); border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+}
+
+/* 卡片显隐/排序配置条 */
+.dash-card-settings {
+  background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color);
+  border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-5);
+}
+.dcs-head { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+.dcs-hint { color: var(--color-text-muted); font-size: var(--text-xs); }
+.dcs-head .qc-link { margin-left: auto; display: inline-flex; align-items: center; gap: var(--space-1); }
+.dcs-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-2); }
+.dcs-row {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-light); border-radius: var(--radius-sm);
+}
+.dcs-row.is-hidden { opacity: 0.55; }
+.dcs-name { flex: 1; font-size: var(--text-sm); color: var(--color-text-primary); }
+.dcs-actions { display: flex; align-items: center; gap: 2px; }
+
 .cards {
   display: grid; gap: var(--space-5);
   grid-template-columns: repeat(6, minmax(0, 1fr));

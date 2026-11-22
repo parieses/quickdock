@@ -19,7 +19,7 @@ import {
 import {
   SendTestNotification, NotifyFocusComplete, NotifyFocusStart, SaveFocusSession,
 } from '../../bindings/quickdock/services/appservice'
-import { pendingOpenTodoId } from '../composables/bridge'
+import { pendingOpenTodoId, pendingCreateTodo } from '../composables/bridge'
 // 待办的增删改都会汇流到 refresh()，在那里顺手把侧边栏角标拉齐（不用等 60s 轮询）
 import { navBadges } from '../composables/useNavBadges'
 import { matchesTextOrPinyin } from '../utils/pinyin'
@@ -1106,6 +1106,16 @@ async function focusPendingTodo() {
 
 watch(pendingOpenTodoId, (v) => { if (v) void focusPendingTodo() })
 
+// 总览「新建待办」快捷动作：标志在切页前写好，这里消费即清。
+// watch + onMounted 双保险：TodoPage 在 KeepAlive 白名单里，已挂载时走 watch，
+// 首次从总览跳过来时组件尚未创建，靠 onMounted 补一次。
+function consumeCreateRequest() {
+  if (!pendingCreateTodo.value) return
+  pendingCreateTodo.value = false
+  openCreate()
+}
+watch(pendingCreateTodo, consumeCreateRequest)
+
 function onDocClick(e: MouseEvent) {
   if (!(e.target as HTMLElement).closest?.('.focus-hist-wrap')) {
     showFocusHist.value = false
@@ -1141,6 +1151,7 @@ onMounted(() => {
   restoreFocus()
   // id 可能在组件创建之前就已写入（先切页、后 mount），watch 不会回溯触发
   if (pendingOpenTodoId.value) void focusPendingTodo()
+  consumeCreateRequest()
   startPage()
 })
 onActivated(startPage)

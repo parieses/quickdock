@@ -36,6 +36,10 @@ export const pendingOpenNoteId = ref<string>('')
 // 待办深链：命令面板选中某条待办后写入该 id，TodoPage 监听并滚动定位 + 短暂高亮。
 export const pendingOpenTodoId = ref<string>('')
 
+// 跨页「新建待办」：总览快捷动作写入 true，TodoPage 监听后打开新建弹窗并清零。
+// 与 pendingOpenTodoId 同一套「写标志 → 目标页消费即清」口径，不依赖挂载先后。
+export const pendingCreateTodo = ref(false)
+
 // 页面内定位目标：总览卡片点的是「某个仓库 / 端口区块 / 某个常驻运行时」，
 // 落到目标页后还要停在那一条上，而不是回到该页默认的第一个。
 //
