@@ -1107,6 +1107,9 @@ func main() {
 	// 关闭 SSH 终端会话：会话常驻在 Go 侧（关窗口不断连），
 	// 进程退出时必须主动收掉，否则远端会残留一串没断的 shell 进程。
 	sshSvc.Shutdown()
+	// 取消网盘所有在途传输（下载/上传/列目录共用 transferCtx）。进程退出时正在
+	// 跑的 .part 会由 transport 取消触发清理，不留半截文件；Close 内部 cancel 幂等。
+	netdiskSvc.Close()
 	if appService.PluginWindowMgr != nil {
 		appService.PluginWindowMgr.CloseAll()
 	}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, inject, reactive } from 'vue'
+import { ref, computed, inject, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../stores/workspace'
 import TypeIcon from './TypeIcon.vue'
@@ -87,6 +87,11 @@ function onSceneMoveKey(e: KeyboardEvent, scene: { id: string; name: string }) {
 
 // 搜索
 const searchText = ref('')
+
+// store 在多处会主动清搜索（selectWorkspace/selectScene/selectCollection、
+// 深链定位时 clearSearch），输入框必须跟着回零，否则列表已恢复、框里还留着
+// 关键词，看着像「搜了却没过滤」。另两栏早已 watch 局部过滤，这里补上同一层同步。
+watch(() => store.searchQuery, v => { searchText.value = v })
 
 function handleInput() {
   store.setSearch(searchText.value)

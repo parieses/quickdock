@@ -118,6 +118,9 @@ const selectedStash = ref<StashEntry | null>(null)
 // 详情区当前展示的来源：工作区（worktreeMode）/ 提交 / 贮藏。
 // 单独标志，避免刷新把贮藏当提交清掉，也让右侧模板能识别「非提交详情」。
 const detailKind = ref<'none' | 'commit' | 'stash'>('none')
+// 提交详情 / 贮藏预览的请求失败态：没有它时 detail=null 会让左侧永远转圈，
+// 右侧却说「请选择一个提交」，两处自相矛盾。失败后显示「加载失败 + 重试」。
+const detailFailed = ref(false)
 
 const loading = ref(false)
 const busy = ref('')      // 正在跑的网络/切换动作（按钮转圈用）
@@ -424,7 +427,12 @@ async function loadRepo(silent = false) {
     worktree.value = null; worktreeDiff.value = ''; stashes.value = []
     return
   }
-  if (!silent) loading.value = true
+  if (!silent) {
+    loading.value = true
+    // 工具栏的「刷新」走非静默路径：清掉全历史搜索态，别让新拉的仓库配着上一次的搜索结果
+    searchResults.value = null
+    histQuery.value = ''
+  }
   error.value = ''
   try {
     const [st, br, lg, tree, wd, sl] = await Promise.all([
@@ -471,6 +479,7 @@ function resetRepoView() {
   worktree.value = null
   worktreeDiff.value = ''
   detail.value = null
+  detailFailed.value = false
   selectedHash.value = ''
   selectedStash.value = null
   detailKind.value = 'none'
@@ -567,22 +576,27 @@ async function doClone() {
   }
 }
 
-async function removeRepo(r: RepoRef) {
-  try {
-    unwrap(await GitRemoveRepo(r.path))
-    if (activePath.value === r.path) {
-      resetRepoView()
-      activePath.value = ''
-    }
-    await loadRepos()
-    if (!activePath.value && repos.value.length) {
-      activePath.value = repos.value[0].path
-      await loadRepo()
-    }
-  } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.removeRepo', e)
-  }
+function removeRepo(r: RepoRef) {
+  // 「移出列表」不改磁盘，但小叉极易误点，必须先问一次再动手。
+  askConfirm(t('gitRemoveRepoConfirm', { name: r.name }), () => {
+    void (async () => {
+      try {
+        unwrap(await GitRemoveRepo(r.path))
+        if (activePath.value === r.path) {
+          resetRepoView()
+          activePath.value = ''
+        }
+        await loadRepos()
+        if (!activePath.value && repos.value.length) {
+          activePath.value = repos.value[0].path
+          await loadRepo()
+        }
+      } catch (e) {
+        toast.error(getErrorMessage(e))
+        logErr('git.removeRepo', e)
+      }
+    })()
+  })
 }
 
 async function switchRepo(r: RepoRef) {
@@ -599,6 +613,7 @@ async function selectCommit(c: Commit) {
   detailKind.value = 'commit'
   selectedFile.value = ''
   detail.value = null
+  detailFailed.value = false
   try {
     detail.value = unwrap<CommitDetail>(await GitCommitDetail(activePath.value, c.hash, true)) || null
     // 在「文件历史」里点提交：用户想看的就是这个文件，顺手选上，省一次点击
@@ -608,8 +623,19 @@ async function selectCommit(c: Commit) {
       if (hit) selectedFile.value = blockPath(hit)
     }
   } catch (e) {
+    detailFailed.value = true
     toast.error(getErrorMessage(e))
     logErr('git.commitDetail', e)
+  }
+}
+
+/** 失败态的「重试」：按当前详情来源重新拉一次，保留用户选中的提交/贮藏。 */
+function retryDetail() {
+  if (detailKind.value === 'stash' && selectedStash.value) void selectStash(selectedStash.value)
+  else if (detailKind.value === 'commit' && selectedHash.value) {
+    const hit = baseCommits.value.find(c => c.hash === selectedHash.value)
+      || commits.value.find(c => c.hash === selectedHash.value)
+    if (hit) void selectCommit(hit)
   }
 }
 
@@ -619,6 +645,7 @@ function openWorktree() {
   worktreeMode.value = true
   selectedHash.value = ''
   selectedFile.value = ''
+  detailFailed.value = false
   // 回工作区就退出「文件历史」：列表继续挂着某文件的历史、而详情在画工作区，两处对不上
   if (fileHist.value) exitFileHistory()
 }
@@ -930,8 +957,8 @@ const ctx = ref<CtxState | null>(null)
 const ctxMenuEl = ref<HTMLElement | null>(null)
 
 /** 定位菜单并把超出窗口的部分收回来（fixed 定位不会自己滚动到可见区）。 */
-function placeCtx(e: MouseEvent, rest: Omit<CtxState, 'x' | 'y'>) {
-  ctx.value = { x: e.clientX, y: e.clientY, ...rest }
+function placeCtxAt(x: number, y: number, rest: Omit<CtxState, 'x' | 'y'>) {
+  ctx.value = { x, y, ...rest }
   nextTick(() => {
     const c = ctx.value
     const el = ctxMenuEl.value
@@ -941,32 +968,45 @@ function placeCtx(e: MouseEvent, rest: Omit<CtxState, 'x' | 'y'>) {
     c.y = Math.max(8, Math.min(c.y, window.innerHeight - r.height - 8))
   })
 }
-
-function openFileCtx(e: MouseEvent, f: WorkFile, kind: 'staged' | 'unstaged') {
-  selectedFile.value = f.path // 右键即选中：菜单操作的对象必须是「看到的这一行」
-  placeCtx(e, { kind, file: f })
+function placeCtx(e: MouseEvent, rest: Omit<CtxState, 'x' | 'y'>) {
+  placeCtxAt(e.clientX, e.clientY, rest)
+}
+/** Shift+F10 / Menu 键没有鼠标坐标：把菜单定位到当前行的左下角。v-menu 会把焦点还给这一行。 */
+function ctxFrom(e: MouseEvent | KeyboardEvent, rest: Omit<CtxState, 'x' | 'y'>) {
+  const me = e as MouseEvent
+  if (typeof me.clientX === 'number' && (me.clientX !== 0 || me.clientY !== 0)) {
+    placeCtx(me, rest)
+    return
+  }
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  placeCtxAt(r.left + 8, r.bottom, rest)
 }
 
-function openCommitCtx(e: MouseEvent, c: Commit) {
+function openFileCtx(e: MouseEvent | KeyboardEvent, f: WorkFile, kind: 'staged' | 'unstaged') {
+  selectedFile.value = f.path // 右键即选中：菜单操作的对象必须是「看到的这一行」
+  ctxFrom(e, { kind, file: f })
+}
+
+function openCommitCtx(e: MouseEvent | KeyboardEvent, c: Commit) {
   // 右键也切到这次提交的详情：接下来不管是打标签还是回滚，都要先看清是哪一次
   if (selectedHash.value !== c.hash) void selectCommit(c)
-  placeCtx(e, { kind: 'commit', commit: c })
+  ctxFrom(e, { kind: 'commit', commit: c })
 }
 
-function openBranchCtx(e: MouseEvent, b: BranchInfo) {
+function openBranchCtx(e: MouseEvent | KeyboardEvent, b: BranchInfo) {
   // 右键不切分支：右键是「准备操作」，顺手切走会让后面的操作落到意料之外的分支上
-  placeCtx(e, { kind: 'branch', branch: b })
+  ctxFrom(e, { kind: 'branch', branch: b })
 }
 
 /** 标签单独一类：它能做的事（推送/删除本地/删除远端）跟分支不一样，共用一个菜单只会互相干扰。 */
-function openTagCtx(e: MouseEvent, g: BranchInfo) {
-  placeCtx(e, { kind: 'tag', tag: g })
+function openTagCtx(e: MouseEvent | KeyboardEvent, g: BranchInfo) {
+  ctxFrom(e, { kind: 'tag', tag: g })
 }
 
 /** 提交详情里的文件行：历史 / blame / 「这次提交里它是什么样」都从这里进。 */
-function openCommitFileCtx(e: MouseEvent, f: FileStat) {
+function openCommitFileCtx(e: MouseEvent | KeyboardEvent, f: FileStat) {
   selectedFile.value = blockPath(f)
-  placeCtx(e, { kind: 'cfile', cfile: f })
+  ctxFrom(e, { kind: 'cfile', cfile: f })
 }
 
 function closeCtx() {
@@ -1139,16 +1179,18 @@ async function selectStash(s: StashEntry) {
   detailKind.value = 'stash'
   selectedFile.value = ''
   detail.value = null
+  detailFailed.value = false
   try {
     detail.value = unwrap<CommitDetail>(await GitStashShow(activePath.value, s.ref)) || null
   } catch (e) {
+    detailFailed.value = true
     toast.error(getErrorMessage(e))
     logErr('git.stashShow', e)
   }
 }
 
-function openStashCtx(e: MouseEvent, s: StashEntry) {
-  placeCtx(e, { kind: 'stash', stash: s })
+function openStashCtx(e: MouseEvent | KeyboardEvent, s: StashEntry) {
+  ctxFrom(e, { kind: 'stash', stash: s })
 }
 
 // ---- 文件历史 / 逐行归属 / 历史版本 ----
@@ -1182,7 +1224,8 @@ function exitFileHistory() {
 
 async function doLogSearch() {
   const q = histQuery.value.trim()
-  if (!activePath.value || q.length < 2 || searching.value) return
+  if (!activePath.value || searching.value) return
+  if (q.length < 2) { toast.error(t('gitSearchMinChars')); return }
   searching.value = true
   try {
     searchResults.value = (unwrap<Commit[]>(await GitSearchLog(activePath.value, q, 200)) as Commit[] | null) || []
@@ -2399,7 +2442,9 @@ const dialogCtx = reactive({
             <ul v-show="open.local" class="grp-list">
               <li v-key-click v-for="b in branches.local" :key="b.name"
                   :class="['item', { current: b.current, 'is-spinning': isCheckingOut(b) }]"
-                  @click="doCheckout(b)" @contextmenu.prevent="openBranchCtx($event, b)">
+                  tabindex="0" @click="doCheckout(b)" @contextmenu.prevent="openBranchCtx($event, b)"
+                  @keydown.menu.prevent="openBranchCtx($event, b)"
+                  @keydown.shift.f10.prevent="openBranchCtx($event, b)">
                 <Loader2 v-if="isCheckingOut(b)" :size="11" class="item-ic" />
                 <GitBranch v-else :size="11" class="item-ic" />
                 <span class="item-name">{{ b.name }}</span>
@@ -2421,8 +2466,10 @@ const dialogCtx = reactive({
             <ul v-show="open.remote" class="grp-list">
               <li v-key-click v-for="b in branches.remote" :key="b.name"
                   :class="['item', 'dim', { 'is-spinning': isCheckingOut(b) }]"
-                  :title="t('git_checkout_remote')" @click="doCheckout(b)"
-                  @contextmenu.prevent="openBranchCtx($event, b)">
+                  :title="t('git_checkout_remote')" tabindex="0" @click="doCheckout(b)"
+                  @contextmenu.prevent="openBranchCtx($event, b)"
+                  @keydown.menu.prevent="openBranchCtx($event, b)"
+                  @keydown.shift.f10.prevent="openBranchCtx($event, b)">
                 <Loader2 v-if="isCheckingOut(b)" :size="11" class="item-ic" />
                 <Users v-else :size="11" class="item-ic" />
                 <span class="item-name">{{ b.name.replace(/^[^/]+\//, '') }}</span>
@@ -2441,7 +2488,9 @@ const dialogCtx = reactive({
             </div>
             <ul v-show="open.tags" class="grp-list">
               <li v-for="g in branches.tags" :key="g.name" class="item dim" :title="t('git_ctx_push_tag')"
-                  @contextmenu.prevent="openTagCtx($event, g)">
+                  tabindex="0" @contextmenu.prevent="openTagCtx($event, g)"
+                  @keydown.menu.prevent="openTagCtx($event, g)"
+                  @keydown.shift.f10.prevent="openTagCtx($event, g)">
                 <Tag :size="11" class="item-ic" />
                 <span class="item-name">{{ g.name }}</span>
               </li>
@@ -2463,9 +2512,10 @@ const dialogCtx = reactive({
             <ul v-show="open.stash" class="grp-list">
               <li v-key-click v-for="s in stashes" :key="s.ref"
                   :class="['item', 'dim', { active: selectedStash?.ref === s.ref }]"
-                  :title="`${s.ref} · ${s.branch} · ${s.message}`"
-                  @click="selectStash(s)"
-                  @contextmenu.prevent="openStashCtx($event, s)">
+                  :title="`${s.ref} · ${s.branch} · ${s.message}`" tabindex="0"
+                  @click="selectStash(s)" @contextmenu.prevent="openStashCtx($event, s)"
+                  @keydown.menu.prevent="openStashCtx($event, s)"
+                  @keydown.shift.f10.prevent="openStashCtx($event, s)">
                 <Archive :size="11" class="item-ic" />
                 <span class="item-name">{{ s.message || t('git_stash_auto') }}</span>
                 <span class="item-remote">{{ s.ref.replace(/^stash@\{|\}$/g, '') }}</span>
@@ -2506,7 +2556,7 @@ const dialogCtx = reactive({
         <div v-if="activePath" class="hist-bar">
           <Search :size="11" class="hb-ic" />
           <input v-model="histQuery" class="hb-input" spellcheck="false"
-                 :placeholder="t('git_filter_ph')" :title="t('git_search_hint')"
+                 :placeholder="t('gitFilterPhMin2')" :title="t('git_search_hint')"
                  @keydown.enter.prevent="doLogSearch" @input="onHistInput" />
           <button v-if="histQuery" class="hb-x" :title="t('git_filter_clear')" @click="clearHistFilter">
             <X :size="10" />
@@ -2548,8 +2598,10 @@ const dialogCtx = reactive({
 
           <ul v-else class="commit-list">
             <li v-key-click v-for="c in shownCommits" :key="c.hash"
-                :class="['commit-item', { active: c.hash === selectedHash }]"
-                @click="selectCommit(c)" @contextmenu.prevent="openCommitCtx($event, c)">
+                :class="['commit-item', { active: c.hash === selectedHash }]" tabindex="0"
+                @click="selectCommit(c)" @contextmenu.prevent="openCommitCtx($event, c)"
+                @keydown.menu.prevent="openCommitCtx($event, c)"
+                @keydown.shift.f10.prevent="openCommitCtx($event, c)">
               <!-- graph 用等宽字体原样渲染：SourceTree 的分支线就是这套字符，不解析反而更准 -->
               <span class="col-graph commit-graph">{{ c.graph }}</span>
               <!-- 分支/标签徽章跟着摘要走：refs 只有被分支或标签指向的提交才有，
@@ -2601,8 +2653,10 @@ const dialogCtx = reactive({
                   <li v-key-click v-else-if="row.file"
                       :class="['file-row', { active: selectedFile === row.file!.path, picked: picked.has('s:' + row.file!.path) }]"
                       :style="{ paddingLeft: 12 + row.depth * 12 + 'px' }"
-                      :title="row.file!.path" @click="onFileClick($event, row.file!, 'staged')"
-                      @contextmenu.prevent="openFileCtx($event, row.file!, 'staged')">
+                      :title="row.file!.path" tabindex="0" @click="onFileClick($event, row.file!, 'staged')"
+                      @contextmenu.prevent="openFileCtx($event, row.file!, 'staged')"
+                      @keydown.menu.prevent="openFileCtx($event, row.file!, 'staged')"
+                      @keydown.shift.f10.prevent="openFileCtx($event, row.file!, 'staged')">
                     <input class="stage-box" type="checkbox" :checked="true" :disabled="busy === 'stage'"
                            :title="t('git_unstage')" @click.stop="toggleStage(row.file!, true)" />
                     <span :class="['file-badge', statusColor(row.file!.status)]">{{ row.file!.status || 'M' }}</span>
@@ -2636,8 +2690,10 @@ const dialogCtx = reactive({
                   <li v-key-click v-else-if="row.file"
                       :class="['file-row', { active: selectedFile === row.file!.path, picked: picked.has('u:' + row.file!.path) }]"
                       :style="{ paddingLeft: 12 + row.depth * 12 + 'px' }"
-                      :title="row.file!.path" @click="onFileClick($event, row.file!, 'unstaged')"
-                      @contextmenu.prevent="openFileCtx($event, row.file!, 'unstaged')">
+                      :title="row.file!.path" tabindex="0" @click="onFileClick($event, row.file!, 'unstaged')"
+                      @contextmenu.prevent="openFileCtx($event, row.file!, 'unstaged')"
+                      @keydown.menu.prevent="openFileCtx($event, row.file!, 'unstaged')"
+                      @keydown.shift.f10.prevent="openFileCtx($event, row.file!, 'unstaged')">
                     <input class="stage-box" type="checkbox" :checked="false" :disabled="busy === 'stage'"
                            :title="t('git_stage')" @click.stop="toggleStage(row.file!, false)" />
                     <span :class="['file-badge', statusColor(row.file!.status)]">{{ row.file!.status || 'M' }}</span>
@@ -2679,6 +2735,10 @@ const dialogCtx = reactive({
                 </button>
               </div>
               <div v-if="detailKind === 'none'" class="file-state">—</div>
+              <div v-else-if="detailFailed" class="file-state detail-failed">
+                <span>{{ t('loadFailed') }}</span>
+                <button class="qd-btn qd-btn-sm" @click="retryDetail">{{ t('retry') }}</button>
+              </div>
               <div v-else-if="!detail" class="file-state"><Loader2 :size="13" class="spin" /></div>
               <ul v-else class="file-rows">
                 <template v-for="row in commitRows" :key="row.key">
@@ -2692,8 +2752,10 @@ const dialogCtx = reactive({
                   <li v-key-click v-else-if="row.file"
                       :class="['file-row', { active: selectedFile && selectedFile === blockPath(row.file!) }]"
                       :style="{ paddingLeft: 12 + row.depth * 12 + 'px' }"
-                      :title="row.file!.desc" @click="selectFile(row.file!)"
-                      @contextmenu.prevent="openCommitFileCtx($event, row.file!)">
+                      :title="row.file!.desc" tabindex="0" @click="selectFile(row.file!)"
+                      @contextmenu.prevent="openCommitFileCtx($event, row.file!)"
+                      @keydown.menu.prevent="openCommitFileCtx($event, row.file!)"
+                      @keydown.shift.f10.prevent="openCommitFileCtx($event, row.file!)">
                     <span :class="['file-badge', statusColor(row.file!.status)]">{{ row.file!.status || 'M' }}</span>
                     <span class="file-path">{{ row.name }}</span>
                     <span v-if="row.file!.add || row.file!.del" class="file-num">
@@ -2748,6 +2810,7 @@ const dialogCtx = reactive({
                   <p v-if="truncated" class="trunc">…</p>
                 </div>
               </template>
+              <p v-else-if="detailFailed" class="pane-state">{{ t('loadFailed') }}</p>
               <p v-else-if="worktreeMode" class="pane-state">
                 {{ changeCount ? t('git_no_diff') : t('git_clean') }}
               </p>
@@ -2959,7 +3022,7 @@ const dialogCtx = reactive({
   flex-shrink: 0; font-size: var(--text-2xs); color: var(--color-text-disabled);
 }
 .item-x {
-  display: none; place-items: center; width: 16px; height: 16px; flex-shrink: 0;
+  display: none; place-items: center; width: 20px; height: 20px; flex-shrink: 0;
   background: none; border: 0; padding: 0; border-radius: var(--radius-xs);
   cursor: pointer; color: var(--color-text-muted);
 }
@@ -3186,6 +3249,8 @@ const dialogCtx = reactive({
   border-bottom: 1px solid var(--color-border);
 }
 .file-state { padding: var(--space-5); color: var(--color-text-muted); font-size: var(--text-sm); }
+/* 详情加载失败：文案 + 重试并排，和左侧空态的灰字区分开。 */
+.file-state.detail-failed { display: flex; align-items: center; gap: var(--space-3); color: var(--color-danger); }
 .file-rows { list-style: none; margin: 0; padding: var(--space-1); overflow-y: auto; flex: 1; min-height: 0; }
 .file-row {
   display: flex; align-items: center; gap: var(--space-3);
@@ -3407,5 +3472,15 @@ const dialogCtx = reactive({
   .col-author { display: none; }
   .detail-files { width: 200px; }
   .st-path { display: none; }
+}
+/* 窄窗：bar-left 原来 min-width:0 会被右侧 flex-shrink:0 的按钮组挤没，
+   仓库名和路径缩到不可读。让工具栏换行，仓库信息独占一行，按钮组自己再换行。 */
+@media (max-width: 820px) {
+  .git-bar {
+    flex-wrap: wrap; height: auto; min-height: 46px;
+    padding-top: 6px; padding-bottom: 6px; row-gap: 6px;
+  }
+  .bar-left { flex: 1 1 100%; }
+  .bar-actions { flex: 1 1 auto; min-width: 0; flex-wrap: wrap; }
 }
 </style>

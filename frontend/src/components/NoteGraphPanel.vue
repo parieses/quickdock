@@ -409,7 +409,12 @@ function onWheel(e: WheelEvent) {
 }
 
 function onNodeClick(node: SimNode) {
+  // 单击只选中、显示该节点的关联侧栏；跳转交给侧栏里的「打开目标」按钮。
+  // 之前这里直接 emit openTarget，父组件一收到就关掉图谱，侧栏根本来不及看。
   selectedId.value = node.id
+}
+// 双击节点 = 快捷跳转：既要"单击看关系"，也保留老用户"双击直达"的习惯
+function onNodeDblClick(node: SimNode) {
   emit('openTarget', node.type, rawId(node), node.label)
 }
 function openSide(row: SideRow) {
@@ -519,7 +524,8 @@ onBeforeUnmount(() => {
               :class="[l.kind === 'manual' ? 'qd-graph-link--manual' : 'qd-graph-link--wiki', linkClasses(l)]"
             />
             <!-- 节点：:cx/:cy/:r/:x/:y 为力导向每帧写出的运行时坐标 -->
-            <g v-for="n in simNodes" :key="n.id" :data-node="n.id" class="qd-graph-node-group">
+            <g v-for="n in simNodes" :key="n.id" :data-node="n.id" class="qd-graph-node-group"
+               @dblclick.stop="onNodeDblClick(n)">
               <circle
                 :cx="n.x"
                 :cy="n.y"

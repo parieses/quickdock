@@ -104,6 +104,12 @@ const batchVisible = ref(false)
 const batchPreselect = ref<string[]>([])
 /** 端口转发抽屉显隐：由左工具条按钮切换，面板自身负责列表刷新/轮询 */
 const forwardVisible = ref(false)
+/** 端口转发面板「所属标签」下拉：从当前标签派生 {id,label}。
+ *  tabs 与 host.name 都是响应式，标签开关/重命名会自动同步给面板——否则
+ *  面板拿不到标签上下文，规则里的 ownerTabId（形如 hostId::序号）只会显示原始 id。 */
+const forwardTabOptions = computed<Array<{ id: string; label: string }>>(() =>
+  tabs.value.map((tab) => ({ id: tab.id, label: tab.host.name || tab.host.host })),
+)
 
 // ---- OSC 7 终端目录跟随（默认关闭） ----
 const FOLLOW_CWD_KEY = 'qd_ssh_follow_cwd'
@@ -1040,6 +1046,7 @@ defineExpose({
     <SshForwardPanel
       :open="forwardVisible"
       :hosts="hosts"
+      :tabs="forwardTabOptions"
       @close="forwardVisible = false"
     />
   </div>

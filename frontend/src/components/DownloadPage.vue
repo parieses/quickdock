@@ -430,6 +430,9 @@ const detailLoading = ref(false)
 const selectedFiles = ref<Set<number>>(new Set())
 const taskOpts = ref({ down: '', up: '', seedRatio: '', peers: '' })
 const newUri = ref('')
+// 详情弹框打开期间按页签周期重拉：1s 任务快照只更新 tasks，不更新 peers/servers/uris/files。
+// 关闭弹框 / 组件卸载时清理；silent 刷新保留页签、文件勾选与正在编辑的选项表单。
+let detailTimer: ReturnType<typeof setInterval> | null = null
 
 // ===== 分组 / 搜索 / 排序 / 选择 =====
 type FilterKey = 'all' | 'active' | 'waiting' | 'paused' | 'complete' | 'stopped'
@@ -678,6 +681,9 @@ async function retryTask(task: DlTask) {
   }
   const u = (task.url || '').trim()
   if (!isSupportedUri(u)) { toast.error(t('dlRetryNoUrl')); return }
+  // DlTask 不保存添加时的 options（鉴权 / 请求头等）；DlAdd 虽支持 optsJSON 第三参，
+  // 但重试时拿不到原值。不改后端的前提下最小可行方案：重试前明确告知不保留高级选项。
+  toast.error(t('dlRetryOptsLost'))
   await add(u, task.dir || '', '')
 }
 
@@ -742,13 +748,26 @@ async function submit() {
       if (!lines.length) { toast.error(t('dlInvalidUrls')); return }
       const skipped = raw.length - lines.length
       if (skipped > 0) toast.success(t('dlSkippedUrls', { count: skipped }))
-      // 不同目录分组提交；成功提示与刷新统一做一次，避免多组弹多条 toast。
-      ok = true
-      for (const g of batchGroups()) {
-        if (!await addBatch(g.uris, g.dir, true)) { ok = false; break }
+      // 不同目录分组提交：逐组记录结果，循环结束后统一汇总。
+      // 不再「一组失败就 break」——那样用户不知道哪几组没加上，容易重复粘贴再提交一遍。
+      const groups = batchGroups()
+      const failedGroups: string[] = []
+      let okGroups = 0
+      for (const g of groups) {
+        if (await addBatch(g.uris, g.dir, true)) okGroups++
+        else failedGroups.push(g.dir || t('dlDir'))
       }
-      if (ok) {
-        toast.success(t('dlAdded'))
+      ok = failedGroups.length === 0
+      if (okGroups > 0 || failedGroups.length > 0) {
+        if (failedGroups.length) {
+          toast.error(t('dlBatchGroupPartial', {
+            ok: okGroups,
+            failed: failedGroups.length,
+            names: failedGroups.join('、'),
+          }))
+        } else {
+          toast.success(t('dlAdded'))
+        }
         await refreshTasks()
       }
     } else {
@@ -774,7 +793,12 @@ async function pasteLinks() {
     const trimmed = text.trim()
     if (!trimmed) { toast.error(t('dlClipboardEmpty')); return }
     if (addMode.value === 'batch') batchText.value = batchText.value.trim() ? `${batchText.value.trim()}\n${trimmed}` : trimmed
-    else url.value = trimmed.split(/\r?\n/)[0] || ''
+    else {
+      // 多行粘贴不再静默丢弃：明确告知只取了第一条，并给出批量模式的出路。
+      const lines = trimmed.split(/\r?\n/).map((x) => x.trim()).filter(Boolean)
+      url.value = lines[0] || ''
+      if (lines.length > 1) toast.success(t('dlPasteMultiHint', { count: lines.length }))
+    }
   } catch (e) {
     logErr('download/paste', e)
     toast.error(getErrorMessage(e))
@@ -834,11 +858,11 @@ function parseCategoryText(): Record<string, string> {
 }
 
 // 清空已保存的 RPC secret：空串在后端表示「不修改」（表单每次打开 secret 都是空的，
-// 拿空串当清空会悄悄抹掉凭据），必须显式传哨兵值。点了之后 UI 立即反映「未设置」，
-// 真正生效在用户点保存、哨兵随表单一起下发时。
-const REMOTE_SECRET_CLEAR = '__QC_CLEAR_REMOTE_SECRET__'
+// 拿空串当清空会悄悄抹掉凭据），必须显式传哨兵值。哨兵由后端 DlOptions 下发
+// （settingsForm.remoteSecretClear），前端不硬编码，避免两端字面量漂移。
+// 点了之后 UI 立即反映「未设置」，真正生效在用户点保存、哨兵随表单一起下发时。
 function clearRemoteSecret() {
-  settingsForm.value.remoteSecret = REMOTE_SECRET_CLEAR
+  settingsForm.value.remoteSecret = settingsForm.value.remoteSecretClear
   settingsForm.value.remoteSecretSet = false
 }
 
@@ -871,12 +895,18 @@ async function doShutdown(force: boolean) {
 // ===== 详情 =====
 watch(selectedId, async (gid) => {
   ctx.value = null
+  if (detailTimer) { clearInterval(detailTimer); detailTimer = null }
   if (!gid) { detail.value = null; return }
   detailTab.value = 'overview'
   await loadDetail()
+  // 打开期间每 2s 静默重拉当前详情：peers / servers / uris / files 都是会变的实时数据，
+  // 只在 gid 变化时拉一次会让这些页签永远停在打开那一刻。
+  detailTimer = setInterval(() => {
+    if (selectedId.value && !detailLoading.value) void loadDetail(true)
+  }, 2000)
 })
 
-async function loadDetail() {
+async function loadDetail(silent = false) {
   if (!selectedId.value) return
   // 历史记录在 aria2 里已经没有这个 gid，DlDetail 必然失败；直接按只读概览渲染，
   // 不去打一次注定报错的 RPC，也别在日志里刷一条「任务不存在」。
@@ -885,18 +915,24 @@ async function loadDetail() {
     detailLoading.value = false
     return
   }
-  detailLoading.value = true
+  // 周期刷新不走 loading 分支：否则弹框每次轮询都闪成「加载中」，滚动位置也会丢。
+  if (!silent) detailLoading.value = true
   const d = await detailOf(selectedId.value)
-  detail.value = d
   if (d) {
-    selectedFiles.value = new Set(d.files.filter((f) => f.selected).map((f) => f.index))
-    const o = d.options || {}
-    taskOpts.value = {
-      down: o['max-download-limit'] || '',
-      up: o['max-upload-limit'] || '',
-      seedRatio: o['seed-ratio'] || '',
-      peers: o['bt-max-peers'] || '',
+    detail.value = d
+    // 静默刷新只换数据，不覆盖用户在文件页的勾选和选项页正在编辑的输入。
+    if (!silent) {
+      selectedFiles.value = new Set(d.files.filter((f) => f.selected).map((f) => f.index))
+      const o = d.options || {}
+      taskOpts.value = {
+        down: o['max-download-limit'] || '',
+        up: o['max-upload-limit'] || '',
+        seedRatio: o['seed-ratio'] || '',
+        peers: o['bt-max-peers'] || '',
+      }
     }
+  } else if (!silent) {
+    detail.value = null
   }
   detailLoading.value = false
 }
@@ -1031,6 +1067,7 @@ onMounted(() => window.addEventListener('keydown', onKeydown))
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
   if (diskTimer) clearTimeout(diskTimer)
+  if (detailTimer) { clearInterval(detailTimer); detailTimer = null }
 })
 </script>
 

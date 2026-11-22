@@ -13,6 +13,9 @@ import type { Collection, ToastAPI } from '../types'
 const store = useWorkspaceStore()
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
+// 窄屏下集合栏是覆盖式抽屉：选中集合后要通知父页收起，让用户直接看到项目列表，
+// 否则抽屉一直盖在上面，还得再点一次页头按钮才能关。宽屏下父页忽略此状态即可。
+const emit = defineEmits<{ (e: 'select-collection'): void }>()
 
 // ---- 局部过滤 ----
 // 全局搜索（SceneRail）跨全部已打开场景，集合多了以后「在这一屏里定位一个集合」
@@ -73,6 +76,7 @@ const showEditDialog = ref(false)
 
 function handleCollectionClick(collectionId: string) {
   store.selectCollection(collectionId)
+  emit('select-collection')
 }
 
 // 「打开」按集合自己的 open_strategy 执行（single / batch / all）。

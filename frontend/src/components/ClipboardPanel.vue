@@ -5,7 +5,7 @@ import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, inje
 import { useI18n } from 'vue-i18n'
 import { KEEP_ALIVE } from '../pages/keepAlive'
 defineOptions({ name: KEEP_ALIVE.clipboard })
-import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight, ListTodo, FilePlus, Sparkles, FolderSearch, ImageDown, ClipboardPaste, AlignLeft, ListPlus, Layers, Play, SkipForward, CheckSquare } from '@lucide/vue'
+import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight, ListTodo, FilePlus, Sparkles, FolderSearch, ImageDown, ClipboardPaste, AlignLeft, ListPlus, Layers, Play, SkipForward, CheckSquare, Ban } from '@lucide/vue'
 import { CreateNoteDoc } from '../../bindings/quickdock/services/note/noteservice'
 import { CreateTodo } from '../../bindings/quickdock/services/todo/todoservice'
 import ClipboardAiPanel from './ClipboardAiPanel.vue'
@@ -28,6 +28,8 @@ import {
   CountClipboardEntries,
   GetPasteQueue,
   SavePasteQueue,
+  GetClipboardCaptureSettings,
+  SetClipboardIgnoredApps,
 } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 import { Events } from '@wailsio/runtime'
@@ -69,6 +71,9 @@ const searchQuery = ref('')
 // 时间过滤：all | today | week | month（默认今天）
 const timeFilter = ref<'all' | 'today' | 'week' | 'month'>('today')
 const loading = ref(true)
+// 首次加载失败时常驻错误态（loading 复位后由模板显示「加载失败 + 重试」），
+// 避免 toast 一闪而过、界面永远停在「加载中」。
+const loadError = ref('')
 const refreshTimer = ref<number | null>(null)
 const imageCache = ref<Record<string, string>>({})
 const imageLoading = ref<Record<string, boolean>>({})
@@ -76,6 +81,15 @@ const listRef = ref<HTMLElement | null>(null)
 const selectedIndex = ref(0)
 const searchInputRef = ref<HTMLInputElement | null>(null)
 const activeTag = ref<string>('all')
+// 按来源筛选：sourceApp 存的是复制时的前台窗口标题。列表里给出出现过的来源，
+// 选一个就只看该来源的历史；「屏蔽此来源」把它写进已有的入库前忽略列表，
+// 以后该窗口的复制不再进历史（隐私场景：密码库/Token 面板）。
+const sourceFilter = ref<string>('all')
+const knownSources = computed(() => {
+  const set = new Set<string>()
+  for (const e of entries.value) if (e.sourceApp?.trim()) set.add(e.sourceApp)
+  return [...set]
+})
 const observerRef = ref<IntersectionObserver | null>(null)
 const IMAGE_CACHE_MAX = 60
 const NOTE_INPUT = ref<string>('')
@@ -154,6 +168,10 @@ const filteredEntries = computed(() => {
       return q.length >= 4 && parts.full.includes(q)
     })
   }
+  // 按来源筛选（前端字段，无需下推 SQL）
+  if (sourceFilter.value !== 'all') {
+    list = list.filter(e => e.sourceApp === sourceFilter.value)
+  }
   return list
 })
 
@@ -211,7 +229,26 @@ const totalClipboardPages = computed(() =>
 // 页码只在筛选条件变化时归 1。
 // 绑到 filteredEntries 会让每 30 秒一次的轮询刷新（以及每次复制后的刷新）
 // 把正在看的第 3 页弹回第 1 页——数据本身没变，只是重新取了一遍。
-watch([activeTag, searchQuery, timeFilter], () => { clipboardPage.value = 1 })
+watch([activeTag, searchQuery, timeFilter, sourceFilter], () => { clipboardPage.value = 1 })
+
+// 屏蔽来源：把窗口标题写进已有的入库前忽略列表。沿用设置面板的同一份数据，
+// 屏蔽后该来源的新复制不再入库；已入库的历史由上面的来源筛选继续可查/可删。
+async function blockSource(source: string) {
+  const name = source?.trim()
+  if (!name) return
+  try {
+    const s = unwrap<{ ignoredApps?: string[] }>(await GetClipboardCaptureSettings())
+    const apps = Array.isArray(s?.ignoredApps) ? [...s!.ignoredApps!] : []
+    if (!apps.some(a => a.toLowerCase() === name.toLowerCase())) apps.push(name)
+    unwrap(await SetClipboardIgnoredApps(JSON.stringify(apps)))
+    // sourceApp 实际是复制时的前台窗口标题，网页标题一变屏蔽就失效；
+    // 在成功提示里直接说明匹配口径，避免用户误以为是按应用进程屏蔽。
+    toast.success(t('cbSourceBlocked', { name }) + ' · ' + t('clipBlockByTitleNote'))
+    if (sourceFilter.value === name) sourceFilter.value = 'all'
+  } catch (e) {
+    toast.error(getErrorMessage(e)); logErr('clipboard/blockSource', e)
+  }
+}
 // 但筛选结果变少时页码可能越界（比如删到只剩 1 页），这时要收回到最后一页，
 // 否则会停在一个空白页上，看起来像"东西没了"。
 watch(totalClipboardPages, (n) => {
@@ -230,6 +267,16 @@ function clearSearch() {
   searchQuery.value = ''
   activeTag.value = 'all'
   timeFilter.value = 'today'
+  selectedIndex.value = 0
+  clipboardPage.value = 1
+}
+
+// 空态引导：库里有记录但被时间/标签/来源/搜索滤空时，一键还原为全量视图。
+function showAllRecords() {
+  searchQuery.value = ''
+  activeTag.value = 'all'
+  sourceFilter.value = 'all'
+  timeFilter.value = 'all'
   selectedIndex.value = 0
   clipboardPage.value = 1
 }
@@ -288,13 +335,15 @@ let entriesLoadGen = 0
 async function loadEntries() {
   const gen = ++entriesLoadGen
   try {
-    const limit = props.compact ? 300 : CLIPBOARD_MAX_LOAD
+    const push = queryPushForTag(activeTag.value)
+    // 收藏标签无法下推 SQL（bindings 无 isPinned 参数）：收藏态 limit=0 拉全量，
+    // 再由 filterByTag 按 isPinned 过滤。否则只能在前 1000 条里筛，老收藏永远不出现。
+    const limit = push.push === 'favorite' ? 0 : (props.compact ? 300 : CLIPBOARD_MAX_LOAD)
     // 按当前标签把类型过滤下推到 SQL：
     //  - image/file → content_type 整类（ListClipboardEntriesByType）
     //  - 智能分类（url/email/json/code/phone）→ text_type 列（ListClipboardEntriesBySmartType，
     //    content_type 固定为 text），同样在库内过滤，既快又覆盖全量历史。
     // 这样即使目标条目排在「最近 1000 条」之外，对应标签也能查到。
-    const push = queryPushForTag(activeTag.value)
     const ct = push.push === 'contentType' ? push.value : ''
     const st = push.push === 'smartType' ? push.value : ''
     const q = searchQuery.value.trim()
@@ -325,22 +374,33 @@ async function loadEntries() {
     }
     // 不再预加载所有图片 — 由 IntersectionObserver 懒加载
     loading.value = false
+    loadError.value = ''
     // 删除 / 清空 / 自动过期都会走这里刷新，总数一并跟上
     void loadTotal()
   } catch (e) {
     if (gen !== entriesLoadGen) return
     const msg = getErrorMessage(e)
     logErr('ClipboardPanel', msg)
+    // 失败也要复位 loading，否则空列表会永远停在「加载中」，错误只闪一下 toast。
+    loading.value = false
+    loadError.value = msg
     if (toast?.error) {
       toast.error(t('loadFailed') + ': ' + msg)
     }
   }
 }
 
+// 失败态的「重试」：显式恢复加载态再查一次（loadEntries 自身不置 loading=true）。
+function retryLoad() {
+  loading.value = true
+  loadError.value = ''
+  void loadEntries()
+}
+
 // 标签切换后若下推方式变了，必须重新查库（已载入的集合不再是所需的那一类）。
 // 用「完整下推签名」（push 类型 + 值）做比较：智能分类之间互切（url↔email）虽然都下推
-// smartType，但 text_type 值不同 → SQL 查询不同 → 必须重查；而 all↔favorite 都下推 none，
-// 集合一致，不重查。
+// smartType，但 text_type 值不同 → SQL 查询不同 → 必须重查；all↔favorite 也不同
+// （favorite 拉全量），同样要重查，否则收藏态会沿用 all 的前 1000 条基础集合。
 watch(() => {
   return tagPushSignature(queryPushForTag(activeTag.value))
 }, (nv, ov) => {
@@ -422,7 +482,11 @@ async function handleCopy(entry: ClipboardEntry) {
     } else {
       unwrap(await CopyClipboardEntry(entry.id))
       toast.success(t('copied'))
-      await loadEntries()
+      // 不再整表 loadEntries：连续复制时 ≤1000 条重载 + 图片集合重建会打断操作。
+      // 只把被点这一条的 copyCount +1，其余刷新交给 30s 轮询 / 剪贴板事件。
+      const target = entries.value.find(e => e.id === entry.id)
+        || baseEntries.value.find(e => e.id === entry.id)
+      if (target) target.copyCount = (target.copyCount || 0) + 1
     }
   } catch (e) {
     if (toast?.error) {
@@ -1050,6 +1114,11 @@ onUnmounted(() => {
         <span>{{ tag.label }}</span>
       </button>
       <div class="tags-divider"></div>
+      <!-- 来源筛选：只对出现在历史里的来源给出选项，选中后只看该来源 -->
+      <select v-if="knownSources.length" v-model="sourceFilter" class="cb-source-select" :title="t('cbSourceFilter')" :aria-label="t('cbSourceFilter')">
+        <option value="all">{{ t('cbSourceAll') }}</option>
+        <option v-for="s in knownSources" :key="s" :value="s">{{ s }}</option>
+      </select>
       <button
         v-for="tf in ([{id:'all'},{id:'today'},{id:'week'},{id:'month'}] as const)"
         :key="'time-' + tf.id"
@@ -1082,10 +1151,15 @@ onUnmounted(() => {
     <!-- 列表 -->
     <!-- 只在「首次加载、还没有任何数据」时让位给加载占位；后台刷新期间
          loading 也为 true，但列表必须继续显示上一次的条目（SWR）。 -->
-    <div ref="listRef" class="clipboard-list" v-if="!loading || entries.length > 0">
+    <div ref="listRef" class="clipboard-list" v-if="entries.length > 0 || (!loading && !loadError)">
       <div v-if="filteredEntries.length === 0" class="clipboard-empty">
         <ClipboardList :size="36" class="empty-icon" />
-        <p class="empty-text">{{ searchQuery ? t('noMatchClipboard') : t('noClipboardRecords') }}</p>
+        <!-- 区分「库里真的一条都没有」与「有记录但被当前筛选滤空」，后者给出去掉筛选的入口 -->
+        <p v-if="entries.length === 0" class="empty-text">{{ t('noClipboardRecords') }}</p>
+        <template v-else>
+          <p class="empty-text">{{ searchQuery ? t('noMatchClipboard') : t('clipNoRecordsFiltered') }}</p>
+          <button class="qd-btn qd-btn-sm" @click="showAllRecords">{{ t('clipSwitchToAll') }}</button>
+        </template>
       </div>
       <div v-key-click
         v-for="(entry, idx) in displayEntries"
@@ -1143,7 +1217,10 @@ onUnmounted(() => {
           </template>
           <div class="item-meta">
             <span class="item-time">{{ timeAgo(entry.createdAt) }}</span>
-            <span v-if="entry.sourceApp" class="item-source">{{ entry.sourceApp }}</span>
+            <span v-if="entry.sourceApp" class="item-source">
+              {{ entry.sourceApp }}
+              <button class="item-source-block" :title="t('cbSourceBlock', { name: entry.sourceApp })" :aria-label="t('cbSourceBlock', { name: entry.sourceApp })" @click.stop="blockSource(entry.sourceApp)"><Ban :size="11" /></button>
+            </span>
             <span v-if="entry.copyCount > 1" class="item-count">{{ entry.copyCount }} {{ t('count') }}</span>
           </div>
           <div v-if="entry.note" class="item-note">
@@ -1290,6 +1367,10 @@ onUnmounted(() => {
 
     <div v-if="loading && !entries.length" class="clipboard-loading">
       <p>{{ t('loading') }}</p>
+    </div>
+    <div v-else-if="loadError && !entries.length" class="clipboard-loading clipboard-load-error">
+      <p>{{ t('loadFailed') }}：{{ loadError }}</p>
+      <button class="qd-btn qd-btn-sm" @click="retryLoad">{{ t('retry') }}</button>
     </div>
 
     <!--
@@ -1549,7 +1630,19 @@ onUnmounted(() => {
 }
 .item-meta { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
 .item-time { font-size: var(--text-xs); color: var(--color-text-disabled); }
-.item-source { font-size: var(--text-xs); color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px var(--space-3); border-radius: var(--radius-xs); }
+.item-source { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-xs); color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px var(--space-3); border-radius: var(--radius-xs); }
+.item-source-block { display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: var(--color-text-muted); cursor: pointer; opacity: 0; transition: opacity 0.12s, color 0.12s; }
+.clipboard-item:hover .item-source-block, .item-source-block:focus-visible { opacity: 1; }
+.item-source-block:hover { color: var(--color-danger); }
+
+/* 来源筛选下拉：与时间分段同高，融入同一行 */
+.cb-source-select {
+  height: 22px; max-width: 180px; padding: 0 var(--space-2);
+  border: 1px solid var(--color-border); border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary); color: var(--color-text-muted);
+  font-size: var(--text-xs); font-family: inherit; cursor: pointer; flex-shrink: 0;
+}
+.cb-source-select:focus { color: var(--color-accent); border-color: var(--color-accent); outline: none; }
 .item-count { font-size: var(--text-xs); color: var(--color-accent); }
 
 .clipboard-item.is-image { align-items: flex-start; padding: var(--space-4) var(--space-5); }
@@ -1606,11 +1699,13 @@ onUnmounted(() => {
   margin-bottom: var(--space-5);
 }
 .clipboard-empty .empty-text { font-size: var(--text-md); color: var(--color-text-secondary); }
+.clipboard-empty .empty-text + .qd-btn { margin-top: var(--space-3); }
 
 .clipboard-loading {
   display: flex; align-items: center; justify-content: center;
   height: 100%; color: var(--color-text-disabled); font-size: var(--text-md);
 }
+.clipboard-load-error { flex-direction: column; gap: var(--space-3); }
 
 /* 剪贴板分页 */
 .clipboard-pagination {

@@ -191,6 +191,7 @@ export interface DlOptionsView {
   remotePort: number
   remoteSecret: string
   remoteSecretSet: boolean
+  remoteSecretClear: string
   remoteSecure: boolean
   remotePath: string
   notifyDisabled: boolean
@@ -312,7 +313,7 @@ const options = ref<DlOptionsView>({
   perTaskFolder: false,
   categoryRules: {}, schedule: { enabled: false, start: '23:00', end: '07:00', downloadLimit: '', uploadLimit: '' },
   remoteEnabled: false, remoteHost: '', remotePort: 6800, remoteSecret: '',
-  remoteSecretSet: false, remoteSecure: false, remotePath: '/jsonrpc', notifyDisabled: false,
+  remoteSecretSet: false, remoteSecretClear: '', remoteSecure: false, remotePath: '/jsonrpc', notifyDisabled: false,
 })
 const tasks = ref<DlTask[]>([])
 const global = ref<DlGlobalStat>({ ...EMPTY_GLOBAL })
@@ -490,7 +491,8 @@ export function useDownloadTasks() {
       }
       return true
     } catch (e) {
-      toast.error(getErrorMessage(e))
+      // silent 由调用方（多行按目录分组）汇总失败组名统一提示，这里不再逐组弹 toast。
+      if (!silent) toast.error(getErrorMessage(e))
       logErr('download/batch', e)
       return false
     }

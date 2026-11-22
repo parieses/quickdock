@@ -173,7 +173,7 @@ const allSelected = computed(
   () => displayEntries.value.length > 0 && displayEntries.value.every((e) => selected.value.includes(e.path)),
 )
 
-async function refreshStatus() {
+async function refreshStatus(silent = false) {
   try {
     gw.value = unwrap<GatewayInfo>(await NetdiskStatus())
     // 后端在 Status 里探测过根目录：没存储时直接进引导页，不再发那次注定
@@ -186,7 +186,14 @@ async function refreshStatus() {
     if (ready.value) await loadDir(dir.value)
   } catch (e) {
     logErr('NetdiskPage.refreshStatus', e)
-    toast.error(getErrorMessage(e))
+    // 轮询失败不弹 toast：网关长时间崩溃时不能每 30s 刷一条错误。
+    if (!silent) toast.error(getErrorMessage(e))
+    // 状态探测失败不能让页面继续停在过期的「运行中」：切到已停止态并清掉旧列表，
+    // 下次轮询 / 手动刷新恢复后再重新拉。
+    if (gw.value?.running) {
+      gw.value = { ...gw.value, running: false }
+      entries.value = []
+    }
   }
 }
 
@@ -477,7 +484,14 @@ async function sendToDownloader(items: Entry[]) {
       await NetdiskSendToDownloader(JSON.stringify(files.map((f) => f.path))),
     )
     if (res?.failed?.length) {
-      toast.error(t('netdiskSendPartial', { added: res.added, failed: res.failed.length }))
+      // 只报数量用户无法定位是哪个文件失败：沿用 confirmDelete 的折叠样式列出失败文件名。
+      const names = res.failed.slice(0, 10)
+      const more = res.failed.length > 10 ? t('netdiskMoreItems', { count: res.failed.length - 10 }) : ''
+      toast.error(t('ndSendPartialDetail', {
+        added: res.added,
+        failed: res.failed.length,
+        names: [...names, more].filter(Boolean).join('、'),
+      }))
       return
     }
     toast.success(t('netdiskSentToDownloader', { count: res?.added ?? files.length }))
@@ -657,19 +671,30 @@ function onEnvProgress(payload: any) {
 let offDownload: (() => void) | null = null
 let offUpload: (() => void) | null = null
 let offEnv: (() => void) | null = null
+let statusTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(async () => {
+  // 网盘页不在 KeepAlive：切走即销毁，回来是全新实例。清掉切走前残留的临时
+  // 上传计数与进度行，再由下面的 refreshStatus → loadDir 拉回真实目录。
+  uploadPending.value = 0
+  jobs.value = []
   offDownload = Events.On('quickdock:netdisk:download', onDownloadProgress)
   offUpload = Events.On('quickdock:netdisk:upload', onUploadProgress)
   offEnv = Events.On('quickdock:env:progress', onEnvProgress)
   window.addEventListener('keydown', onKeydown)
   await refreshStatus()
+  // 网关可能在页面停留期间崩溃 / 被外部停掉；30s 轻量轮询状态，
+  // 异常时 refreshStatus 会切「已停止」并清旧列表，不用点目录才知道。
+  statusTimer = setInterval(() => {
+    if (!busy.value) void refreshStatus(true)
+  }, 30_000)
 })
 
 onUnmounted(() => {
   offDownload?.()
   offUpload?.()
   offEnv?.()
+  if (statusTimer) { clearInterval(statusTimer); statusTimer = null }
   window.removeEventListener('keydown', onKeydown)
 })
 
@@ -741,7 +766,7 @@ function shortTime(s: string): string {
         <button v-if="gw?.installed" class="qd-btn" :disabled="!!busy" @click="restartGateway">
           <Power :size="14" />{{ busy === 'restart' ? t('netdiskRestarting') : t('netdiskRestartGateway') }}
         </button>
-        <button class="qd-btn" :disabled="loading" @click="refreshStatus">
+        <button class="qd-btn" :disabled="loading" @click="() => refreshStatus()">
           <RefreshCw :size="14" />{{ t('netdiskRefresh') }}
         </button>
       </div>
@@ -777,7 +802,7 @@ function shortTime(s: string): string {
         <button class="qd-btn qd-btn-primary" @click="openAdmin">
           <Settings2 :size="14" />{{ t('netdiskOpenAdmin') }}
         </button>
-        <button class="qd-btn" @click="refreshStatus">
+        <button class="qd-btn" @click="() => refreshStatus()">
           <RefreshCw :size="14" />{{ t('netdiskRefresh') }}
         </button>
       </div>
@@ -929,7 +954,15 @@ function shortTime(s: string): string {
     <div v-else class="nd-tip">{{ t('netdiskLoading') }}</div>
 
     <!-- 预览浮层：媒体类交给浏览器流式拉（后端代理透传 Range，可拖进度条） -->
-    <div v-if="preview" class="nd-pv-mask" @click.self="closePreview">
+    <div
+      v-if="preview"
+      v-dialog
+      role="dialog"
+      aria-modal="true"
+      :aria-label="preview.name"
+      class="nd-pv-mask"
+      @click.self="closePreview"
+    >
       <div class="nd-pv">
         <header class="nd-pv-head">
           <span class="nd-pv-title" :title="preview.name">{{ preview.name }}</span>
@@ -937,7 +970,7 @@ function shortTime(s: string): string {
           <button class="btn btn-secondary nd-dl" @click="downloadFile(preview)">
             <Download :size="13" />{{ t('netdiskDownload') }}
           </button>
-          <button class="nd-pv-close" :title="t('netdiskClose')" @click="closePreview">
+          <button class="nd-pv-close" :aria-label="t('netdiskClose')" :title="t('netdiskClose')" @click="closePreview">
             <X :size="16" />
           </button>
         </header>

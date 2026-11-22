@@ -46,6 +46,10 @@ const selected = ref<Set<string>>(new Set())
 const activePath = ref('')
 const previewSearching = ref(false)
 const previewExpanded = ref(false)
+// 结果列表的键盘焦点索引（与鼠标选中解耦：↑↓ 只移动焦点，Enter 才定位/打开）。
+const activeIndex = ref(0)
+const listRef = ref<HTMLElement | null>(null)
+const queryInputRef = ref<HTMLInputElement | null>(null)
 
 let reqId = 0
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -104,6 +108,9 @@ watch([query, sortBy, limit], () => {
 })
 onScopeDispose(() => { if (debounceTimer) clearTimeout(debounceTimer) })
 
+// 新结果到位后焦点回到首行，避免残留旧索引指向完全不同的一条。
+watch(rows, () => { activeIndex.value = 0 })
+
 function onRowClick(e: MouseEvent, i: number, path: string) {
   activePath.value = path
   const next = new Set(selected.value)
@@ -151,35 +158,95 @@ async function copyField(field: 'path' | 'name') {
     .join('\n')
   if (text) await copyText(text)
 }
-async function runOn(paths: string[], kind: 'reveal' | 'open') {
+async function runOn(items: FileSearchResult[], kind: 'reveal' | 'open') {
   let ok = 0
-  for (const p of paths) {
+  const failed: string[] = []
+  for (const r of items) {
+    const p = r.path
+    if (!p) continue
     try {
       unwrap(await (kind === 'reveal' ? RevealInExplorer(p) : LaunchInstalledApp(p)))
       ok++
     } catch (e) {
+      failed.push(r.name || p)
       logErr('fileSearch/action', e)
     }
   }
-  if (ok) toast.success(t('fileSearchActionDone', { n: ok }))
-  else if (paths.length) toast.error(t('fileSearchActionFailed'))
+  if (failed.length) {
+    // 部分失败不能只报成功数：列出失败项名称，用户才知道该重试哪几条。
+    toast.error(t('fileSearchActionPartial', { ok, fail: failed.length }) + '：' + failed.join('、'))
+  } else if (ok) {
+    toast.success(t('fileSearchActionDone', { n: ok }))
+  } else if (items.length) {
+    toast.error(t('fileSearchActionFailed'))
+  }
 }
 function bulk(kind: 'reveal' | 'open') {
-  void runOn(selectedRows.value.map(r => r.path!).filter(Boolean), kind)
+  void runOn(selectedRows.value, kind)
 }
 function rowAction(e: MouseEvent, r: FileSearchResult, kind: 'reveal' | 'open') {
   e.stopPropagation()
-  if (r.path) void runOn([r.path], kind)
+  void runOn([r], kind)
 }
 
-// 预览面板自己不处理 Esc（命令面板里那是文档级 capture 监听）。这里只在容器上
-// 收掉预览内搜索与放大态，避免 Esc 冒泡到全局把整个页面收起。
+// 容器级键盘导航：预览面板自己不处理 Esc（命令面板里那是文档级 capture 监听）。
+// 这里收掉预览内搜索/放大态，并给结果行补 ↑↓ / Enter / Esc，与剪贴板页一致。
+function scrollToActive() {
+  const items = listRef.value?.querySelectorAll('.fs-row')
+  ;(items?.[activeIndex.value] as HTMLElement | undefined)?.scrollIntoView({ block: 'nearest' })
+}
+
 function onKeydown(e: KeyboardEvent) {
-  if (e.key !== 'Escape' || e.isComposing || e.keyCode === 229) return
-  if (previewSearching.value || previewExpanded.value) {
-    previewSearching.value = false
-    previewExpanded.value = false
-    e.stopPropagation()
+  if (e.isComposing || e.keyCode === 229) return
+  // Esc：先收预览内的搜索/放大；否则清空选中与键盘焦点，并阻止冒泡到全局收起页面。
+  if (e.key === 'Escape') {
+    if (previewSearching.value || previewExpanded.value) {
+      previewSearching.value = false
+      previewExpanded.value = false
+      e.stopPropagation()
+      return
+    }
+    if (selected.value.size || activeIndex.value) {
+      selected.value = new Set()
+      activeIndex.value = 0
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    return
+  }
+  const target = e.target as HTMLElement | null
+  const tag = target?.tagName
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    // 搜索后焦点通常还在搜索框，↑↓ 必须能在那里接管；但排序/条数下拉与其它输入框不抢。
+    if (tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON' || tag === 'A') return
+    if (tag === 'INPUT' && target !== queryInputRef.value) return
+  } else if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON' || tag === 'A') {
+    // 搜索框回车是「搜索」，按钮回车是它自身动作，都不能再触发行打开。
+    return
+  }
+  if (!rows.value.length) return
+  switch (e.key) {
+    case 'ArrowDown':
+      e.preventDefault()
+      activeIndex.value = activeIndex.value < rows.value.length - 1 ? activeIndex.value + 1 : 0
+      scrollToActive()
+      break
+    case 'ArrowUp':
+      e.preventDefault()
+      activeIndex.value = activeIndex.value > 0 ? activeIndex.value - 1 : rows.value.length - 1
+      scrollToActive()
+      break
+    case 'Enter': {
+      e.preventDefault()
+      const r = rows.value[activeIndex.value]
+      if (!r?.path) return
+      // 与鼠标单击/双击一致：设为当前预览、单选该行，再定位到所在文件夹。
+      activePath.value = r.path
+      selected.value = new Set([r.path])
+      lastAnchor = activeIndex.value
+      void runOn([r], 'reveal')
+      break
+    }
   }
 }
 </script>
@@ -204,6 +271,7 @@ function onKeydown(e: KeyboardEvent) {
           <div class="qd-input-wrap fs-query">
             <Search :size="13" />
             <input
+              ref="queryInputRef"
               v-model="query"
               class="qd-input"
               :placeholder="t('fileSearchPlaceholder')"
@@ -243,7 +311,7 @@ function onKeydown(e: KeyboardEvent) {
         </p>
 
         <div class="fs-body" :class="{ 'is-expanded': previewExpanded }">
-          <div class="fs-list">
+          <div ref="listRef" class="fs-list">
             <div v-if="loading && !rows.length" class="qd-empty">
               <p class="qd-empty-hint">{{ t('evSearching') }}</p>
             </div>
@@ -256,9 +324,13 @@ function onKeydown(e: KeyboardEvent) {
               <div v-key-click
                 v-for="(r, i) in rows"
                 :key="r.path || i"
-                :class="['qd-row', 'fs-row', { active: !!r.path && selected.has(r.path) }]"
+                :class="['qd-row', 'fs-row', {
+                  active: !!r.path && selected.has(r.path),
+                  'kbd-active': i === activeIndex
+                }]"
                 @click="onRowClick($event, i, r.path || '')"
                 @dblclick="rowAction($event, r, 'reveal')"
+                @mouseenter="activeIndex = i"
               >
                 <span class="qd-row-icon"><FileIcon :size="15" /></span>
                 <span class="fs-row-main">
@@ -335,10 +407,24 @@ function onKeydown(e: KeyboardEvent) {
 .fs-preview { flex: 1 1 45%; min-width: 0; overflow: hidden; padding: var(--space-4); }
 
 .fs-row { gap: var(--space-4); }
+/* 键盘焦点态：与鼠标 selected 的填充色分开，↑↓ 移动时始终看得见焦点在哪一行 */
+.fs-row.kbd-active { outline: 1px solid var(--color-accent); outline-offset: -1px; }
 .fs-row-main { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: var(--space-1); }
 .fs-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fs-dir { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
 .fs-time { flex-shrink: 0; font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap; }
 .fs-row-actions { display: flex; flex-shrink: 0; gap: var(--space-1); opacity: 0; }
 .fs-row:hover .fs-row-actions, .fs-row.active .fs-row-actions { opacity: 1; }
+
+/* 窄窗（约 900px 以下）双栏会把列表和预览都挤得太窄，改为上下堆叠：
+   列表占上半、预览移到下方，各自保留独立滚动，不再横向抢宽度。 */
+@media (max-width: 900px) {
+  .fs-body { flex-direction: column; }
+  .fs-list {
+    flex: 1 1 50%;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .fs-preview { flex: 1 1 50%; }
+}
 </style>

@@ -50,7 +50,7 @@ import {
   Trash2, Search, X, FolderPlus, FileText, Folder,
   Copy as CopyIcon, PanelLeft, PanelLeftClose, ChevronDown, Sparkles, FileDown, List,
   FileSearch, Square, CheckSquare, Clock, Code2, Columns2, Eye, Link2, Network, PanelRight,
-  Download, Upload, History, FilePlus2, Loader2, Check, AlertTriangle, RefreshCw,
+  Download, Upload, History, FilePlus2, Loader2, Check, AlertTriangle, RefreshCw, CircleHelp,
 } from '@lucide/vue'
 import type { ToastAPI, Note, WikiTarget, LinkTargetGroups, EntityType } from '../types'
 
@@ -62,6 +62,9 @@ const toast = inject<ToastAPI>('toast')!
 // ---- 数据 ----
 const nodes = ref<Note[]>([])
 const loading = ref(true)
+// 树读取失败要 distinct 于「真的空库」：否则 catch 只 toast 一闪而过，
+// 左栏回落到「还没有笔记」空态，用户会以为库空了而新建，掩盖后端故障。
+const loadFailed = ref(false)
 const expanded = ref<Set<string>>(new Set())
 const searchQuery = ref('')
 const activeTag = ref('')
@@ -306,6 +309,7 @@ function parseTagsS(json: string): string[] {
 
 async function load() {
   loading.value = true
+  loadFailed.value = false
   try {
     const r = unwrap<Note[]>(await ListNotesTree())
     // 快捷笔记与树节点共用一张表：它的 keyword 固定，name 会回退成 keyword，
@@ -332,7 +336,10 @@ async function load() {
       if (n) onDoc(n)
       pendingOpenNoteId.value = ''
     }
-  } catch (e) { toast.error(getErrorMessage(e)) } finally { loading.value = false }
+  } catch (e) {
+    loadFailed.value = true
+    toast.error(getErrorMessage(e))
+  } finally { loading.value = false }
 }
 
 async function doSearch() {
@@ -373,6 +380,32 @@ async function loadTags() {
 // ---- 左侧树 ----
 function toggleFolder(id: string) {
   const s = new Set(expanded.value); s.has(id) ? s.delete(id) : s.add(id); expanded.value = s
+}
+// 搜索/标签结果是扁平列表，不读 expanded —— 在那里点文件夹调 toggleFolder 毫无反应。
+// 正确行为：退出筛选回到树、展开该文件夹及其祖先、滚动定位到它，让用户看见里面的笔记。
+async function revealSearchFolder(n: TreeNode) {
+  // allNodes 是 load 时的全量快照，搜索只覆盖 nodes 不动它 —— 用它回溯父链，
+  // 不依赖清筛选后正在 debounce 异步回填的 nodes（那时还是搜索子集，父节点找不到）。
+  const next = new Set(expanded.value)
+  let cur: Note | undefined = n
+  const guard = new Set<string>()
+  while (cur?.parentId && !guard.has(cur.parentId)) {
+    guard.add(cur.parentId)
+    next.add(cur.parentId)
+    cur = allNodes.value.find(x => x.id === cur!.parentId)
+  }
+  next.add(n.id)
+  expanded.value = next
+  // 退出筛选：watch → debounce → doSearch('') → load() 会重建树。等那行渲染出来再滚。
+  searchQuery.value = ''
+  activeTag.value = ''
+  const id = n.id.replace(/"/g, '\\"')
+  for (let i = 0; i < 60; i++) {
+    await nextTick()
+    const el = document.querySelector<HTMLElement>(`[data-note-id="${id}"]`)
+    if (el) { el.scrollIntoView({ block: 'center' }); break }
+    await new Promise(r => setTimeout(r, 20))
+  }
 }
 // 展开所有含子项的文件夹。之前是个空函数（也没有按钮），工具栏只剩"全部折叠"，
 // 大目录里想快速扫一遍只能一层层点。
@@ -778,6 +811,8 @@ const tocOpen = ref(false)
 // 大纲是编辑区右侧的第三个 flex 栏，与源码/预览并排，不遮挡内容。
 const graphOpen = ref(false)
 const outlineOpen = ref(false)
+// 编辑器光标所在行（1-based），传给大纲做「当前标题」高亮；切文档/重建编辑器时归零。
+const outlineActiveLine = ref(0)
 interface OutlineHeading { level: number; text: string; line: number }
 // 比 tocItems 多一个 1-based 行号：大纲要能把编辑器滚到该行并折叠该区段，
 // 光有标题文本做不到（同名标题会跳错）。
@@ -797,6 +832,7 @@ function onOutlineJump(line: number) {
   if (h && previewRef.value) gotoHeading(h.text)
 }
 function onOutlineFold(line: number) { docEditor?.foldAt(line) }
+function onOutlineUnfold(line: number) { docEditor?.unfoldAt(line) }
 function onOutlineFoldAll() { docEditor?.foldAll() }
 function onOutlineUnfoldAll() { docEditor?.unfoldAll() }
 function onGraphOpenTarget(type: string, id: string, _label: string) {
@@ -810,7 +846,10 @@ function onGraphOpenTarget(type: string, id: string, _label: string) {
     pendingOpenTodoId.value = id
     navigate('todo')
   } else {
-    navigateTo('workspace', id)
+    // 图谱实体只有 note/todo/item 三种（见后端 entity_link.go 的 validEntityType），
+    // note/todo 已在上面分支处理，走到这里必是 item。WorkspacePage.parseLocate
+    // 认的是 "scene|collection|item:原始id"，裸 id 会被当成无效目标静默忽略。
+    navigateTo('workspace', 'item:' + id)
   }
 }
 function gotoHeading(text: string) {
@@ -1090,6 +1129,7 @@ let offDocScroll: (() => void) | null = null
 
 async function mountDocEditor() {
   editorError.value = ''
+  outlineActiveLine.value = 0
   const gen = ++docEditorGen
   // 先拆旧的：切文档/切格式都走这里，旧实例的滚动监听要一起摘掉
   offDocScroll?.()
@@ -1118,6 +1158,8 @@ async function mountDocEditor() {
         docContent.value = v
         onDocInput()
       },
+      // 光标行 → 大纲当前标题高亮。只在 MD 折叠开启时才有大纲，text 格式不传也无副作用。
+      onSelectionChange: (line) => { outlineActiveLine.value = line },
       onSave: () => { void flushPendingSave() },
     })
     // await 期间用户可能已经切到另一篇：这次的实例直接丢掉，别挂错文档
@@ -1351,6 +1393,116 @@ function insertWiki(c: { type: EntityType; label: string }) {
   docEditor?.focus()
 }
 
+// ---- Markdown 语法速查浮层 ----
+// 挂在工具条 ? 按钮上：hover 显示、点击固定、Esc / 点外部关闭。
+// 语法样例是符号本身（不属于自然语言，按 CheatSheetModal 的惯例走数据不走 i18n），
+// 只有右侧说明文字走 i18n key。
+interface MdHelpRow { sample: string; descKey: string; insert?: string }
+const MD_HELP_GROUPS: { titleKey: string; rows: MdHelpRow[] }[] = [
+  {
+    titleKey: 'mdHelpBasic',
+    rows: [
+      { sample: '# 标题', descKey: 'mdHelpHeading' },
+      { sample: '**粗体**', descKey: 'mdHelpBold' },
+      { sample: '*斜体*', descKey: 'mdHelpItalic' },
+      { sample: '~~删除线~~', descKey: 'mdHelpStrike' },
+      { sample: '`行内代码`', descKey: 'mdHelpInlineCode' },
+      { sample: '> 引用', descKey: 'mdHelpQuote' },
+    ],
+  },
+  {
+    titleKey: 'mdHelpList',
+    rows: [
+      { sample: '- 列表项', descKey: 'mdHelpUl' },
+      { sample: '1. 列表项', descKey: 'mdHelpOl' },
+      { sample: '- [ ] 待办', descKey: 'mdHelpTask' },
+    ],
+  },
+  {
+    titleKey: 'mdHelpMedia',
+    rows: [
+      // 以下四行展示用简短样例，插入用可直接看到效果的完整示例数据（insert 覆盖 sample）。
+      { sample: '[文字](链接)', descKey: 'mdHelpLink', insert: '[示例链接](https://example.com)' },
+      { sample: '![说明](图片)', descKey: 'mdHelpImage', insert: '![示例图片](https://example.com/pic.png)' },
+      { sample: '| 列1 | 列2 |', descKey: 'mdHelpTable', insert: '| 列1 | 列2 |\n| --- | --- |\n| 内容A | 内容B |' },
+      { sample: '```js … ```', descKey: 'mdHelpCodeBlock', insert: '```js\nconsole.log("Hello")\n```' },
+    ],
+  },
+  {
+    titleKey: 'mdHelpAdvanced',
+    rows: [
+      { sample: '[[笔记名]]', descKey: 'mdHelpWiki' },
+      { sample: '$x^2$', descKey: 'mdHelpMath' },
+      { sample: '---', descKey: 'mdHelpDivider' },
+    ],
+  },
+]
+const mdHelpOpen = ref(false)
+const mdHelpPinned = ref(false)
+let mdHelpTimer: ReturnType<typeof setTimeout> | null = null
+const mdHelpWrapEl = ref<HTMLElement | null>(null)
+
+function cancelMdHelpClose() {
+  if (mdHelpTimer) { clearTimeout(mdHelpTimer); mdHelpTimer = null }
+}
+function openMdHelp() {
+  cancelMdHelpClose()
+  mdHelpOpen.value = true
+}
+// 延迟关闭：鼠标从按钮穿过几像素间隙移到浮层时，pointerleave 会先触发；
+// 给一点时间让浮层的 pointerenter 取消关闭，否则浮层一碰就闪退。
+function scheduleMdHelpClose() {
+  if (mdHelpPinned.value) return
+  cancelMdHelpClose()
+  mdHelpTimer = setTimeout(() => { mdHelpOpen.value = false; mdHelpTimer = null }, 180)
+}
+function clickMdHelp() {
+  cancelMdHelpClose()
+  if (mdHelpOpen.value && mdHelpPinned.value) {
+    mdHelpOpen.value = false
+    mdHelpPinned.value = false
+  } else {
+    mdHelpOpen.value = true
+    mdHelpPinned.value = true
+  }
+}
+function closeMdHelp() {
+  cancelMdHelpClose()
+  mdHelpOpen.value = false
+  mdHelpPinned.value = false
+}
+function onMdHelpDocDown(e: MouseEvent) {
+  if (!mdHelpOpen.value) return
+  const target = e.target as Node | null
+  if (target && mdHelpWrapEl.value?.contains(target)) return
+  closeMdHelp()
+}
+function onMdHelpKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && mdHelpOpen.value) {
+    e.stopPropagation()
+    closeMdHelp()
+  }
+}
+// 点击语法样例：把示例文本插到正文光标处。sample 是带占位的示例数据（如「# 标题」
+// 「**粗体**」），少数需要完整结构才生效的（表格/代码块/链接）在 insert 字段里给
+// 可直接看到效果的完整示例并覆盖 sample。插入后用户再改占位文字即可。
+// insertAtCursor 走 CM dispatch → onChange → docContent → 800ms 防抖落盘，
+// 与图片粘贴写回同一条链路，不另开后端接口。
+function insertMdSample(sample: string) {
+  if (!docEditor) {
+    // 编辑器尚未挂载（动态 import 中/失败）：降级为追加到文末，不让点击落空
+    docContent.value = docContent.value.trim()
+      ? docContent.value.replace(/\s*$/, '') + '\n' + sample
+      : sample
+    closeMdHelp()
+    void saveDoc()
+    return
+  }
+  docEditor.insertAtCursor(sample)
+  closeMdHelp()
+  void saveDoc()
+}
+
 async function renameCurrent() {
   if (!selectedDoc.value) return
   try { unwrap(await RenameNoteNode(selectedDoc.value.id, selectedDoc.value.name)); await load() } catch (e) { toast.error(getErrorMessage(e)) }
@@ -1360,10 +1512,15 @@ onMounted(() => {
   loadTreePrefs(); loadRecent(); loadNoteView(); load()
   docEditorHost.value?.addEventListener('paste', onEditorPaste, true)
   document.addEventListener('mousedown', onWikiDocDown, true)
+  document.addEventListener('mousedown', onMdHelpDocDown, true)
+  document.addEventListener('keydown', onMdHelpKeydown, true)
 })
 onBeforeUnmount(() => {
   docEditorHost.value?.removeEventListener('paste', onEditorPaste, true)
   document.removeEventListener('mousedown', onWikiDocDown, true)
+  document.removeEventListener('mousedown', onMdHelpDocDown, true)
+  document.removeEventListener('keydown', onMdHelpKeydown, true)
+  cancelMdHelpClose()
   if (savedResetTimer) clearTimeout(savedResetTimer)
   void flushPendingSave()
   offDocScroll?.()
@@ -1499,11 +1656,15 @@ watch(pendingOpenNoteId, (id) => {
                 @toggle-select="toggleSelect"
               />
             </div>
-            <div v-if="!tree.length && !recentDisplay.length && !loading" class="tree-empty">{{ t('notesEmpty') }}</div>
+            <div v-if="loadFailed && !loading" class="tree-empty tree-error">
+              <span>{{ t('notesLoadFailed') }}</span>
+              <button type="button" class="tree-retry" @click="load()">{{ t('retry') }}</button>
+            </div>
+            <div v-else-if="!tree.length && !recentDisplay.length && !loading" class="tree-empty">{{ t('notesEmpty') }}</div>
           </template>
           <!-- 搜索/标签结果：扁平展示 -->
           <template v-else>
-            <div v-key-click v-for="n in flatResults" :key="'res-'+n.id" class="qd-row sr-row" :class="{ active: !selectMode && selectedDocId === n.id, 'sel-on': selectMode && selectedIds.has(n.id) }" @click="selectMode ? toggleSelect(n.id) : (n.isFolder ? toggleFolder(n.id) : onDoc(n))">
+            <div v-key-click v-for="n in flatResults" :key="'res-'+n.id" class="qd-row sr-row" :class="{ active: !selectMode && selectedDocId === n.id, 'sel-on': selectMode && selectedIds.has(n.id) }" @click="selectMode ? toggleSelect(n.id) : (n.isFolder ? revealSearchFolder(n) : onDoc(n))">
               <span v-key-click v-if="selectMode" class="tn-check" role="checkbox" :aria-checked="selectedIds.has(n.id)" :class="{ on: selectedIds.has(n.id) }" @click.stop="toggleSelect(n.id)"></span>
               <component :is="n.isFolder ? Folder : FileText" :size="13" class="tn-icon" />
               <div class="sr-text">
@@ -1610,6 +1771,34 @@ watch(pendingOpenNoteId, (id) => {
             <button class="ne-copy" :title="t('copy')" @click="copyDoc"><CopyIcon :size="13" /></button>
             <button v-if="tocItems.length" class="ne-copy" :class="{ active: tocOpen }" :title="t('notesToc')" @click="tocOpen = !tocOpen"><List :size="13" /></button>
             <button ref="wikiBtnEl" class="ne-copy" :title="t('wikiInsertLink')" @click="openWikiPicker"><Link2 :size="13" /></button>
+            <!-- Markdown 语法速查：hover 显示、点击固定（兼顾键盘/触屏），Esc 或点外部关闭。
+                 仅 markdown 格式出现；浮层与按钮同包在 md-help-wrap 内，点浮层不会被判成「外部」。 -->
+            <span v-if="selectedDoc.format !== 'text'"
+                  ref="mdHelpWrapEl" class="md-help-wrap"
+                  @pointerenter="openMdHelp" @pointerleave="scheduleMdHelpClose">
+              <button class="ne-copy" :class="{ active: mdHelpOpen }" :title="t('mdHelpTitle')"
+                      :aria-label="t('mdHelpTitle')" :aria-expanded="mdHelpOpen"
+                      @click="clickMdHelp" @focus="openMdHelp" @blur="scheduleMdHelpClose"><CircleHelp :size="13" /></button>
+              <div v-if="mdHelpOpen" class="md-help-pop" role="dialog" :aria-label="t('mdHelpTitle')"
+                   @pointerenter="cancelMdHelpClose" @pointerleave="scheduleMdHelpClose">
+                <div class="md-help-head">
+                  <span class="md-help-title">{{ t('mdHelpTitle') }}</span>
+                  <button class="md-help-close" :title="t('close')" @click="closeMdHelp"><X :size="13" /></button>
+                </div>
+                <div class="md-help-body">
+                  <section v-for="grp in MD_HELP_GROUPS" :key="grp.titleKey" class="md-help-group">
+                    <h4 class="md-help-group-title">{{ t(grp.titleKey) }}</h4>
+                    <button v-for="row in grp.rows" :key="row.sample" class="md-help-row"
+                            :title="t('mdHelpInsert')" @click="insertMdSample(row.insert ?? row.sample)">
+                      <code class="md-help-sample">{{ row.sample }}</code>
+                      <span class="md-help-desc">{{ t(row.descKey) }}</span>
+                    </button>
+                  </section>
+                </div>
+                <div class="md-help-foot">{{ t('mdHelpInsertHint') }} · {{ mdHelpPinned ? t('mdHelpPinned') : t('mdHelpHint') }}</div>
+                <div class="md-help-wiki">{{ t('mdHelpWikiNote') }}</div>
+              </div>
+            </span>
             <div v-if="showWikiPicker" ref="wikiPopEl" class="ne-wiki-pop">
               <div class="ne-wiki-search">
                 <Search :size="12" />
@@ -1677,9 +1866,10 @@ watch(pendingOpenNoteId, (id) => {
               v-if="outlineOpen && outlineHeadings.length"
               class="ne-outline-dock"
               :headings="outlineHeadings"
+              :active-line="outlineActiveLine"
               @jump="onOutlineJump"
               @fold="onOutlineFold"
-              @unfold="onOutlineFold"
+              @unfold="onOutlineUnfold"
               @fold-all="onOutlineFoldAll"
               @unfold-all="onOutlineUnfoldAll"
               @close="outlineOpen = false"
@@ -1737,6 +1927,9 @@ watch(pendingOpenNoteId, (id) => {
 .tt-sep { width: 1px; height: 14px; flex-shrink: 0; background: var(--color-border); margin: 0 var(--space-1); }
 .tree-wrap { flex: 1; overflow-y: auto; padding: var(--space-2); }
 .tree-empty { color: var(--color-text-disabled); font-size: var(--text-sm); padding: var(--space-7); text-align: center; }
+.tree-error { color: var(--color-danger); display: flex; flex-direction: column; align-items: center; gap: var(--space-3); }
+.tree-retry { padding: var(--space-1) var(--space-3); border: 1px solid var(--color-danger); border-radius: var(--radius-sm); background: transparent; color: var(--color-danger); font-size: var(--text-sm); cursor: pointer; }
+.tree-retry:hover { background: var(--color-danger); color: var(--color-bg-primary); }
 .sr-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3); margin-bottom: 0; min-height: 26px; border-radius: var(--radius-sm); cursor: pointer; font-size: var(--text-md); }
 .sr-row:hover { background: var(--color-bg-hover); }
 
@@ -1783,6 +1976,31 @@ watch(pendingOpenNoteId, (id) => {
 .ne-copy.active { background: var(--color-accent-bg); color: var(--color-accent); }
 /* 插入 wiki 链接的候选浮层：挂在 .ne-head 上，absolute 不占布局高度 */
 .ne-wiki-pop { position: absolute; top: 100%; right: 12px; z-index: 20; width: 260px; margin-top: var(--space-2); padding: var(--space-3); border: 1px solid var(--popover-border-color); border-radius: var(--radius-sm); background: var(--color-popover-bg); box-shadow: var(--shadow-sm); }
+/* Markdown 语法速查浮层：锚在 ? 按钮所在 span（ne-head 内）。宽度按说明文字排布，
+   高度上限 + 内部滚动，避免长语法表在小窗口里顶穿编辑区。 */
+.md-help-wrap { position: relative; display: inline-flex; }
+.md-help-pop {
+  position: absolute; top: 100%; right: 0; z-index: 22;
+  width: 340px; max-width: calc(100vw - 32px); max-height: 420px;
+  display: flex; flex-direction: column;
+  margin-top: var(--space-2);
+  border: 1px solid var(--popover-border-color); border-radius: var(--radius-md);
+  background: var(--color-popover-bg); box-shadow: var(--shadow-lg);
+}
+.md-help-head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border); }
+.md-help-title { flex: 1; font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
+.md-help-close { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: none; background: none; color: var(--color-text-muted); border-radius: var(--radius-sm); cursor: pointer; }
+.md-help-close:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.md-help-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-2) var(--space-4) var(--space-3); }
+.md-help-group + .md-help-group { margin-top: var(--space-3); padding-top: var(--space-2); border-top: 1px solid var(--color-border); }
+.md-help-group-title { margin: 0 0 var(--space-2); font-size: var(--text-xs); font-weight: 600; color: var(--color-text-muted); }
+.md-help-row { display: flex; align-items: baseline; gap: var(--space-3); width: 100%; padding: 3px var(--space-2); margin: 0; border: none; border-radius: var(--radius-sm); background: none; text-align: left; cursor: pointer; font-family: inherit; }
+.md-help-row:hover { background: var(--color-bg-hover); }
+.md-help-row:hover .md-help-sample { color: var(--color-text-primary); }
+.md-help-sample { flex-shrink: 0; min-width: 108px; padding: 1px var(--space-2); border-radius: var(--radius-xs); background: var(--color-bg-tertiary); color: var(--color-accent); font-family: 'Consolas', 'Monaco', monospace; font-size: var(--text-sm); white-space: nowrap; }
+.md-help-desc { font-size: var(--text-sm); color: var(--color-text-secondary); }
+.md-help-foot { padding: var(--space-2) var(--space-4); border-top: 1px solid var(--color-border); font-size: var(--text-xs); color: var(--color-text-muted); }
+.md-help-wiki { padding: 0 var(--space-4) var(--space-3); font-size: var(--text-xs); color: var(--color-text-disabled); }
 .ne-wiki-search { display: flex; align-items: center; gap: var(--space-3); color: var(--color-text-muted); }
 .ne-wiki-input { flex: 1; min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: var(--text-sm); outline: none; font-family: inherit; }
 .ne-wiki-input:focus { border-color: var(--color-border-focus-soft); }

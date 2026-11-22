@@ -85,9 +85,12 @@ type DlOptionsView struct {
 	RemotePort      int    `json:"remotePort"`
 	RemoteSecret    string `json:"remoteSecret"`
 	RemoteSecretSet bool   `json:"remoteSecretSet"`
-	RemoteSecure    bool   `json:"remoteSecure"`
-	RemotePath      string `json:"remotePath"`
-	NotifyDisabled  bool   `json:"notifyDisabled"`
+	// RemoteSecretClear 是「清空 secret」动作的哨兵值，由后端下发，前端不要硬编码——
+	// 两端各写一份字面量迟早漂移，漂移后「清空」会变成静默不改或误改配置。
+	RemoteSecretClear string `json:"remoteSecretClear"`
+	RemoteSecure      bool   `json:"remoteSecure"`
+	RemotePath        string `json:"remotePath"`
+	NotifyDisabled    bool   `json:"notifyDisabled"`
 }
 
 func optionsView(c *aria2.Config) DlOptionsView {
@@ -124,13 +127,14 @@ func optionsView(c *aria2.Config) DlOptionsView {
 		PerTaskFolder:  c.PerTaskFolder,
 		Schedule:       c.Schedule,
 
-		RemoteEnabled:   c.RemoteEnabled,
-		RemoteHost:      c.RemoteHost,
-		RemotePort:      c.RemotePort,
-		RemoteSecretSet: c.RemoteSecret != "",
-		RemoteSecure:    c.RemoteSecure,
-		RemotePath:      c.RemotePath,
-		NotifyDisabled:  c.NotifyDisabled,
+		RemoteEnabled:     c.RemoteEnabled,
+		RemoteHost:        c.RemoteHost,
+		RemotePort:        c.RemotePort,
+		RemoteSecretSet:   c.RemoteSecret != "",
+		RemoteSecretClear: remoteSecretClear,
+		RemoteSecure:      c.RemoteSecure,
+		RemotePath:        c.RemotePath,
+		NotifyDisabled:    c.NotifyDisabled,
 	}
 }
 

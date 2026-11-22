@@ -63,9 +63,11 @@ const LOG_WINDOW_SEC = 86_400 // 与 24h 在线率同口径：只画最近一天
 const monitors = ref<Monitor[]>([])
 const stats = ref<Record<string, MonitorStat>>({})
 const logsMap = ref<Record<string, MonitorLog[]>>({})
+const logsFailed = ref<Set<string>>(new Set()) // 每条监控的日志是否拉取失败：空数组要区分「真没记录」与「失败」
 const loading = ref(false)
 const error = ref('')
 const loadedOnce = ref(false) // 首屏是否成功加载过（用于区分加载态与「刷新中保留上一屏」）
+const refreshFailed = ref(false) // 首屏之后定时刷新失败：保留上一屏但在更新时间旁标记陈旧数据
 const lastUpdatedAt = ref<number>(0)
 const autoRefresh = ref(true)
 const pageActive = ref(false)
@@ -131,14 +133,14 @@ function stamp(d: Date): string {
 
 // ── 加载 ───────────────────────────────────────────────────────────
 /** 单条日志独立请求、独立失败：某条监控刚被删或库忙，不该让整页变错误态。 */
-async function loadOneLogs(id: string, since: number): Promise<MonitorLog[]> {
+async function loadOneLogs(id: string, since: number): Promise<{ rows: MonitorLog[]; failed: boolean }> {
   try {
     const raw = unwrap<MonitorLog[]>(await GetMonitorLogsSince(id, since, LOG_LIMIT))
     const list: MonitorLog[] = Array.isArray(raw) ? [...raw] : []
     // 后端返回顺序不保证，统一按时间升序后取最近 N 条，迷你格左旧右新。
-    return list.sort((a, b) => (a.checkedTs || 0) - (b.checkedTs || 0)).slice(-LOG_LIMIT)
+    return { rows: list.sort((a, b) => (a.checkedTs || 0) - (b.checkedTs || 0)).slice(-LOG_LIMIT), failed: false }
   } catch {
-    return []
+    return { rows: [], failed: true }
   }
 }
 
@@ -163,20 +165,38 @@ async function load() {
     )
     if (seq !== loadSeq) return
     const lm: Record<string, MonitorLog[]> = {}
-    for (const [id, rows] of entries) lm[id] = rows
+    const lf = new Set<string>()
+    for (const [id, res] of entries) {
+      lm[id] = res.rows
+      if (res.failed) lf.add(id)
+    }
     monitors.value = monList
     stats.value = statMap
     logsMap.value = lm
+    logsFailed.value = lf
     lastUpdatedAt.value = Date.now()
     loadedOnce.value = true
+    refreshFailed.value = false
     error.value = ''
     emit('data', monList, statMap)
   } catch (e) {
-    // 只在首屏把它当错误；刷新失败保留上一屏数据，不把已看到的汇总抹掉。
+    // 首屏失败当错误；已有数据时刷新失败只标记「显示的是旧时刻数据」，保留上一屏不抹掉。
     if (!loadedOnce.value) error.value = getErrorMessage(e)
+    else refreshFailed.value = true
   } finally {
     if (seq === loadSeq) loading.value = false
   }
+}
+
+/** 单条监控日志的重试：卡片里点「重试」只重拉这一条，不动整页汇总与其它监控。 */
+async function reloadOneLogs(id: string) {
+  const since = Math.floor(Date.now() / 1000) - LOG_WINDOW_SEC
+  const res = await loadOneLogs(id, since)
+  logsMap.value = { ...logsMap.value, [id]: res.rows }
+  const next = new Set(logsFailed.value)
+  if (res.failed) next.add(id)
+  else next.delete(id)
+  logsFailed.value = next
 }
 
 // ── 派生数据 ───────────────────────────────────────────────────────
@@ -205,6 +225,11 @@ const overall = computed<Overall>(() => {
     labelKey = bannerClass = 'statusAllUp'
   } else if (online > 0 && down > 0) {
     labelKey = bannerClass = 'statusPartial'
+  } else if (enabled.length > 0 && online === 0 && down === 0) {
+    // 有启用项但首轮检测还没出结果：中性「等待首次检测」，不误报红色「全部离线」。
+    // 用 statusPartial 的黄色（与 unknown 状态点同色），不新增全局横幅样式。
+    labelKey = 'monStatusWaitingFirstCheck'
+    bannerClass = 'statusPartial'
   }
   // 整体 24h 在线率用「成功次数 / 总次数」聚合，而不是把各监控的百分比再平均：
   // 10 次里挂 1 次与 10000 次里挂 10 次不该得到一样的权重。
@@ -224,10 +249,10 @@ const overall = computed<Overall>(() => {
   }
 })
 
-interface StatusCard { monitor: Monitor; stat?: MonitorStat; logs: MonitorLog[] }
+interface StatusCard { monitor: Monitor; stat?: MonitorStat; logs: MonitorLog[]; logsFailed: boolean }
 interface StatusGroup { name: string; isNone: boolean; cards: StatusCard[] }
 function toCard(m: Monitor): StatusCard {
-  return { monitor: m, stat: stats.value[m.id], logs: logsMap.value[m.id] ?? [] }
+  return { monitor: m, stat: stats.value[m.id], logs: logsMap.value[m.id] ?? [], logsFailed: logsFailed.value.has(m.id) }
 }
 const groups = computed<StatusGroup[]>(() => {
   const byName = new Map<string, Monitor[]>()
@@ -320,18 +345,21 @@ function buildSnapshotHtml(): string {
       <span><b>${o.online}</b> ${esc(t('statusOnline'))}</span>
       <span><b>${esc(o.uptimeSample ? o.uptime.toFixed(1) + '%' : '—')}</b> ${esc(t('statusOverallUptime'))}</span>
       <span>${esc(t('statusLastUpdated'))} ${esc(fmtUpdated(lastUpdatedAt.value))}</span>
+      ${refreshFailed.value ? `<span>${esc(t('monStatusStaleData', { time: fmtUpdated(lastUpdatedAt.value) }))}</span>` : ''}
     </div>
   </div>`
   const sections = groups.value.map((g) => {
     const cards = g.cards.map((c) => {
       const m = c.monitor
       const s = c.stat
-      const cells = c.logs.length
-        ? c.logs.map((l) => {
-            const cls = l.status === 'up' ? 'up' : (l.status === 'down' ? 'down' : 'na')
-            return `<div class="cell ${cls}" title="${esc(cellTitle(l))}"></div>`
-          }).join('')
-        : `<span class="empty">${esc(t('statusNoLogs'))}</span>`
+      const cells = c.logsFailed
+        ? `<span class="empty">${esc(t('monLogLoadFailed'))}</span>`
+        : c.logs.length
+          ? c.logs.map((l) => {
+              const cls = l.status === 'up' ? 'up' : (l.status === 'down' ? 'down' : 'na')
+              return `<div class="cell ${cls}" title="${esc(cellTitle(l))}"></div>`
+            }).join('')
+          : `<span class="empty">${esc(t('statusNoLogs'))}</span>`
       return `<article class="card">
         <div class="chead"><span class="dot ${esc(statusClass(m))}"></span><span class="nm">${esc(m.name)}</span><span class="st">${esc(statusLabel(m))}</span></div>
         <div class="ctarget">${esc(kindText(m))} · ${esc(targetText(m) || '—')}</div>
@@ -342,7 +370,7 @@ function buildSnapshotHtml(): string {
           ${metricHtml(t('statusP99'), msText(s?.p99LatencyMs))}
           ${metricHtml(t('statusLastDown'), downText(s?.lastDownAt))}
         </div>
-        <div class="cells">${cells}</div>
+        <div class="cells" title="${esc(t('monStatusRecentChecksTip'))}">${cells}</div>
       </article>`
     }).join('')
     return `<section><h2>${esc(g.name)}</h2><div class="grid">${cards}</div></section>`
@@ -457,6 +485,10 @@ function exportSnapshot() {
           <span><b>{{ overall.online }}</b> {{ t('statusOnline') }}</span>
           <span><b>{{ overall.uptimeSample ? overall.uptime.toFixed(1) + '%' : '—' }}</b> {{ t('statusOverallUptime') }}</span>
           <span class="st-updated">{{ t('statusLastUpdated') }} {{ fmtUpdated(lastUpdatedAt) }}</span>
+          <span v-if="refreshFailed" class="st-stale">
+            {{ t('monStatusStaleData', { time: fmtUpdated(lastUpdatedAt) }) }}
+            <button class="qd-btn st-retry" @click="load()">{{ t('statusRetry') }}</button>
+          </span>
         </div>
       </div>
 
@@ -479,14 +511,18 @@ function exportSnapshot() {
               <div class="st-metric"><span class="st-metric-lbl" :title="t('monitorPercentileTip')">{{ t('statusP99') }}</span><span class="st-metric-val">{{ msText(c.stat?.p99LatencyMs) }}</span></div>
               <div class="st-metric"><span class="st-metric-lbl">{{ t('statusLastDown') }}</span><span class="st-metric-val">{{ downText(c.stat?.lastDownAt) }}</span></div>
             </div>
-            <div class="st-cells">
+            <div class="st-cells" :title="t('monStatusRecentChecksTip')">
               <div
                 v-for="(l, i) in c.logs"
                 :key="l.id || i"
                 :class="['st-cell', l.status === 'up' ? 'up' : (l.status === 'down' ? 'down' : 'na')]"
                 :title="cellTitle(l)"
               ></div>
-              <span v-if="!c.logs.length" class="st-cells-empty">{{ t('statusNoLogs') }}</span>
+              <span v-if="c.logsFailed" class="st-cells-empty st-cells-error">
+                {{ t('monLogLoadFailed') }}
+                <button class="qd-btn st-retry" @click="reloadOneLogs(c.monitor.id)">{{ t('statusRetry') }}</button>
+              </span>
+              <span v-else-if="!c.logs.length" class="st-cells-empty">{{ t('statusNoLogs') }}</span>
             </div>
           </div>
         </div>
@@ -543,6 +579,9 @@ function exportSnapshot() {
 }
 .st-banner-metrics b { font-size: var(--text-lg); color: var(--color-text-primary); margin-right: var(--space-2); }
 .st-updated { color: var(--color-text-muted); }
+.st-stale { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--color-warning); }
+.st-cells-error { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--color-danger); }
+.qd-btn.st-retry { height: 22px; padding: 0 var(--space-2); font-size: var(--text-xs); }
 
 .st-group-title { margin: var(--space-2) 0 var(--space-3); font-size: var(--text-md); font-weight: 600; color: var(--color-text-secondary); }
 .st-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--space-4); }

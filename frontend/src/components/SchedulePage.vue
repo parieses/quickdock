@@ -146,11 +146,15 @@ interface RunItem {
   status: string; result: string; durationMs: number; createdTs: number
 }
 const runs = ref<RunItem[]>([])
+// 拉历史失败时统计条会显示全 0，与「真没跑过」无法区分——记下失败态给明确提示。
+const runsFailed = ref(false)
 async function loadRuns() {
+  runsFailed.value = false
   try {
     runs.value = unwrap<RunItem[]>(await GetAllScheduleRuns(1000)) ?? []
   } catch (e) {
-    // 统计失败不影响主列表，只记日志
+    // 统计失败不影响主列表，但要让用户知道数字不可信，而不是当成「0 次运行」
+    runsFailed.value = true
     logErr('schedule.loadRuns', e)
   }
 }
@@ -363,6 +367,16 @@ function todayStr(): string {
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
+/** 下一个整点或半点：一次性任务默认是「最近的将来」，填过去时刻必被后端拒。 */
+function nextRunSlot(): string {
+  const d = new Date()
+  d.setSeconds(0, 0)
+  const m = d.getMinutes()
+  if (m < 30) d.setMinutes(30)
+  else { d.setMinutes(0); d.setHours(d.getHours() + 1) }
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`
+}
 function splitDateTime(source: Ref<string>) {
   const date = computed({
     get: () => source.value.slice(0, 10),
@@ -418,9 +432,8 @@ function openCreate() {
   fHttpHeaders.value = ''
   fHttpBody.value = ''
   fKind.value = 'once'
-  // 默认选中今天：一次性任务最常见的就是「今天某个点跑一下」，
-  // 原生 datetime-local 空值时日期段是 yyyy/mm/日，用户得从年份一格格拨到今天。
-  fRunAt.value = `${todayStr()}T09:00:00`
+  // 默认「最近的将来」整点/半点：写死今天 09:00 的话，下午新建必被后端以「执行时间已过」拒掉。
+  fRunAt.value = nextRunSlot()
   fIntervalVal.value = 5
   fIntervalUnit.value = 'min'
   fTimeOfDay.value = '09:00'
@@ -605,18 +618,24 @@ async function toggleAllEnabled() {
 }
 
 const runningId = ref('')
+// 立即运行是同步阻塞调用（后端等命令跑完，最长 30s），没有进度/取消通道。
+// 至少把「最长等待 30 秒」从按钮 hover 的 title 提到用户眼前，别让他对着转圈干等。
+const runNotice = ref('')
 async function runNow(t0: ScheduledTask) {
   runningId.value = t0.id
   error.value = ''
+  runNotice.value = t('sched_running')
   try {
     const r = await RunScheduledTaskNow(t0.id)
-    // RunScheduledTaskNow 失败时 code=1，成功时 msg 为结果
-    if (r && r.code !== 0) { error.value = r.msg }
     await refresh()
+    // 错误必须在 refresh 之后写：refresh 开头会 error.value = ''，先写会被吞掉。
+    // RunScheduledTaskNow 失败时 code=1，成功时 msg 为结果。
+    if (r && r.code !== 0) { error.value = r.msg }
   } catch (e) {
     error.value = getErrorMessage(e)
   } finally {
     runningId.value = ''
+    runNotice.value = ''
   }
 }
 
@@ -752,6 +771,9 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
     </PageHeader>
 
     <div v-if="error" class="sched-error">{{ error }}</div>
+    <div v-if="runNotice" class="sched-run-notice" role="status">
+      <LoaderCircle :size="14" class="spin" />{{ runNotice }}
+    </div>
 
     <!-- 搜索 / 状态筛选 -->
     <div v-if="tasks.length" class="sched-toolbar">
@@ -769,6 +791,12 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 
     <!-- 运行统计（近 7 天）：失败次数与失败率一眼可见，不用逐条点历史 -->
     <div v-if="tasks.length" class="sched-stats">
+      <div v-if="runsFailed" class="stat-unavailable">
+        <BarChart3 :size="13" class="stat-ico" />
+        <span>{{ t('sched_stats_unavailable') }}</span>
+        <button class="qd-btn qd-btn-sm" @click="loadRuns">{{ t('retry') }}</button>
+      </div>
+      <template v-else>
       <div class="stat-sum">
         <BarChart3 :size="13" class="stat-ico" />
         <span class="stat-label">{{ t('sched_stats_week') }}</span>
@@ -787,6 +815,7 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
           :tooltip-extra="weekTooltipExtra"
         />
       </div>
+      </template>
     </div>
 
     <!-- 列表 -->
@@ -1150,11 +1179,23 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 }
 .stat-rate.bad { background: var(--color-danger-bg); color: var(--color-danger); }
 .stat-bars { margin-left: auto; width: 168px; flex-shrink: 0; }
+/* 统计拉取失败：明确告知数字不可用，不拿全 0 冒充「没跑过」 */
+.stat-unavailable {
+  display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
 
 .sched-error {
   margin: var(--space-5) var(--space-7) 0; padding: var(--space-4) var(--space-5); font-size: var(--text-sm);
   color: var(--color-danger); background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); flex-shrink: 0;
+}
+/* 立即运行同步等待提示：把「最长 30 秒」提到眼前，别让用户对着转圈干等 */
+.sched-run-notice {
+  display: flex; align-items: center; gap: var(--space-2);
+  margin: var(--space-5) var(--space-7) 0; padding: var(--space-3) var(--space-5); font-size: var(--text-sm);
+  color: var(--color-text-secondary); background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border); border-radius: var(--radius-md); flex-shrink: 0;
 }
 
 /* 弹窗内校验提示：与页面级 .sched-error 同色系，但去掉外边距（弹窗有自己的内边距） */

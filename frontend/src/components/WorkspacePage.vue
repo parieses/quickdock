@@ -112,6 +112,8 @@ const showHeaderActions = computed(() =>
 // 本值不参与布局。命名沿用桌面折叠开关，窄屏下由 CSS 媒体查询把「未切换」映射成
 // 默认收起的抽屉（不做 JS resize 监听），toggle 后由 .is-collection-open 展开。
 const collectionDrawerOpen = ref(false)
+// 项目列表实例：wiki 深链定位走它暴露的 flashItemById（虚拟滚动需按 id 先滚再找 DOM）
+const itemListRef = ref<InstanceType<typeof ItemList> | null>(null)
 
 // ---- 命令面板深链定位（scene / collection / item）----
 // target 形如 "scene:<id>" / "collection:<id>" / "item:<id>"；workspaceId / sceneId
@@ -238,17 +240,9 @@ async function applyItemLocate(id: string) {
   if (store.activeSceneId !== sceneId) await store.selectScene(sceneId)
   if (store.activeCollectionId !== item.collectionId) await store.selectCollection(item.collectionId)
   await nextTick()
-  flashItemRow(item.name)
-}
-
-/** 选中后的滚动 + 短暂高亮。ItemList 行没有 id 属性，按标题文本定位，找不到就静默跳过。 */
-function flashItemRow(name: string) {
-  const rows = Array.from(document.querySelectorAll<HTMLElement>('.item-list .qd-row'))
-  const el = rows.find(r => (r.querySelector('.qd-row-title')?.textContent || '').trim() === name)
-  if (!el) return
-  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  el.classList.add('qd-link-flash')
-  window.setTimeout(() => el.classList.remove('qd-link-flash'), 1800)
+  // 交给 ItemList 按 id 定位：它会先处理虚拟滚动（>100 条时目标行未渲染），
+  // 再滚动 + 短暂高亮。按标题文本找行的旧做法在大集合里必然静默跳过、同名还会误命。
+  await itemListRef.value?.flashItemById(id)
 }
 
 watch(pendingTarget, consumePendingTarget, { immediate: true })
@@ -315,8 +309,9 @@ watch([() => store.loading, () => store.workspaces.length], () => { void tryAppl
           @open-settings="emit('open-settings', $event)"
         />
         <template v-else>
-          <CollectionList id="ws-collections" class="ws-collections" />
-          <ItemList class="ws-items" />
+          <CollectionList id="ws-collections" class="ws-collections"
+                          @select-collection="collectionDrawerOpen = false" />
+          <ItemList ref="itemListRef" class="ws-items" />
         </template>
       </div>
     </template>

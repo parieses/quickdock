@@ -105,6 +105,7 @@ function onDragStart(e: DragEvent) {
   <div>
     <!-- 缩进按层级运行时计算，只能走内联样式（R7 的计算值例外） -->
     <div v-key-click
+      :data-note-id="node.id"
       :draggable="!selectMode"
       :style="'padding-left:' + (12 + depth * 16) + 'px'"
       :class="['qd-row', 'tn-row', 'tn-' + (isFolder ? 'folder' : 'doc'), {

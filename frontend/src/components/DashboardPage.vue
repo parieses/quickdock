@@ -318,12 +318,24 @@ interface MailConfig {
   accounts?: MailAccount[]
 }
 const MAIL_EXPIRE_MS = 10 * 60 * 1000
+const MAIL_PREVIEW_COUNT = 3
 const mailCodes = ref<MailCode[]>([])
+// 卡片默认只展开前 3 条，多的收在「另有 N 条」后面——验证码卡是扫一眼就走的卡，
+// 不该被十几封安全提醒撑成一张长列表。展开态同时被深链定位使用（见 focusMailCode）。
+const mailCodesExpanded = ref(false)
+const visibleMailCodes = computed(() => mailCodesExpanded.value
+  ? mailCodes.value
+  : mailCodes.value.slice(0, MAIL_PREVIEW_COUNT))
 const mailCfg = ref<MailConfig>({ host: '', port: 993, email: '', enabled: false, connected: false })
 const mailBusy = ref(false)
 const mailError = ref('')
 const mailCopied = ref('')
-const mailNow = ref(Date.now())
+/**
+ * 全页统一时钟：验证码 10 分钟过期、问候语与「今日」口径都挂在它上面，由 60 秒定时器推进。
+ * 原先 todayStr/greeting 裸读 new Date() 没有响应式依赖——跨零点后日期栏换了新的一天，
+ * 问候和逾期判断却停在昨天；统一到这个 ref 后，定时器一拍就一起重算。
+ */
+const nowTick = ref(Date.now())
 const mailTestBusy = ref(false)
 const mailTestMsg = ref('')
 const mailTestOk = ref(false)
@@ -362,7 +374,7 @@ function openMailGuide() {
   void openExternal(mailGuideUrl.value).catch((e: unknown) => logErr('dashboard.mailGuide', e))
 }
 
-function isMailExpired(received: number) { return mailNow.value - received > MAIL_EXPIRE_MS }
+function isMailExpired(received: number) { return nowTick.value - received > MAIL_EXPIRE_MS }
 // 安全提醒没有验证码，也不受 10 分钟时效约束；它只是「发生过的一件事」。
 function isSecurityMail(m: MailCode) { return m.kind === 'password' || m.kind === 'login' }
 function mailKindText(kind?: string) {
@@ -449,8 +461,11 @@ async function focusMailCode(id: string) {
   let hit = mailCodes.value.find(c => c.id === id)
   if (!hit) { await loadMailCodes(); hit = mailCodes.value.find(c => c.id === id) }
   if (!hit) return
+  // 目标落在折叠区就先展开，再定位——否则「另有 N 条」深链过来的通知永远静默失败
+  if (!mailCodesExpanded.value && mailCodes.value.indexOf(hit) >= MAIL_PREVIEW_COUNT) {
+    mailCodesExpanded.value = true
+  }
   await nextTick()
-  // 卡片只展示前 3 条；目标不在可见行里就没有可定位的 DOM，静默忽略
   const el = document.querySelector<HTMLElement>(`[data-mail-id="${id.replace(/"/g, '\\"')}"]`)
   if (!el) return
   el.scrollIntoView({ block: 'center', behavior: 'smooth' })
@@ -515,6 +530,16 @@ function mailAccountDot(a: MailAccount) {
   if (a.lastErr) return 'down'
   return a.connected ? 'up' : 'pending'
 }
+// 卡头圆点与账号列表同一聚合口径：用逐账号判定，而不是 mailCfg 的单账号字段。
+// 多账号下任一账号报错即 down，否则任一连上即 up；没账号的旧构建退回单账号字段。
+const mailHeadDot = computed(() => {
+  const list = mailAccounts.value
+  if (!list.length) return mailCfg.value.connected ? 'up' : (mailCfg.value.lastErr ? 'down' : 'pending')
+  const dots = list.map(mailAccountDot)
+  if (dots.includes('down')) return 'down'
+  if (dots.includes('up')) return 'up'
+  return 'pending'
+})
 function mailAccountStateClass(a: MailAccount) {
   if (!a.enabled) return 'off'
   if (a.lastErr) return 'bad'
@@ -748,17 +773,14 @@ const monLogs = ref<Record<string, CheckPoint[]>>({})
 const loading = ref(false)
 const failed = ref<Record<string, boolean>>({})
 
-const todayStr = computed(() => {
-  const d = new Date()
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const dd = String(d.getDate()).padStart(2, '0')
-  return `${d.getFullYear()}-${mm}-${dd}`
-})
+// 挂在 nowTick 上：60 秒定时器跨零点后这里会跟着重算，待办到期分布与逾期数
+// （todayStr 的消费方）不会再停在昨天。格式直接复用 lunar.ts 的 localISO。
+const todayStr = computed(() => localISO(new Date(nowTick.value)))
 
 // 问候归到最上面那张「今日」卡的头部：它和日期、农历、天气同属「开工第一眼」。
 // 公历/星期的唯一展示位仍是 db-date，别再往问候旁边挂小字日期。
 const greeting = computed(() => {
-  const h = new Date().getHours()
+  const h = new Date(nowTick.value).getHours()
   if (h < 6) return t('dash_greet_night')
   if (h < 12) return t('dash_greet_morning')
   if (h < 18) return t('dash_greet_afternoon')
@@ -1391,9 +1413,12 @@ async function applyWeatherChange() {
   if (!ok) toast.error(t('daybarWeatherSourceFailed', { source: sourceLabel(src) }))
 }
 
-/** 跨天重算农历/节气/宜忌：搭 60 秒监控轮询的便车，不另起定时器。 */
+/** 跨天重算农历/节气/宜忌，并推进全页时钟：搭 60 秒轮询的便车，不另起定时器。
+ *  切回页面（startPage）也会调它，所以 nowTick 必须在这里推进而不是只在定时器里——
+ *  否则跨零点后从别的页切回来，要再等最多 60 秒问候和到期分布才翻篇。 */
 function refreshDayIfNeeded() {
-  if (dayInfo.value.date !== localISO(new Date())) {
+  nowTick.value = Date.now()
+  if (dayInfo.value.date !== localISO(new Date(nowTick.value))) {
     dayInfo.value = describeDay()
     showYiJiDetail.value = false // 昨天展开的全量宜忌别留在今天
   }
@@ -1568,9 +1593,8 @@ function attachGlobal() {
   if (!PREVIEW && timer === null) {
     timer = setInterval(() => {
       void loadMonitors()
-      refreshDayIfNeeded()
+      refreshDayIfNeeded()            // 内含 nowTick 推进：验证码过期/问候/今日口径一起走动
       void loadWeather()
-      mailNow.value = Date.now()      // 验证码 10 分钟过期态要自己走动
       void loadMailCodes()            // 纯本地 IPC，兼作事件丢失时的兜底
     }, 60000)
   }
@@ -2039,7 +2063,9 @@ onUnmounted(() => {
                   {{ t('dash_view_all') }}<ChevronRight :size="11" />
                 </button>
               </header>
-              <p v-if="failed.item" class="empty">{{ t('dash_load_failed') }}</p>
+              <p v-if="failed.item" class="empty">
+                {{ t('dash_load_failed') }} <button class="qc-link" @click="loadItems()">{{ t('retry') }}</button>
+              </p>
               <p v-else-if="!items.length" class="empty">{{ t('dash_recent_empty') }}</p>
               <div v-else class="tiles">
                 <button v-for="it in items" :key="it.id" class="tile"
@@ -2118,7 +2144,9 @@ onUnmounted(() => {
                   {{ t('dash_view_all') }}<ChevronRight :size="11" />
                 </button>
               </header>
-              <p v-if="failed.todo" class="empty">{{ t('dash_load_failed') }}</p>
+              <p v-if="failed.todo" class="empty">
+                {{ t('dash_load_failed') }} <button class="qc-link" @click="loadTodos()">{{ t('retry') }}</button>
+              </p>
               <p v-else-if="!todoList.length" class="empty">{{ t('dash_todo_empty') }}</p>
               <template v-else>
                 <div v-if="todoDist.length" class="todo-dist" :title="t('dash_dist_title')">
@@ -2145,9 +2173,7 @@ onUnmounted(() => {
               <header class="card-head">
                 <Mail :size="13" class="t-ic" />
                 <span class="card-title">{{ t('mailTitle') }}</span>
-                <span v-if="mailEnabled" class="qc-dot"
-                      :class="mailCfg.connected ? 'up' : (mailCfg.lastErr ? 'down' : 'pending')"
-                      :title="mailAccountSummary"></span>
+                <span v-if="mailEnabled" class="qc-dot" :class="mailHeadDot" :title="mailAccountSummary"></span>
                 <div class="qc-actions">
                   <button v-if="mailEnabled" class="db-icon-btn" :title="t('dash_refresh')"
                           :disabled="mailBusy" @click="refreshMailCodes()">
@@ -2188,7 +2214,7 @@ onUnmounted(() => {
                   </span>
                 </p>
                 <ul v-else class="qc-list">
-                  <li v-key-click v-for="m in mailCodes.slice(0, 3)" :key="m.id" class="qc-row"
+                  <li v-key-click v-for="m in visibleMailCodes" :key="m.id" class="qc-row"
                       :data-mail-id="m.id" :title="t('mailDetailOpen')"
                       :class="{ security: isSecurityMail(m), expired: !isSecurityMail(m) && isMailExpired(m.received), 'qc-flash': flashMailId === m.id }"
                       @click="openMailDetail(m)">
@@ -2210,6 +2236,13 @@ onUnmounted(() => {
                             @click.stop="dismissCode(m.id)" @dblclick.stop><X :size="13" /></button>
                   </li>
                 </ul>
+                <!-- 超过预览条数时给展开入口：验证码/安全提醒可能一次来好几封，
+                     全铺开会撑成一长条，但也不能让第 4 条之后永远看不到。 -->
+                <div v-if="mailCodes.length > MAIL_PREVIEW_COUNT" class="qc-more">
+                  <button class="qc-link" @click="mailCodesExpanded = !mailCodesExpanded">
+                    {{ mailCodesExpanded ? t('dashMailLess') : t('dashMailMore', { n: mailCodes.length - MAIL_PREVIEW_COUNT }) }}
+                  </button>
+                </div>
               </div>
             </section>
 
@@ -2223,7 +2256,9 @@ onUnmounted(() => {
                   {{ t('dash_view_all') }}<ChevronRight :size="11" />
                 </button>
               </header>
-              <p v-if="failed.port" class="empty">{{ t('dash_load_failed') }}</p>
+              <p v-if="failed.port" class="empty">
+                {{ t('dash_load_failed') }} <button class="qc-link" @click="loadPorts()">{{ t('retry') }}</button>
+              </p>
               <p v-else-if="!portList.length" class="empty">{{ t('dash_ports_empty') }}</p>
               <ul v-else class="rows">
                 <li v-key-click v-for="p in portList" :key="`${p.protocol}-${p.port}`" class="row clickable"
@@ -2248,7 +2283,10 @@ onUnmounted(() => {
                 </button>
               </header>
               <p v-if="!residentList.length" class="empty">
-                {{ failed.env ? t('dash_load_failed') : t('dash_env_empty') }}
+                <template v-if="failed.env">
+                  {{ t('dash_load_failed') }} <button class="qc-link" @click="loadRuntimes()">{{ t('retry') }}</button>
+                </template>
+                <template v-else>{{ t('dash_env_empty') }}</template>
               </p>
               <ul v-else class="rows">
                 <li v-key-click v-for="r in residentList" :key="r.id" class="row clickable" @click="go(r.page, r.target)">
@@ -2270,7 +2308,9 @@ onUnmounted(() => {
                   {{ t('dash_view_all') }}<ChevronRight :size="11" />
                 </button>
               </header>
-              <p v-if="failed.git" class="empty">{{ t('dash_load_failed') }}</p>
+              <p v-if="failed.git" class="empty">
+                {{ t('dash_load_failed') }} <button class="qc-link" @click="loadGit()">{{ t('retry') }}</button>
+              </p>
               <p v-else-if="!gitList.length" class="empty">{{ t('dash_git_empty') }}</p>
               <ul v-else class="rows">
                 <li v-key-click v-for="r in gitList" :key="r.path" class="row clickable" :title="r.error || r.path"
@@ -2300,7 +2340,9 @@ onUnmounted(() => {
                   {{ t('dash_view_all') }}<ChevronRight :size="11" />
                 </button>
               </header>
-              <p v-if="failed.monitor" class="empty">{{ t('dash_load_failed') }}</p>
+              <p v-if="failed.monitor" class="empty">
+                {{ t('dash_load_failed') }} <button class="qc-link" @click="loadMonitors()">{{ t('retry') }}</button>
+              </p>
               <p v-else-if="!monitorList.length" class="empty">{{ t('dash_health_empty') }}</p>
               <template v-else>
                 <div class="ribbon-wrap" :title="t('dash_uptime_24h')">
@@ -2584,6 +2626,7 @@ onUnmounted(() => {
   font: inherit; color: var(--color-accent);
 }
 .qc-link:hover { text-decoration: underline; }
+.qc-more { padding: var(--space-2) 0 var(--space-1); font-size: var(--text-2xs); }
 .qc-error { color: var(--color-danger); }
 .qc-conn { display: block; margin-top: var(--space-3); font-size: var(--text-2xs); line-height: 1.4; }
 .qc-conn.ok { color: var(--color-text-disabled); }

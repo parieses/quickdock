@@ -45,6 +45,9 @@ const status = ref<VaultStatusView | null>(null)
 const selectedId = ref('')
 const query = ref('')
 const loading = ref(false)
+// 列表请求的持久失败态：catch 里只 toast 会让界面退回「共 0 条 + 还没有保存任何密码」，
+// 把真实错误伪装成空库。失败后计数显示「—」，列表区给「加载失败 + 重试」。
+const loadFailed = ref(false)
 const saving = ref(false)
 
 /** 表单。secret 留空 + hasSecret 表示「不改密码」，与后端约定一致。 */
@@ -63,6 +66,8 @@ const form = reactive({
 })
 
 const showSecret = ref(false)
+// 新建态没有选中条目，不能走 Reveal；眼睛只切本地密码框的明文。
+const showCreatePwd = ref(false)
 const revealedSecret = ref('')
 
 /** 浏览器集成：一次开关，长期有效。extBusy 防连点（开关是幂等接口，但连点会闪）。 */
@@ -107,6 +112,7 @@ function kindLabel(kind: string): string {
 
 function fillForm(item: CredentialSummary | null) {
   showSecret.value = false
+  showCreatePwd.value = false
   revealedSecret.value = ''
   form.name = item?.name ?? ''
   form.kind = item?.kind || 'login'
@@ -123,6 +129,7 @@ function fillForm(item: CredentialSummary | null) {
 
 async function load(keepId = '') {
   loading.value = true
+  loadFailed.value = false
   try {
     const res = await ListCredentials()
     list.value = unwrap<CredentialSummary[]>(res) ?? []
@@ -140,6 +147,7 @@ async function load(keepId = '') {
       fillForm(null)
     }
   } catch (e) {
+    loadFailed.value = true
     toast.error(getErrorMessage(e) || t('credLoadFailed'))
     logErr('CredentialsPage.load', e)
   } finally {
@@ -164,6 +172,7 @@ function createNew() {
   selectedId.value = ''
   fillForm(null)
   showSecret.value = false
+  showCreatePwd.value = false
 }
 
 async function save() {
@@ -225,7 +234,8 @@ async function remove() {
 
 async function toggleReveal() {
   const item = selected.value
-  if (!item) return
+  // 新建态：没有可 Reveal 的条目，眼睛只切本地密码框明文。
+  if (!item) { showCreatePwd.value = !showCreatePwd.value; return }
   if (showSecret.value) {
     showSecret.value = false
     revealedSecret.value = ''
@@ -264,8 +274,10 @@ async function genPassword() {
       form.secret = data.password
       revealedSecret.value = data.password
       showSecret.value = true
+      showCreatePwd.value = true
     }
   } catch (e) {
+    toast.error(t('credGenerateFailed'))
     logErr('CredentialsPage.generate', e)
   }
 }
@@ -390,7 +402,7 @@ onMounted(async () => {
     <PageHeader>
       <template #titles>
         <h2 class="qd-page-title">{{ t('navCredentials') }}</h2>
-        <span class="qd-page-sub">{{ t('credSubtitle', { n: status?.count ?? 0 }) }}</span>
+        <span class="qd-page-sub">{{ t('credSubtitle', { n: loadFailed || !status ? '—' : status.count }) }}</span>
       </template>
       <!-- 页头动作按 ui.md §3.1：一组次要动作（ghost）+ 1 个主按钮，
            中间一条短竖线。原来 5 个同级按钮平铺，「新建」和「刷新」一样重。 -->
@@ -472,23 +484,32 @@ onMounted(async () => {
           <input v-model="query" class="qd-input" :placeholder="t('credSearchPlaceholder')" />
         </div>
         <div class="cred-items">
-          <button
-            v-for="item in filtered"
-            :key="item.id"
-            class="cred-item"
-            :class="{ 'is-active': item.id === selectedId }"
-            type="button"
-            @click="selectItem(item)"
-          >
-            <KeyRound :size="13" class="cred-item-icon" />
-            <span class="cred-item-main">
-              <span class="cred-item-name">{{ item.name }}</span>
-              <span class="cred-item-sub">{{ item.username || item.host || kindLabel(item.kind) }}</span>
-            </span>
-          </button>
-          <p v-if="!loading && filtered.length === 0" class="cred-empty">
-            {{ query ? t('credNoResult') : t('credEmpty') }}
-          </p>
+          <div v-if="loadFailed" class="cred-load-failed">
+            <span>{{ t('credLoadFailed') }}</span>
+            <button class="qd-btn qd-btn-sm" @click="load()">{{ t('retry') }}</button>
+          </div>
+          <div v-else-if="loading && !list.length" class="cred-skeleton-wrap">
+            <div v-for="n in 4" :key="n" class="cred-skeleton"></div>
+          </div>
+          <template v-else>
+            <button
+              v-for="item in filtered"
+              :key="item.id"
+              class="cred-item"
+              :class="{ 'is-active': item.id === selectedId }"
+              type="button"
+              @click="selectItem(item)"
+            >
+              <KeyRound :size="13" class="cred-item-icon" />
+              <span class="cred-item-main">
+                <span class="cred-item-name">{{ item.name }}</span>
+                <span class="cred-item-sub">{{ item.username || item.host || kindLabel(item.kind) }}</span>
+              </span>
+            </button>
+            <p v-if="!loading && filtered.length === 0" class="cred-empty">
+              {{ query ? t('credNoResult') : t('credEmpty') }}
+            </p>
+          </template>
         </div>
       </aside>
 
@@ -517,13 +538,13 @@ onMounted(async () => {
               <input
                 v-model="form.secret"
                 class="qd-input cred-pw"
-                :type="showSecret ? 'text' : 'password'"
+                :type="(selected ? showSecret : showCreatePwd) ? 'text' : 'password'"
                 autocomplete="off"
                 spellcheck="false"
                 :placeholder="selected?.hasSecret ? t('credPasswordKeep') : ''"
               />
               <button class="qd-icon-btn" type="button" :title="t('credShow')" @click="toggleReveal">
-                <EyeOff v-if="showSecret" :size="15" />
+                <EyeOff v-if="(selected ? showSecret : showCreatePwd)" :size="15" />
                 <Eye v-else :size="15" />
               </button>
               <button class="qd-icon-btn" type="button" :title="t('credGenerate')" @click="genPassword">
@@ -648,6 +669,7 @@ onMounted(async () => {
 .cred-ext-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-4);
 }
 
@@ -695,7 +717,9 @@ onMounted(async () => {
 
 .cred-transfer-pw {
   width: 220px;
-  flex-shrink: 0;
+  max-width: 100%;
+  flex: 0 1 220px;
+  min-width: 120px;
 }
 
 .cred-transfer-result {
@@ -792,6 +816,35 @@ onMounted(async () => {
   line-height: 1.6;
 }
 
+/* 加载失败：常驻错误态替代「共 0 条」，重试按钮就地 recover。 */
+.cred-load-failed {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-5) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-danger);
+}
+
+/* 首次加载的空窗期：空态被 !loading 挡住，给几条骨架免得整块空白。 */
+.cred-skeleton-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+.cred-skeleton {
+  height: 38px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--color-bg-tertiary), var(--color-bg-hover), var(--color-bg-tertiary));
+  background-size: 200% 100%;
+  animation: cred-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes cred-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
 .cred-detail {
   flex: 1;
   min-width: 0;
@@ -856,4 +909,12 @@ onMounted(async () => {
 }
 
 .cred-spacer { flex: 1; }
+
+/* 窄窗：扩展条与导入导出面板原来都是单行 flex + 定宽输入，控件被挤出可视区。
+   允许整行换行，口令框独占一行自适应宽度。 */
+@media (max-width: 760px) {
+  .cred-ext-row { gap: var(--space-2); }
+  .cred-transfer-pw { flex: 1 1 100%; width: auto; min-width: 0; }
+  .cred-ext-badge { margin-left: 0; }
+}
 </style>

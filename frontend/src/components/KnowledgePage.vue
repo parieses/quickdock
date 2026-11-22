@@ -277,6 +277,10 @@ async function selectLibrary(id: string) {
   chunks.value = []
   // 换了库，原来那份文档多半不在新库里，抽屉里的分段就成了「无主」内容。
   previewOpen.value = false
+  // 旧库的检索结果/查询态一并作废，否则中间栏还挂着上一个库的命中，
+  // 点这些旧命中时 openHit 在新库 sources 里找不到来源会毫无反应。
+  searchSeq++ // 让在途的旧库检索失效，避免结果回落污染新库视图
+  clearQuery()
   await loadSources()
 }
 
@@ -327,6 +331,7 @@ async function removeLibrary(lib: KBLibrary) {
     selectedId.value = ''
     chunks.value = []
     await refreshAll()
+    toast.success(t('deleted'))
   } catch (e) {
     toast.error(getErrorMessage(e))
     logErr('kb', e)
@@ -487,7 +492,11 @@ async function loadChunksFor(id: string) {
 // 同一份文档已经在抽屉里就不重复拉 —— 连点五条命中只该有零次请求。
 async function openHit(h: SearchHit) {
   const src = sources.value.find(s => s.id === h.sourceId)
-  if (!src) return
+  if (!src) {
+    // 命中来源不在当前库（多半是切库后的旧结果，或文档已移除）：明确提示，别静默失败。
+    toast.error(t('kbHitSourceGone'))
+    return
+  }
   activeChunkId.value = h.chunkId
   previewOpen.value = true
   if (selectedId.value !== src.id || !chunks.value.length) {
@@ -1010,7 +1019,7 @@ onScopeDispose(() => {
           <component :is="iconFor(selectedSource?.ext || '')" :size="14" class="kb-preview-icon" />
           <span class="kb-preview-name" :title="selectedSource?.path">{{ selectedSource?.name || t('kbTabChunks') }}</span>
           <span v-if="chunks.length" class="kb-preview-count">{{ t('kbChunkCount', { n: chunks.length }) }}</span>
-          <button class="qd-icon-btn" :title="t('cancel')" @click="previewOpen = false">
+          <button class="qd-icon-btn" :title="t('kbClosePreview')" @click="previewOpen = false">
             <X :size="14" />
           </button>
         </div>
@@ -1381,10 +1390,19 @@ onScopeDispose(() => {
 
 .kb-doc-reindex,
 .kb-doc-remove {
+  position: relative;
   display: inline-flex;
   padding: 3px;
   border-radius: var(--radius-sm);
   color: var(--color-text-muted);
+}
+
+/* 图标 12px + padding 3px = 18px，透明热区再外扩 3px 到 24×24，视觉不变。 */
+.kb-doc-reindex::after,
+.kb-doc-remove::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
 }
 
 .kb-doc-reindex:hover {
@@ -2164,6 +2182,7 @@ onScopeDispose(() => {
 }
 
 .kb-lib-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2176,6 +2195,13 @@ onScopeDispose(() => {
   color: var(--color-text-muted);
   cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+/* 视觉尺寸保持 20×20，透明热区把可点区域扩到 24×24，避免高 DPI 点空。 */
+.kb-lib-btn::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
 }
 
 .kb-lib-btn:hover {

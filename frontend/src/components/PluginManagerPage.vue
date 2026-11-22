@@ -73,6 +73,9 @@ async function onMarketInstalled() {
 
 // ---- 执行历史（5.2） ----
 const execLogs = ref<PluginExecLog[]>([])
+// 加载失败与「真的没有记录」必须分开：否则 catch 里清空数组会把失败
+// 渲染成「暂无执行记录」，用户以为历史丢了，也没有重试入口。
+const execLogsFailed = ref(false)
 const loadingLogs = ref(false)
 const historyOpen = ref(false)
 const expandedLog = ref<string | null>(null)
@@ -167,17 +170,20 @@ async function openCmdList(p: PluginInfo) {
 
 async function loadLogs() {
   loadingLogs.value = true
+  execLogsFailed.value = false
   try {
     execLogs.value = (unwrap(await ListPluginExecLogs(100)) || []) as PluginExecLog[]
   } catch (e) {
     execLogs.value = []
+    execLogsFailed.value = true
   } finally {
     loadingLogs.value = false
   }
 }
 function toggleHistory() {
   historyOpen.value = !historyOpen.value
-  if (historyOpen.value && execLogs.value.length === 0) loadLogs()
+  // 失败态留给显式「重试」按钮处理，避免每次展开/收起都静默重拉一次。
+  if (historyOpen.value && execLogs.value.length === 0 && !execLogsFailed.value) loadLogs()
 }
 function toggleLogDetail(id: string) {
   expandedLog.value = expandedLog.value === id ? null : id
@@ -860,10 +866,12 @@ onUnmounted(() => {
       <p class="empty-desc">{{ t('pluginDragToInstall') }}</p>
     </div>
 
-    <!-- 九宫格插件列表 -->
+    <!-- 九宫格插件列表：空态要分清「分类里没有」和「搜了没匹配」。
+         搜索态沿用市场页的 pluginMarketNoResult，别再说「该分类下暂无插件」——
+         没选分类时这句话是误导；图标也同步换成搜索图标。 -->
     <div v-else-if="filteredPlugins.length === 0" class="plugin-empty">
-      <Puzzle :size="48" class="empty-icon" />
-      <p class="empty-title">{{ t('pluginEmptyCategory') }}</p>
+      <component :is="pluginQuery.trim() ? Search : Puzzle" :size="48" class="empty-icon" />
+      <p class="empty-title">{{ pluginQuery.trim() ? t('pluginMarketNoResult') : t('pluginEmptyCategory') }}</p>
     </div>
 
     <div v-else class="plugin-grid">
@@ -1003,6 +1011,12 @@ onUnmounted(() => {
 
       <div v-if="historyOpen" class="history-body">
         <div v-if="loadingLogs" class="history-loading">{{ t('loading') }}</div>
+        <!-- 失败态优先于空态：加载失败时绝不能落到「暂无执行记录」，否则用户会
+             以为记录真的丢了。重试直接调 loadLogs（原加载函数）。 -->
+        <div v-else-if="execLogsFailed" class="history-failed">
+          <span>{{ t('pluginExecHistoryLoadFailed') }}</span>
+          <button class="history-retry" @click="loadLogs()">{{ t('retry') }}</button>
+        </div>
         <div v-else-if="execLogs.length === 0" class="history-empty">{{ t('pluginExecHistoryEmpty') }}</div>
         <div v-else class="history-list">
           <div v-key-click
@@ -1222,7 +1236,12 @@ onUnmounted(() => {
   display: flex; gap: var(--space-1); opacity: 0;
   transition: opacity 120ms;
 }
-.plugin-card:hover .card-actions-top { opacity: 1; }
+/* 键盘用户 Tab 进按钮组时也要显形：只靠 :hover 的话 opacity:0 会把
+   按钮连同全局 :focus-visible 焦点环一起藏掉，根本看不出落在哪个危险操作上。
+   :focus-within 让焦点进入任意按钮时整组显形，焦点环（全局 button:focus-visible）
+   随之可见；鼠标场景仍走 :hover。 */
+.plugin-card:hover .card-actions-top,
+.plugin-card:focus-within .card-actions-top { opacity: 1; }
 .action-top-btn {
   display: flex; align-items: center; justify-content: center;
   width: 22px; height: 22px; border-radius: var(--radius-xs);
@@ -1408,10 +1427,18 @@ onUnmounted(() => {
   background: var(--color-danger); margin-left: var(--space-1);
 }
 .history-body { margin-top: var(--space-3); }
-.history-loading, .history-empty {
+.history-loading, .history-empty, .history-failed {
   font-size: var(--text-xs); color: var(--color-text-disabled);
   padding: var(--space-4) var(--space-1);
 }
+.history-failed { display: flex; align-items: center; gap: var(--space-3); }
+.history-retry {
+  padding: 1px var(--space-3);
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary); color: var(--color-accent);
+  font-size: var(--text-xs); font-family: inherit; cursor: pointer;
+}
+.history-retry:hover { border-color: var(--color-accent); }
 .history-list {
   max-height: 220px; overflow-y: auto;
   display: flex; flex-direction: column; gap: var(--space-1);

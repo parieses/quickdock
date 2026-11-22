@@ -44,13 +44,16 @@ export type ClipTagId =
 
 /**
  * loadEntries 把标签筛选下推到 SQL 的方式：
- *  - none       ：全量载入（all / favorite），前端再按 isPinned 等逻辑过滤
+ *  - none       ：常规上限载入（all），前端按 isPinned 等逻辑过滤
+ *  - favorite   ：收藏无法下推 SQL（bindings 无 isPinned 参数），改为拉全量，
+ *                 再由前端按 isPinned 过滤；独立签名保证 all↔favorite 切换会重查
  *  - contentType：按 content_type 整类过滤（image / file）
  *  - smartType  ：按 text_type 智能分类过滤（url/email/json/code/phone），
  *                 content_type 固定为 text
  */
 export type TagPush =
   | { push: 'none' }
+  | { push: 'favorite' }
   | { push: 'contentType'; value: string }
   | { push: 'smartType'; value: string }
 
@@ -68,7 +71,7 @@ export function isSmartTextTag(tagId: string): boolean {
 }
 
 /**
- * 当前标签对应的 SQL 下推方式；all/favorite 返回 none。
+ * 当前标签对应的 SQL 下推方式；all 返回 none，favorite 返回 favorite（拉全量）。
  *
  * 注意：image/file 不是 text 的子类，不能套 text 前置条件；
  * 智能分类下推的是 text_type（不是 content_type='text'），这样切换 url↔email
@@ -77,6 +80,7 @@ export function isSmartTextTag(tagId: string): boolean {
 export function queryPushForTag(tagId: string): TagPush {
   if (SQL_TYPE_TAGS[tagId]) return { push: 'contentType', value: SQL_TYPE_TAGS[tagId] }
   if (isSmartTextTag(tagId)) return { push: 'smartType', value: tagId }
+  if (tagId === 'favorite') return { push: 'favorite' }
   return { push: 'none' }
 }
 

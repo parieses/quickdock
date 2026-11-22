@@ -334,6 +334,12 @@ const todayStr = computed(() => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 })
 
+/** Date → datetime-local 值（YYYY-MM-DDTHH:MM:SS，与输入框 step=1 对齐）。 */
+function toLocalInput(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
 // 「今天」按钮只在点了真的会改变视图时才显示：已经选中今天、且正看着今天所在月份时，
 // 点它毫无效果、只剩占位感。翻到别的月份仍保留，方便一键跳回。
 const atToday = computed(() => {
@@ -411,6 +417,54 @@ function recurrenceLabel(todo: Todo): string {
   return ''
 }
 
+// ---- 重复待办：occurrence 级编辑 / snooze 的日期工具 ----
+// 项目里没有现成的 nextDue/addDays，这里只做这些功能需要的最小实现。
+// 一律用本地日期构造器（new Date(y, m, d)）避免 'YYYY-MM-DD' 被当成 UTC 解析导致跨日。
+function parseDateOnly(s: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
+  if (!m) return null
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  return Number.isNaN(d.getTime()) ? null : d
+}
+function formatDateOnly(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+/** 按重复规则把某个截止日推进到下一周期（仅取日期部分，不含时分秒）。 */
+function nextDueDate(due: string, f: RecurrenceForm): string {
+  const base = parseDateOnly(due) || new Date()
+  base.setHours(0, 0, 0, 0)
+  const next = new Date(base.getTime())
+  if (f.kind === 'weekly') {
+    const days = f.weekdays.split(',').map(s => Number(s.trim()))
+      .filter(n => Number.isInteger(n) && n >= 0 && n <= 6)
+    if (days.length) {
+      let step = 1
+      while (step <= 7 && !days.includes((base.getDay() + step) % 7)) step++
+      next.setDate(base.getDate() + Math.min(step, 7))
+    } else {
+      next.setDate(base.getDate() + 7) // 没选星期就按整周推进
+    }
+  } else if (f.kind === 'monthly') {
+    const day = base.getDate()
+    next.setDate(1) // 先落到月初，规避 setMonth 的溢出（1/31 -> 3/3）
+    next.setMonth(next.getMonth() + 1)
+    const last = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()
+    next.setDate(Math.min(day, last)) // 月末钳到当月最后一天
+  } else {
+    next.setDate(base.getDate() + 1) // daily / none 兜底：往后一天
+  }
+  return formatDateOnly(next)
+}
+/** 把日期（可带 ' HH:MM:SS' 时间部分）整体推后一天，保留原来的时刻。 */
+function plusOneDay(s: string): string {
+  if (!s) return ''
+  const d = parseDateOnly(s.slice(0, 10))
+  if (!d) return s
+  d.setDate(d.getDate() + 1)
+  return formatDateOnly(d) + s.slice(10)
+}
+
 // ---- 4.2 标签筛选 ----
 const activeTag = ref('')
 const allTags = computed(() => {
@@ -475,15 +529,23 @@ function toggleSubInput(todo: Todo) {
   newSubTitle.value = ''
 }
 async function addSubtask(parent: Todo) {
+  // 先同步取标题并清空：Enter 提交后紧接的 blur 不应该拿旧文本再建一条。
   const title = newSubTitle.value.trim()
+  newSubTitle.value = ''
   if (!title) return
   try {
     await unwrap(await CreateSubtask(parent.id, title))
-    newSubTitle.value = ''
     await refresh()
   } catch (e) {
+    // 提交失败把标题放回去，别让用户白打一遍（清空是为了防 Enter+blur 双提交）
+    newSubTitle.value = title
     error.value = getErrorMessage(e)
   }
+}
+// 输入框失焦：有内容就当 Enter 提交，别让打了半天的标题悄悄消失。
+function onSubInputBlur(parent: Todo) {
+  if (newSubTitle.value.trim()) void addSubtask(parent)
+  else toggleSubInput(parent)
 }
 
 // ---- 子任务：行内改名 / 上下移 ----
@@ -786,6 +848,9 @@ function selectUnscheduled() {
 
 // ---- 新增（点击 + 按钮弹出弹窗）----
 const showCreate = ref(false)
+// 弹窗内的即时反馈：页面级 error 在遮罩下面，弹窗打开时用户看不见，
+// 标题空 / 保存失败都会表现成「点了没反应」。与 SchedulePage / MonitorPage 的 formErr 同口径。
+const formErr = ref('')
 const cTitle = ref('')
 const cPriority = ref('none')
 const cDueDate = ref('')
@@ -799,14 +864,20 @@ const cRecTime = ref('09:00')
 const cRecWeekdays = ref('')
 
 function openCreate() {
+  formErr.value = ''
   cTitle.value = ''
   cPriority.value = 'none'
   // 未指定日期时默认落在今天，避免新建的待办静默掉进「未排期」
   cDueDate.value = selectedDate.value || todayStr.value
   cNote.value = ''
-  cStart.value = ''
-  cEnd.value = ''
-  cReminder.value = ''
+  // 时间字段预填当前日期（跟随截止日，未选日期则今天）：开始=当前时刻、结束=+1h、提醒与开始同刻。
+  // 原生 datetime-local 空值时日期段是 yyyy/mm/日，用户得从年份一格格拨到今天，太费事。
+  const baseDay = cDueDate.value
+  const startD = new Date(`${baseDay}T${toLocalInput(new Date()).slice(11)}`)
+  const endD = new Date(startD.getTime() + 60 * 60 * 1000)
+  cStart.value = toLocalInput(startD)
+  cEnd.value = toLocalInput(endD)
+  cReminder.value = cStart.value
   cTags.value = ''
   cRecKind.value = 'none'
   cRecTime.value = '09:00'
@@ -815,7 +886,8 @@ function openCreate() {
 }
 async function createTodo() {
   const title = cTitle.value.trim()
-  if (!title) return
+  if (!title) { formErr.value = t('todoErrTitle'); return }
+  formErr.value = ''
   try {
     await unwrap(await CreateTodo(
       title, cPriority.value, cDueDate.value, cNote.value,
@@ -827,7 +899,7 @@ async function createTodo() {
     invalidateLinkTargets() // 新待办立刻可当互链目标，不等候选缓存 TTL
     await refresh()
   } catch (e) {
-    error.value = getErrorMessage(e)
+    formErr.value = getErrorMessage(e)
   }
 }
 
@@ -846,11 +918,19 @@ const editRecKind = ref('none')
 const editRecTime = ref('09:00')
 const editRecWeekdays = ref('')
 const editStatus = ref('todo')
+// 重复待办的「本次编辑应用范围」：默认 all 保持原有行为不变。
+type EditScope = 'all' | 'thisOnly' | 'fromNext'
+const editScope = ref<EditScope>('all')
+// 只有「原本就是重复待办」才显示范围选择：普通待办 UI 保持原样，
+// 且推进 due_date 应以模板自身的重复规则为准，而不是用户在弹窗里临时改的 kind。
+const editIsRecurring = computed(() =>
+  !!editing.value && parseRecurrence(editing.value.recurrence).kind !== 'none')
 
 function toInput(s: string): string { return s ? s.replace(' ', 'T') : '' }
 function fromInput(s: string): string { return s ? s.replace('T', ' ') : '' }
 
 function startEdit(todo: Todo) {
+  formErr.value = ''
   editing.value = todo
   editTitle.value = todo.title
   editPriority.value = todo.priority
@@ -865,22 +945,72 @@ function startEdit(todo: Todo) {
   editRecTime.value = rf.timeOfDay
   editRecWeekdays.value = rf.weekdays
   editStatus.value = todo.status || 'todo'
+  editScope.value = 'all' // 每次打开都回到默认，避免上次的选择串到这条
   showEdit.value = true
 }
 async function saveEdit() {
   if (!editing.value) return
   const title = editTitle.value.trim()
-  if (!title) return
+  if (!title) { formErr.value = t('todoErrTitle'); return }
+  formErr.value = ''
+  const orig = editing.value
+  const editedRec = recurrenceToJSON({ kind: editRecKind.value, timeOfDay: editRecTime.value, weekdays: editRecWeekdays.value })
+  const editedTags = tagsTextToJSON(editTags.value)
+  const editedStart = fromInput(editStart.value)
+  const editedEnd = fromInput(editEnd.value)
+  const editedReminder = fromInput(editReminder.value)
   try {
-    await unwrap(await UpdateTodo(
-      editing.value.id, title, editPriority.value, editDueDate.value, editNote.value,
-      fromInput(editStart.value), fromInput(editEnd.value), fromInput(editReminder.value),
-      recurrenceToJSON({ kind: editRecKind.value, timeOfDay: editRecTime.value, weekdays: editRecWeekdays.value }),
-      tagsTextToJSON(editTags.value),
-      editStatus.value,
-    ))
+    // 重复待办 + 非「全部」：单模板模型下用「推进模板 due_date + 必要时新建一条 occurrence」实现。
+    if (editScope.value !== 'all' && editIsRecurring.value) {
+      const originalDue = orig.dueDate
+      const advanced = nextDueDate(originalDue, parseRecurrence(orig.recurrence))
+      if (editScope.value === 'thisOnly') {
+        // 仅本次：模板保留原始内容、只把截止日推到下一周期（recurrence 仍在，调度继续生成未来实例）；
+        // 本次的编辑落在新的一条独立待办上（不带 recurrence，截止日=原日期）。
+        await unwrap(await UpdateTodo(
+          orig.id, orig.title, orig.priority, advanced, orig.note,
+          orig.startTime, orig.endTime, orig.reminderTime, orig.recurrence,
+          orig.tags, orig.status,
+        ))
+        await unwrap(await CreateTodo(
+          title, editPriority.value, originalDue, editNote.value,
+          editedStart, editedEnd, editedReminder, '', editedTags,
+        ))
+        invalidateLinkTargets() // 新 occurrence 立即可当互链目标
+      } else {
+        // 从下次起：改模板本身，但把截止日推到下一周期——编辑从下一次开始生效，本次保持原样。
+        await unwrap(await UpdateTodo(
+          orig.id, title, editPriority.value, advanced, editNote.value,
+          editedStart, editedEnd, editedReminder,
+          editedRec, editedTags, editStatus.value,
+        ))
+      }
+    } else {
+      // 全部：保持原有行为——照旧改这一条模板。
+      await unwrap(await UpdateTodo(
+        orig.id, title, editPriority.value, editDueDate.value, editNote.value,
+        editedStart, editedEnd, editedReminder, editedRec, editedTags, editStatus.value,
+      ))
+    }
     showEdit.value = false
     editing.value = null
+    await refresh()
+  } catch (e) {
+    formErr.value = getErrorMessage(e)
+  }
+}
+
+// 稍后提醒：把 due_date（连同起止/提醒时刻）整体推到明天，保留未完成状态、
+// 不动 recurrence。UpdateTodo 会复位 reminder_sent，正好让提醒重新响一次。
+async function snooze(todo: Todo) {
+  const due = todo.dueDate ? plusOneDay(todo.dueDate) : plusOneDay(todayStr.value)
+  try {
+    await unwrap(await UpdateTodo(
+      todo.id, todo.title, todo.priority, due, todo.note,
+      plusOneDay(todo.startTime), plusOneDay(todo.endTime), plusOneDay(todo.reminderTime),
+      todo.recurrence,
+      todo.tags as unknown as string, 'todo',
+    ))
     await refresh()
   } catch (e) {
     error.value = getErrorMessage(e)
@@ -1162,6 +1292,7 @@ onUnmounted(() => {
               <template v-else>
                 <p>{{ t('todoNoTodosThisDay') }}</p>
                 <p class="empty-hint">{{ t('todoClickDayHint') }}</p>
+                <button class="empty-add-btn" @click="openCreate"><Plus :size="13" /> {{ t('todoAddFirst') }}</button>
               </template>
             </div>
             <div
@@ -1219,6 +1350,7 @@ onUnmounted(() => {
                   <button class="act" @click="startFocus(todo)" :title="t('todoFocusStart')"><Timer :size="13" /></button>
                 </template>
                 <button class="act" @click="toggleSubInput(todo)" :title="t('todoSubtaskAdd')"><ListTree :size="13" /></button>
+                <button class="act" @click="snooze(todo)" :title="t('todoSnooze')"><Clock :size="13" /></button>
                 <button class="act" @click="startEdit(todo)" :title="t('todoEdit')"><Pencil :size="13" /></button>
                 <button class="act danger" @click="remove(todo)" :title="t('todoDelete')"><Trash2 :size="13" /></button>
               </div>
@@ -1262,7 +1394,7 @@ onUnmounted(() => {
                 </div>
                 <div v-if="addingSubFor === todo.id" class="sub-add">
                   <input v-model="newSubTitle" class="modal-input sub-input" :placeholder="t('todoSubtaskPh')"
-                         @keyup.enter="addSubtask(todo)" @blur="toggleSubInput(todo)" />
+                         @keyup.enter="addSubtask(todo)" @blur="onSubInputBlur(todo)" />
                 </div>
               </div>
             </div>
@@ -1291,10 +1423,18 @@ onUnmounted(() => {
                 :key="card.id"
                 class="kanban-card"
                 draggable="true"
+                :title="t('todoKanbanEditHint')"
+                @dblclick.stop="startEdit(card)"
                 @dragstart="onDragStart(card.id, $event)"
                 @dragend="onDragEnd"
               >
-                <span class="kanban-card-name">{{ card.title }}</span>
+                <div class="kanban-card-top">
+                  <span class="kanban-card-name">{{ card.title }}</span>
+                  <span class="kanban-card-acts">
+                    <button class="act" @click.stop="startEdit(card)" :title="t('todoEdit')"><Pencil :size="12" /></button>
+                    <button class="act danger" @click.stop="remove(card)" :title="t('todoDelete')"><Trash2 :size="12" /></button>
+                  </span>
+                </div>
                 <div class="kanban-card-meta">
                   <!-- 看板按状态看，卡片不写日期的话「今天哪些没做完」在列里完全看不出来 -->
                   <span v-if="card.dueDate" :class="['kanban-due', { overdue: isOverdue(card) }]">
@@ -1325,8 +1465,9 @@ onUnmounted(() => {
 
     <!-- 编辑弹窗 -->
     <QdModal v-model="showEdit" :title="t('todoEdit')" width="380px">
+        <p v-if="formErr" class="form-err" role="alert">{{ formErr }}</p>
         <label>{{ t('todoTitle') }}</label>
-        <input v-model="editTitle" class="modal-input" placeholder="..." />
+        <input v-model="editTitle" class="modal-input" placeholder="..." @input="formErr = ''" />
 
         <label>{{ t('todoPriority') }}</label>
         <select v-model="editPriority" class="modal-input">
@@ -1373,6 +1514,17 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <!-- 重复待办：本次编辑的应用范围。普通待办不显示，保持原 UI。 -->
+        <template v-if="editIsRecurring">
+          <label>{{ t('todoOccScope') }}</label>
+          <select v-model="editScope" class="modal-input">
+            <option value="all">{{ t('todoOccAll') }}</option>
+            <option value="thisOnly">{{ t('todoOccThisOnly') }}</option>
+            <option value="fromNext">{{ t('todoOccFromNext') }}</option>
+          </select>
+          <p class="occ-hint">{{ t('todoOccHint') }}</p>
+        </template>
+
         <!-- 4.2 标签 -->
         <label>{{ t('todoTags') }}</label>
         <input v-model="editTags" class="modal-input" :placeholder="t('todoTagsPh')" list="todo-tag-options" />
@@ -1395,8 +1547,9 @@ onUnmounted(() => {
 
     <!-- 新增弹窗 -->
     <QdModal v-model="showCreate" :title="t('todoAdd')" width="380px">
+        <p v-if="formErr" class="form-err" role="alert">{{ formErr }}</p>
         <label>{{ t('todoTitle') }}</label>
-        <input v-model="cTitle" class="modal-input" :placeholder="t('todoAddPlaceholder')" />
+        <input v-model="cTitle" class="modal-input" :placeholder="t('todoAddPlaceholder')" @input="formErr = ''" />
 
         <label>{{ t('todoPriority') }}</label>
         <select v-model="cPriority" class="modal-input">
@@ -1814,4 +1967,34 @@ onUnmounted(() => {
 .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .modal-grid > * { min-width: 0; }
 .modal-grid input[type="datetime-local"] { width: 100%; box-sizing: border-box; }
+.occ-hint { margin: var(--space-1) 0 0; font-size: var(--text-xs); color: var(--color-text-disabled); line-height: 1.5; }
+
+/* 弹窗内错误条：页面级 .todo-error 在遮罩下面，弹窗必须自带一处反馈。
+   与 SchedulePage / MonitorPage 的 .form-err 同口径。 */
+.form-err { margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3); font-size: var(--text-sm); color: var(--color-danger); background: var(--color-danger-bg); border: 1px solid var(--color-danger-border); border-radius: var(--radius-sm); }
+/* 空态里的「添加第一条」：给全新用户一个明确的下一步，而不是只说"点击左侧日期" */
+.empty-add-btn { display: inline-flex; align-items: center; gap: var(--space-2); margin-top: var(--space-4); padding: 5px 12px; border: 1px solid var(--color-accent-border); border-radius: var(--radius-md); background: var(--color-accent-bg); color: var(--color-accent); font-size: var(--text-sm); font-family: inherit; cursor: pointer; }
+.empty-add-btn:hover { background: var(--color-accent); color: var(--color-bg-primary); }
+
+/* 看板卡片：标题与最小操作集同一行。操作按钮常驻但弱化，聚焦时补回对比度，
+   避免 hover 才显形导致键盘用户 Tab 到透明按钮上（横向共性里的可达性问题）。 */
+.kanban-card-top { display: flex; align-items: flex-start; gap: var(--space-2); }
+.kanban-card-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.kanban-card-acts { display: inline-flex; gap: 2px; flex-shrink: 0; opacity: 0.5; }
+.kanban-card:hover .kanban-card-acts, .kanban-card:focus-within .kanban-card-acts { opacity: 1; }
+.kanban-card-acts .act { width: 20px; height: 20px; }
+
+/* 窄窗口 / 高 DPI 缩放适配：800px 窗口主区仅约 590 CSS px，332px 日历 +
+   右栏工具条会把新建按钮挤出 overflow:hidden。与全局页头 900px 断点对齐。 */
+@media (max-width: 900px) {
+  .todo-body { gap: var(--space-4); padding: var(--space-3) var(--space-5); }
+  .cal-card { width: 240px; padding: var(--space-3); }
+  .panel-head { flex-wrap: wrap; row-gap: var(--space-2); }
+  .panel-head-right { flex-wrap: wrap; }
+  .panel-remaining { display: none; } /* 剩余数信息密度最低，窄屏先让位于操作按钮 */
+}
+@media (max-width: 720px) {
+  .todo-body { flex-direction: column; }
+  .cal-card { width: 100%; align-self: stretch; }
+}
 </style>

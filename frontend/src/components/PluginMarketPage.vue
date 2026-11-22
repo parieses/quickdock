@@ -203,8 +203,10 @@ function dlLabel(p: MarketPlugin): string {
   return t('pluginDownloadedSize', { mb: (st.downloaded / 1048576).toFixed(1) })
 }
 
-async function loadMarket() {
-  loading.value = true
+// silent=true：后台定时刷新用，保留正在浏览的旧列表，不把整页闪成「加载中」。
+// 首次进入 / 手动刷新 / 安装后刷新仍走默认的全屏加载，给用户明确的进行中反馈。
+async function loadMarket(silent = false) {
+  if (!silent) loading.value = true
   try {
     const idx = unwrap<MarketIndex>(await GetPluginMarket())
     if (idx) {
@@ -224,7 +226,7 @@ async function loadMarket() {
     setMarketOffline(false, 0)
     toast?.error?.(t('pluginMarketLoadFailed') + ': ' + getErrorMessage(e))
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -327,7 +329,7 @@ onMounted(() => {
   })
   // 后台定时拉取市场索引（每 5 分钟），刷新「可更新」角标与按钮状态；
   // 仅在页面挂载期间运行，卸载即清理。
-  autoTimer = setInterval(() => { loadMarket() }, 5 * 60 * 1000)
+  autoTimer = setInterval(() => { loadMarket(true) }, 5 * 60 * 1000)
   onUnmounted(() => {
     offProgress()
     if (autoTimer) { clearInterval(autoTimer); autoTimer = null }
@@ -355,7 +357,9 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
           <ArrowUpCircle v-else :size="14" />
           <span>{{ updatingAll ? t('pluginUpdateAllProgress', { done: updateAllDone, total: updateAllTotal }) : t('pluginUpdateAll') }}</span>
         </button>
-        <button class="qd-icon-btn" @click="loadMarket" :title="t('refresh')">
+        <!-- 必须显式 loadMarket()：裸 @click="loadMarket" 会把 MouseEvent 当第一个
+             参数传进去（truthy），被误判成 silent 刷新，手动刷新反而不显示加载态。 -->
+        <button class="qd-icon-btn" @click="loadMarket()" :title="t('refresh')">
           <RefreshCw :size="14" />
         </button>
       </div>
@@ -557,14 +561,17 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
       <template #footer>
         <div class="modal-actions">
           <button class="op-btn" @click="closeDetail()">{{ t('close') }}</button>
-          <a v-if="pickDownload(detail.downloads)" class="action-btn btn-install detail-install"
+          <!-- 真 button：原来的 <a> 没有 href，键盘 Tab 不到、也无法触发。
+               与卡片上的安装按钮保持一致（同 class、同 disabled 语义）。 -->
+          <button v-if="pickDownload(detail.downloads)" type="button" class="action-btn btn-install detail-install"
             :class="{ 'is-installing': installing.has(detail.id) }"
+            :disabled="installing.has(detail.id)"
             :title="detail.installed && !detail.has_update ? t('pluginReinstallHint') : undefined"
             @click="install(detail)">
             <RefreshCw v-if="installing.has(detail.id)" :size="14" class="spin" />
             <Download v-else :size="14" />
             <span>{{ installing.has(detail.id) ? dlLabel(detail) : (detail.installed ? (detail.has_update ? t('pluginUpgrade') : t('pluginReinstall')) : t('pluginInstallFromMarket')) }}</span>
-          </a>
+          </button>
         </div>
       </template>
     </QdModal>
@@ -746,7 +753,8 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 }
 .detail-shots { display: flex; flex-wrap: wrap; gap: var(--space-4); }
 .detail-shot { width: 160px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); }
-.detail-install { width: auto; padding: 7px var(--space-6); text-decoration: none; }
+/* 已从 <a> 改为真 button：按钮不继承字体，这里补 inherit 与卡片安装按钮一致 */
+.detail-install { width: auto; padding: 7px var(--space-6); text-decoration: none; font-family: inherit; }
 </style>
 
 

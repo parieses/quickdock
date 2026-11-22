@@ -171,7 +171,9 @@ async function checkUpdate() {
     const res = unwrap<NodeEnvStatus>(await CheckDSHUpdate())
     if (res && status.value) status.value = { ...status.value, ...res }
   } catch (e) {
-    // 检测失败（离线/超时）静默，不打断用户
+    // 离线/超时必须给可见反馈，否则用户分不清「没有更新」和「检测失败」。
+    // checkingUpdate 在 finally 里复位，按钮随即恢复可点。
+    showMsg(t('dshCheckUpdateFailed'), true)
   } finally {
     checkingUpdate.value = false
   }

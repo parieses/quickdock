@@ -64,6 +64,7 @@ const toast = useToast()
 const monitors = ref<Monitor[]>([])
 const stats = ref<Record<string, MonitorStat>>({})
 const logsMap = ref<Record<string, MonitorLog[]>>({})
+const logsFailed = ref<Set<string>>(new Set()) // 每条监控的日志拉取是否失败：空数组要区分「真没记录」与「失败」
 const expanded = ref<Set<string>>(new Set())
 const loading = ref(false)
 const error = ref('')
@@ -461,8 +462,9 @@ async function checkNow(m: Monitor) {
   error.value = ''
   try {
     const r = await CheckMonitorNow(m.id)
-    if (r && r.code !== 0) error.value = r.msg
+    // refresh() 开头会清 error，故错误必须在它之后写回，否则被吞掉。
     await refresh()
+    if (r && r.code !== 0) error.value = r.msg
   } catch (e) { error.value = getErrorMessage(e) } finally { checkingId.value = '' }
 }
 
@@ -560,8 +562,11 @@ async function toggleMute(m: Monitor) {
 // 复用定时任务/笔记同一套「按可见顺序重写 sort=i*10」：拖一下只动 sort 一列，
 // 不碰任何编辑字段，也绝不重算运行数据。分组只是展示层——拖动会反映到全局 sort 顺序，
 // 跨组拖动保留原分组归属（组是用户自己划的，拖排序不该偷偷改它）。
+/** 有搜索/分组筛选时禁拖：visibleMonitors 只是子集，按可见下标写 sort=i*10 会打乱隐藏项。 */
+const canDrag = computed(() => !query.value.trim() && !groupFilter.value)
 const dragId = ref('')
 function onDragStart(e: DragEvent, m: Monitor) {
+  if (!canDrag.value) return
   dragId.value = m.id
   e.dataTransfer?.setData('text/plain', m.id)
   if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
@@ -583,18 +588,22 @@ async function onDrop(target: Monitor) {
   const toIdx = next.findIndex(x => x.id === target.id)
   if (toIdx < 0) return
   next.splice(toIdx, 0, moved)
-  const busy = new Set<string>()
+  // 乐观更新：先改本地顺序，写库失败再拉回服务端顺序（对照定时任务拖拽）。
+  const serverOrder = monitors.value.slice()
+  monitors.value = next.slice()
   try {
     for (let i = 0; i < next.length; i++) {
-      if (next[i].sort !== i * 10) {
-        busy.add(next[i].id)
-        await SetMonitorSort(next[i].id, i * 10)
-      }
+      if (next[i].sort === i * 10) continue
+      // unwrap 会把 code!==0 的失败抛成 ApiError，逐条检查，不再静默忽略。
+      unwrap(await SetMonitorSort(next[i].id, i * 10))
+      next[i].sort = i * 10
     }
-    // 乐观更新：本地立刻重排，省一次往返闪烁
-    monitors.value = next.slice()
     await refresh()
-  } catch (e) { error.value = getErrorMessage(e) }
+  } catch (e) {
+    error.value = getErrorMessage(e)
+    monitors.value = serverOrder // 恢复拖拽前的本地顺序，别把假象留着
+    await refresh() // 再拉一次，确保与库里实际顺序一致
+  }
 }
 
 // ---- 展开日志 ----
@@ -629,9 +638,11 @@ async function loadLogs(id: string) {
     // 绘图点上限 2000：再多画布也画不出区别，但序列化与解析会明显变慢。
     // 后端保留上限已提到 20000 条，所以「7d / 全部」拿到的确实是可用区间内的数据。
     logsMap.value[id] = unwrap<MonitorLog[]>(await GetMonitorLogsSince(id, since, 2000)) ?? []
+    logsFailed.value.delete(id) // 拉取成功，清掉失败态
   } catch (e) {
-    // 展开面板的数据失败只让图表显示空态，不拖垮整页
+    // 失败时标记该条：让面板显示「加载失败 + 重试」，不伪装成「暂无检测记录」，也不拖垮整页。
     logErr('monitor.loadLogs', e)
+    logsFailed.value.add(id)
   }
 }
 
@@ -741,7 +752,7 @@ async function toggleExpand(m: Monitor) {
 }
 
 async function clearLogs(m: Monitor) {
-  try { await unwrap(await ClearMonitorLogs(m.id)); logsMap.value[m.id] = [] } catch (e) { error.value = getErrorMessage(e) }
+  try { await unwrap(await ClearMonitorLogs(m.id)); logsMap.value[m.id] = []; logsFailed.value.delete(m.id) } catch (e) { error.value = getErrorMessage(e) }
 }
 
 // ---- 导出 CSV ----
@@ -1109,7 +1120,7 @@ onUnmounted(() => {
           :key="m.id"
           :data-monitor-id="m.id"
           :class="['mon-item', { disabled: !m.enabled, picked: isSelected(m.id), dragging: dragId === m.id, 'mon-flash': flashMonitorId === m.id }]"
-          draggable="true"
+          :draggable="canDrag"
           @dragstart="onDragStart($event, m)"
           @dragover="onDragOver($event, m)"
           @drop="onDrop(m)"
@@ -1205,7 +1216,11 @@ onUnmounted(() => {
               <button class="logs-btn danger" @click="clearLogs(m)">{{ t('mon_clear_logs') }}</button>
             </div>
           </div>
-          <div v-if="!logsMap[m.id] || logsMap[m.id].length === 0" class="logs-empty">{{ t('mon_no_logs') }}</div>
+          <div v-if="logsFailed.has(m.id)" class="logs-load-error">
+            <span>{{ t('monLogLoadFailed') }}</span>
+            <button class="logs-btn" @click="onRangeChange(m.id)">{{ t('statusRetry') }}</button>
+          </div>
+          <div v-else-if="!logsMap[m.id] || logsMap[m.id].length === 0" class="logs-empty">{{ t('mon_no_logs') }}</div>
           <template v-else>
             <div class="logs-viz">
               <!-- 正常率环形图：与折线图共用同一份 logsMap，切范围一起变 -->
@@ -1324,12 +1339,15 @@ onUnmounted(() => {
           </div>
         </template>
 
-        <!-- 请求头 / 请求体：POST/PUT/PATCH 类探针要能带鉴权头与 payload，
-             否则这些方法只能发出一个空 body，和 GET 没区别（接口一律 401/400）。 -->
-        <template v-if="showBodyFields && fKind === 'http'">
+        <!-- 请求头对所有 HTTP 方法都可用：GET/DELETE 调鉴权接口同样要带
+             Authorization / Token，不能因为没 body 就让它们只能发裸请求。
+             请求体仍只给 POST/PUT/PATCH（showBodyFields）。 -->
+        <template v-if="fKind === 'http'">
           <label>{{ t('mon_http_headers') }}</label>
           <textarea v-model="fHeaders" class="modal-input mon-textarea" rows="3"
             :placeholder="t('mon_http_headers_ph')"></textarea>
+        </template>
+        <template v-if="showBodyFields && fKind === 'http'">
           <label>{{ t('mon_http_body') }}</label>
           <textarea v-model="fBody" class="modal-input mon-textarea" rows="3"
             :placeholder="t('mon_http_body_ph')"></textarea>
@@ -1687,6 +1705,7 @@ onUnmounted(() => {
 .logs-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .logs-btn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); }
 .logs-empty { font-size: var(--text-xs); color: var(--color-text-disabled); padding: var(--space-3) 0; }
+.logs-load-error { display: inline-flex; align-items: center; gap: var(--space-3); font-size: var(--text-xs); color: var(--color-danger); padding: var(--space-3) 0; }
 
 /* 日志可视化：正常率环（原生 SVG）+ 延迟折线（QdLineChart） */
 .logs-viz { display: flex; align-items: stretch; gap: var(--space-5); }

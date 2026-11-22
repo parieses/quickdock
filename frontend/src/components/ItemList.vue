@@ -305,15 +305,32 @@ const ctxActions = computed<CtxAction[]>(() => {
   return acts
 })
 
-// Esc 关闭：右键菜单是最容易被"忘了关"的浮层
-function onCtxKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape' && ctx.value) {
+// Esc 关闭：右键菜单和批量「移动」菜单都是最容易被"忘了关"的浮层
+function onDocKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  if (ctx.value) {
     e.stopPropagation()
     closeContextMenu()
+  } else if (moveMenuOpen.value) {
+    e.stopPropagation()
+    moveMenuOpen.value = false
   }
 }
-onMounted(() => document.addEventListener('keydown', onCtxKeydown))
-onBeforeUnmount(() => document.removeEventListener('keydown', onCtxKeydown))
+// 移动菜单点外部关闭：按钮与菜单都在 .batch-move-wrap 内，点它们不算外部。
+// 用 pointerdown 而非 click，能在焦点转移前先收起，避免误触到下层行。
+function onDocPointerDown(e: PointerEvent) {
+  if (!moveMenuOpen.value) return
+  const wrap = document.querySelector('.item-list .batch-move-wrap')
+  if (wrap && !wrap.contains(e.target as Node)) moveMenuOpen.value = false
+}
+onMounted(() => {
+  document.addEventListener('keydown', onDocKeydown)
+  document.addEventListener('pointerdown', onDocPointerDown)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onDocKeydown)
+  document.removeEventListener('pointerdown', onDocPointerDown)
+})
 
 // 拖拽排序
 const dragItemId = ref<string | null>(null)
@@ -363,6 +380,36 @@ function onItemMoveKey(e: KeyboardEvent, item: { id: string; name: string }) {
   store.reorderItems(ids)
   itemMoveMsg.value = t(e.key === 'ArrowUp' ? 'sceneMovedUp' : 'sceneMovedDown', { name: item.name })
 }
+
+// ---- 深链定位（wiki [[...]] → 具体条目）----
+// 供 WorkspacePage 调用：按 id 而非标题文本命中（同名条目不能再误命第一行），
+// 且必须在虚拟滚动下先把目标行滚进可视区再找 DOM——大于 100 条时未渲染的行
+// 根本不在 DOM 里，旧实现按 querySelectorAll('.qd-row') 找必然静默跳过。
+async function flashItemById(id: string): Promise<boolean> {
+  // 局部过滤会把目标挡在 visibleItems 之外：深链要先把过滤清掉再找
+  if (!visibleItems.value.some(it => it.id === id) && localQuery.value) {
+    localQuery.value = ''
+    await nextTick()
+  }
+  const idx = visibleItems.value.findIndex(it => it.id === id)
+  if (idx < 0) return false
+  if (useVirtual.value && scrollEl.value) {
+    const el = scrollEl.value
+    // 目标行滚到视口中央：直接写 scrollTop，并同步内部 ref 让 slice 立即重算，
+    // 不必等 scroll 事件的下一帧（否则紧随其后的 querySelector 还是查不到）。
+    el.scrollTop = Math.max(0, idx * ROW_H + ROW_H / 2 - el.clientHeight / 2)
+    scrollTop.value = el.scrollTop
+    viewportH.value = el.clientHeight
+    await nextTick()
+  }
+  const row = scrollEl.value?.querySelector<HTMLElement>(`[data-item-id="${id.replace(/"/g, '\\"')}"]`)
+  if (!row) return false
+  row.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  row.classList.add('qd-link-flash')
+  window.setTimeout(() => row.classList.remove('qd-link-flash'), 1800)
+  return true
+}
+defineExpose({ flashItemById })
 </script>
 
 <template>
@@ -436,6 +483,7 @@ function onItemMoveKey(e: KeyboardEvent, item: { id: string; name: string }) {
         <div v-key-click
           v-for="item in slice"
           :key="item.id"
+          :data-item-id="item.id"
           class="qd-row"
           :class="{ dragging: dragItemId === item.id, picked: isSel(item.id) }"
           :style="item.color ? { boxShadow: 'inset 3px 0 0 ' + item.color } : undefined"
@@ -483,6 +531,7 @@ function onItemMoveKey(e: KeyboardEvent, item: { id: string; name: string }) {
         <li v-key-click
           v-for="item in visibleItems"
           :key="item.id"
+          :data-item-id="item.id"
           class="qd-row"
           :class="{ dragging: dragItemId === item.id, picked: isSel(item.id) }"
           :style="item.color ? { boxShadow: 'inset 3px 0 0 ' + item.color } : undefined"

@@ -301,7 +301,7 @@ const { t } = useI18n()
           <td>{{ p.version }}</td>
           <td><span class="mono">{{ p.ports.length ? p.ports.join(' / ') : (p.port || '—') }}</span></td>
           <td>
-            <a v-if="p.consolePort" class="svc-port-link" @click="ctx.openConsole(p.consolePort)">:{{ p.consolePort }} ↗</a>
+            <button v-if="p.consolePort" type="button" class="svc-port-link" @click="ctx.openConsole(p.consolePort)">:{{ p.consolePort }} ↗</button>
             <span v-else class="muted">—</span>
           </td>
         </tr>
@@ -329,7 +329,17 @@ const { t } = useI18n()
 
 .svc-btn.console { background: var(--color-text-muted); }
 
-.svc-port-link { text-decoration: none; transition: color var(--transition-fast); }
+/* 控制台链接用真 <button>，保留原 <a> 的继承外观，同时天然可 Tab 聚焦、回车触发。 */
+.svc-port-link {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
 
 .svc-port-link:hover { color: var(--color-accent); text-decoration: underline; }
 

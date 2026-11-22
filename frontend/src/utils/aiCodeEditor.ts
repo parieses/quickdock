@@ -71,6 +71,8 @@ export interface CodeEditorHandle {
   revealLine(line: number): void
   /** 折叠/切换 1-based 第 line 行所在标题区段；越界 clamp，无可折叠区段时是空操作 */
   foldAt(line: number): void
+  /** 只展开 1-based 第 line 行所在标题区段（已展开或越界时空操作）；供大纲 unfold 显式指令 */
+  unfoldAt(line: number): void
 }
 
 export interface CodeEditorOpts {
@@ -630,6 +632,18 @@ export async function createCodeEditor(host: HTMLElement, opts: CodeEditorOpts):
   }
   host.addEventListener('keydown', onHostKeydown, true)
 
+  /** 找 1-based 第 line 行所在的已折叠区段，返回 {from,to} 或 null。foldAt/unfoldAt 共用。 */
+  function findFoldedAt(line: number): { from: number; to: number } | null {
+    const doc = view.state.doc
+    const ln = doc.line(clampLine(doc.lines, line))
+    let from = -1
+    let to = -1
+    foldedRanges(view.state).between(ln.from, ln.to, (f, t) => {
+      if (from < 0 || f < from) { from = f; to = t }
+    })
+    return from >= 0 ? { from, to } : null
+  }
+
   return {
     focus: () => view.focus(),
     destroy: () => {
@@ -689,20 +703,22 @@ export async function createCodeEditor(host: HTMLElement, opts: CodeEditorOpts):
       const doc = view.state.doc
       const n = clampLine(doc.lines, line)
       const ln = doc.line(n)
-      // 先判断这行是否已有折叠区段（等价于 CM 内部 findFold / toggleFold）：
-      // 有就展开，没有就按 foldable 找区段折叠。用两个 number 存结果，避免
-      // TS 把「闭包里赋值的 let 联合类型」在后续收窄成 never。
-      let foldedFrom = -1
-      let foldedTo = -1
-      foldedRanges(view.state).between(ln.from, ln.to, (from, to) => {
-        if (foldedFrom < 0 || foldedFrom > from) { foldedFrom = from; foldedTo = to }
-      })
-      if (foldedFrom >= 0) {
-        view.dispatch({ effects: unfoldEffect.of({ from: foldedFrom, to: foldedTo }) })
+      //  Toggle 语义：这行已折叠就展开，没折叠就按 foldable 找区段折起来。
+      //  匹配的折叠区段交给统一 helper 找，unfoldAt 复用同一口径。
+      const folded = findFoldedAt(n)
+      if (folded) {
+        view.dispatch({ effects: unfoldEffect.of(folded) })
         return
       }
       const range = foldable(view.state, ln.from, ln.to)
       if (range) view.dispatch({ effects: foldEffect.of(range) })
+    },
+    unfoldAt: (line: number) => {
+      if (!opts.fold) return
+      // 只展开，不 toggle：大纲发来 unfold 指令时这节必然已折叠，
+      // 用显式 API 而不是 foldAt，避免日后 foldAt 语义变动把方向带反。
+      const folded = findFoldedAt(clampLine(view.state.doc.lines, line))
+      if (folded) view.dispatch({ effects: unfoldEffect.of(folded) })
     },
   }
 }
