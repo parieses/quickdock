@@ -57,7 +57,7 @@ import '../styles/hljs-theme.css'
 import { logErr } from '../utils/logger'
 import { useFloatMenu } from '../composables/useFloatMenu'
 import { useSaveAs } from '../composables/useSaveAs'
-import { aiGenerating, aiFinishedUnread, pendingTarget } from '../composables/bridge'
+import { aiGenerating, aiFinishedUnread, pendingTarget, pendingAskText } from '../composables/bridge'
 import { resolveConvDir } from '../utils/aiConvDir'
 import { profileNeedsKey } from '../utils/aiKey'
 import { pickActiveRun } from '../utils/aiRuns'
@@ -3316,6 +3316,25 @@ function consumePendingTarget() {
 watch(pendingTarget, consumePendingTarget, { immediate: true })
 // 双重兜底：immediate 那次若撞上会话列表未就绪，挂载后再补一次（已消费则是 no-op）
 onMounted(consumePendingTarget)
+
+// 外部页面（日志查看器等）送来的文本：开一条空白任务，把文本填进主输入框等用户发送。
+// 不直接 send——文本只是起点，用户往往要先补一句上下文或确认内容。
+function consumePendingAskText() {
+  const p = pendingAskText.value
+  if (!p) return
+  // 取走即清：AI 页被 KeepAlive 保活，留着会在切走再回来时重复注入。
+  pendingAskText.value = null
+  beginBlankTask()
+  // 等落地页的 hero 输入框挂载好再写入并聚焦（与 openNewTask / fillHeroTip 同口径）。
+  void nextTick(() => {
+    input.value = p.text
+    nextTick(() => heroRef.value?.focus())
+  })
+}
+watch(pendingAskText, consumePendingAskText, { immediate: true })
+// immediate 那次若发生在挂载前（heroRef 还没就位），挂载后再补一次消费；
+// 已消费则是 no-op。保活时 watch 一直活着，这条只在首次挂载时兜底。
+onMounted(consumePendingAskText)
 
 onMounted(async () => {
   // KeepAlive 首次挂载也会走 onActivated，但那条路依赖 App.vue 的包裹结构；

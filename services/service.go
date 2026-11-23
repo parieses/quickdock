@@ -242,6 +242,11 @@ type AppService struct {
 	// 与 monitorInflight 同款 LoadOrStore 模式。
 	schedInflight sync.Map // taskID -> struct{}
 
+	// 手动「立即执行」的取消句柄：taskID -> context.CancelFunc。
+	// 只登记手动触发的后台运行（定时触发无人值守，不提供取消）。执行结束即删；
+	// CancelScheduledRun 按 id 取到就调，取不到说明任务已不在运行。
+	schedRunCancels sync.Map // taskID -> context.CancelFunc
+
 	// DeepSeek Harness 运行环境（检测/下载便携 Node + 安装 dsh）与进程管理
 	NodeEnv *dshcore.NodeEnvManager
 	DSH     *dshcore.DSHProcessManager

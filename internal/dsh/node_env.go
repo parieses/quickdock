@@ -86,11 +86,9 @@ func (m *NodeEnvManager) runtimeDir() string { return m.node.RuntimeDir() }
 
 func (m *NodeEnvManager) SetApp(app *application.App) { m.app = app }
 
-// EmitLog 向前端 DSH 日志面板推送一行日志
+// EmitLog 落盘并向前端 DSH 日志面板推送一行日志（见 emitDSHLog）。
 func (m *NodeEnvManager) EmitLog(level, msg string) {
-	if m.app != nil {
-		m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: level, Message: msg})
-	}
+	emitDSHLog(m.app, level, msg)
 }
 
 func (m *NodeEnvManager) nodeExe() string { return m.node.Exe() }
@@ -409,11 +407,7 @@ func (m *NodeEnvManager) SetupDSH(ctx context.Context, onProgress func(SetupProg
 			m.app.Event.Emit("quickdock:dsh:progress", sp)
 		}
 	}
-	logf := func(level, msg string) {
-		if m.app != nil {
-			m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: level, Message: msg})
-		}
-	}
+	logf := func(level, msg string) { m.EmitLog(level, msg) }
 
 	if m.installing.Swap(true) {
 		// 锁被占用（并发安装/更新）也补发 error 事件，前端 settingUp/updating 才能复位，

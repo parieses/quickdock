@@ -204,6 +204,7 @@ async function confirmDeleteVar(name: string) {
       <span class="path-summary-dot" :class="{ ok: ctx.pathEntries.some((e: any) => e.inPath) }"></span>
       {{ ctx.pathEntries.filter((e: any) => e.inPath).length }} / {{ ctx.pathEntries.length }} {{ t('pathSummary') }}
     </div>
+    <p class="modal-text path-write-hint">{{ t('pathWriteHint') }}</p>
     <div class="path-list">
       <div v-for="e in ctx.pathEntries" :key="e.id + e.version" class="path-row">
         <span class="path-badge" :style="{ background: ctx.avatarColor(e.id) }" v-html="ctx.avatarIcon(e.id)"></span>
@@ -212,6 +213,9 @@ async function confirmDeleteVar(name: string) {
         <span class="path-flag" :class="e.inPath ? 'ok' : 'no'">
           <span class="path-flag-dot"></span>{{ e.inPath ? t('inPath') : t('notInPath') }}
         </span>
+        <button class="op-btn small" @click="ctx.togglePathEntry(e.id, e.version, e.inPath)">
+          {{ e.inPath ? t('pathRemoveFromPath') : t('pathAddToPath') }}
+        </button>
       </div>
       <div v-if="!ctx.pathEntries.length" class="path-empty">{{ t('pathEmpty') }}</div>
     </div>
@@ -614,7 +618,7 @@ async function confirmDeleteVar(name: string) {
 
 .path-list { display: flex; flex-direction: column; gap: 7px; margin: var(--space-2) 0 var(--space-5); max-height: 52vh; overflow: auto; }
 
-.path-row { display: grid; grid-template-columns: 26px 130px 1fr auto; align-items: center; gap: 10px; padding: 9px 11px; background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: var(--text-sm); transition: border-color .12s ease, background .12s ease; }
+.path-row { display: grid; grid-template-columns: 26px 130px 1fr auto auto; align-items: center; gap: 10px; padding: 9px 11px; background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: var(--text-sm); transition: border-color .12s ease, background .12s ease; }
 
 .path-row:hover { border-color: var(--color-border-focus); background: var(--color-bg-secondary); }
 
@@ -654,6 +658,8 @@ async function confirmDeleteVar(name: string) {
 .path-summary-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-disabled); flex: none; }
 
 .path-summary-dot.ok { background: var(--color-success); }
+
+.path-write-hint { margin-top: var(--space-2); }
 
 .empty-text { font-size: var(--text-md); color: var(--color-text-muted); }
 

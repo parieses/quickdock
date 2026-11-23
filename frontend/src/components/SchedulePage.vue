@@ -15,7 +15,7 @@ import { matchesTextOrPinyin } from '../utils/pinyin'
 import { pendingTarget } from '../composables/bridge'
 import {
   CreateScheduledTask, ListScheduledTasks, UpdateScheduledTask,
-  DeleteScheduledTask, SetScheduledTaskEnabled, RunScheduledTaskNow,
+  DeleteScheduledTask, SetScheduledTaskEnabled, RunScheduledTaskNowAsync, CancelScheduledRun,
   SetScheduledTaskSort, GetAllScheduleRuns, SetAllScheduledTasksEnabled,
 } from '../../bindings/quickdock/services/appservice'
 import type { ScheduledTask } from '../../bindings/quickdock/internal/db/models'
@@ -622,25 +622,52 @@ async function toggleAllEnabled() {
 }
 
 const runningId = ref('')
-// 立即运行是同步阻塞调用（后端等命令跑完，最长 30s），没有进度/取消通道。
-// 至少把「最长等待 30 秒」从按钮 hover 的 title 提到用户眼前，别让他对着转圈干等。
+const runningTask = computed(() => tasks.value.find(x => x.id === runningId.value) || null)
+// 后台执行状态：runningId 靠 schedule:run-updated 事件清除（不再是同步 await）。
+// runProgress 显示最近一步（命令/HTTP 只有 start + 收尾，AI 会推更多工具步骤）。
 const runNotice = ref('')
+const runProgress = ref('')
+const cancelingId = ref('')
 async function runNow(t0: ScheduledTask) {
-  runningId.value = t0.id
   error.value = ''
-  runNotice.value = t('sched_running')
+  runNotice.value = ''
+  runProgress.value = ''
   try {
-    const r = await RunScheduledTaskNow(t0.id)
-    await refresh()
-    // 错误必须在 refresh 之后写：refresh 开头会 error.value = ''，先写会被吞掉。
-    // RunScheduledTaskNow 失败时 code=1，成功时 msg 为结果。
-    if (r && r.code !== 0) { error.value = r.msg }
+    // 异步 binding 立即返回：不再把 RPC 挂满 30 秒，进度靠事件推。
+    const r = await RunScheduledTaskNowAsync(t0.id)
+    if (r && r.code !== 0) {
+      error.value = r.msg
+      return
+    }
+    runningId.value = t0.id
+    runNotice.value = t('sched_run_started', { name: t0.name })
+    runProgress.value = t('sched_run_progress_start')
+  } catch (e) {
+    error.value = getErrorMessage(e)
+  }
+}
+async function cancelRun() {
+  if (!runningId.value || cancelingId.value) return
+  cancelingId.value = runningId.value
+  try {
+    const r = await CancelScheduledRun(runningId.value)
+    if (r && r.code !== 0) error.value = r.msg
+    else runProgress.value = t('sched_run_canceling')
   } catch (e) {
     error.value = getErrorMessage(e)
   } finally {
-    runningId.value = ''
-    runNotice.value = ''
+    cancelingId.value = ''
   }
+}
+
+// 收尾：清运行态并刷新（这样运行历史/结果立刻可见）。error 不在这里写——
+// 失败结果进运行历史与通知，UI 不抢它的语义。
+function finishRun() {
+  if (!runningId.value) return
+  runningId.value = ''
+  runNotice.value = ''
+  runProgress.value = ''
+  void refresh()
 }
 
 // 定时任务页看不到「空间」这层：AI 任务的产出全在它的专属空间里。
@@ -710,8 +737,19 @@ onDeactivated(stopPage)
 // 不刷新就一直停在旧快照，看起来像「没跑过」或「只跑了一次」。
 // 用 On 返回的 off 单独注销：Events.Off(事件名) 是按名字整体移除的，历史弹窗
 // 和 AI 页也监听同一事件，这里卸一次会把它们的监听一起清掉。
-const offRunUpdated = Events.On('schedule:run-updated', () => { void refresh() })
-onBeforeUnmount(() => { offRunUpdated?.() })
+const offRunUpdated = Events.On('schedule:run-updated', (payload: any) => {
+  const d = payload?.data ?? payload
+  // 只对当前手动触发的那条任务收尾；定时触发的不动 UI 运行态。
+  if (runningId.value && d?.taskId && d.taskId !== runningId.value) return
+  finishRun()
+})
+const offRunProgress = Events.On('schedule:run-progress', (payload: any) => {
+  const d = payload?.data ?? payload
+  if (!runningId.value || (d?.taskId && d.taskId !== runningId.value)) return
+  const tool = String(d?.tool || '').trim()
+  if (tool && tool !== 'start') runProgress.value = t('sched_run_progress_step', { tool })
+})
+onBeforeUnmount(() => { offRunUpdated?.(); offRunProgress?.() })
 
 // ---- 通知中心深链定位 ----
 // 点一条定时任务通知后停在对应那条上，而不是回到列表顶部。
@@ -786,7 +824,13 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 
     <div v-if="error" class="sched-error">{{ error }}</div>
     <div v-if="runNotice" class="sched-run-notice" role="status">
-      <LoaderCircle :size="14" class="spin" />{{ runNotice }}
+      <LoaderCircle :size="14" class="spin" />
+      <span class="sched-run-text">{{ runNotice }}<span v-if="runProgress" class="sched-run-step"> · {{ runProgress }}</span></span>
+      <!-- AI 动作在 services/ai 自己的链路里跑，取消只断等待不中断工具调用，不显示按钮 -->
+      <button v-if="runningTask && runningTask.action !== 'ai'" class="sched-run-cancel"
+              :disabled="!!cancelingId" @click="cancelRun">
+        {{ cancelingId ? t('sched_run_canceling') : t('sched_run_cancel') }}
+      </button>
     </div>
 
     <!-- 搜索 / 状态筛选 -->
@@ -891,8 +935,7 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
           <QdSwitch :model-value="task.enabled" @update:model-value="() => toggleEnabled(task)"
                     :label="task.enabled ? t('sched_enabled') : t('sched_disabled')"
                     :title="task.enabled ? t('sched_enabled') : t('sched_disabled')" />
-          <!-- 「立即执行」是同步阻塞调用（后端要等命令跑完，最长 30s），
-               所以这里只能给转圈 + 说明，不能画进度条或停止按钮 —— 都没有真实通道。 -->
+          <!-- 立即执行走后台：转圈期间顶部状态条显示进度，命令/HTTP 可点取消 -->
           <button class="act" :disabled="runningId === task.id" @click="runNow(task)"
                   :title="runningId === task.id ? t('sched_running') : t('sched_run_now')">
             <LoaderCircle v-if="runningId === task.id" :size="14" class="spin" />
@@ -1218,6 +1261,15 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
   color: var(--color-text-secondary); background: var(--color-accent-bg);
   border: 1px solid var(--color-accent-border); border-radius: var(--radius-md); flex-shrink: 0;
 }
+.sched-run-text { flex: 1; min-width: 0; }
+.sched-run-step { color: var(--color-accent); }
+.sched-run-cancel {
+  flex-shrink: 0; padding: var(--space-1) var(--space-3); font-size: var(--text-xs);
+  color: var(--color-text-secondary); background: var(--color-surface);
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm); cursor: pointer;
+}
+.sched-run-cancel:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); }
+.sched-run-cancel:disabled { opacity: 0.5; cursor: default; }
 
 /* 弹窗内校验提示：与页面级 .sched-error 同色系，但去掉外边距（弹窗有自己的内边距） */
 .form-err {

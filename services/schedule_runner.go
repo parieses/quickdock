@@ -1,7 +1,9 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -840,9 +842,13 @@ func (a *AppService) notifyScheduleRun(t *db.ScheduledTask, status, result strin
 	// 定时任务恰恰是「没人盯着的时候发生的事」，成功也该能事后查到。
 	// 老库补列默认 always，升级后不会突然收不到通知。
 	policy := normalizeNotifyPolicy(t.NotifyPolicy)
-	pushExternal := policy == "always" || (policy == "failed" && status != "ok")
+	// canceled 是用户手动点的，不是需要「主动打扰」的异常：不推外部渠道，
+	// 但通知中心照常留档（事后仍能查到这次取消）。
+	pushExternal := status != "canceled" && (policy == "always" || (policy == "failed" && status != "ok"))
 	icon := "✅"
-	if status != "ok" {
+	if status == "canceled" {
+		icon = "⏹"
+	} else if status != "ok" {
 		icon = "⚠️"
 	}
 	title := icon + " 定时任务：" + t.Name
@@ -886,6 +892,13 @@ func (a *AppService) notifyScheduleRun(t *db.ScheduledTask, status, result strin
 // executeTask 执行单个任务，返回 (status, result)
 // status: "ok" | "fail"
 func (a *AppService) executeTask(t *db.ScheduledTask) (string, string) {
+	return a.executeTaskContext(context.Background(), t)
+}
+
+// executeTaskContext 是 executeTask 的可取消版本。定时触发走 context.Background()
+// （无人值守不能被取消）；手动「立即执行」传可取消 ctx，让 UI 的取消按钮能真正
+// 终止命令/HTTP 动作。AI 动作自己有独立通道，取消仅对命令/HTTP 生效。
+func (a *AppService) executeTaskContext(ctx context.Context, t *db.ScheduledTask) (string, string) {
 	switch t.Action {
 	case "app", "dir", "url":
 		if err := platform.ShellOpen(t.Target, t.WorkingDir); err != nil {
@@ -894,10 +907,14 @@ func (a *AppService) executeTask(t *db.ScheduledTask) (string, string) {
 		return "ok", "已打开：" + t.Target
 
 	case "command":
-		return a.executeCommandTask(t)
+		out := platform.RunCommandCaptureContext(ctx, t.Target, t.WorkingDir, schedCommandTimeout)
+		if out.Canceled {
+			return "canceled", "已取消：命令执行被手动终止"
+		}
+		return a.commandOutcome(t, out)
 
 	case "http":
-		return a.executeHTTP(t)
+		return a.executeHTTPContext(ctx, t)
 
 	case "todo":
 		return a.executeRecurringTodo(t)
@@ -917,8 +934,18 @@ func (a *AppService) executeTask(t *db.ScheduledTask) (string, string) {
 // 结果。启动 GUI/常驻程序的场景请用「打开软件」动作，那里本就是即发即忘。
 func (a *AppService) executeCommandTask(t *db.ScheduledTask) (string, string) {
 	out := platform.RunCommandCapture(t.Target, t.WorkingDir, schedCommandTimeout)
+	return a.commandOutcome(t, out)
+}
+
+// commandOutcome 把命令执行结果压成 (status, 单行摘要)，供可取消与不可取消
+// 两条执行路径共用——结果口径必须一致，否则同一条命令手动跑和定时跑会在
+// 运行历史里显示成两种文案。
+func (a *AppService) commandOutcome(t *db.ScheduledTask, out platform.CommandOutcome) (string, string) {
 	if out.Err != nil {
 		return "fail", "命令执行失败：" + out.Err.Error()
+	}
+	if out.Canceled {
+		return "canceled", "已取消：命令执行被手动终止"
 	}
 	// 输出摘要：优先 stdout（ls/dir 的正常输出走 stdout），为空退回 stderr
 	// （失败原因通常在 stderr）。压成单行——撑坏三种消费面没有任何好处。
@@ -1053,6 +1080,12 @@ func (a *AppService) SyncTodoSchedule(m *db.Todo) {
 
 // executeHTTP 发起 HTTP 请求（curl 能力），返回状态码与简要正文
 func (a *AppService) executeHTTP(t *db.ScheduledTask) (string, string) {
+	return a.executeHTTPContext(context.Background(), t)
+}
+
+// executeHTTPContext 是 executeHTTP 的可取消版本：ctx 取消时 client.Do 立即
+// 返回 context.Canceled，收尾文案与命令取消对齐（status=canceled）。
+func (a *AppService) executeHTTPContext(ctx context.Context, t *db.ScheduledTask) (string, string) {
 	method := strings.ToUpper(strings.TrimSpace(t.HTTPMethod))
 	if method == "" {
 		method = "GET"
@@ -1061,7 +1094,7 @@ func (a *AppService) executeHTTP(t *db.ScheduledTask) (string, string) {
 	if t.HTTPBody != "" {
 		bodyReader = strings.NewReader(t.HTTPBody)
 	}
-	req, err := http.NewRequest(method, t.Target, bodyReader)
+	req, err := http.NewRequestWithContext(ctx, method, t.Target, bodyReader)
 	if err != nil {
 		return "fail", "请求构建失败：" + err.Error()
 	}
@@ -1085,6 +1118,9 @@ func (a *AppService) executeHTTP(t *db.ScheduledTask) (string, string) {
 	client := scheduleHTTPClient
 	resp, err := client.Do(req)
 	if err != nil {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return "canceled", "已取消：HTTP 请求被手动终止"
+		}
 		return "fail", "请求失败：" + err.Error()
 	}
 	defer resp.Body.Close()

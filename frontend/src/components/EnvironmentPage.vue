@@ -909,6 +909,22 @@ async function toggleEnvVar(r: RuntimeInfo, ins: Install) {
   }
 }
 
+// PATH 面板：按版本加入/移出用户 PATH。复用上面的按版本激活/注销，不整体覆盖 PATH
+// （EnvUserEnvSetPath 会抹掉用户非 QuickDock 的条目）。非 Windows 后端返回"不支持"，
+// 这里用 toast 展示即可；成功后 pathEntries 随 load() 刷新，按钮态自动跟着变。
+async function togglePathEntry(id: string, version: string, inPath: boolean) {
+  try {
+    if (inPath) {
+      unwrap(await EnvUnsetActive(id, version))
+    } else {
+      unwrap(await EnvSetActive(id, version))
+    }
+    await load()
+  } catch (e: any) {
+    toast.error(getErrorMessage(e))
+  }
+}
+
 // 操作列下拉菜单（设置别名 / 删除 收纳于此）
 const openMenu = ref<string | null>(null)
 function toggleMenu(v: string) {
@@ -2084,6 +2100,7 @@ const dialogCtx = reactive({
   toggleGoPath,
   toggleLogAuto,
   toggleLogModalAuto,
+  togglePathEntry,
   userEnv,
 })
 </script>

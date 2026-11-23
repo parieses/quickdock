@@ -40,6 +40,12 @@ export const pendingOpenTodoId = ref<string>('')
 // 与 pendingOpenTodoId 同一套「写标志 → 目标页消费即清」口径，不依赖挂载先后。
 export const pendingCreateTodo = ref(false)
 
+// 跨页「文本注入 AI 输入框」：日志查看器等页面把整理好的文本写进来，
+// AI 页监听后开一条空白任务、把文本填进输入框等用户确认发送。
+// 与 pendingCreateTodo 同一套「写标志 → 目标页消费即清」口径：seq 让连续两次
+// 注入（哪怕文本相同）也生成新对象，消费方取走即清空，不会因保活重复注入。
+export const pendingAskText = ref<{ text: string; seq: number } | null>(null)
+
 // 页面内定位目标：总览卡片点的是「某个仓库 / 端口区块 / 某个常驻运行时」，
 // 落到目标页后还要停在那一条上，而不是回到该页默认的第一个。
 //

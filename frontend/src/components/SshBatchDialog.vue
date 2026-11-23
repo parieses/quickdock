@@ -23,7 +23,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
 import {
-  AlertTriangle, Check, ChevronDown, ChevronRight, Folder, Play, Server, ShieldAlert, Square, X,
+  AlertTriangle, Check, ChevronDown, ChevronRight, Download, Folder, Play, RotateCcw, Server,
+  ShieldAlert, Square, X,
 } from '@lucide/vue'
 import {
   DeleteSshCommand,
@@ -37,6 +38,7 @@ import {
 import type { SshCommandInput } from '../../bindings/quickdock/services/sshx/models'
 import type { SshCommand } from '../utils/ssh'
 import { unwrap } from '../utils/api'
+import { downloadCsv } from '../utils/csv'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { useToast } from '../composables/useToast'
@@ -460,6 +462,70 @@ const STATUS_KEY: Record<SshBatchStatus, string> = {
   canceled: 'sshBatchStatusCanceled',
 }
 
+/**
+ * 仅重试失败项：failed（跑了但退出码非 0）与 errored（根本没跑起来）。
+ * canceled 不算——那是用户主动停掉的，自动重跑违背他的意图。
+ */
+const failedHostIds = computed(() =>
+  order.value.filter(id => {
+    const s = statusOf(id)
+    return s === 'failed' || s === 'errored'
+  }),
+)
+
+async function retryFailed() {
+  if (!failedHostIds.value.length || running.value) return
+  selected.value = new Set(failedHostIds.value)
+  // canRun / needsConfirm 都依赖 plan：必须按新勾选重算，
+  // 否则还拿着上一次「全部主机」的风险判定，可能漏掉生产机确认。
+  await loadPlan()
+  await onRunClick()
+}
+
+/** 导出前把每格截短：Excel 单元格上限 32767 字符，单台输出上限却是 128KB。 */
+const CSV_CELL_CAP = 30000
+function clipCsvCell(s: string): string {
+  if (!s || s.length <= CSV_CELL_CAP) return s
+  return s.slice(0, CSV_CELL_CAP) + '…'
+}
+
+function csvStamp(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+}
+
+/** 把当前这批结果导成 CSV 并触发下载。复用 utils/csv 的 BOM/CRLF/转义处理。 */
+function exportResults() {
+  if (!order.value.length) return
+  try {
+    const rows: (string | number)[][] = [[
+      t('sshBatchColHost'), t('sshBatchColAddr'), t('sshBatchColEnv'), t('sshBatchColStatus'),
+      t('sshBatchColExitCode'), t('sshBatchColErrorCode'), t('sshBatchColError'),
+      t('sshBatchColDuration'), t('sshBatchColStdout'), t('sshBatchColStderr'),
+    ]]
+    for (const r of rowsOf()) {
+      const res = rowOf(r.hostId)
+      rows.push([
+        r.name,
+        r.addr,
+        t(sshEnvKey(r.env)),
+        t(STATUS_KEY[statusOf(r.hostId)]),
+        res ? res.exitCode : '',
+        res?.errorCode || '',
+        res?.error || '',
+        res ? res.durationMs : '',
+        clipCsvCell(res?.stdout || ''),
+        clipCsvCell(res?.stderr || ''),
+      ])
+    }
+    downloadCsv(`quickdock-ssh-batch-${csvStamp(new Date())}.csv`, rows)
+    toastSuccess(t('sshBatchExportDone'))
+  } catch (e) {
+    toastError(getErrorMessage(e))
+    logErr('SshBatchDialog.exportResults', e)
+  }
+}
+
 function rowsOf(): { hostId: string; name: string; addr: string; env: string }[] {
   // 结果表用 order（开跑快照），主机的展示名从 hosts 里补：
   // 后端结果里带了 name/addr/env，但还没回报的行只能靠本地数据。
@@ -841,6 +907,27 @@ onBeforeUnmount(() => {
                   err: summary.errored + summary.canceled,
                 }) }}
                 <em>{{ batchDuration(summary.durationMs) }}</em>
+              </span>
+              <span class="batch-results-tools">
+                <button
+                  v-if="order.length"
+                  class="batch-results-tool"
+                  :title="t('sshBatchExport')"
+                  @click="exportResults"
+                >
+                  <Download :size="11" />
+                  <span>{{ t('sshBatchExport') }}</span>
+                </button>
+                <button
+                  v-if="failedHostIds.length"
+                  class="batch-results-tool"
+                  :disabled="running"
+                  :title="t('sshBatchRetryFailed')"
+                  @click="retryFailed"
+                >
+                  <RotateCcw :size="11" />
+                  <span>{{ t('sshBatchRetryFailedN', { n: failedHostIds.length }) }}</span>
+                </button>
               </span>
             </div>
             <div class="batch-result-list">
@@ -1364,6 +1451,38 @@ onBeforeUnmount(() => {
   color: var(--color-warning);
   background: var(--color-bg-secondary);
   border-radius: var(--radius-xs);
+}
+
+/* 结果头右侧工具：导出 + 仅重试失败项，跟随结果区一起出现。 */
+.batch-results-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.batch-results-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px var(--space-3);
+  font-size: var(--text-xs);
+  font-family: inherit;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.batch-results-tool:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.batch-results-tool:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .batch-result-list {

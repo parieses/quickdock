@@ -16,7 +16,7 @@ import { useThemeName } from './useThemeName'
 import { ListAllItems, ScanInstalledApps, ResetInstalledAppsCache } from '../../bindings/quickdock/services/appservice'
 import { ListPlugins, GetPluginIcon } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { ListNotesTree } from '../../bindings/quickdock/services/note/noteservice'
-import { GetAllUsage } from '../../bindings/quickdock/services/frecency/frecencyservice'
+import { GetRecentUsage } from '../../bindings/quickdock/services/frecency/frecencyservice'
 import { ListWorkspaces } from '../../bindings/quickdock/services/workspace/workspaceservice'
 import { ListScenes } from '../../bindings/quickdock/services/scene/sceneservice'
 import { ListCollections } from '../../bindings/quickdock/services/collection/collectionservice'
@@ -224,10 +224,14 @@ export function usePaletteData(deps: PaletteDataDeps) {
     if (gen === itemsLoadGen) loading.value = false
   }
 
-  // 刷新「最近使用」缓存：运行命令/打开项目后实时拉取，否则要等下次重开面板才出现
+  // 刷新「最近使用」缓存：运行命令/打开项目后实时拉取，否则要等下次重开面板才出现。
+  // 走后端 GetRecentUsage（按最近使用时间倒序取前 N 条）而非 GetAllUsage：
+  // 面板「最近使用」只需要最近的一撮，不必把全量 frecency 历史拉到前端再筛。
+  // GetAllUsage 仍由 useFrecency 用于打分排序（那里需要全量，不能改）。
+  const RECENT_FETCH_LIMIT = 20 // > RECENT_VISIBLE(15)：展开后仍有内容可看
   async function refreshRecentCache(gen?: number) {
     try {
-      const raw = await GetAllUsage()
+      const raw = await GetRecentUsage(RECENT_FETCH_LIMIT)
       if (gen === undefined || gen === itemsLoadGen) {
         // plugin 记录 label 可能为空（某些热键/自动执行路径），但近期有 plugin 记录本身
         // 就值得留在「最近使用」——组装时用命令标题/插件名兜底，故放宽过滤。
@@ -235,7 +239,7 @@ export function usePaletteData(deps: PaletteDataDeps) {
         // 这里顺手滤掉旧版本可能已写入的 file 记录。
         recentCache.value = (unwrap<RecentEntry[]>(raw) || []).filter(e => e.type && e.type !== 'file' && (e.label || e.type === 'plugin'))
       }
-    } catch (e) { console.error('[CmdPalette] GetAllUsage:', getErrorMessage(e)) }
+    } catch (e) { console.error('[CmdPalette] GetRecentUsage:', getErrorMessage(e)) }
   }
 
   return { loadPluginIcons, loadPluginIndex, rebuildAppIndex, loadPaletteData, refreshRecentCache }

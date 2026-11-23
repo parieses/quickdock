@@ -475,7 +475,7 @@ const allTags = computed(() => {
 })
 
 // ---- 4.3 状态 + 看板视图 ----
-const viewMode = ref<'list' | 'kanban'>('list')
+const viewMode = ref<'list' | 'kanban' | 'quadrant'>('list')
 const KANBAN_STATUSES = ['todo', 'doing', 'done'] as const
 const STATUS_ORDER: Record<string, string[]> = {
   todo: ['doing', 'done', 'todo'],
@@ -638,6 +638,32 @@ const topTodosByStatus = computed(() => {
 function statusTodos(status: string): Todo[] {
   return topTodosByStatus.value.get(status) || []
 }
+
+// 四象限视图：用「优先级 + 截止日期」近似「重要 + 紧急」。
+// 重要 = priority high；紧急 = 有 dueDate 且已到期（今天或逾期）。
+// 数据源与看板一致取 selectedTodos，保证日期/搜索/标签筛选在三套视图间一致。
+const QUADRANTS = ['Q1', 'Q2', 'Q3', 'Q4'] as const
+function quadrantOf(todo: Todo): typeof QUADRANTS[number] {
+  const important = todo.priority === 'high'
+  const urgent = todo.dueDate !== '' && todo.dueDate <= todayStr.value
+  if (important && urgent) return 'Q1'
+  if (important) return 'Q2'
+  if (urgent) return 'Q3'
+  return 'Q4'
+}
+const quadrantTodos = computed(() => {
+  const m = new Map<string, Todo[]>()
+  for (const q of QUADRANTS) m.set(q, [])
+  for (const x of selectedTodos.value) m.get(quadrantOf(x))!.push(x)
+  return m
+})
+function todosInQuadrant(q: string): Todo[] {
+  return quadrantTodos.value.get(q) || []
+}
+function quadrantLabel(q: string): string {
+  return t('todoQuadrant' + q)
+}
+
 const dragId = ref('')
 const dragOverStatus = ref('')
 
@@ -1360,6 +1386,7 @@ onUnmounted(() => {
             <div class="view-toggle">
               <button :class="['vt-btn', { active: viewMode === 'list' }]" @click="viewMode = 'list'">{{ t('todoViewList') }}</button>
               <button :class="['vt-btn', { active: viewMode === 'kanban' }]" @click="viewMode = 'kanban'">{{ t('todoViewKanban') }}</button>
+              <button :class="['vt-btn', { active: viewMode === 'quadrant' }]" @click="viewMode = 'quadrant'">{{ t('todoViewQuadrant') }}</button>
             </div>
             <span class="panel-remaining">{{ t('todoRemaining', { count: remainingCount }) }}</span>
             <button class="add-fab" @click="openCreate" :title="t('todoAdd')"><Plus :size="16" /></button>
@@ -1513,7 +1540,7 @@ onUnmounted(() => {
         </template>
 
         <!-- 看板视图（4.3）-->
-        <div v-else class="kanban">
+        <div v-else-if="viewMode === 'kanban'" class="kanban">
           <div
             v-for="st in KANBAN_STATUSES"
             :key="st"
@@ -1560,6 +1587,47 @@ onUnmounted(() => {
                 </div>
               </div>
               <div v-if="statusTodos(st).length === 0" class="kanban-empty">{{ t('todoKanbanEmpty') }}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 四象限视图：重要×紧急，按优先级与截止日期自动归类；不做拖拽 -->
+        <div v-else-if="viewMode === 'quadrant'" class="quadrant-view">
+          <p class="quadrant-hint">{{ t('todoQuadrantHint') }}</p>
+          <div class="quadrant">
+            <div v-for="q in QUADRANTS" :key="q" class="quadrant-cell">
+              <div class="quadrant-head">
+                <span :class="['quadrant-dot', q.toLowerCase()]"></span>
+                <span class="quadrant-title">{{ quadrantLabel(q) }}</span>
+                <span class="quadrant-count">{{ todosInQuadrant(q).length }}</span>
+              </div>
+              <div class="quadrant-cards">
+                <div
+                  v-for="card in todosInQuadrant(q)"
+                  :key="card.id"
+                  class="kanban-card"
+                >
+                  <div class="kanban-card-top">
+                    <span class="kanban-card-name">{{ card.title }}</span>
+                    <span class="kanban-card-acts">
+                      <button class="act" @click.stop="startEdit(card)" :title="t('todoEdit')"><Pencil :size="12" /></button>
+                      <button class="act danger" @click.stop="remove(card)" :title="t('todoDelete')"><Trash2 :size="12" /></button>
+                    </span>
+                  </div>
+                  <div class="kanban-card-meta">
+                    <span v-if="card.dueDate" :class="['kanban-due', { overdue: isOverdue(card) }]">
+                      {{ card.dueDate.slice(5) }}
+                    </span>
+                    <button class="status-pill" :class="'st-' + (card.status || 'todo')" @click.stop="cycleStatus(card)">{{ statusLabel(card.status) }}</button>
+                    <i :class="['pri-dot', 'p-' + card.priority]"></i>
+                    <template v-for="tg in parseTags(card.tags)" :key="tg">
+                      <span v-key-click class="tag-chip" @click.stop="activeTag = tg">{{ tg }}</span>
+                    </template>
+                    <span v-if="subtasksOf(card.id).length" class="sub-badge">▸{{ subProgress(card.id).done }}/{{ subProgress(card.id).total }}</span>
+                  </div>
+                </div>
+                <div v-if="todosInQuadrant(q).length === 0" class="quadrant-empty">{{ t('todoQuadrantEmpty') }}</div>
+              </div>
             </div>
           </div>
         </div>
@@ -1978,6 +2046,28 @@ onUnmounted(() => {
   flex: 1; display: flex; align-items: center; justify-content: center;
   text-align: center; font-size: var(--text-xs); color: var(--color-text-disabled); padding: var(--space-5) 0;
 }
+
+/* 四象限视图：2×2 网格，样式沿用看板 token，不引入硬编码色值 */
+.quadrant-view { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.quadrant-hint { margin: 0 0 var(--space-2); font-size: var(--text-xs); color: var(--color-text-disabled); flex-shrink: 0; }
+.quadrant { flex: 1; display: grid; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); gap: var(--space-3); min-height: 0; }
+.quadrant-cell {
+  display: flex; flex-direction: column; min-height: 0;
+  background: var(--color-card-bg); border: 1px solid var(--card-border-color);
+  border-radius: var(--radius-lg); padding: var(--space-3);
+}
+.quadrant-head { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); flex-shrink: 0; }
+.quadrant-dot { width: 8px; height: 8px; border-radius: 50%; }
+.quadrant-dot.q1 { background: var(--color-danger); }
+.quadrant-dot.q2 { background: var(--color-warning); }
+.quadrant-dot.q3 { background: var(--color-accent); }
+.quadrant-dot.q4 { background: var(--color-text-disabled); }
+.quadrant-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
+.quadrant-count { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-disabled); background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 7px; }
+.quadrant-cards { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); }
+.quadrant-empty { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; font-size: var(--text-xs); color: var(--color-text-disabled); padding: var(--space-5) 0; }
+/* 象限卡片复用看板卡片，但不拖拽，光标不提示可抓取 */
+.quadrant .kanban-card, .quadrant .kanban-card:active { cursor: default; }
 
 .tag-filter { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
 .tag-fbtn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 

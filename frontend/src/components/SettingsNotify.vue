@@ -7,14 +7,14 @@
  * 用户会误以为「每个任务/每个监控单独配机器人」。收进设置后，任务/监控页只保留
  * 「发不发、走哪个渠道」的开关，机器人地址统一在这里配。
  */
-import { ref, watch, inject } from 'vue'
+import { ref, watch, inject, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import type { ToastAPI } from '../types'
 import {
   GetWebhookConfig, SetWebhookConfig, TestWebhook,
-  GetExtraNotifyChannels, SetExtraNotifyChannels,
+  GetExtraNotifyChannels, SetExtraNotifyChannels, SendWebhookMessage,
 } from '../../bindings/quickdock/services/appservice'
 
 const { t } = useI18n()
@@ -218,6 +218,51 @@ async function testExtra(ch: ExtraNotifyChannel) {
     extraTesting.value = ''
   }
 }
+
+// ── 手动发消息 ────────────────────────────────────────────────────────
+// 与定时任务/监控的 best-effort 异步发送不同：这里同步回收每个渠道的成败，
+// 便于用户确认「真的发出去了」。渠道选项完全复用上面两节已加载的配置，不引入新接口。
+interface SendChannelOption { value: string; label: string }
+interface SendResultRow { channel: string; ok: boolean; error?: string }
+interface SendResult { sent: number; ok: number; results: SendResultRow[] }
+
+const sendChannel = ref('')
+const sendTitle = ref('')
+const sendBody = ref('')
+const sending = ref(false) // 发送是同步串行的（多渠道 + 10s 超时会卡），禁用态防重复点击
+const sendResult = ref<SendResult | null>(null)
+
+const sendChannels = computed<SendChannelOption[]>(() => {
+  const out: SendChannelOption[] = [{ value: '', label: t('notifySendChannelAll') }]
+  // 内置 6 家：只列出已填了地址、即实际可用的渠道（值用 kind）。
+  for (const kind of kinds) {
+    if (fields[kind].ref.value.trim()) out.push({ value: kind, label: t('mon_nf_' + kind) })
+  }
+  // 扩展渠道：只列出启用且填了 URL 的；值用 id，避免按 kind 向同类型全部渠道扇出。
+  for (const ch of extraChannels.value) {
+    if (ch.enabled && ch.url.trim()) {
+      out.push({ value: ch.id, label: ch.name.trim() || extraKindLabel(ch.kind) })
+    }
+  }
+  return out
+})
+
+async function send() {
+  const title = sendTitle.value.trim()
+  // 后端会 trim 后判空，这里先拦一次给即时反馈（复用现成的通用空值提示）。
+  if (!title) { toast.error(t('notifySendTitlePh') + t('cannotBeEmpty')); return }
+  sending.value = true
+  sendResult.value = null
+  try {
+    sendResult.value = unwrap<SendResult>(
+      await SendWebhookMessage(title, sendBody.value, sendChannel.value)
+    ) ?? { sent: 0, ok: 0, results: [] }
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  } finally {
+    sending.value = false
+  }
+}
 </script>
 
 <template>
@@ -293,6 +338,39 @@ async function testExtra(ch: ExtraNotifyChannel) {
         </button>
       </div>
     </div>
+
+    <!-- 手动发消息：渠道选项完全来自上面两节已加载的配置，发送结果逐条展示成败。 -->
+    <div class="section">
+      <h3 class="section-title">{{ t('notifySendTitle') }}</h3>
+      <p class="section-desc">{{ t('notifySendDesc') }}</p>
+
+      <label class="nt-label">{{ t('notifySendChannel') }}</label>
+      <select v-model="sendChannel" class="qd-input nt-send-channel">
+        <option v-for="opt in sendChannels" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+      </select>
+      <p v-if="sendChannels.length === 1" class="nt-hint">{{ t('notifySendEmpty') }}</p>
+
+      <label class="nt-label">{{ t('notifySendTitlePh') }}</label>
+      <input v-model="sendTitle" class="qd-input" :placeholder="t('notifySendTitlePh')" />
+
+      <label class="nt-label">{{ t('notifySendBodyPh') }}</label>
+      <textarea v-model="sendBody" class="qd-input nt-send-body" :placeholder="t('notifySendBodyPh')" rows="3"></textarea>
+
+      <div class="nt-actions">
+        <button class="qd-btn qd-btn-primary" :disabled="sending" @click="send">
+          {{ sending ? t('notifySending') : t('notifySendButton') }}
+        </button>
+      </div>
+
+      <div v-if="sendResult" class="nt-send-result">
+        <div class="nt-send-summary">{{ t('notifySendSummary', { sent: sendResult.sent, ok: sendResult.ok }) }}</div>
+        <div v-for="(r, i) in sendResult.results" :key="i" class="nt-send-row">
+          <span class="nt-send-row-channel">{{ r.channel }}</span>
+          <span :class="['nt-send-row-flag', r.ok ? 'ok' : 'fail']">{{ r.ok ? t('notifySendRowOk') : t('notifySendRowFail') }}</span>
+          <span v-if="r.error" class="nt-send-row-error">{{ r.error }}</span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -316,4 +394,14 @@ async function testExtra(ch: ExtraNotifyChannel) {
 .ntx-url .qd-input { flex: 1; min-width: 0; }
 .ntx-enable { display: inline-flex; align-items: center; gap: var(--space-2); flex-shrink: 0; font-size: var(--text-sm); color: var(--color-text-secondary); }
 .ntx-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-4); }
+/* 手动发消息 */
+.nt-send-channel { max-width: 280px; }
+.nt-send-body { min-height: 72px; resize: vertical; }
+.nt-send-result { margin-top: var(--space-4); padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); }
+.nt-send-summary { font-size: var(--text-sm); color: var(--color-text-secondary); margin-bottom: var(--space-2); }
+.nt-send-row { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; font-size: var(--text-sm); padding: var(--space-1) 0; }
+.nt-send-row-channel { color: var(--color-text-primary); }
+.nt-send-row-flag.ok { color: var(--color-success); }
+.nt-send-row-flag.fail { color: var(--color-danger); }
+.nt-send-row-error { color: var(--color-text-muted); font-size: var(--text-xs); word-break: break-all; }
 </style>

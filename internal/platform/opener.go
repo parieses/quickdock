@@ -2,6 +2,7 @@ package platform
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -117,6 +118,7 @@ type CommandOutcome struct {
 	Stderr   string // 已捕获的标准错误输出
 	ExitCode int    // 进程退出码；启动失败或超时未退出为 -1
 	TimedOut bool   // 等待超时且进程仍未退出（未杀进程，输出为部分快照）
+	Canceled bool   // 被 ctx 显式取消并杀了进程（与 TimedOut 区分，结果文案不同）
 	Err      error  // 启动失败等错误；非 nil 时退出码无意义
 }
 
@@ -135,6 +137,16 @@ const commandOutputCap = 8 << 10
 // 意外。此时返回 TimedOut 与已捕获的部分输出；进程由内部 Wait 协程继续回收，
 // 输出缓冲带锁，超时快照与后续写入不存在数据竞争。
 func RunCommandCapture(command, workingDir string, timeout time.Duration) CommandOutcome {
+	return RunCommandCaptureContext(context.Background(), command, workingDir, timeout)
+}
+
+// RunCommandCaptureContext 是 RunCommandCapture 的可取消版本：ctx 取消时立即
+// 终止子进程并返回 Canceled=true。供定时任务「立即执行」的手动取消使用——
+// 原函数保留 context.Background() 语义，其他调用方（定时触发）行为不变。
+//
+// 与 timeout 路径的区别：timeout 是「超时不杀进程」（可能是常驻程序）；取消是
+// 用户显式要求停止，必须杀进程，否则点取消后任务还在后台跑，用户无从察觉。
+func RunCommandCaptureContext(ctx context.Context, command, workingDir string, timeout time.Duration) CommandOutcome {
 	command = strings.TrimSpace(command)
 	argList := splitArgs(command)
 	if len(argList) == 0 {
@@ -178,6 +190,20 @@ func RunCommandCapture(command, workingDir string, timeout time.Duration) Comman
 			Stdout:   DecodeConsoleText(stdout.String()),
 			Stderr:   DecodeConsoleText(stderr.String()),
 			ExitCode: exitCodeOf(err),
+		}
+	case <-ctx.Done():
+		// 显式取消：杀进程（Windows 用 taskkill /F 连同子进程，避免 cmd /c
+		// 的孙进程残留），再等 done 回收句柄。cappedBuffer 带锁，取消路径读
+		// 快照与 Wait 协程的后续写入不冲突。
+		if cmd.Process != nil {
+			_ = sysutil.KillProcess(cmd.Process.Pid)
+		}
+		<-done
+		return CommandOutcome{
+			Stdout:   DecodeConsoleText(stdout.String()),
+			Stderr:   DecodeConsoleText(stderr.String()),
+			ExitCode: -1,
+			Canceled: true,
 		}
 	case <-time.After(timeout):
 		return CommandOutcome{

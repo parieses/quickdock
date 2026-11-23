@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -252,6 +253,71 @@ func (a *AppService) RunScheduledTaskNow(id string) *ApiResult {
 		return FailMsg(result)
 	}
 	return OkMsg(result, result)
+}
+
+// RunScheduledTaskNowAsync 立即手动执行一次，所有动作都在后台跑、RPC 立即返回。
+//
+// 与 RunScheduledTaskNow 的区别：那个对命令/HTTP 仍同步等满 30 秒，前端点一下
+// 就卡住、没有进度也不能取消。这里把执行整体搬进 goroutine，UI 靠
+// schedule:run-progress / schedule:run-updated 两个事件显示状态，并可经
+// CancelScheduledRun 真正终止命令/HTTP。
+//
+// 收尾与同步路径完全一致（运行历史 + 通知 + 不重排 next_run），结果不从 RPC
+// 返回——异步返回后再给结果没有意义，用户去运行历史/通知里看。
+// 原有同步 binding 保留：MCP 调用方与 AIPage 的「空间内运行」仍需要拿返回值。
+func (a *AppService) RunScheduledTaskNowAsync(id string) *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	t, err := a.DB.GetScheduledTask(id)
+	if err != nil {
+		return Fail(err)
+	}
+	if _, loaded := a.schedInflight.LoadOrStore(t.ID, struct{}{}); loaded {
+		return FailMsg("该任务正在执行中")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	a.schedRunCancels.Store(t.ID, cancel)
+	a.taskWG.Add(1)
+	go func() {
+		defer a.taskWG.Done()
+		defer a.schedInflight.Delete(t.ID)
+		defer a.schedRunCancels.Delete(t.ID)
+		defer cancel()
+		defer func() {
+			if r := recover(); r != nil {
+				logger.E("QuickDock: 手动任务 %s 异步执行 panic: %v", t.ID, r)
+			}
+		}()
+
+		startedAt := time.Now()
+		a.emitScheduleRunProgress(t.ID, "start", "任务已开始执行")
+		status, result := a.executeTaskContext(ctx, t)
+		durationMs := time.Since(startedAt).Milliseconds()
+		a.NoteActivity(db.ActivityScheduleRun, t.ID, t.Name)
+		runAt := nowStr()
+		_ = a.DB.SetTaskRunResult(t.ID, runAt, status, result, t.NextRun, t.Enabled)
+		_ = a.DB.InsertScheduleRun(t.ID, t.Name, status, result, durationMs)
+		a.emitScheduleRunUpdated(t, status, result, runAt)
+		a.notifyScheduleRun(t, status, result, durationMs)
+	}()
+	return OkMsg("任务已在后台开始，可在此页查看进度或取消", "任务已在后台开始")
+}
+
+// CancelScheduledRun 取消一个正在后台执行的手动任务。
+//
+// 命令动作杀进程树（sysutil.KillProcess，Windows 用 taskkill /F），HTTP 动作
+// 取消在途请求；两者的执行结果都会以 status=canceled 写进运行历史。
+// AI 动作跑在 services/ai 自己的链路里，此处只登记了等待、不中断已发出的工具
+// 调用——UI 对 AI 任务不显示取消按钮，避免误导。
+func (a *AppService) CancelScheduledRun(id string) *ApiResult {
+	v, ok := a.schedRunCancels.Load(id)
+	if !ok {
+		return FailMsg("该任务当前没有正在执行的手动运行")
+	}
+	v.(context.CancelFunc)()
+	return OkMsg("已发送取消信号", "已发送取消信号")
 }
 
 // sameSchedule 判断两次保存的调度规则是否等价（忽略名称/动作/通知等业务字段）。

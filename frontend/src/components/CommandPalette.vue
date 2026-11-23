@@ -360,6 +360,12 @@ const systemCommands = computed<SystemCmd[]>(() => [
   // 添加下载：导航到下载器页（在那里填 URL / 种子）。
   { id: 'add-download', label: t('dlAdd'), desc: t('cmdAddDownloadDesc'), keywords: ['download', 'add', '下载', '添加', 'xiazai', 'tianjia', '数据'], icon: Download,
     action: async () => { await gotoMainPage('download') } },
+  // 最近笔记：命令面板直达笔记页的「最近编辑」分组（palette:locate 深链）。
+  { id: 'recent-notes', label: t('cmdRecentNotes'), desc: t('cmdRecentNotesDesc'), keywords: ['最近笔记', '最近编辑', 'recent notes', 'notes'], icon: FileText,
+    action: async () => {
+      emitToMain('palette:locate', { page: 'notes', target: 'recent-edited', kind: 'note', id: 'recent-edited' })
+      await gotoMainPage('notes')
+    } },
 ])
 
 // 业务命令落到主窗口：面板是独立浮窗，不共享主窗口的 Pinia / bridge ref，

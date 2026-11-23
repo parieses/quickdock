@@ -213,20 +213,14 @@ func (m *DSHProcessManager) Start() (string, error) {
 				m.token = tok
 				m.url = u
 				m.port = DefaultDSHPort
-				if m.app != nil {
-					m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: "info", Message: "检测到端口 3080 已有 dsh 服务且 token 有效，直接复用（不启动新进程）"})
-				}
+				m.logf("info", "检测到端口 3080 已有 dsh 服务且 token 有效，直接复用（不启动新进程）")
 				return u, nil
 			}
 			// token 失效：落到下方「清理残留 → 重绑 3080 → 拉新实例」分支，重新获取访问凭证。
-			if m.app != nil {
-				m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: "warn", Message: "端口 3080 的 dsh 服务 token 已失效，将重启以重新获取访问凭证"})
-			}
+			m.logf("warn", "端口 3080 的 dsh 服务 token 已失效，将重启以重新获取访问凭证")
 		}
 		if pid := findPortPID(DefaultDSHPort); pid > 0 && isNodeProcess(pid) {
-			if m.app != nil {
-				m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: "warn", Message: fmt.Sprintf("端口 3080 被残留 node 进程 %d 占用，正在清理…", pid)})
-			}
+			m.logf("warn", fmt.Sprintf("端口 3080 被残留 node 进程 %d 占用，正在清理…", pid))
 			killProcessTree(pid)
 			// 等待端口真正释放（最多 3s），确保下面能重新绑定 3080
 			for i := 0; i < 30; i++ {
@@ -243,9 +237,7 @@ func (m *DSHProcessManager) Start() (string, error) {
 				return "", ferr
 			}
 			port = free
-			if m.app != nil {
-				m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: "warn", Message: fmt.Sprintf("端口 %d 被非 dsh 进程占用且无法清理，本次改用随机端口 %d", DefaultDSHPort, free)})
-			}
+			m.logf("warn", fmt.Sprintf("端口 %d 被非 dsh 进程占用且无法清理，本次改用随机端口 %d", DefaultDSHPort, free))
 		} else {
 			ln2.Close()
 		}
@@ -299,11 +291,7 @@ func (m *DSHProcessManager) Start() (string, error) {
 
 	// 排空 stdout/stderr（监听端口已知，无需解析 URL 行），同时把输出转发到日志面板，
 	// 首次初始化 profile 或启动失败时能直接看到 dsh 在做什么
-	logf := func(level, msg string) {
-		if m.app != nil {
-			m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: level, Message: msg})
-		}
-	}
+	logf := func(level, msg string) { m.logf(level, msg) }
 	logf("info", "正在启动 dsh web（首次启动需初始化 profile，可能较慢）…")
 	logf("info", fmt.Sprintf("dsh web 进程已拉起（PID %d），等待服务就绪…", cmd.Process.Pid))
 	// 就绪判定用 HTTP 壳 200 即可（简单可靠）；dsh 官方前端未就绪时自带「定时常量刷新」，
@@ -474,9 +462,7 @@ func (m *DSHProcessManager) Start() (string, error) {
 			// 不再因健康检查超时/失败而杀掉 dsh：慢机器首次初始化 profile 可能远超预算，
 			// 杀掉会造成「刚起来又被杀」死循环；且窗口已按 token URL 提前打开，dsh 自带
 			// 前端刷新会在就绪后自动呈现。这里仅记录日志并保留进程，由 reaper 处理真正退出。
-			if m.app != nil {
-				m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: "warn", Message: "dsh 健康检查未通过（可能仍在初始化）：" + err.Error()})
-			}
+			m.logf("warn", "dsh 健康检查未通过（可能仍在初始化）："+err.Error())
 		}
 		m.mu.Lock()
 		m.starting = false
@@ -866,11 +852,10 @@ func removeAllWithRetry(path string) error {
 	return lastErr
 }
 
-// logf 转发诊断日志到「环境管理 → DeepSeek Harness」日志面板（quickdock:dsh:log 事件）
+// logf 落盘并转发诊断日志到「环境管理 → DeepSeek Harness」日志面板。
+// 关窗后仍可在日志页回溯（见 emitDSHLog）。
 func (m *DSHProcessManager) logf(level, msg string) {
-	if m.app != nil {
-		m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: level, Message: msg})
-	}
+	emitDSHLog(m.app, level, msg)
 }
 
 // stopLocked 停止逻辑的带锁实现，调用方必须已持有 m.mu。
@@ -1014,11 +999,7 @@ func (m *DSHProcessManager) InstallPlugin(plugin string) error {
 	cmd.Env = env
 	sysutil.Hide(cmd)
 
-	logf := func(level, msg string) {
-		if m.app != nil {
-			m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: level, Message: msg})
-		}
-	}
+	logf := func(level, msg string) { m.logf(level, msg) }
 	logf("info", fmt.Sprintf("安装插件 %s（dsh plugin --profile web add %s）…", plugin, plugin))
 
 	// 确保 pnpm 可用：dsh plugin add 内部用 pnpm 管理依赖，新电脑可能没装
@@ -1103,11 +1084,7 @@ func (m *DSHProcessManager) UpdateAllPlugins() error {
 	if err := os.MkdirAll(dshHome, 0755); err != nil {
 		return err
 	}
-	logf := func(level, msg string) {
-		if m.app != nil {
-			m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: level, Message: msg})
-		}
-	}
+	logf := func(level, msg string) { m.logf(level, msg) }
 
 	// 1) 升级前备份（固定版/range 版都会改 package.json，备份保证可回滚）
 	backupDir, err := m.backupProfileDeps(profileDir, logf)
@@ -1261,11 +1238,7 @@ func (m *DSHProcessManager) RollbackPlugins() (err error) {
 		return fmt.Errorf("没有可用的插件备份")
 	}
 	profileDir := filepath.Join(m.nodeEnv.DshHome(), "profiles", "web")
-	logf := func(level, msg string) {
-		if m.app != nil {
-			m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: level, Message: msg})
-		}
-	}
+	logf := func(level, msg string) { m.logf(level, msg) }
 	// 统一在返回前 emit 完成事件（service.go 在另一包，无法直接调 unexported emit），
 	// 成功 err==nil → ok:true，任意失败路径 err!=nil → ok:false，前端据此复位回滚按钮。
 	defer func() {
@@ -1489,11 +1462,7 @@ func (m *DSHProcessManager) RemovePlugin(name string) error {
 	cmd.Env = env
 	sysutil.Hide(cmd)
 
-	logf := func(level, msg string) {
-		if m.app != nil {
-			m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: level, Message: msg})
-		}
-	}
+	logf := func(level, msg string) { m.logf(level, msg) }
 	logf("info", fmt.Sprintf("卸载插件 %s（dsh plugin --profile web remove %s）…", name, name))
 	if err := m.ensurePnpm(ctx, logf); err != nil {
 		logf("error", fmt.Sprintf("pnpm 不可用且自动安装失败: %v", err))

@@ -19,6 +19,7 @@ import {
   Info,
   Loader2,
   Pencil,
+  PlugZap,
   Plus,
   Search,
   Server,
@@ -26,13 +27,23 @@ import {
   X,
 } from '@lucide/vue'
 import { SelectLocalFile } from '../../bindings/quickdock/services/appservice'
-import { ImportSshConfig } from '../../bindings/quickdock/services/sshx/sshservice'
-import { unwrap } from '../utils/api'
+import { ImportSshConfig, TestHost } from '../../bindings/quickdock/services/sshx/sshservice'
+import { apiErrorCode, apiErrorData, unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { useToast } from '../composables/useToast'
 import { isAppLocked } from '../utils/appLock'
-import { sshEnvClass, sshEnvKey, sshTargetFull, type SshHost } from '../utils/ssh'
+import {
+  SSH_ERR,
+  sshEnvClass,
+  sshEnvKey,
+  sshErrorText,
+  sshTargetFull,
+  type SshHost,
+  type SshHostKeyInfo,
+  type TestHostResult,
+} from '../utils/ssh'
+import SshFingerprintDialog from './SshFingerprintDialog.vue'
 import {
   flattenSshTree,
   filterSshTree,
@@ -295,6 +306,84 @@ async function importSshConfig() {
     importing.value = false
   }
 }
+
+// ---- 已存主机「测试连接」 ----
+//
+// 这里调的是 TestHost(id)：测的是库里已保存的配置（与表单弹窗里的 TestHostInput 不同）。
+// 成功后端会顺手写 lastConnectedAt，属于测试连接的正常副作用。
+//
+// needsTrust=true 走 Ok() 返回，不是异常：连通了但服务器身份还没信任，
+// 必须显式弹指纹窗让用户核对，绝不能当成失败显示一句「连接失败」。
+
+const testingHostId = ref('')
+/** 最近一次测试结果：挂在那一行下方，比 toast 留得住（指纹/延迟还能回看）。 */
+const testStatus = ref<{ hostId: string; ok: boolean; text: string } | null>(null)
+
+const fpVisible = ref(false)
+const fpMode = ref<'unknown' | 'changed'>('unknown')
+const fpInfo = ref<SshHostKeyInfo>({})
+/** 指纹被信任后要自动重测的那台主机。 */
+const fpRetryHost = ref<SshHost | null>(null)
+
+function openFingerprint(
+  host: SshHost,
+  mode: 'unknown' | 'changed',
+  info: SshHostKeyInfo,
+) {
+  fpRetryHost.value = host
+  fpMode.value = mode
+  fpInfo.value = {
+    host: info.host || host.host,
+    port: Number(info.port) || Number(host.port) || 22,
+    keyType: info.keyType || '',
+    fingerprint: info.fingerprint || '',
+    oldFingerprint: info.oldFingerprint || '',
+    knownTypes: info.knownTypes || [],
+  }
+  fpVisible.value = true
+}
+
+async function testHost(host: SshHost) {
+  if (!host.id || testingHostId.value) return
+  testingHostId.value = host.id
+  testStatus.value = null
+  try {
+    const r = unwrap<TestHostResult>(await TestHost(host.id))
+    if (!r) return
+    if (r.needsTrust) {
+      testStatus.value = { hostId: host.id, ok: false, text: t('sshHostTestNeedsTrust') }
+      openFingerprint(host, 'unknown', {
+        keyType: r.hostKeyAlgorithm,
+        fingerprint: r.fingerprint,
+        knownTypes: r.knownTypes,
+      })
+      return
+    }
+    testStatus.value = {
+      hostId: host.id,
+      ok: true,
+      text: t('sshHostTestFingerprint', { fp: r.fingerprint }) + ` · ${r.latencyMs}ms`,
+    }
+  } catch (e) {
+    const code = apiErrorCode(e)
+    if (code === SSH_ERR.HOSTKEY_CHANGED) {
+      openFingerprint(host, 'changed', apiErrorData<SshHostKeyInfo>(e) || {})
+      testStatus.value = { hostId: host.id, ok: false, text: t('sshHostTestNeedsTrust') }
+      return
+    }
+    testStatus.value = { hostId: host.id, ok: false, text: sshErrorText(e, code, t) }
+  } finally {
+    testingHostId.value = ''
+  }
+}
+
+/** 信任指纹后自动重测一次，用户不用再点一遍按钮。 */
+function onTestTrusted() {
+  fpVisible.value = false
+  const host = fpRetryHost.value
+  fpRetryHost.value = null
+  if (host) void testHost(host)
+}
 </script>
 
 <template>
@@ -446,6 +535,17 @@ async function importSshConfig() {
             >
               <Info :size="11" />
             </button>
+            <!-- 测试连接只针对已存主机：测的是库里的配置，不需要先打开会话。 -->
+            <button
+              v-if="n.kind !== 'folder'"
+              class="tree-act"
+              :title="t('sshTest')"
+              :disabled="testingHostId === n.host.id"
+              @click.stop="testHost(n.host)"
+            >
+              <Loader2 v-if="testingHostId === n.host.id" :size="11" class="tree-spin" />
+              <PlugZap v-else :size="11" />
+            </button>
             <button class="tree-act" :title="t('sshEdit')" @click.stop="emit('edit', n.host)">
               <Pencil :size="11" />
             </button>
@@ -458,6 +558,13 @@ async function importSshConfig() {
             </button>
           </span>
         </div>
+        <!-- 测试结果条：贴在那一行下面。toast 只有几秒且是单行容器，
+             指纹和延迟需要留得住、也能被长指纹撑开换行。 -->
+        <div
+          v-if="n.kind !== 'folder' && testStatus && testStatus.hostId === n.host.id"
+          class="tree-test-status"
+          :class="testStatus.ok ? 'is-ok' : 'is-err'"
+        >{{ testStatus.text }}</div>
       </template>
 
       <!-- 末节点的下侧插入线：循环里只有「上侧」，最后一行下面还得补一条 -->
@@ -486,6 +593,19 @@ async function importSshConfig() {
         </button>
       </div>
     </Teleport>
+
+    <SshFingerprintDialog
+      :visible="fpVisible"
+      :mode="fpMode"
+      :host="fpInfo.host || ''"
+      :port="fpInfo.port || 22"
+      :key-type="fpInfo.keyType || ''"
+      :fingerprint="fpInfo.fingerprint || ''"
+      :old-fingerprint="fpInfo.oldFingerprint || ''"
+      :known-types="fpInfo.knownTypes || []"
+      @trusted="onTestTrusted"
+      @cancel="fpVisible = false"
+    />
   </div>
 </template>
 
@@ -916,6 +1036,27 @@ async function importSshConfig() {
   color: var(--color-danger);
   border-color: var(--color-danger-bg);
   background: var(--color-danger-bg);
+}
+
+/* 测试连接结果条：贴在那一行下面，指纹长串允许换行。
+   色值全部走设计 token，不新造颜色。 */
+.tree-test-status {
+  margin: -2px var(--space-3) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  word-break: break-all;
+  border-radius: var(--radius-xs);
+}
+
+.tree-test-status.is-ok {
+  color: var(--color-success);
+  background: var(--color-success-bg);
+}
+
+.tree-test-status.is-err {
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
 }
 
 /* 文件夹「+」菜单 */

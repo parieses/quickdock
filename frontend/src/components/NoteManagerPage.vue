@@ -6,6 +6,7 @@ import { KEEP_ALIVE } from '../pages/keepAlive'
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onBeforeUnmount, onActivated, inject, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Events } from '@wailsio/runtime'
 import { useSaveAs } from '../composables/useSaveAs'
 import { pendingOpenNoteId, pendingOpenTodoId, navigate, navigateTo } from '../composables/bridge'
 import { unwrap } from '../utils/api'
@@ -27,6 +28,7 @@ import { downloadText, downloadBlob, safeFileName } from '../utils/download'
 import { invalidateLinkTargets } from '../constants/linkEvents'
 import {
   ListNotesTree,
+  RecentNotes,
   SearchNotesTree,
   CreateNoteFolder,
   CreateNoteDoc,
@@ -48,7 +50,7 @@ import {
 import { CopyText } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import { ResolveWikiTarget, ListLinkTargets, SearchLinkTargets } from '../../bindings/quickdock/services/appservice'
 import {
-  Trash2, Search, X, FolderPlus, FileText, Folder,
+  Trash2, Search, X, FolderPlus, FileText, Folder, Pencil,
   Copy as CopyIcon, PanelLeft, PanelLeftClose, ChevronDown, Sparkles, FileDown, List,
   FileSearch, Square, CheckSquare, Clock, Code2, Columns2, Eye, Link2, Network, PanelRight,
   Download, Upload, History, FilePlus2, Loader2, Check, AlertTriangle, RefreshCw, CircleHelp,
@@ -159,6 +161,28 @@ const recentDisplay = computed(() => {
       }
     })
     .filter((x): x is Note & { parentName: string; rel: string } => !!x)
+})
+
+// ---- 最近编辑（后端 RecentNotes：按 updatedAt 倒序取前 N 篇文档）----
+// 与上面的「最近打开」是两条独立链路：那条是本机点击历史（localStorage），这条是
+// 真实的最后编辑时间（后端 updatedAt），彼此不能替代，分组也分开展示。
+const recentEdited = ref<Note[]>([])
+async function loadRecentEdited() {
+  try {
+    recentEdited.value = unwrap<Note[]>(await RecentNotes(8)) || []
+  } catch { /* 最近编辑只是导航捷径，拉不到就静默沿用旧值，不影响树和编辑 */ }
+}
+const recentEditedDisplay = computed(() => {
+  if (searchQuery.value || activeTag.value) return []
+  const map = new Map(nodes.value.map(n => [n.id, n]))
+  return recentEdited.value.map(n => {
+    const par = n.parentId ? map.get(n.parentId) : null
+    return {
+      ...n,
+      parentName: (par?.name || par?.keyword || '') as string,
+      rel: relTime(Date.parse(n.updatedAt) || 0),
+    }
+  })
 })
 
 // ---- 左侧树折叠 / 拖拽调宽 ----
@@ -330,6 +354,7 @@ async function load() {
     nodes.value = list
     allNodes.value = list
     void loadTags()
+    void loadRecentEdited()
     if (selectedDocId.value && !nodes.value.find(n => n.id === selectedDocId.value)) {
       selectedDocId.value = ''; docContent.value = ''; docTagsText.value = ''
     }
@@ -1536,12 +1561,15 @@ async function renameCurrent() {
 
 onMounted(() => {
   loadTreePrefs(); loadRecent(); loadNoteView(); load()
+  // 「最近笔记」深链监听常驻（KeepAlive 组件只挂载一次）
+  offPaletteLocate = Events.On('palette:locate', onPaletteLocate)
   docEditorHost.value?.addEventListener('paste', onEditorPaste, true)
   document.addEventListener('mousedown', onWikiDocDown, true)
   document.addEventListener('mousedown', onMdHelpDocDown, true)
   document.addEventListener('keydown', onMdHelpKeydown, true)
 })
 onBeforeUnmount(() => {
+  offPaletteLocate?.()
   docEditorHost.value?.removeEventListener('paste', onEditorPaste, true)
   document.removeEventListener('mousedown', onWikiDocDown, true)
   document.removeEventListener('mousedown', onMdHelpDocDown, true)
@@ -1562,6 +1590,32 @@ watch(pendingOpenNoteId, (id) => {
     pendingOpenNoteId.value = ''
   }
 })
+
+// 命令面板「最近笔记」深链：浮窗广播 palette:locate(target='recent-edited')，
+// 主窗口标记待定位；本页在 KeepAlive 白名单里、组件常驻，故在 onMounted 注册一次，
+// 再用 watch + onActivated 保证切回本页（DOM 重新可见）后才滚动/高亮新分组。
+const recentEditedBlockRef = ref<HTMLElement | null>(null)
+const recentEditedFlash = ref(false)
+const pendingRecentLocate = ref(false)
+let offPaletteLocate: (() => void) | null = null
+function onPaletteLocate(ev: any) {
+  if (window.location.hash) return // 事件广播到所有窗口，独立窗口忽略
+  const p: any = ev?.data ?? ev
+  if (p?.target === 'recent-edited') pendingRecentLocate.value = true
+}
+async function locateRecentEdited() {
+  await nextTick()
+  const el = recentEditedBlockRef.value
+  // KeepAlive 停用时 DOM 被移到脱离文档的容器，isConnected 为 false：
+  // 留着 pending，等 onActivated 真正切回本页再定位，别让这次深链白丢。
+  if (!el || !el.isConnected) return
+  pendingRecentLocate.value = false
+  recentEditedFlash.value = true
+  el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  setTimeout(() => { recentEditedFlash.value = false }, 1600)
+}
+watch(pendingRecentLocate, (v) => { if (v) void locateRecentEdited() })
+onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 </script>
 
 <template>
@@ -1669,6 +1723,30 @@ watch(pendingOpenNoteId, (id) => {
                 </div>
               </div>
             </div>
+            <!-- 最近编辑：后端按 updatedAt 倒序，与上面的「最近打开」是两条独立链路 -->
+            <div v-if="recentEditedDisplay.length" ref="recentEditedBlockRef" class="recent-block" :class="{ 'recent-located': recentEditedFlash }">
+              <div class="recent-title">
+                <Pencil :size="11" />
+                <span class="rt-label">{{ t('notesRecentEdited') }}</span>
+                <span class="rt-count">{{ recentEditedDisplay.length }}</span>
+              </div>
+              <div v-key-click
+                v-for="n in recentEditedDisplay" :key="'recent-edited-'+n.id"
+                class="qd-row recent-row"
+                :class="{ active: !selectMode && selectedDocId === n.id, 'sel-on': selectMode && selectedIds.has(n.id) }"
+                @click="selectMode ? toggleSelect(n.id) : onDoc(n)"
+              >
+                <input v-key-click v-if="selectMode" type="checkbox" class="tn-check" :checked="selectedIds.has(n.id)" @change="toggleSelect(n.id)" @click.stop />
+                <FileText :size="13" class="tn-icon" />
+                <div class="rn-text">
+                  <div class="rn-line1">
+                    <span class="rn-name">{{ n.name || n.keyword }}</span>
+                    <span v-if="n.rel" class="rn-time">{{ n.rel }}</span>
+                  </div>
+                  <div v-if="n.parentName" class="rn-path">{{ n.parentName }}</div>
+                </div>
+              </div>
+            </div>
             <div v-for="root in tree" :key="root.id">
               <NoteTreeNode
                 :node="root" :depth="0"
@@ -1686,7 +1764,7 @@ watch(pendingOpenNoteId, (id) => {
               <span>{{ t('notesLoadFailed') }}</span>
               <button type="button" class="tree-retry" @click="load()">{{ t('retry') }}</button>
             </div>
-            <div v-else-if="!tree.length && !recentDisplay.length && !loading" class="tree-empty">{{ t('notesEmpty') }}</div>
+            <div v-else-if="!tree.length && !recentDisplay.length && !recentEdited.length && !loading" class="tree-empty">{{ t('notesEmpty') }}</div>
           </template>
           <!-- 搜索/标签结果：扁平展示 -->
           <template v-else>
@@ -2149,6 +2227,13 @@ watch(pendingOpenNoteId, (id) => {
   margin: var(--space-2) 0 var(--space-3);
   padding: var(--space-3) var(--space-2) 0;
   border-top: 1px solid var(--color-border);
+  transition: background-color var(--transition-fast);
+}
+/* 命令面板「最近笔记」深链命中时的短暂高亮（1.6s 后由脚本褪去） */
+.recent-block.recent-located {
+  background: var(--color-select-bg);
+  border-radius: var(--radius-sm);
+  box-shadow: inset 2px 0 0 var(--color-accent);
 }
 .recent-title {
   display: flex;

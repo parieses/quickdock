@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ScrollText, FolderOpen, RefreshCw, Search, Copy, Check, AlertTriangle, Trash2, HardDrive, Radio, Plus, X, Pause, Play } from '@lucide/vue'
+import { ScrollText, FolderOpen, RefreshCw, Search, Copy, Check, AlertTriangle, Trash2, HardDrive, Radio, Plus, X, Pause, Play, Sparkles } from '@lucide/vue'
 import { ListLogFiles, ReadLogFile, ListCrashFiles, ClearCrashFiles, GetLogStorage, ClearLogs } from '../../bindings/quickdock/services/diag/diagservice'
-import { OpenLogsDir } from '../../bindings/quickdock/services/system/systemservice'
+import { OpenLogsDir, GetLogsInfo } from '../../bindings/quickdock/services/system/systemservice'
 import { SelectLocalFile } from '../../bindings/quickdock/services/appservice'
-import { LogTailOpen, LogTailStop, LogTailPause } from '../../bindings/quickdock/services/logtail/logtailservice'
+import { LogTailOpen, LogTailStop, LogTailPause, LogTailStats } from '../../bindings/quickdock/services/logtail/logtailservice'
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -13,10 +13,11 @@ import { logErr } from '../utils/logger'
 import { copyToClipboard } from '../utils/clipboard'
 import { formatBytes } from '../utils/ssh'
 import { useToast } from '../composables/useToast'
+import { navigateTo, pendingAskText } from '../composables/bridge'
 
 const { t } = useI18n()
 // 破坏性动作的确认走全局 toast.confirm（useToast 是模块级单例，不依赖注入点）。
-const { confirm: toastConfirm, error: toastError } = useToast()
+const { confirm: toastConfirm, error: toastError, success: toastSuccess } = useToast()
 
 // 进日志页时从侧栏角标快照下来的「新增崩溃数」：设置按钮上的红点在这里要有
 // 明确落点（工具栏按钮 + 崩溃分组的「新增 N」）。已读水位在进页时就清了，
@@ -183,6 +184,30 @@ async function loadFiles() {
     // 崩溃列表是次要数据，读失败降级成空即可，只上报不弹窗刷屏。
     crashFiles.value = []
     logErr('LogViewer:crashFiles', e)
+  }
+}
+
+// ---- 日志交给 AI ----
+// 把当前日志文件的路径 + 最近 200 行塞进 AI 输入框，用户补两句上下文就能发。
+// 不直接 send：日志只是素材，模型需要用户说清楚想查什么。
+let askSeq = 0
+async function askAIAboutLogs() {
+  try {
+    const info = unwrap<{ dir: string; currentFile: string; recentLines: string[] }>(await GetLogsInfo(200))
+    if (!info) {
+      toastError(t('logAskAIFail'))
+      return
+    }
+    // recentLines 由新到旧，AI 读日志要按时间正序；复制一份再反转，不动 binding 返回值。
+    const lines = (info.recentLines || []).slice().reverse()
+    const prompt = t('logAskAIPrompt', { file: info.currentFile, n: 200, lines: lines.join('\n') })
+    // seq 让连点两次也生成新对象；AI 页 watch 取走即清，不会重复注入。
+    pendingAskText.value = { text: prompt, seq: ++askSeq }
+    toastSuccess(t('logAskAIDone'))
+    navigateTo('ai', 'new:blank')
+  } catch (e) {
+    logErr('LogViewer:askAI', e)
+    toastError(t('logAskAIFail'))
   }
 }
 
@@ -380,6 +405,34 @@ const tailTabs = ref<TailTab[]>([])
 const tailId = ref('')
 const activeTab = computed(() => tailTabs.value.find((x) => x.id === tailId.value) || null)
 
+// 尾随会话的实时读数（后端权威统计，前端只展示）：
+// lines 是后端累计已收行数——前端 tab.received 会在环形缓冲截断后停在 TAIL_MAX_LINES，
+// 而后端记的是真实总量；size 当前文件大小；rotate 文件轮转次数。
+interface LogTailStatsInfo { lines: number; size: number; rotate: number }
+const tailStats = ref<LogTailStatsInfo | null>(null)
+const TAIL_STATS_INTERVAL_MS = 1500
+let tailStatsTimer: ReturnType<typeof setInterval> | null = null
+
+async function loadTailStats() {
+  const id = activeTab.value?.id
+  if (!id) return
+  try {
+    const res = unwrap<LogTailStatsInfo | null>(await LogTailStats(id))
+    // 异步返回期间可能已切 tab / 关会话：丢弃过期结果，别把别的会话读数挂上来。
+    if (activeTab.value?.id !== id) return
+    tailStats.value = res
+  } catch (e) {
+    // 静默：轮询每 1.5s 一次，会话关闭/文件轮转是常态，弹错会刷屏；保留上一轮值。
+    logErr('LogViewer:tailStats', e)
+  }
+}
+
+// 切 tab 时清掉上一个会话的读数并立即拉一次，不等下个 1.5s 周期。
+watch(tailId, () => {
+  tailStats.value = null
+  void loadTailStats()
+})
+
 // 主区顶部上下文行的标题：原来一进日志页只有一排按钮，得回左侧列表找选中项
 // 才知道「现在在看哪个文件」。三种来源各取自己的可读名称。
 const currentSourceLabel = computed(() => {
@@ -533,6 +586,10 @@ function copyLine(l: string) { copyText(l) }
 
 onMounted(async () => {
   offTail = Events.On('logtail:line', onTailLine)
+  // 尾随读数每 1.5s 拉一次后端权威统计；非尾随来源时是廉价的空转。
+  tailStatsTimer = setInterval(() => {
+    if (isTail.value && activeTab.value) void loadTailStats()
+  }, TAIL_STATS_INTERVAL_MS)
   await loadFiles()
   await loadStorage()
   await loadContent()
@@ -542,6 +599,7 @@ onUnmounted(() => {
   // 后端按 id 幂等处理，页面先消失也不影响结果。
   void stopAllTails()
   if (followTimer) clearInterval(followTimer)
+  if (tailStatsTimer) clearInterval(tailStatsTimer)
   if (toastTimer) clearTimeout(toastTimer)
 })
 </script>
@@ -653,9 +711,17 @@ onUnmounted(() => {
           >
             <AlertTriangle :size="13" />{{ t('badgeNewCrash', { n: props.newCrashCount }) }}
           </button>
-          <span v-if="isTail && activeTab" class="log-count">
-            {{ t('ltReceived', { n: activeTab.received }) }}
-          </span>
+          <template v-if="isTail && activeTab">
+            <span class="log-count">
+              {{ t('ltReceived', { n: tailStats?.lines ?? activeTab.received }) }}
+            </span>
+            <span v-if="tailStats" class="log-count">
+              {{ t('ltStatsSize', { size: formatBytes(tailStats.size) }) }}
+            </span>
+            <span v-if="tailStats && tailStats.rotate > 0" class="log-count tail-rotate">
+              {{ t('ltStatsRotate', { n: tailStats.rotate }) }}
+            </span>
+          </template>
           <span v-else-if="rawLines.length" class="log-count">
             {{ t('logLines', { shown: renderedLines.length, total: rawLines.length }) }}
           </span>
@@ -704,6 +770,9 @@ onUnmounted(() => {
           </button>
           <button class="log-btn" @click="OpenLogsDir()">
             <FolderOpen :size="13" /> {{ t('logOpenDir') }}
+          </button>
+          <button class="log-btn" :title="t('logAskAI')" @click="askAIAboutLogs">
+            <Sparkles :size="13" /> {{ t('logAskAI') }}
           </button>
           <button class="log-btn" @click="copyAll" :title="t('logCopyLine')">
             <Copy v-if="!copied" :size="13" />
@@ -1033,6 +1102,8 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums; white-space: nowrap; padding-right: var(--space-1);
 }
 .log-capped { color: var(--color-warning); }
+/* 轮转次数是"日志被换掉过"的信号，用警示色跟普通统计区分开 */
+.tail-rotate { color: var(--color-warning); }
 
 /* 级别开关：开着的按钮有淡底，关掉的透明且半透明——状态一眼可辨，
    比原来「都一样、只差 0.3 透明度」清楚 */
