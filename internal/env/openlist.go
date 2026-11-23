@@ -210,8 +210,10 @@ func (o *OpenListRuntime) Install(ctx context.Context, version string, cb Instal
 		if e.Name() == openlistDataSub {
 			continue // 发布包万一带 data/ 也不覆盖用户数据
 		}
-		if err := os.Rename(filepath.Join(staging, e.Name()), filepath.Join(o.baseDir, e.Name())); err != nil {
-			return fmt.Errorf("安装 OpenList 失败: %w", err)
+		src := filepath.Join(staging, e.Name())
+		dst := filepath.Join(o.baseDir, e.Name())
+		if err := o.replaceEntry(src, dst, cb.OnLog); err != nil {
+			return fmt.Errorf("安装 OpenList 失败（%s 写入被拒绝，通常是网关仍在运行）: %w", e.Name(), err)
 		}
 	}
 	_ = os.WriteFile(filepath.Join(o.baseDir, "VERSION"), []byte(version), 0o644)
@@ -219,6 +221,70 @@ func (o *OpenListRuntime) Install(ctx context.Context, version string, cb Instal
 		cb.OnLog("OpenList " + version + " 安装完成")
 	}
 	return nil
+}
+
+// replaceEntry 把暂存目录里的条目搬到安装目录，覆盖同名旧文件。
+//
+// 为什么不直接用 os.Rename：Windows 上有两个坑。
+//  1. 旧 openlist.exe 还在跑（升级时它通常正是在跑）——覆盖一个已加载的映像
+//     只会得到 ERROR_ACCESS_DENIED，Go 把它翻译成 "Access is denied."，
+//     界面上就是一句完全指不出原因的话；
+//  2. 刚解压出来的 exe 常被杀软实时扫描短暂独占，重命名会瞬时失败。
+//
+// 所以先试一次；失败就停掉运行中的网关，再把旧文件改名让位（运行中的 exe
+// 允许改名，只是不允许被覆盖），最后带间隔重试。
+func (o *OpenListRuntime) replaceEntry(src, dst string, onLog func(string)) error {
+	err := os.Rename(src, dst)
+	if err == nil || runtime.GOOS != "windows" {
+		return err
+	}
+	o.stopForReplace(onLog)
+
+	aside := ""
+	if _, statErr := os.Stat(dst); statErr == nil {
+		cand := dst + ".old"
+		_ = os.Remove(cand) // 上次升级残留（当时旧进程还占着，删不掉）
+		if e := os.Rename(dst, cand); e == nil {
+			aside = cand
+		}
+	}
+	for i := 0; i < 20; i++ { // 20 × 150ms ≈ 3s，覆盖杀软扫描的常见占用窗口
+		time.Sleep(150 * time.Millisecond)
+		if e := os.Rename(src, dst); e == nil {
+			if aside != "" {
+				_ = os.Remove(aside) // 旧进程若还活着会删不掉，留着不影响运行
+			}
+			return nil
+		} else {
+			err = e
+		}
+	}
+	if aside != "" {
+		_ = os.Rename(aside, dst) // 让位后仍搬不进去：还原，别留下「正式文件不见了」
+	}
+	return err
+}
+
+// stopForReplace 在覆盖程序文件前停掉正在运行的网关。
+//
+// 触发点只在 replaceEntry 的第一次重命名失败之后：文件没被占用就不该动服务。
+// 停完不等端口（Stop 内部已等），镜像段释放的余量交给 replaceEntry 的重试。
+// 只记日志、不返回错误 —— 停不下来时替换仍有「让位 + 重试」兜底。
+func (o *OpenListRuntime) stopForReplace(onLog func(string)) {
+	running := false
+	if v, _ := svcMgr.info(RuntimeOpenList); v != "" {
+		running = true
+	} else if findListenPID(o.configPort()) != 0 {
+		running = true
+	}
+	if !running {
+		return
+	}
+	logger.W("[env][openlist] 替换程序文件前停止运行中的网关")
+	if onLog != nil {
+		onLog("正在停止运行中的 OpenList，以便替换程序文件…")
+	}
+	_ = o.Stop("")
 }
 
 // describeArchive 按当前平台给出归档扩展名（Windows 是 zip，其余是 tar.gz）。
