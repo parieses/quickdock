@@ -46,6 +46,7 @@ import (
 	portsvc "quickdock/services/port"
 	recyclesvc "quickdock/services/recycle"
 	scenesvc "quickdock/services/scene"
+	scriptsvc "quickdock/services/script"
 	shelfsvc "quickdock/services/shelf"
 	snapshotsvc "quickdock/services/snapshot"
 	sshxsvc "quickdock/services/sshx"
@@ -742,6 +743,16 @@ func main() {
 	credentialsSvc := credentialssvc.NewCredentialsService(appService)
 	appService.StartCredentialAPIFn = credentialsSvc.StartAPIIfEnabled
 	appService.StopCredentialAPIFn = credentialsSvc.StopAPI
+
+	// 脚本任务门面（青龙式）：脚本正文在 dataDir/scripts/<id>/，DB 只存索引。
+	// 两条注入都是「services 生命周期 → script 子包」的反向调用，理由同密码库：
+	// 子包要取 services.ApiResult，宿主不能直接 import 它。
+	scriptSvc := scriptsvc.NewService(appService)
+	// 定时任务 action='script' 走这条路（同步等结果，好让调度器记成败与重试）。
+	appService.RunScheduledScriptFn = scriptSvc.RunScriptSyncCtx
+	// 启动收尾：清掉上次进程遗留的 running 记录（否则并发闸门永久卡死）、
+	// 恢复 HTTP 触发监听、起事件监听循环。必须在 DB 就绪之后。
+	appService.StartScriptRuntimeFn = scriptSvc.Startup
 	// SSH 面板的「问 AI」走本地 SSE（见 services/ai/ai_ask_stream.go）。
 	// 注册只能发生在这里：prompt 组装在 sshx、流式端点在 ai，两边互相 import 会成环。
 	aiSvc.RegisterAskStream("ssh", sshSvc.AskOverStream)
@@ -754,6 +765,9 @@ func main() {
 	// （工具复用其能力，且必须复用同一实例而非另建），故在其后创建。
 	envengine.SetMCPAppVersion(appVersion)
 	mcpSvc := mcpsvc.NewMCPService(appService, clipSvc, pluginSvc, workspaceSvc, todoSvc, diagSvc, systemSvc, noteSvc, frecencySvc, portSvc, collectionSvc, monitorSvc, kbSvc, downloadSvc, sshSvc, envSvc, netdiskSvc, mailboxSvc, credentialsSvc, shelfSvc, sceneSvc, itemSvc, appVersion)
+	// 脚本域工具（script_list / script_runs / script_log / script_run）复用同一实例，
+	// 不另建一份：并发闸门（同一脚本不许并发）在实例内部，另建等于开了后门。
+	mcpSvc.Script = scriptSvc
 
 	// 系统通知服务（用于待办定时提醒）
 	notifier := notifications.New()
@@ -823,6 +837,7 @@ func main() {
 			application.NewService(netdiskSvc),
 			application.NewService(sshSvc),
 			application.NewService(credentialsSvc),
+			application.NewService(scriptSvc),
 			application.NewService(mcpSvc),
 			application.NewService(pluginSvc),
 			application.NewService(notifier),
@@ -1110,6 +1125,8 @@ func main() {
 	// 取消网盘所有在途传输（下载/上传/列目录共用 transferCtx）。进程退出时正在
 	// 跑的 .part 会由 transport 取消触发清理，不留半截文件；Close 内部 cancel 幂等。
 	netdiskSvc.Close()
+	// 脚本域：关掉 HTTP 触发监听，并取消所有在途脚本进程（取消 → taskkill 连孙进程）。
+	scriptSvc.Shutdown()
 	if appService.PluginWindowMgr != nil {
 		appService.PluginWindowMgr.CloseAll()
 	}

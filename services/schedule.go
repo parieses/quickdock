@@ -17,7 +17,7 @@ func (a *AppService) CreateScheduledTask(t db.ScheduledTask) *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
-	if err := validateScheduledTask(&t); err != nil {
+	if err := validateScheduledTask(a.DB, &t); err != nil {
 		return Fail(err)
 	}
 	t.NextRun = computeNextRun(&t, nowStr())
@@ -60,7 +60,7 @@ func (a *AppService) UpdateScheduledTask(t db.ScheduledTask) *ApiResult {
 	if t.ID == "" {
 		return FailMsg("任务 ID 不能为空")
 	}
-	if err := validateScheduledTask(&t); err != nil {
+	if err := validateScheduledTask(a.DB, &t); err != nil {
 		return Fail(err)
 	}
 	// 提前取一次旧值：改名同步空间名、重算 next_run 都要用，别在各分支里重复查。
@@ -353,8 +353,9 @@ func normalizeNotifyPolicy(s string) string {
 	}
 }
 
-// validateScheduledTask 基础字段校验
-func validateScheduledTask(t *db.ScheduledTask) error {
+// validateScheduledTask 基础字段校验。d 可为 nil（跑在无 DB 的单元测试里），
+// 为空时跳过需要查库的「脚本是否存在」这一条。
+func validateScheduledTask(d *db.Database, t *db.ScheduledTask) error {
 	// 验证名称
 	if err := validators.ValidateName(t.Name, 1, 100); err != nil {
 		return err
@@ -445,6 +446,18 @@ func validateScheduledTask(t *db.ScheduledTask) error {
 		}
 		if len(t.Target) > 1000 {
 			return fmt.Errorf("命令长度不能超过 1000 字符")
+		}
+	case "script":
+		// target 存脚本 id（不存路径也不存命令行）：脚本正文在数据目录里，
+		// 任务只引用它。这样改脚本不用改任务，删脚本时任务会明确报「脚本不存在」，
+		// 而不是在某天早上跑一个已经不存在的路径。
+		if strings.TrimSpace(t.Target) == "" {
+			return fmt.Errorf("请选择要运行的脚本")
+		}
+		if d != nil {
+			if _, err := d.GetScript(t.Target); err != nil {
+				return fmt.Errorf("脚本不存在或已被删除")
+			}
 		}
 	case "ai":
 		if strings.TrimSpace(t.Target) == "" {

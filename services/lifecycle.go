@@ -186,7 +186,17 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 	// 启动待办定时提醒调度器（常驻后台轮询，到期推送系统通知）
 	a.StartReminderScheduler()
 
-	// 启动定时任务调度器（精确定时器，到期执行 打开软件/目录/网址/命令/HTTP）
+	// 脚本域：收尾遗留运行 + 事件监听 + 恢复 HTTP 触发。
+	//
+	// 必须排在调度器**之前**：收尾把上次进程遗留的 status='running' 改成失败，
+	// 而并发闸门是「同一脚本同时只跑一个」。顺序反过来的话，一个到点的脚本任务
+	// 可能先撞上那条永远不会结束的旧记录，被判「正在运行中」而跳过——表现是
+	// 「重启后第一次定时执行总是被跳过」，且没有任何报错。
+	if a.StartScriptRuntimeFn != nil {
+		a.StartScriptRuntimeFn()
+	}
+
+	// 启动定时任务调度器（精确定时器，到期执行 打开软件/目录/网址/命令/脚本/HTTP）
 	a.StartScheduleRunner()
 
 	// 启动网站监控检查器（仿 UptimeRobot，按 interval 定时探测并记录在线率）

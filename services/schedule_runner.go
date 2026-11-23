@@ -913,6 +913,21 @@ func (a *AppService) executeTaskContext(ctx context.Context, t *db.ScheduledTask
 		}
 		return a.commandOutcome(t, out)
 
+	case "script":
+		// 同步等待脚本结束：定时任务的契约是「一次执行产出一个 status + 摘要」，
+		// 异步返回会让重试逻辑、失败通知、执行历史全部失去依据。
+		if a.RunScheduledScriptFn == nil {
+			return "fail", "脚本服务未就绪（这是构建问题，不是配置问题）"
+		}
+		status, summary, err := a.RunScheduledScriptFn(ctx, t.Target, "cron")
+		if err != nil {
+			if status == "" {
+				status = "fail"
+			}
+			return status, summary
+		}
+		return status, summary
+
 	case "http":
 		return a.executeHTTPContext(ctx, t)
 

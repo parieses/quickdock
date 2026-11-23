@@ -162,6 +162,23 @@ type AppService struct {
 	// StopCredentialAPIFn 关闭本地 HTTP 服务，退出时调一次。
 	StopCredentialAPIFn func()
 
+	// RunScheduledScriptFn 注入「定时任务跑脚本」（实现在 services/script 子包）。
+	//
+	// 同 StartCredentialAPIFn 的原因：services/script 反 import services 取 ApiResult，
+	// 宿主不能持具体类型。签名带 ctx 是因为调度器的「立即执行 + 取消」走它自己的
+	// context，脚本进程必须跟着一起被杀，否则取消按钮只是断了一根等待的线。
+	//
+	// 未注入时（精简构建/测试）action='script' 的任务返回明确失败，
+	// 而不是静默跳过——静默跳过会让任务卡在「下次运行」而不报错。
+	RunScheduledScriptFn func(ctx context.Context, scriptID, trigger string) (status, summary string, err error)
+
+	// StartScriptRuntimeFn 注入脚本域的启动钩子（实现在 services/script）。
+	//
+	// 做三件事，且必须在 DB 就绪后：收尾上次进程遗留的 running 记录
+	// （否则并发闸门永久卡死）、启动事件监听循环、按上次状态恢复 HTTP 触发服务。
+	// 放在这里而不是 main.go 里直接调：main 里 DB 还没打开。
+	StartScriptRuntimeFn func()
+
 	// ClipNoteFn 把浏览器扩展的网页剪藏写进笔记树。
 	// 同 StartCredentialAPIFn 的原因：实现在 services/note 子包，宿主不能反向引用。
 	// HTTP 端点在 services/credentials，笔记服务在 services/note，两边都只认宿主，
