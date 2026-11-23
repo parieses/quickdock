@@ -58,6 +58,9 @@ const {
 const plugins = ref<PluginInfo[]>([])
 const icons = ref<Record<string, string>>({}) // pluginId → data URI（当前主题那一档）
 const loading = ref(true)
+// 读取失败与「真的一个插件都没装」必须分开：以前失败只弹一次 toast，
+// 页面随后渲染「还没有插件，拖入此区域安装」，用户会以为插件全丢了。
+const loadFailed = ref(false)
 const operating = ref<Set<string>>(new Set())
 
 // 插件「新安装/更新」角标：首次打开后清除
@@ -311,6 +314,7 @@ async function loadPlugins(opts?: { silent?: boolean }) {
   if (!opts?.silent) loading.value = true
   try {
     plugins.value = (unwrap(await ListPlugins()) || []) as PluginInfo[]
+    loadFailed.value = false
     await loadIcons()
     // 加载「新」角标集合
     try {
@@ -318,6 +322,7 @@ async function loadPlugins(opts?: { silent?: boolean }) {
       if (Array.isArray(flags)) newFlags.value = new Set(flags as string[])
     } catch (e) { logErr('PluginManagerPage', e) }
   } catch (e) {
+    loadFailed.value = true
     toast?.error?.(t('pluginLoadFailed') + ': ' + getErrorMessage(e))
   } finally {
     loading.value = false
@@ -336,7 +341,7 @@ async function killPlugin(p: PluginInfo) {
   if (operating.value.has(p.id)) return
   operating.value.add(p.id)
   try {
-    await KillPlugin(p.id)
+    unwrap(await KillPlugin(p.id))
     // 杀进程 ≠ 禁用：后端把状态置回 registered（懒加载就绪），插件仍启用，
     // 命令面板可见、下次打开/执行命令自动拉起——无需手动再启用。
     p.status = 'registered'
@@ -361,13 +366,13 @@ async function togglePlugin(p: PluginInfo) {
   operating.value.add(p.id)
   try {
     if (isEnabled(p)) {
-      await DisablePlugin(p.id)
+      unwrap(await DisablePlugin(p.id))
       // 后端语义：禁用 = disabled=true + status=stopped；两个字段都要同步本地，
       // 否则徽标/电源按钮会与真实状态错位（曾出现启用后仍显示「已禁用」）。
       p.disabled = true
       p.status = 'stopped'
     } else {
-      await EnablePlugin(p.id)
+      unwrap(await EnablePlugin(p.id))
       // EnablePlugin → ReloadPlugin 返回前已完成加载握手，状态即 running
       p.disabled = false
       p.status = 'running'
@@ -857,6 +862,13 @@ onUnmounted(() => {
     <!-- 加载中 -->
     <div v-if="loading" class="plugin-loading">
       <p>{{ t('loading') }}</p>
+    </div>
+
+    <!-- 加载失败：与空态分开，给出重试入口 -->
+    <div v-else-if="loadFailed" class="plugin-empty">
+      <Puzzle :size="48" class="empty-icon" />
+      <p class="empty-title">{{ t('statusError') }}</p>
+      <button class="qd-btn" @click="loadPlugins()">{{ t('statusRetry') }}</button>
     </div>
 
     <!-- 空状态 -->

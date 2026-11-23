@@ -64,10 +64,6 @@ async function load() {
   }
 }
 
-watch(() => props.visible, (v) => {
-  if (v) { msg.value = ''; void load(); void loadExtra() }
-}, { immediate: true })
-
 async function save() {
   saving.value = true
   msg.value = ''
@@ -263,6 +259,12 @@ async function send() {
     sending.value = false
   }
 }
+
+// 必须放在所有 ref / 函数声明之后：immediate watch 在 setup 期同步执行，
+// 若提前到这里会先于 extraLoading 等 const 的初始化触发暂时性死区（打开通知设置直接崩）。
+watch(() => props.visible, (v) => {
+  if (v) { msg.value = ''; void load(); void loadExtra() }
+}, { immediate: true })
 </script>
 
 <template>
@@ -315,7 +317,7 @@ async function send() {
             autocomplete="off"
             spellcheck="false"
           />
-          <button type="button" class="btn btn-ghost btn-sm" @click="toggleUrlVisible(ch.id)">
+          <button type="button" class="qd-btn qd-btn-ghost qd-btn-sm" @click="toggleUrlVisible(ch.id)">
             {{ isUrlVisible(ch.id) ? t('mcpTokenHide') : t('mcpTokenShow') }}
           </button>
         </div>

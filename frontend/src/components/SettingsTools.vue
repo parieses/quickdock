@@ -15,13 +15,14 @@ const toast = inject<ToastAPI>('toast')!
 const props = defineProps<{ visible: boolean }>()
 
 // 可选的工具类型（与后端 EnsureDefaultTools 及 TYPE_TOOL_MAP 保持一致）
-const TOOL_TYPE_OPTIONS = [
+// 用 computed 而不是常量：label 走 t()，切语言时要跟着变，常量会停在首次渲染那一档。
+const TOOL_TYPE_OPTIONS = computed(() => [
   { value: TOOL_TYPES.SYSTEM, label: t('toolType_system') },
   { value: TOOL_TYPES.EDITOR, label: t('toolType_editor') },
   { value: TOOL_TYPES.BROWSER, label: t('toolType_browser') },
   { value: TOOL_TYPES.TERMINAL, label: t('toolType_terminal') },
   { value: TOOL_TYPES.OFFICE, label: t('toolType_office') },
-]
+])
 
 const tools = ref<OpenTool[]>([])
 const loading = ref(false)
@@ -57,10 +58,11 @@ async function load() {
 
 // 按类型分组（保持 TOOL_TYPE_OPTIONS 顺序）；仅展示有工具的分组
 const groupedTools = computed(() => {
-  return TOOL_TYPE_OPTIONS
+  return TOOL_TYPE_OPTIONS.value
     .map((opt) => ({
       type: opt.value,
-      label: opt.value,
+      // 这里以前取的是 opt.value，分组标题直接显示 system / editor / browser
+      label: opt.label,
       items: tools.value.filter((x) => x.type === opt.value),
     }))
     .filter((g) => g.items.length > 0)
@@ -103,10 +105,10 @@ async function save() {
       const created = unwrap<OpenTool>(await CreateTool(name, type, path, args))
       // CreateTool 无 isDefault 参数，若需设为默认则再更新一次
       if (draft.isDefault === 1 && created && created.id) {
-        await UpdateTool(created.id, name, type, path, args, 1)
+        unwrap(await UpdateTool(created.id, name, type, path, args, 1))
       }
     } else {
-      await UpdateTool(draft.id, name, type, path, args, draft.isDefault === 1 ? 1 : 0)
+      unwrap(await UpdateTool(draft.id, name, type, path, args, draft.isDefault === 1 ? 1 : 0))
     }
     toast.success(t('saveSuccess'))
     closeEditor()
@@ -131,7 +133,7 @@ async function remove(tool: OpenTool) {
 
 async function setDefault(tool: OpenTool) {
   try {
-    await UpdateTool(tool.id, tool.name, tool.type, tool.path || '', tool.args || '', 1)
+    unwrap(await UpdateTool(tool.id, tool.name, tool.type, tool.path || '', tool.args || '', 1))
     toast.success(t('toolDefaultSet'))
     await load()
   } catch (e) {
