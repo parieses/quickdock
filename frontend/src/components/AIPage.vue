@@ -57,7 +57,7 @@ import '../styles/hljs-theme.css'
 import { logErr } from '../utils/logger'
 import { useFloatMenu } from '../composables/useFloatMenu'
 import { useSaveAs } from '../composables/useSaveAs'
-import { aiGenerating, aiFinishedUnread, pendingTarget, pendingAskText } from '../composables/bridge'
+import { aiGenerating, aiFinishedUnread, pendingTarget, pendingAskText, pendingNewAiTask } from '../composables/bridge'
 import { resolveConvDir } from '../utils/aiConvDir'
 import { profileNeedsKey } from '../utils/aiKey'
 import { pickActiveRun } from '../utils/aiRuns'
@@ -3342,6 +3342,17 @@ watch(pendingAskText, consumePendingAskText, { immediate: true })
 // immediate 那次若发生在挂载前（heroRef 还没就位），挂载后再补一次消费；
 // 已消费则是 no-op。保活时 watch 一直活着，这条只在首次挂载时兜底。
 onMounted(consumePendingAskText)
+
+// 总览「新建 AI 任务」：只开一条空白任务、聚焦输入框，不填任何内容。
+// 不复用 pendingAskText 是因为那条带着「把文本填进输入框」的语义。
+function consumeNewAiTask() {
+  if (!pendingNewAiTask.value) return
+  pendingNewAiTask.value = false
+  beginBlankTask()
+  void nextTick(() => heroRef.value?.focus())
+}
+watch(pendingNewAiTask, consumeNewAiTask, { immediate: true })
+onMounted(consumeNewAiTask)
 
 onMounted(async () => {
   // KeepAlive 首次挂载也会走 onActivated，但那条路依赖 App.vue 的包裹结构；

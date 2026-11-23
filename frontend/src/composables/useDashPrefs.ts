@@ -15,7 +15,7 @@ import { writeStorageDebounced } from '../utils/storageQueue'
 
 /** 总览卡片 id（模板里每张 section.card 的 data-dash-card 必须与此一一对应） */
 export const DASH_CARDS = [
-  'next', 'recent', 'shelf', 'todo', 'mail', 'ports', 'resident', 'git', 'monitor', 'ai',
+  'next', 'recent', 'shelf', 'todo', 'scripts', 'mail', 'ports', 'resident', 'git', 'monitor', 'ai',
 ] as const
 export type DashCardId = (typeof DASH_CARDS)[number]
 

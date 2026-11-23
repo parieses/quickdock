@@ -8,7 +8,7 @@ import { ref, computed, onMounted, onBeforeUnmount, onActivated, inject, watch, 
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
 import { useSaveAs } from '../composables/useSaveAs'
-import { pendingOpenNoteId, pendingOpenTodoId, navigate, navigateTo } from '../composables/bridge'
+import { pendingOpenNoteId, pendingOpenTodoId, pendingCreateNote, navigate, navigateTo } from '../composables/bridge'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { pinyinMatch, matchesTextOrPinyin } from '../utils/pinyin'
@@ -1597,14 +1597,18 @@ async function renameCurrent() {
   }
 }
 
-onMounted(() => {
-  loadTreePrefs(); loadRecent(); loadNoteView(); load()
+onMounted(async () => {
+  loadTreePrefs(); loadRecent(); loadNoteView()
   // 「最近笔记」深链监听常驻（KeepAlive 组件只挂载一次）
   offPaletteLocate = Events.On('palette:locate', onPaletteLocate)
   docEditorHost.value?.addEventListener('paste', onEditorPaste, true)
   document.addEventListener('mousedown', onWikiDocDown, true)
   document.addEventListener('mousedown', onMdHelpDocDown, true)
   document.addEventListener('keydown', onMdHelpKeydown, true)
+  // 先等树加载完再消费「新建笔记」请求：并发的两次 load 谁后回谁生效，
+  // 先建后载会把刚建的那条从树上盖掉（详情已开、树里找不到）。
+  await load()
+  consumeCreateNote()
 })
 onBeforeUnmount(() => {
   offPaletteLocate?.()
@@ -1628,6 +1632,15 @@ watch(pendingOpenNoteId, (id) => {
     pendingOpenNoteId.value = ''
   }
 })
+
+// 总览「新建笔记」快捷动作：标志在切页前写好，这里消费即清。
+// 与 pendingCreateTodo 同一套口径；已挂载时走 watch，首次从总览跳过来靠 onMounted。
+function consumeCreateNote() {
+  if (!pendingCreateNote.value) return
+  pendingCreateNote.value = false
+  void newDocAt('')
+}
+watch(pendingCreateNote, consumeCreateNote)
 
 // 命令面板「最近笔记」深链：浮窗广播 palette:locate(target='recent-edited')，
 // 主窗口标记待定位；本页在 KeepAlive 白名单里、组件常驻，故在 onMounted 注册一次，

@@ -22,7 +22,7 @@ import { defineAsyncComponent, type AsyncComponentLoader, type Component, type R
 import {
   FolderKanban, FileText, ListTodo, AlarmClock, Activity,
 	Clipboard, Server, SquareTerminal, Bot, Terminal, Puzzle, LayoutDashboard, GitBranch, Search, BookOpen, Download,
-	KeyRound, Cloud,
+	KeyRound, Cloud, FileCode2,
 } from '@lucide/vue'
 // 保活白名单从零依赖模块引（名字常量与组件里 defineOptions 共用同一份）
 import { KEEP_ALIVE_PAGES } from './keepAlive'
@@ -83,6 +83,8 @@ const GitPage = lazy(() => import('../components/GitPage.vue'))
 const PluginManagerPage = lazy(() => import('../components/PluginManagerPage.vue'))
 const TodoPage = lazy(() => import('../components/TodoPage.vue'))
 const SchedulePage = lazy(() => import('../components/SchedulePage.vue'))
+// 脚本任务：与定时任务相邻（同一件事的两半——「跑什么」与「什么时候跑」）。
+const ScriptPage = lazy(() => import('../components/ScriptPage.vue'))
 const MonitorPage = lazy(() => import('../components/MonitorPage.vue'))
 const AIPage = lazy(() => import('../components/AIPage.vue'))
 // 注意：不能在这里给 AIPage 赋 name 来对齐白名单。KeepAlive 判断异步组件时读的是
@@ -169,6 +171,7 @@ export const navEntries: NavEntry[] = [
   { id: 'notes', labelKey: 'navNotes', icon: FileText, component: NoteManagerPage },
   { id: 'todo', labelKey: 'navTodo', icon: ListTodo, component: TodoPage },
   { id: 'schedule', labelKey: 'navSchedule', icon: AlarmClock, component: SchedulePage },
+  { id: 'script', labelKey: 'navScript', icon: FileCode2, component: ScriptPage },
   { id: 'monitor', labelKey: 'navMonitor', icon: Activity, component: MonitorPage },
   { id: 'clipboard', labelKey: 'navClipboard', icon: Clipboard, component: ClipboardPanel, wrapperClass: 'clipboard-page' },
   // filesearch：与笔记/剪贴板同属「找东西」，故紧跟其后；Everything 不可用由页面内的

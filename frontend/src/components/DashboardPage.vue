@@ -31,7 +31,7 @@ import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage, isDialogCanceled } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { openExternal } from '../utils/externalLinks'
-import { navigate, navigateTo, pendingTarget, pendingOpenTodoId, pendingCreateTodo } from '../composables/bridge'
+import { navigate, navigateTo, pendingTarget, pendingOpenTodoId, pendingCreateTodo, pendingCreateNote, pendingNewAiTask, pendingCreateScript, pendingOpenScriptId } from '../composables/bridge'
 import { dashPrefs, DASH_CARDS, type DashCardId } from '../composables/useDashPrefs'
 import { useToast } from '../composables/useToast'
 import { describeDay, localISO } from '../utils/lunar'
@@ -45,6 +45,7 @@ import {
 } from '../utils/weather'
 import type { WeatherConfig, WeatherData, CityHit, WeatherSource } from '../utils/weather'
 import { ListTodos, ToggleTodo } from '../../bindings/quickdock/services/todo/todoservice'
+import { ListScripts } from '../../bindings/quickdock/services/script/scriptservice'
 import { ListMonitors, ListMonitorStats, GetMonitorLogsSince } from '../../bindings/quickdock/services/monitor/monitorservice'
 import { EnvList, EnvEverythingStatus } from '../../bindings/quickdock/services/env/environmentservice'
 import { DSHStatus } from '../../bindings/quickdock/services/dsh/dshservice'
@@ -69,6 +70,7 @@ import {
   Sun, CloudSun, Cloud, CloudFog, CloudRain, CloudSnow, CloudLightning, CloudOff,
   Mail, Layers, Copy, Trash2, Plus, File, Folder, AlertCircle, ShieldAlert,
   Coins, ExternalLink, LayoutGrid, Eye, EyeOff, ArrowUp, ArrowDown, RotateCcw, Link,
+  NotebookPen, Sparkles, FileCode2,
 } from '@lucide/vue'
 import TypeIcon from './TypeIcon.vue'
 import MailDetailDialog from './MailDetailDialog.vue'
@@ -443,6 +445,27 @@ function quickNewTodo() {
   navigate('todo')
 }
 
+/** 总览的三个「新建」快捷动作走同一套跨页桥：写标志 → 切页 → 目标页消费即清。
+ *  这样从总览点一下就能直接落到「正在新建」的状态，而不是先到页面再找按钮。 */
+function quickNewNote() {
+  pendingCreateNote.value = true
+  navigate('notes')
+}
+function quickNewAiTask() {
+  pendingNewAiTask.value = true
+  navigate('ai')
+}
+/** 新建脚本要在脚本页弹窗里填名字/语言，所以只是挂个标志再跳过去。 */
+function quickNewScript() {
+  pendingCreateScript.value = true
+  navigate('script')
+}
+/** 点脚本卡某一行：带上 id，让脚本页直接选中它而不是回到列表第一项。 */
+function openScriptCard(id: string) {
+  pendingOpenScriptId.value = id
+  navigate('script')
+}
+
 async function dismissCode(id: string) {
   try {
     unwrap(await Dismiss(id))
@@ -627,6 +650,10 @@ let offMailChanged: (() => void) | null = null
 // 服务崩了（或 reaper 自动重拉成功）卡片会一直显示旧状态。
 let offDshExited: (() => void) | null = null
 let offDshStarted: (() => void) | null = null
+// 脚本卡：脚本新建/改动/跑完都走事件刷新，不再为它加一条轮询——
+// 定时脚本跑完的那一刻正是这张卡最该变的时候。
+let offScriptChanged: (() => void) | null = null
+let offScriptRun: (() => void) | null = null
 
 async function loadShelf() {
   try {
@@ -772,6 +799,12 @@ const weatherTime = computed(() => weather.value
 
 const todos = ref<Todo[]>([])
 const monitors = ref<Monitor[]>([])
+// 脚本卡只要「名字 / 语言 / 上次跑成没」四五个字段，不必把整个 Script 结构搬过来。
+interface DashScript {
+  id: string; name: string; lang: string
+  lastRun: string; lastStatus: string; failCount: number
+}
+const scripts = ref<DashScript[]>([])
 const runtimes = ref<RuntimeInfo[]>([])
 // 两个不归 env 监督器管的常驻进程：只取「跑没跑 / 端口」，其余字段这里用不上
 const fileSearch = ref<{ running: boolean; enabled: boolean } | null>(null)
@@ -982,6 +1015,14 @@ const monitorList = computed(() => {
   return [...monitors.value].sort((a, b) => rank(a) - rank(b)).slice(0, 6)
 })
 
+/** 脚本任务：失败的排最前——总览上「哪些挂了」比「最近跑了什么」更值得先看见。 */
+const scriptList = computed(() => {
+  const rank = (s: DashScript) => (s.lastStatus === 'running' ? 0 : s.lastStatus && s.lastStatus !== 'ok' ? 1 : 2)
+  return [...scripts.value]
+    .sort((a, b) => rank(a) - rank(b) || (b.lastRun || '').localeCompare(a.lastRun || ''))
+    .slice(0, 5)
+})
+
 // 常用开发端口：只看前 6 条时它们不该被系统进程的上百个端口挤出去。
 const COMMON_DEV_PORTS = [3000, 5173, 8080, 8000, 8888, 4200]
 const portList = computed(() =>
@@ -1016,6 +1057,31 @@ function isUrgent(x: Todo): boolean {
   return !!x.dueDate && x.dueDate <= todayStr.value
 }
 
+/** 脚本卡三点色：跑着的用警告色（中性偏「进行中」），失败红、成功绿、没跑过灰。 */
+function scriptDot(st: string): string {
+  if (st === 'ok') return 'up'
+  if (st === 'running') return 'run'
+  if (!st) return 'idle'
+  return 'down'
+}
+/** 语言短标签：总览一行放不下 "javascript"，统一压成两三个字符。 */
+function langTag(lang: string): string {
+  switch (lang) {
+    case 'python': return 'PY'
+    case 'javascript': return 'JS'
+    case 'shell': return 'SH'
+    case 'go': return 'GO'
+    case 'php': return 'PHP'
+  }
+  return '·'
+}
+/** 上次运行时间：只留到分钟。总览要的是「刚刚 / 21:40 / 11-22」这种一眼量级。 */
+function lastRunText(s: string): string {
+  if (!s) return t('dash_scripts_never')
+  const t2 = s.replace('T', ' ').slice(0, 16)
+  return t2.slice(0, 10) === todayStr.value ? t2.slice(11) : t2.slice(5)
+}
+
 // ---- 加载 ----
 async function loadTodos() {
   try {
@@ -1024,6 +1090,16 @@ async function loadTodos() {
   } catch (e) {
     failed.value.todo = true
     logErr('dashboard.todos', e)
+  }
+}
+
+async function loadScripts() {
+  try {
+    scripts.value = (unwrap(await ListScripts()) as DashScript[] | null) || []
+    delete failed.value.scripts
+  } catch (e) {
+    failed.value.scripts = true
+    logErr('dashboard.scripts', e)
   }
 }
 
@@ -1545,7 +1621,7 @@ async function refreshAll(silent = false) {
   // 手动那一次得把它带上，否则卡片上的钱数会停在进来时的那个值。
   await Promise.all([
     loadTodos(), loadMonitors(), loadRuntimes(), loadTools(), loadPorts(), loadItems(), loadGit(),
-    loadAIConfig(), loadAIUsage(), loadActivity(),
+    loadAIConfig(), loadAIUsage(), loadActivity(), loadScripts(),
   ])
   loading.value = false
   lastRefresh.value = new Date()
@@ -1578,6 +1654,7 @@ function cardOrder(id: DashCardId): number {
 function cardTitle(id: DashCardId): string {
   const keys: Record<DashCardId, string> = {
     next: 'dashNextTitle', recent: 'dash_recent', shelf: 'shelfTitle', todo: 'dash_today_todo', mail: 'mailTitle',
+    scripts: 'dash_scripts',
     ports: 'dash_ports', resident: 'dash_env_resident', git: 'dash_git',
     monitor: 'dash_health', ai: 'dash_ai_usage',
   }
@@ -1783,6 +1860,8 @@ function attachGlobal() {
   offShelfChanged = Events.On('shelf:changed', () => { void loadShelf() })
   offDshExited = Events.On('quickdock:dsh:exited', () => { if (!disposed) void loadDshOnly() })
   offDshStarted = Events.On('quickdock:dsh:started', () => { if (!disposed) void loadDshOnly() })
+  offScriptChanged = Events.On('quickdock:script:changed', () => { if (!disposed) void loadScripts() })
+  offScriptRun = Events.On('quickdock:script:run', () => { if (!disposed) void loadScripts() })
   if (!PREVIEW && timer === null) {
     timer = setInterval(() => {
       void loadMonitors()
@@ -1805,6 +1884,8 @@ function detachGlobal() {
   offShelfChanged?.(); offShelfChanged = null
   offDshExited?.(); offDshExited = null
   offDshStarted?.(); offDshStarted = null
+  offScriptChanged?.(); offScriptChanged = null
+  offScriptRun?.(); offScriptRun = null
   if (timer !== null) { clearInterval(timer); timer = null }
 }
 
@@ -1866,17 +1947,33 @@ onUnmounted(() => {
         <span class="qd-page-sub">{{ t('dash_subtitle') }}</span>
       </template>
       <div class="qd-page-actions">
-        <button class="qd-btn qd-btn-ghost" :title="t('dashQuickNewTodo')" @click="quickNewTodo">
-          <ListTodo :size="13" />{{ t('dashQuickNewTodo') }}
-        </button>
-        <button class="qd-btn qd-btn-ghost" :disabled="!mailCodes.length" :title="t('dashQuickCopyCode')"
-                @click="quickCopyCode">
-          <Copy :size="13" />{{ t('dashQuickCopyCode') }}
-        </button>
-        <button class="qd-btn qd-btn-ghost" :disabled="loading" @click="refreshAll()">
-          <RefreshCw :size="13" :class="{ spin: loading }" />
-          {{ t('dash_refresh') }}
-        </button>
+        <!-- 按 ui.md §3.1 分两段：左边是「从总览直接开一个新东西」，
+             右边是顺手工具（复制验证码 / 刷新）。总览没有主操作，
+             所以不画主按钮，只用一条短竖线把这两类分开。 -->
+        <div class="qd-action-group">
+          <button class="qd-btn qd-btn-ghost" :title="t('dashQuickNewTodo')" @click="quickNewTodo">
+            <ListTodo :size="13" />{{ t('dashQuickNewTodo') }}
+          </button>
+          <button class="qd-btn qd-btn-ghost" :title="t('dashQuickNewNote')" @click="quickNewNote">
+            <NotebookPen :size="13" />{{ t('dashQuickNewNote') }}
+          </button>
+          <button class="qd-btn qd-btn-ghost" :title="t('dashQuickNewAiTask')" @click="quickNewAiTask">
+            <Sparkles :size="13" />{{ t('dashQuickNewAiTask') }}
+          </button>
+          <button class="qd-btn qd-btn-ghost" :title="t('dashQuickNewScript')" @click="quickNewScript">
+            <FileCode2 :size="13" />{{ t('dashQuickNewScript') }}
+          </button>
+        </div>
+        <span class="qd-action-sep"></span>
+        <div class="qd-action-group">
+          <button class="qd-btn qd-btn-ghost" :disabled="!mailCodes.length" :title="t('dashQuickCopyCode')"
+                  @click="quickCopyCode">
+            <Copy :size="13" />{{ t('dashQuickCopyCode') }}
+          </button>
+          <button class="qd-btn qd-btn-ghost" :disabled="loading" :title="t('dash_refresh')" @click="refreshAll()">
+            <RefreshCw :size="13" :class="{ spin: loading }" />
+          </button>
+        </div>
       </div>
     </PageHeader>
 
@@ -2461,6 +2558,42 @@ onUnmounted(() => {
               </template>
             </section>
 
+            <!-- 脚本任务：定时脚本跑完的那条结果最容易漏——它不在待办里，
+                 也不会弹窗。总览只列「失败优先 + 最近跑过的」，点进去看日志。 -->
+            <section v-if="cardVisible('scripts')" class="card span-3" :style="{ order: cardOrder('scripts') }">
+              <header class="card-head">
+                <FileCode2 :size="13" class="t-ic" />
+                <span class="card-title">{{ t('dash_scripts') }}</span>
+                <span v-if="scripts.length" class="card-count">{{ scripts.length }}</span>
+                <div class="qc-actions">
+                  <button class="db-icon-btn" :title="t('dashQuickNewScript')" @click="quickNewScript">
+                    <Plus :size="13" />
+                  </button>
+                  <button class="db-icon-btn" :title="t('dash_refresh')" @click="loadScripts()">
+                    <RefreshCw :size="13" />
+                  </button>
+                </div>
+                <button class="card-link" @click="go('script')">
+                  {{ t('dash_view_all') }}<ChevronRight :size="11" />
+                </button>
+              </header>
+              <p v-if="failed.scripts" class="empty">
+                {{ t('dash_load_failed') }} <button class="qc-link" @click="loadScripts()">{{ t('retry') }}</button>
+              </p>
+              <p v-else-if="!scripts.length" class="empty">
+                {{ t('dash_scripts_empty') }}
+                <button class="qc-link" @click="quickNewScript">{{ t('dashQuickNewScript') }}</button>
+              </p>
+              <ul v-else class="rows">
+                <li v-for="x in scriptList" :key="x.id" class="row clickable" :title="x.name" @click="openScriptCard(x.id)">
+                  <span class="qc-dot" :class="scriptDot(x.lastStatus)"></span>
+                  <span class="row-title">{{ x.name }}</span>
+                  <span class="scr-tag">{{ langTag(x.lang) }}</span>
+                  <span class="due">{{ lastRunText(x.lastRun) }}</span>
+                </li>
+              </ul>
+            </section>
+
             <!-- 验证码：有时效、拿到就复制走，属于「扫一眼就处理」的卡，
                  所以紧跟两个入口卡，排在需要细读的状态卡之前。 -->
             <section v-if="cardVisible('mail')" class="card span-3" :style="{ order: cardOrder('mail') }">
@@ -3030,6 +3163,10 @@ onUnmounted(() => {
 .qc-dot.down { background: var(--color-danger); }
 /* 首次同步尚未出结果：中性灰，别用红点把「正在连」说成「连不上」 */
 .qc-dot.pending { background: var(--color-text-disabled); }
+/* 脚本卡的两档：跑着的用警告色（「进行中」既不是成功也不是失败），
+   从没跑过用中性灰——新建还没跑过一次不该摆出红点。 */
+.qc-dot.run { background: var(--color-warning); }
+.qc-dot.idle { background: var(--color-text-disabled); }
 /* 邮箱设置浮层里的账号列表：选中态用 bg-hover，不要再套一层卡片面层——
    浮层里再挖一块更暗的面，看起来会像个洞。列表只用一圈描边分组。 */
 .qc-acct-head {
@@ -3235,6 +3372,12 @@ onUnmounted(() => {
   color: var(--color-text-primary);
 }
 .row-icon { color: var(--color-text-muted); flex-shrink: 0; }
+/* 语言短标签（PY/JS/GO…）：等宽 + 描边，比彩色药丸安静，一行里不抢标题。 */
+.scr-tag {
+  flex-shrink: 0; font-family: var(--font-mono); font-size: var(--text-2xs);
+  line-height: 1.6; padding: 0 4px; border-radius: var(--radius-xs);
+  color: var(--color-text-muted); border: 1px solid var(--color-border);
+}
 .row-target {
   max-width: 46%; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted);

@@ -22,6 +22,7 @@ import type { ScheduledTask } from '../../bindings/quickdock/internal/db/models'
 import type { CollectionItem } from '../types'
 import { ITEM_TYPE } from '../constants/itemTypes'
 import SceneItemPicker from './SceneItemPicker.vue'
+import { ListScripts } from '../../bindings/quickdock/services/script/scriptservice'
 import UnifiedCalendar from './UnifiedCalendar.vue'
 
 import { Events } from '@wailsio/runtime'
@@ -34,6 +35,7 @@ import {
   Plus, Play, Pause, Pencil, Trash2, AlarmClock, AppWindow, FolderOpen,
   Globe, TerminalSquare, Zap, CheckCircle2, XCircle, History,
   Search, LoaderCircle, GripVertical, Bell, BarChart3, FolderSearch, Bot, MessagesSquare, CalendarDays,
+  FileCode2,
 } from '@lucide/vue'
 
 const { t, locale } = useI18n()
@@ -49,9 +51,9 @@ const error = ref('')
 const formErr = ref('')
 
 // ---- 动作类型元信息 ----
-const ACTIONS = ['app', 'dir', 'url', 'command', 'http', 'ai'] as const
+const ACTIONS = ['app', 'dir', 'url', 'command', 'script', 'http', 'ai'] as const
 const actionIcon: Record<string, any> = {
-  app: AppWindow, dir: FolderOpen, url: Globe, command: TerminalSquare, http: Zap, ai: Bot,
+  app: AppWindow, dir: FolderOpen, url: Globe, command: TerminalSquare, script: FileCode2, http: Zap, ai: Bot,
 }
 function actionLabel(a: string) { return t('sched_action_' + a) }
 
@@ -83,10 +85,29 @@ function targetPlaceholder(a: string) {
     case 'dir': return 'D:\\project\\quickdock'
     case 'url': return 'https://example.com'
     case 'command': return 'ping -n 1 example.com'
+    case 'script': return t('sched_script_ph')
     case 'http': return 'https://api.example.com/webhook'
     case 'ai': return t('sched_ai_prompt_ph')
   }
   return ''
+}
+
+// ---- 脚本任务（action='script'）----
+// target 存脚本 id：改脚本不用改任务。下拉里只给「有名字的东西」，
+// 绝不让用户手填 id——填错了要等到下次到点才报错。
+const scriptOptions = ref<{ id: string; name: string; lang: string }[]>([])
+async function loadScriptOptions() {
+  try {
+    const list = unwrap<{ id: string; name: string; lang: string }[]>(await ListScripts()) || []
+    scriptOptions.value = list.map(s => ({ id: s.id, name: s.name, lang: s.lang }))
+  } catch (e) {
+    // 脚本服务没就绪时任务表单仍可用，只是没有可选脚本；留日志方便定位绑定缺失。
+    scriptOptions.value = []
+    logErr('schedule.loadScriptOptions', e)
+  }
+}
+function scriptName(id: string) {
+  return scriptOptions.value.find(s => s.id === id)?.name || ''
 }
 
 // ---- 展示辅助 ----
@@ -738,7 +759,7 @@ function stopPage() {
   needsRefresh = true
   stopTick()
 }
-onMounted(() => { void refresh(); startPage() })
+onMounted(() => { void refresh(); startPage(); void loadScriptOptions() })
 onActivated(startPage)
 onDeactivated(stopPage)
 
@@ -985,11 +1006,20 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
         <!-- 目标：ai 动作存的是多行提示词，用 textarea；路径类动作才显示应用/场景选择器 -->
         <label>{{ targetLabel(fAction) }}</label>
         <AppTargetPicker v-if="fAction === 'app'" v-model="fTarget" :placeholder="targetPlaceholder(fAction)" />
+        <select v-else-if="fAction === 'script'" v-model="fTarget" class="modal-input">
+          <option value="">{{ scriptOptions.length ? t('sched_script_ph') : t('sched_script_empty') }}</option>
+          <!-- 脚本被删了但任务还在：不额外给一项的话下拉会显示成空白，
+               用户以为「没配」，保存一次就把 target 悄悄清掉了。 -->
+          <option v-if="fTarget && !scriptOptions.some(s => s.id === fTarget)" :value="fTarget">
+            {{ t('sched_script_missing') }}
+          </option>
+          <option v-for="sc in scriptOptions" :key="sc.id" :value="sc.id">{{ sc.name }} · {{ sc.lang }}</option>
+        </select>
         <textarea v-else-if="fAction === 'ai'" v-model="fTarget" class="modal-input modal-area" rows="4"
                   :placeholder="targetPlaceholder(fAction)"></textarea>
         <input v-else v-model="fTarget" class="modal-input" :placeholder="targetPlaceholder(fAction)" />
         <!-- 不必手填路径：从已有的场景/集合/项目里挑一个，自动带出 target 与对应动作类型 -->
-        <button v-if="fAction !== 'ai'" type="button" class="qd-btn qd-btn-sm sched-pick-btn" @click="showPicker = true">
+        <button v-if="fAction !== 'ai' && fAction !== 'script'" type="button" class="qd-btn qd-btn-sm sched-pick-btn" @click="showPicker = true">
           <FolderSearch :size="13" /> {{ t('sched_pick_scene_item') }}
         </button>
 

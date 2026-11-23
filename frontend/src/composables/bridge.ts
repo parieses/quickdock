@@ -40,6 +40,20 @@ export const pendingOpenTodoId = ref<string>('')
 // 与 pendingOpenTodoId 同一套「写标志 → 目标页消费即清」口径，不依赖挂载先后。
 export const pendingCreateTodo = ref(false)
 
+// 跨页「新建笔记」：总览快捷动作写入 true，NoteManagerPage 消费后建一条空白文档并打开。
+export const pendingCreateNote = ref(false)
+
+// 跨页「新建 AI 任务」：总览快捷动作写入 true，AIPage 消费后回到落地页开一条空白任务。
+// 不带内容，所以不复用 pendingAskText（那条会把文本填进输入框）。
+export const pendingNewAiTask = ref(false)
+
+// 跨页「新建脚本」：总览快捷动作写入 true，ScriptPage 消费后打开新建弹窗。
+export const pendingCreateScript = ref(false)
+
+// 脚本深链：总览脚本卡点某条脚本时写入 id，ScriptPage 监听后选中它。
+// 与 pendingOpenTodoId / pendingOpenNoteId 同一套「写标志 → 目标页消费即清」口径。
+export const pendingOpenScriptId = ref<string>('')
+
 // 跨页「文本注入 AI 输入框」：日志查看器等页面把整理好的文本写进来，
 // AI 页监听后开一条空白任务、把文本填进输入框等用户确认发送。
 // 与 pendingCreateTodo 同一套「写标志 → 目标页消费即清」口径：seq 让连续两次

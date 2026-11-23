@@ -7,7 +7,7 @@
 import type { Component } from 'vue'
 import {
   Bell, Bot, Bug, Clock, FilePlus, FileSearch, FileText, FolderTree, GitBranch, Globe,
-  LayoutList, Link as LinkIcon, ListChecks, Network, PenLine, Play, Plus, Search, Square,
+  LayoutList, Link as LinkIcon, ListChecks, Network, PackagePlus, PenLine, Play, Plus, Search, Square,
   Terminal, Wrench,
 } from '@lucide/vue'
 import type { AIArtifact, AIMessage, AIRuleFile, AISource, AIToolCall } from '../types/ai'
@@ -214,6 +214,11 @@ const TOOL_ICON: Record<string, Component> = {
   port_list: LayoutList, log_list: FileText, log_read: FileText,
   monitor_list: Clock, monitor_check_now: Clock, monitor_logs: Clock,
   schedule_list: Clock, schedule_runs: Clock, schedule_run_now: Play,
+  // 脚本任务：建/写用「新建文件」「改文件」的图标，读用文件/目录，装依赖用包，
+  // 一眼能看出这一步是在动代码还是在装东西。
+  script_list: ListChecks, script_files: FolderTree, script_read_file: FileText,
+  script_create: FilePlus, script_write_file: PenLine, script_install_deps: PackagePlus,
+  script_run: Play, script_log: FileText,
   todo_list: ListChecks, todo_add: Plus, todo_done: ListChecks,
   note_search: FileText, note_create: FileText,
   clipboard_list: LayoutList, clipboard_search: Search,
@@ -250,6 +255,10 @@ const TOOL_VERB: Record<string, string> = {
   log_list: 'aiToolVerbQuery', log_read: 'aiToolVerbRead',
   monitor_list: 'aiToolVerbQuery', monitor_check_now: 'aiToolVerbCheck', monitor_logs: 'aiToolVerbQuery',
   schedule_list: 'aiToolVerbQuery', schedule_runs: 'aiToolVerbQuery', schedule_run_now: 'aiToolVerbRun',
+  script_list: 'aiToolVerbQuery', script_files: 'aiToolVerbList', script_read_file: 'aiToolVerbRead',
+  script_runs: 'aiToolVerbQuery', script_log: 'aiToolVerbRead', script_run: 'aiToolVerbRun',
+  script_create: 'aiToolVerbScriptCreate', script_write_file: 'aiToolVerbScriptWrite',
+  script_install_deps: 'aiToolVerbScriptDeps',
   todo_list: 'aiToolVerbQuery', todo_add: 'aiToolVerbAdd', todo_done: 'aiToolVerbUpdate',
   note_search: 'aiToolVerbSearch', note_create: 'aiToolVerbAdd',
   clipboard_list: 'aiToolVerbQuery', clipboard_search: 'aiToolVerbSearch',

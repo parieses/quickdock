@@ -28,6 +28,8 @@ export const KEEP_ALIVE = {
   dashboard: 'DashboardPage',
   todo: 'TodoPage',
   schedule: 'SchedulePage',
+  // 脚本站：编辑器里可能有没保存的改动，切走销毁等于丢草稿。
+  script: 'ScriptPage',
   clipboard: 'ClipboardPanel',
   filesearch: 'FileSearchPage',
 } as const
