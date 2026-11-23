@@ -39,6 +39,7 @@ import (
 	pluginsvc "quickdock/services/plugin"
 	portsvc "quickdock/services/port"
 	scenesvc "quickdock/services/scene"
+	scriptsvc "quickdock/services/script"
 	shelfsvc "quickdock/services/shelf"
 	sshxsvc "quickdock/services/sshx"
 	systemsvc "quickdock/services/system"
@@ -80,7 +81,12 @@ type MCPService struct {
 	Shelf       *shelfsvc.ShelfService
 	Scene       *scenesvc.SceneService
 	Item        *itemsvc.ItemService
-	version     string
+	// Script 脚本任务门面：只读三件套 + 受限触发。
+	// 用字段赋值而不是塞进构造函数：MCP 服务在脚本服务之前创建（脚本工具要复用
+	// 同一个实例而不是另建一份），构造后再像 netdiskSvc.Downloader 那样挂上去，
+	// 免得把 23 个参数的构造函数再拉长一个。
+	Script  *scriptsvc.ScriptService
+	version string
 }
 
 // NewMCPService 创建 MCP 绑定服务，并注册业务工具。
@@ -621,6 +627,7 @@ func toolProviders() []toolProvider {
 		{Category: mcpsrv.CategoryDiag, Register: registerDiagTools},           // 日志与崩溃记录
 		{Category: mcpsrv.CategorySchedule, Register: registerScheduleTools},   // 定时任务与执行历史
 		{Category: mcpsrv.CategoryMonitor, Register: registerMonitorTools},     // 监控状态、检测记录
+		{Category: mcpsrv.CategorySchedule, Register: registerScriptTools},     // 脚本任务（只读 + 受限触发）
 		{Category: mcpsrv.CategoryPlugin, Register: registerPluginTools},       // 插件清单与命令执行
 		{Category: mcpsrv.CategoryRisk, Register: registerRiskTools},           // 高危：当前恒不开放
 	}

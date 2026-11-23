@@ -189,12 +189,18 @@ func domainCatalog() []mcpsrv.Domain {
 		},
 		{
 			ID: mcpsrv.CategorySchedule, LabelKey: "mcpCatSchedule", Order: orderSchedule, External: true,
-			Summary: "定时任务与执行历史",
+			Summary: "定时任务、脚本任务与执行历史",
 			Hint: "**定时任务**：schedule_list 看已有任务，schedule_runs 看执行历史。" +
-				"用户说「以后每半小时 / 每天 xx 帮我看一次 yy」时，这是明确要一个长期任务，不是要你现在跑一次。\n",
+				"用户说「以后每半小时 / 每天 xx 帮我看一次 yy」时，这是明确要一个长期任务，不是要你现在跑一次。\n" +
+				"**脚本任务**：script_list 看有哪些脚本，script_files / script_read_file 看目录与源码，" +
+				"script_runs / script_log 看跑得怎么样。这些脚本是用户机器上可直接执行的代码（python/js/shell/go/php）。\n",
 			WriteHint: "schedule_create 建任务：提示词要把「做什么、产出什么」写全，因为跑的时候用户不在场；" +
 				"没说频率就先问。只能建 action=ai 的任务（命令/应用类让用户去定时任务页建）。" +
-				"schedule_run_now 立即跑一次，不影响排期；命令类任务会等到结束，AI 类会立刻返回「已开始」。\n",
+				"schedule_run_now 立即跑一次，不影响排期；命令类任务会等到结束，AI 类会立刻返回「已开始」。\n" +
+				"script_create 建脚本：code 是入口正文，files 放依赖文件与辅助模块（Python=requirements.txt、" +
+				"Node=package.json、Go=go.mod（缺了自动补）、PHP=composer.json），首次运行会自动先装依赖。" +
+				"要自己跑必须传 allowRun=true（等于用户勾了「允许 MCP 调用」）。" +
+				"script_write_file 是**整体覆盖**不是追加，改完依赖文件可调 script_install_deps 立刻重装。\n",
 			Scenes: readScenes(),
 		},
 		{
