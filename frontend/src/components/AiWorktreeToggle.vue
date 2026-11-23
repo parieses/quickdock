@@ -15,7 +15,7 @@
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { FolderGit2, X } from '@lucide/vue'
+import { ChevronDown, FolderGit2, X } from '@lucide/vue'
 
 const props = defineProps<{
   /** 当前目录在 git 仓库里：false 时整个组件不渲染 */
@@ -93,7 +93,7 @@ function onToggle() {
         :disabled="props.disabled"
         @click="emit('toggle-branch')"
       >
-        {{ label }} ▾
+        {{ label }} <ChevronDown :size="12" />
       </button>
       <!-- 分支下拉：向上弹（输入区贴着窗口底部） -->
       <div v-if="props.enabled && props.branchOpen" class="ai-wt-menu">

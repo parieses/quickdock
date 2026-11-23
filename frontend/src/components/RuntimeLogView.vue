@@ -9,6 +9,7 @@
 // 而且 PHP 错误日志只能看不能搜。抽出来之后三处共用一份实现。
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ArrowDown, ArrowUp } from '@lucide/vue'
 
 interface Props {
   /** 原始日志全文（按 \n 切行） */
@@ -163,8 +164,8 @@ onMounted(() => nextTick(scrollBottom))
         <input v-model="query" class="rv-input" :placeholder="t('logFilterPlaceholder')" />
         <span v-if="matchCount" class="rv-hits">{{ cur + 1 }}/{{ matchCount }}</span>
         <template v-if="matchCount > 1">
-          <button class="rv-nav" :title="t('logPrev')" @click="step(-1)">↑</button>
-          <button class="rv-nav" :title="t('logNext')" @click="step(1)">↓</button>
+          <button class="rv-nav" :title="t('logPrev')" @click="step(-1)"><ArrowUp :size="14" /></button>
+          <button class="rv-nav" :title="t('logNext')" @click="step(1)"><ArrowDown :size="14" /></button>
         </template>
         <button v-if="query" class="rv-nav" :title="t('clear')" @click="query = ''">×</button>
       </div>

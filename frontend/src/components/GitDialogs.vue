@@ -434,14 +434,9 @@ const { t } = useI18n()
 
 .modal-label { font-size: var(--text-xs); color: var(--color-text-muted); }
 
-.modal-input {
-  height: 30px; padding: 0 9px; font-size: var(--text-sm); font-family: var(--font-mono);
-  background: var(--color-bg-primary); border: 1px solid var(--color-border);
-  border-radius: var(--radius-xs); color: var(--color-text-primary); outline: none;
-}
-
-.modal-input:focus { border-color: var(--color-border-focus-soft); }
-
+/* .modal-input 走 settings.css 的全局定义（34px / 继承字体 / bg-tertiary），
+   这里不再另立同名样式。Git 专属的 mono、窄输入框由 .rm-input / .rm-name-in /
+   .ssh-form .modal-input 这些配套类继续覆盖。 */
 .modal-row { display: flex; align-items: center; gap: var(--space-2); }
 
 .modal-path {

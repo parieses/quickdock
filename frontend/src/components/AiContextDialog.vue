@@ -295,7 +295,7 @@ void n // 保留 i18n 的数字格式化入口，后续要按语言显示千分�
   position: fixed;
   inset: 0;
   background: var(--color-bg-overlay);
-  z-index: 210;
+  z-index: var(--z-modal);
 }
 
 .ctx-dialog {
@@ -312,7 +312,7 @@ void n // 保留 i18n 的数字格式化入口，后续要按语言显示千分�
   border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
-  z-index: 211;
+  z-index: calc(var(--z-modal) + 1);
 }
 
 .ctx-head {

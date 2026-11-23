@@ -8,6 +8,7 @@
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ChevronDown, ChevronRight } from '@lucide/vue'
 
 /** 侧栏的一项：运行时分两类，special 是 git / everything 这种非服务入口 */
 interface SidebarItem {
@@ -91,7 +92,10 @@ watch(() => props.selectedId, () => { void nextTick(revealActive) }, { immediate
       <button class="cats-group-label" type="button" @click="emit('toggle-group', grp.key)">
         <span v-if="grp.running" class="cat-dot" :title="t('svcRunning')"></span>
         <span>{{ t(grp.labelKey) }}</span>
-        <span class="cats-chevron">{{ grp.collapsed ? '▸' : '▾' }}</span>
+        <span class="cats-chevron">
+          <ChevronRight v-if="grp.collapsed" :size="12" />
+          <ChevronDown v-else :size="12" />
+        </span>
       </button>
       <button
         v-for="it in grp.items"

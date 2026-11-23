@@ -870,11 +870,15 @@ const refreshSec = ref(5)
 const LS_REFRESH_KEY = 'quickdock.monitor.refreshSec'
 
 if (typeof localStorage !== 'undefined') {
-  const saved = localStorage.getItem(LS_REFRESH_KEY)
-  if (saved !== null) {
-    const n = parseInt(saved, 10)
-    if (REFRESH_OPTIONS.includes(n)) refreshSec.value = n
-  }
+  // 隐私模式 / 企业策略下 getItem 本身会抛 SecurityError，typeof 挡不住；
+  // 读偏好失败就沿用默认的 5 秒，别让整页脚本崩在这里。
+  try {
+    const saved = localStorage.getItem(LS_REFRESH_KEY)
+    if (saved !== null) {
+      const n = parseInt(saved, 10)
+      if (REFRESH_OPTIONS.includes(n)) refreshSec.value = n
+    }
+  } catch { /* 存储不可用：沿用默认刷新间隔 */ }
 }
 
 let pollTimer: ReturnType<typeof setTimeout> | undefined

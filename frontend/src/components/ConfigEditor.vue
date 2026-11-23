@@ -118,7 +118,7 @@ defineExpose({ markSaved, focus })
       <span class="ce-st-item">{{ t('ceLines', { n: lineCount }) }}</span>
       <span class="ce-st-sep">·</span>
       <span class="ce-st-item">{{ text.length }} {{ t('ceChars') }}</span>
-      <span v-if="dirty" class="ce-dirty">● {{ t('ceDirty') }}</span>
+      <span v-if="dirty" class="ce-dirty"><span class="ce-dirty-dot"></span>{{ t('ceDirty') }}</span>
       <span class="ce-spacer"></span>
       <span class="ce-keys">Ctrl+F {{ t('ceFind') }} · Ctrl+S {{ t('save') }}</span>
     </div>
@@ -157,7 +157,8 @@ defineExpose({ markSaved, focus })
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .ce-st-sep { color: var(--color-text-disabled); }
-.ce-dirty { color: var(--color-warning); }
+.ce-dirty { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--color-warning); }
+.ce-dirty-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-warning); }
 .ce-spacer { flex: 1 1 auto; }
 .ce-keys { color: var(--color-text-disabled); }
 </style>

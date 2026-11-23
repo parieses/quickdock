@@ -324,7 +324,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
 .ai-perm-modal {
   position: fixed;
   inset: 0;
-  z-index: 3000;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;

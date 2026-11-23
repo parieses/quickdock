@@ -182,7 +182,7 @@ function goHotkeySettings() {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 120;
+  z-index: var(--z-modal);
 }
 .cs-modal {
   display: flex;
