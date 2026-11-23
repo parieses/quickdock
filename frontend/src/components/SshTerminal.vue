@@ -1118,10 +1118,13 @@ onBeforeUnmount(() => {
 function readScreenText(): string {
   if (!term) return ''
   const buf = term.buffer.active
-  // baseY 是当前视口最上方的行号；多往上取一屏，覆盖"命令 + 输出 + 报错"完整一段。
-  const top = Math.max(0, buf.baseY - term.rows)
+  // 必须用 viewportY（视口顶行）而不是 baseY（滚到底时的视口顶行）：
+  // 用户往上滚去看旧报错时，baseY 不变，按它取到的是最后两屏，不是他正看着的那一屏。
+  const vtop = typeof buf.viewportY === 'number' ? buf.viewportY : buf.baseY
+  // 多往上取一屏，覆盖"命令 + 输出 + 报错"完整一段。
+  const top = Math.max(0, vtop - term.rows)
   const lines: string[] = []
-  for (let y = top; y < buf.baseY + term.rows; y++) {
+  for (let y = top; y < vtop + term.rows; y++) {
     const line = buf.getLine(y)
     lines.push(line ? line.translateToString(true) : '')
   }

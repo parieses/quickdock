@@ -420,6 +420,12 @@ function onState(ev: { sessionId: string; state: string; error?: string; errorCo
   // 远端主动断开（用户敲 exit、网络掉线、服务器重启）都归到这里：
   // 会话还在管理器里保留着，这里只改展示，不销毁——画面留在回放缓冲里，
   // 用户可以先看最后输出再决定要不要重连。
+  // 连接空窗期的输出超过待写上限（2MB）时终端会丢弃超出的部分并报这一档：
+  // 不提示的话，用户拿到的是一个静默缺内容的画面，还会以为是自己看漏了。
+  if (ev.state === 'incomplete') {
+    toastError(t('sshScreenTruncated'))
+    return
+  }
   if (ev.state === 'disconnected' || ev.state === 'closed') {
     phase.value = 'closed'
     errMsg.value = ev.error || ''
@@ -638,6 +644,18 @@ async function openAiPanel(): Promise<void> {
   aiOpen.value = true
 }
 
+/**
+ * 关闭 AI 面板。
+ *
+ * 必须清掉一次性载荷：面板是 v-if 挂载 + immediate watch，
+ * 不清的话下次用右下角按钮打开，会把上一次右键的选区当成"本轮引用"
+ * 重新挂上并预填默认问题，发问时还会把旧选区一并发给模型。
+ */
+function closeAiPanel() {
+  aiOpen.value = false
+  pendingAsk.value = null
+}
+
 const ai = useAIAvailability()
 
 /** 待注入 AI 面板的提问（右键选中后的一次性载荷）。
@@ -826,7 +844,7 @@ defineExpose({
         :read-screen="readScreen"
         :send-to-term="sendToTerm"
         :pending-ask="pendingAsk"
-        @close="aiOpen = false"
+        @close="closeAiPanel"
       />
     </div>
 

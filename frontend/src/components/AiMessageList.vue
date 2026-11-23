@@ -62,6 +62,14 @@ const props = defineProps<{
   formatStat: (s: AIStreamStat) => string
   cpForCall: (tc: AIToolCall) => AICheckpointView | undefined
   /**
+   * 回滚点的版本号（父组件传 checkpoints.length 即可）。
+   *
+   * v-memo 的依赖里必须有它：历史消息渲染时 checkpoints 还在异步加载，
+   * 只靠 cpForCall 这个稳定引用的函数，checkpoints 到货后依赖值全不变 →
+   * 命中缓存 → 撤销按钮不出现，得手动展开一次工具卡才冒出来。
+   */
+  cpVersion: number
+  /**
    * 后台任务状态：job id → 一行（由父组件轮询 ai_jobs 得到，含已结束的）。
    *
    * 卡片上原来直接把 job id 印出来（`后台任务 job_mvzabgak_27620：…`），那是
@@ -782,7 +790,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
           v-for="m in shownMessages"
           :key="m.id"
           :data-msg-id="m.id"
-          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), costLines.get(m.id), locale, (m.imgList?.length ?? 0), m.attached_files, m.attachedList?.length, m.tool_calls, m.skills, m.plan, m.id !== latestPlanMsgId, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id, expandedInMessage(m), schedTimes, m.created_at]"
+          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), costLines.get(m.id), locale, (m.imgList?.length ?? 0), m.attached_files, m.attachedList?.length, m.tool_calls, m.skills, m.plan, m.id !== latestPlanMsgId, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id, expandedInMessage(m), schedTimes, m.created_at, cpVersion]"
           :class="['ai-msg', m.role]"
         >
           <div class="ai-msg-role">

@@ -174,6 +174,7 @@ async function checkUpdate() {
     // 离线/超时必须给可见反馈，否则用户分不清「没有更新」和「检测失败」。
     // checkingUpdate 在 finally 里复位，按钮随即恢复可点。
     showMsg(t('dshCheckUpdateFailed'), true)
+    logErr('SettingsDSH.checkUpdate', e)
   } finally {
     checkingUpdate.value = false
   }
@@ -580,11 +581,26 @@ onUnmounted(() => {
 })
 
 let checkRanOnce = false
+/**
+ * 统一复位所有「忙碌中」标志。
+ *
+ * 这些标志只在完成事件里收尾；后端异常退出或事件通道没建起来时事件不会来，
+ * 按钮就永久禁用（而且离开再回来也不会恢复）。进入本页时一律清零，
+ * 真实状态由 refresh / polling 重新取。
+ */
+function resetBusyFlags() {
+  installingPlugin.value = false
+  updatingPlugins.value = false
+  settingUp.value = false
+  updating.value = false
+  uninstalling.value = false
+  removingPlugin.value = ''
+}
+
 watch(() => props.visible, async (v) => {
   if (v) {
-    // 重新进入本页时复位插件安装状态，避免上次卡死的事件遗漏导致按钮永久禁用
-    installingPlugin.value = false
-    updatingPlugins.value = false
+    // 重新进入本页时复位安装/更新/卸载状态，避免上次卡死的事件遗漏导致按钮永久禁用
+    resetBusyFlags()
     await refresh()
     loadDSHStatus()
     // 已装插件列表只在进入页面时读一次 package.json（本地文件，无网络）；

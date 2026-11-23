@@ -252,6 +252,8 @@ async function ask() {
     confirmRun.value = ''
     await nextTick()
   } catch (e) {
+    // 已经点了停止或又开了一轮：这一轮的失败不该弹到现在这轮头上
+    if (cancelled.value || seq !== askSeq) return
     logErr('ssh.ai.ask', e)
     errMsg.value = getErrorMessage(e)
     // AI 未配置是很常见的首访状态，给出可点击的引导而不是一句"失败"。
@@ -261,7 +263,8 @@ async function ask() {
       toastError(errMsg.value)
     }
   } finally {
-    busy.value = false
+    // 同上：只有仍是最新一轮才收转圈，否则会把新一轮的忙碌态提前关掉
+    if (seq === askSeq) busy.value = false
   }
 }
 

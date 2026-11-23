@@ -5,7 +5,7 @@
  * 两个页签共用一次数据拉取：AISessionStats 一条 SQL 聚合给出轮次、用时、
  * TTFT、TPS 与 token 明细。打开时才拉，失败就地显示，不弹 toast 打断。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { X } from '@lucide/vue'
 import { AISessionStats } from '../../bindings/quickdock/services/ai/aiservice'
@@ -132,6 +132,8 @@ watch(() => props.open, (v) => {
   if (v) window.document.addEventListener('keydown', onKeydown, true)
   else window.document.removeEventListener('keydown', onKeydown, true)
 }, { immediate: true })
+// open 为真时被卸载（父级条件渲染）不会走 watch 的 false 分支，这里兜底摘掉监听
+onBeforeUnmount(() => window.document.removeEventListener('keydown', onKeydown, true))
 </script>
 
 <template>
@@ -222,7 +224,7 @@ watch(() => props.open, (v) => {
   position: fixed;
   inset: 0;
   background: var(--color-bg-overlay);
-  z-index: 220;
+  z-index: var(--z-modal);
 }
 .sstat-dialog {
   position: fixed;
@@ -238,7 +240,7 @@ watch(() => props.open, (v) => {
   border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
-  z-index: 221;
+  z-index: calc(var(--z-modal) + 1);
   overflow: hidden;
 }
 .sstat-head {

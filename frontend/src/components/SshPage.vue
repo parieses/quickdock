@@ -114,8 +114,15 @@ const forwardTabOptions = computed<Array<{ id: string; label: string }>>(() =>
 // ---- OSC 7 终端目录跟随（默认关闭） ----
 const FOLLOW_CWD_KEY = 'qd_ssh_follow_cwd'
 const followCwd = ref(false)
-/** 下发给「当前激活且已打开文件面板」那一个标签的目标路径；空串 = 不下发。 */
-const followSftpPath = ref('')
+/**
+ * 下发给「当前激活且已打开文件面板」那一个标签的目标路径；null = 不下发。
+ *
+ * 带自增 seq 而不是裸字符串：远端 PROMPT_COMMAND 每次提示符都上报同一个 $PWD，
+ * 用户手动把面板切到别的目录后，再敲命令时路径没变 → 赋相同值不触发 watch，
+ * 「跟随终端目录」就只生效一次。
+ */
+const followSftpPath = ref<{ path: string; seq: number } | null>(null)
+let followSeq = 0
 
 function loadFollowCwd() {
   try {
@@ -130,7 +137,7 @@ function loadFollowCwd() {
 function toggleFollowCwd() {
   followCwd.value = !followCwd.value
   // 关掉开关时立刻撤掉待下发的路径，否则下次打开会把上次那条旧目录灌进面板。
-  if (!followCwd.value) followSftpPath.value = ''
+  if (!followCwd.value) followSftpPath.value = null
   try {
     localStorage.setItem(FOLLOW_CWD_KEY, String(followCwd.value))
   } catch (e) {
@@ -141,7 +148,7 @@ function toggleFollowCwd() {
 // 切换标签也要清空：留在 ref 里的是上一个标签的目录，直接传给新标签的面板
 // 会把 B 主机的文件列表指到 A 主机上报的路径上。
 watch(activeId, () => {
-  followSftpPath.value = ''
+  followSftpPath.value = null
 })
 
 // ---- 远端 shell 集成（登录后注入 OSC 7 钩子，默认开） ----
@@ -194,7 +201,7 @@ function onSshCwd(ev: Event) {
   if (!active || !sftpTabs.value.has(active)) return
   const tab = findTab(tabs.value, active)
   if (!tab || tabSessionId(tab) !== sid) return
-  followSftpPath.value = path
+  followSftpPath.value = { path, seq: ++followSeq }
 }
 
 let offShown: (() => void) | null = null
@@ -1023,7 +1030,7 @@ defineExpose({
             class="ssh-sftp"
             :host="tab.host"
             :active="tab.id === activeId && sftpTabs.has(tab.id)"
-            :follow-path="tab.id === activeId && sftpTabs.has(tab.id) ? followSftpPath : ''"
+            :follow-path="tab.id === activeId && sftpTabs.has(tab.id) ? followSftpPath : null"
             @close="toggleSftp(tab.id)"
           />
         </template>

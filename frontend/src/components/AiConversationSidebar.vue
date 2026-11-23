@@ -469,7 +469,22 @@ onBeforeUnmount(() => {
           >
             <component :is="modeIcon(c.mode)" :size="12" class="ai-conv-mode" />
             <AiConvRunDot :state="c.id === activeId ? undefined : runState[c.id]" />
-            <span v-key-click class="ai-conv-title" :title="t('aiRenameHint')" @dblclick.stop="startRename(c)" @keydown.f2.stop.prevent="startRename(c)">{{ c.title || t('aiNewChat') }}</span>
+            <!-- 空间内的任务同样支持双击/F2 改名：输入框必须在这一支里也渲染，
+                 否则 startRename 把 renamingId 置上却没有对应 input，
+                 openCtxMenu 又会因「正在改名」吞掉右键，表现是右键菜单也不出来。 -->
+            <input
+              v-if="renamingId === c.id"
+              ref="renameInput"
+              :value="renameText" @input="onRenameTextInput"
+              class="ai-conv-rename"
+              spellcheck="false"
+              maxlength="60"
+              @click.stop
+              @keydown.enter="onEnterSend($event, () => commitRename(c))"
+              @keydown.esc.prevent="cancelRename()"
+              @blur="commitRename(c)"
+            />
+            <span v-else v-key-click class="ai-conv-title" :title="t('aiRenameHint')" @dblclick.stop="startRename(c)" @keydown.f2.stop.prevent="startRename(c)">{{ c.title || t('aiNewChat') }}</span>
             <span v-if="c.unread" class="ai-conv-unread" :title="t('aiUnreadHint')" />
           </div>
           <button
@@ -783,12 +798,12 @@ onBeforeUnmount(() => {
 
 /* ---- 任务行右键菜单 ----
    fixed + 全屏透明遮罩：菜单贴鼠标出现，点遮罩任意位置即关。
-   z-index 取 3000（与 SftpPanel 行菜单同档）：这个菜单从 body 挂出，
-   低于侧栏之上任何带栈的浮层（@ 补全、+ 面板）都会让菜单被切成两半。
+   z-index 取 --z-context（右键菜单档，要能盖住弹窗）：这个菜单从 body 挂出，
+   低于这个档位的任何带栈浮层（@ 补全、+ 面板）都会让菜单被切成两半。
    前缀用 ai-conv- 而不是 ai-ctx-：AIPage 里的图片/图表右键菜单已经占了
    ai-ctx 这一组类名，scoped 虽然能隔开，但全仓搜的时候两处会混在一起。 */
 .ai-conv-ctx-backdrop {
-  position: fixed; inset: 0; z-index: 3000;
+  position: fixed; inset: 0; z-index: var(--z-context);
 }
 .ai-conv-ctx-menu {
   position: fixed;
