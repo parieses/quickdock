@@ -17,9 +17,11 @@
  * 全文重新着色并拼一遍 HTML 字符串，行号还是每行一个 DOM；CM 的增量解析在长配置
  * 上快一个档，还白送撤销与括号匹配，且不用再维护「两层字体行高必须完全一致」。
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { CodeEditorHandle } from '../utils/aiCodeEditor'
+import { importWithRetry } from '../utils/lazyImport'
+import { log } from '../utils/logger'
 
 const props = withDefaults(
   defineProps<{
@@ -39,6 +41,8 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const host = ref<HTMLElement | null>(null)
+/** 降级态的 textarea（引擎拉不到时的兜底编辑区） */
+const plainRef = ref<HTMLTextAreaElement | null>(null)
 let ed: CodeEditorHandle | null = null
 let disposed = false
 
@@ -52,33 +56,104 @@ function markSaved() {
   base.value = text.value
 }
 
-// ---- 光标行列（CM 的 selection 回调推过来）----
+// ---- 光标行列（CM 的 selection 回调推过来；纯文本兜底时按 textarea 选区算）----
 const caret = ref({ line: 1, col: 1 })
 
+/**
+ * 编辑器内核状态。
+ *  'loading' 动态加载中  'cm' CodeMirror 就绪  'text' 降级为纯文本 textarea
+ *
+ * 必须有 'text' 这一档：createCodeEditor 内部还要按需拉 codemirror 核心与语言包
+ * （dev 期还会撞上 vite 预构建换 hash 的 504），一旦拉不到就只剩一个空 div ——
+ * 用户看到的正是「新建脚本后没法写代码」。纯文本没有高亮，但能敲、能存、
+ * Ctrl+S 照常用，比空白强一万倍。
+ */
+const engine = ref<'loading' | 'cm' | 'text'>('loading')
+const loadErr = ref('')
+/**
+ * 「正在加载」提示只在慢的时候出现：切文件时组件是重建的，正常几十毫秒就绪，
+ * 每次都闪一下文案反而像卡了。超过 150ms 才显示。
+ */
+const showLoading = ref(false)
+let loadingTimer = 0
+function startLoading() {
+  showLoading.value = false
+  window.clearTimeout(loadingTimer)
+  loadingTimer = window.setTimeout(() => {
+    if (engine.value === 'loading') showLoading.value = true
+  }, 150)
+}
+function stopLoading() {
+  window.clearTimeout(loadingTimer)
+  showLoading.value = false
+}
+/** 让「重试」能把上一轮挂起的 mount 结果丢掉，别的实例/轮次不要覆盖当前状态 */
+let mountSeq = 0
+
+function caretFromOffset(offset: number) {
+  const before = text.value.slice(0, Math.max(0, offset))
+  const nl = before.lastIndexOf('\n')
+  caret.value = { line: before.split('\n').length, col: before.length - nl }
+}
+
 async function mount() {
-  if (!host.value) return
-  const { createCodeEditor } = await import('../utils/aiCodeEditor')
-  // await 期间组件可能已卸载、或 readonly 又变了一次
-  if (disposed || !host.value) return
+  const seq = ++mountSeq
+  engine.value = 'loading'
+  loadErr.value = ''
+  startLoading()
   ed?.destroy()
-  ed = await createCodeEditor(host.value, {
-    value: text.value,
-    filename: props.filename,
-    readOnly: props.readonly,
-    fontSize: '13px',
-    onChange: (v) => emit('update:modelValue', v),
-    onSave: () => emit('save'),
-    onSelectionChange: (line, col) => {
-      caret.value = { line, col }
-    },
-  })
-  // 与原来「打开即可敲字」一致：CM 是异步加载的，加载完补一次聚焦
-  ed.focus()
+  ed = null
+  if (!host.value) {
+    stopLoading()
+    return
+  }
+  try {
+    // 走 importWithRetry 而不是裸 import：dev 期 vite 预构建换 hash 时，
+    // 裸动态 import 会抛 "Failed to fetch dynamically imported module"，
+    // 这里会重试一次、必要时整页重载；仍失败就落到下面降级成纯文本。
+    const { createCodeEditor } = await importWithRetry(() => import('../utils/aiCodeEditor'))
+    // await 期间组件可能已卸载、readonly 变了、或用户点了重试
+    if (disposed || seq !== mountSeq || !host.value) return
+    ed = await createCodeEditor(host.value, {
+      value: text.value,
+      filename: props.filename,
+      readOnly: props.readonly,
+      fontSize: '13px',
+      onChange: (v) => emit('update:modelValue', v),
+      onSave: () => emit('save'),
+      onSelectionChange: (line, col) => {
+        caret.value = { line, col }
+      },
+    })
+    if (disposed || seq !== mountSeq) {
+      ed.destroy()
+      ed = null
+      return
+    }
+    stopLoading()
+    engine.value = 'cm'
+    // 与原来「打开即可敲字」一致：CM 是异步加载的，加载完补一次聚焦
+    ed.focus()
+  } catch (e) {
+    if (disposed || seq !== mountSeq) return
+    stopLoading()
+    ed?.destroy()
+    ed = null
+    // 拉不到编辑器内核 = 不能写代码，这是会挡住主流程的故障：降级 + 留下可读原因，
+    // 并给一个「重试」，等 dev 预构建/更新包就位后一键恢复高亮。
+    log.warn('ConfigEditor', 'editor engine unavailable, falling back to plain text', e)
+    loadErr.value = e instanceof Error ? e.message : String(e ?? '')
+    engine.value = 'text'
+    await nextTick()
+    plainRef.value?.focus()
+  }
 }
 
 onMounted(mount)
 onBeforeUnmount(() => {
   disposed = true
+  mountSeq++
+  stopLoading()
   ed?.destroy()
   ed = null
 })
@@ -87,7 +162,10 @@ onBeforeUnmount(() => {
 // 否则会绕回来把 modelValue 再写一遍。
 watch(
   () => props.modelValue,
-  (v) => ed?.setValue(v ?? ''),
+  (v) => {
+    // 降级态下 textarea 直接绑 :value，不需要也不能再走 CM
+    if (engine.value === 'cm') ed?.setValue(v ?? '')
+  },
 )
 // 只读是 CM 的扩展级配置，切换只能重建实例
 watch(
@@ -97,8 +175,24 @@ watch(
 
 // ---- 查找 / 替换在编辑器内部（Ctrl+F），这里不再维护第二套 UI ----
 
+/** 纯文本兜底：textarea 的输入直接回灌给父组件，与 CM 的 onChange 同一条路 */
+function onPlainInput(e: Event) {
+  const el = e.target as HTMLTextAreaElement
+  emit('update:modelValue', el.value)
+  caretFromOffset(el.selectionStart ?? 0)
+}
+function onPlainCaret(e: Event) {
+  const el = e.target as HTMLTextAreaElement
+  caretFromOffset(el.selectionStart ?? 0)
+}
+
+function retry() {
+  void mount()
+}
+
 function focus() {
-  ed?.focus()
+  if (engine.value === 'text') plainRef.value?.focus()
+  else ed?.focus()
 }
 
 defineExpose({ markSaved, focus })
@@ -106,9 +200,23 @@ defineExpose({ markSaved, focus })
 
 <template>
   <div class="ce">
+    <!-- 降级提示：只有在编辑器内核拉不到时才出现，说明原因并给一条恢复路径 -->
+    <div v-if="engine === 'text'" class="ce-fallback-bar">
+      <span class="ce-fb-text">{{ t('ceFallbackHint') }}</span>
+      <button class="ce-fb-retry" type="button" @click="retry">{{ t('ceRetry') }}</button>
+    </div>
+
     <!-- 编辑区：CodeMirror 宿主（行号/高亮/滚动/查找栏都在它内部） -->
     <div class="ce-body">
-      <div ref="host" class="ce-cm"></div>
+      <div v-show="engine !== 'text'" ref="host" class="ce-cm"></div>
+      <!-- 兜底编辑区：没有高亮，但能写、能存、Ctrl+S 一样生效 -->
+      <textarea
+        v-if="engine === 'text'"
+        ref="plainRef" class="ce-plain mono" :value="text" :readonly="readonly" spellcheck="false"
+        @input="onPlainInput" @select="onPlainCaret" @click="onPlainCaret" @keyup="onPlainCaret"
+        @keydown.ctrl.s.prevent="emit('save')" @keydown.meta.s.prevent="emit('save')"
+      />
+      <div v-if="showLoading" class="ce-loading">{{ t('ceLoading') }}</div>
     </div>
 
     <!-- 状态栏 -->
@@ -120,6 +228,7 @@ defineExpose({ markSaved, focus })
       <span class="ce-st-item">{{ text.length }} {{ t('ceChars') }}</span>
       <span v-if="dirty" class="ce-dirty"><span class="ce-dirty-dot"></span>{{ t('ceDirty') }}</span>
       <span class="ce-spacer"></span>
+      <span v-if="engine === 'text'" class="ce-st-item ce-st-warn" :title="loadErr">{{ t('cePlainMode') }}</span>
       <span class="ce-keys">Ctrl+F {{ t('ceFind') }} · Ctrl+S {{ t('save') }}</span>
     </div>
   </div>
@@ -143,8 +252,36 @@ defineExpose({ markSaved, focus })
 }
 
 /* ---- 编辑主体：CM 撑满剩余空间（CM 自己的主题在 utils/aiCodeEditor.ts）---- */
-.ce-body { flex: 1 1 auto; min-height: 0; display: flex; overflow: hidden; }
+.ce-body { flex: 1 1 auto; min-height: 0; display: flex; overflow: hidden; position: relative; }
 .ce-cm { flex: 1 1 auto; min-width: 0; }
+
+/* ---- 降级兜底：纯文本编辑区 + 顶部提示条 ---- */
+.ce-fallback-bar {
+  flex: none; display: flex; align-items: center; gap: var(--space-2);
+  padding: 5px 10px;
+  background: var(--color-warning-bg);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--text-xs); color: var(--color-warning);
+}
+.ce-fb-text { flex: 1 1 auto; line-height: 1.5; }
+.ce-fb-retry {
+  flex: none; height: 22px; padding: 0 var(--space-2);
+  border: 1px solid currentColor; border-radius: var(--radius-sm);
+  background: transparent; color: inherit; font-size: var(--text-xs);
+  font-family: inherit; cursor: pointer;
+}
+.ce-fb-retry:hover { background: var(--color-bg-hover); }
+.ce-plain {
+  flex: 1 1 auto; min-width: 0; width: 100%;
+  resize: none; border: none; outline: none; padding: 8px 10px;
+  background: transparent; color: var(--color-text-primary);
+  font-family: var(--font-mono); font-size: 13px; line-height: 1.6;
+  tab-size: 2; white-space: pre; overflow: auto;
+}
+.ce-loading {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--color-text-muted); font-size: var(--text-xs);
+}
 
 /* ---- 状态栏 ---- */
 .ce-status {
@@ -159,6 +296,7 @@ defineExpose({ markSaved, focus })
 .ce-st-sep { color: var(--color-text-disabled); }
 .ce-dirty { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--color-warning); }
 .ce-dirty-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-warning); }
+.ce-st-warn { color: var(--color-warning); }
 .ce-spacer { flex: 1 1 auto; }
 .ce-keys { color: var(--color-text-disabled); }
 </style>

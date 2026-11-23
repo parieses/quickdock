@@ -27,6 +27,8 @@ import {
 import { tags as t } from '@lezer/highlight'
 import { i18n } from '../i18n'
 import { log } from './logger'
+// 动态 import 的重试 / dev 期 dep hash 过期自愈都在这里（内外两层共用）。
+import { importWithRetry } from './lazyImport'
 
 /** 查找栏文案。DOM 是命令式创建的，拿不到 useI18n() 的组件上下文，直接问全局实例 */
 const tf = (k: string): string => (i18n.global.t as (key: string) => string)(k)
@@ -118,63 +120,6 @@ export interface CodeEditorOpts {
    * 等其它使用者完全不受影响。
    */
   fold?: boolean
-}
-
-/**
- * 动态 import 的统一入口：失败重试一次。
- *
- * 本文件的模块几乎全是动态 import，dev 期这些请求会撞上 vite 预构建（dep optimizer）
- * 重排——优化器换了 browserHash 后，旧 `?v=` 的请求一律回 504 Outdated Optimize Dep。
- * 静态 import 由 vite 客户端兜底（自动整页重载），动态 import 没有这层保护，错误直接
- * 抛给调用方，表现就是「源码视图一片空白」。
- *
- * 但**重试对 504 是无效的**：`?v=<browserHash>` 写在编译后的说明符里，同一个
- * 模块说明符重试一百次也还是旧 hash。真正能换掉它的只有整页重载（重新拉一份
- * index.html 与模块图）。所以这里分两条路：hash 过期 → 重载页面（带节流，
- * 免得真·离线时无限刷新）；其余错误 → 等 300ms 再试一次。
- */
-const DEP_RELOAD_KEY = 'quickdock.ai.editor.depReloadAt'
-
-function isStaleDepError(e: unknown): boolean {
-  const msg = e instanceof Error ? e.message : String(e ?? '')
-  // 开发期 vite 明确回 "Outdated Optimize Dep"；浏览器对 504 的模块请求统一
-  // 报成 Failed to fetch dynamically imported module，两者都要认。
-  return /Outdated Optimize Dep|Failed to fetch dynamically imported module/i.test(msg)
-}
-
-/** 距离上次自动重载是否已经超过节流窗口（60s）。 */
-function shouldReloadForDeps(): boolean {
-  try {
-    const last = Number(sessionStorage.getItem(DEP_RELOAD_KEY) || 0)
-    return Date.now() - last > 60_000
-  } catch {
-    // 隐私模式/禁用 storage：宁可不重载，也不要每次打开编辑器都刷一次页。
-    return false
-  }
-}
-
-async function importWithRetry<T>(load: () => Promise<T>): Promise<T> {
-  try {
-    return await load()
-  } catch (e) {
-    log.warn('CodeEditor', 'dynamic import failed', e)
-    // 只在 dev 自动重载：生产环境整页刷新会丢掉用户没保存的编辑内容，
-    // 宁可降级成纯文本。dev 期的 504 纯粹是预构建换 hash，刷新无损。
-    if (import.meta.env.DEV && isStaleDepError(e) && shouldReloadForDeps()) {
-      try {
-        sessionStorage.setItem(DEP_RELOAD_KEY, String(Date.now()))
-      } catch {
-        // 写不进去也能重载一次，只是失去节流保护。
-      }
-      log.warn('CodeEditor', 'dep hash stale, reloading page once')
-      location.reload()
-      // 重载已在路上，返回一个永不 resolve 的 Promise：调用方不会在页面
-      // 消失前抢着渲染一版降级内容（那会闪一下纯文本编辑器）。
-      return new Promise<T>(() => {})
-    }
-    await new Promise((r) => setTimeout(r, 300))
-    return load()
-  }
 }
 
 // 语言按扩展名懒加载。default 返回 null = 纯文本编辑（行号/搜索/undo 照有）。

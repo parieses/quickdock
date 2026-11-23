@@ -16,6 +16,7 @@ import { clampSideWidth, parseStoredWidth } from '../utils/aiSideWidth'
 import { writeStorageDebounced } from '../utils/storageQueue'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { importWithRetry } from '../utils/lazyImport'
 import { AIReadPreviewFile, AISavePreviewFile } from '../../bindings/quickdock/services/ai/aiservice'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 import type { AIArtifact } from '../types/ai'
@@ -325,7 +326,7 @@ watch(
     // await 期间用户可能已经切走/取消，挂载前再验一遍
     if (!cmHostEl.value || activeTab.value?.id !== tabId || !tab.editing) return
     try {
-      const { createCodeEditor } = await import('../utils/aiCodeEditor')
+      const { createCodeEditor } = await importWithRetry(() => import('../utils/aiCodeEditor'))
       if (!cmHostEl.value || activeTab.value?.id !== tabId || !tab.editing) return
       cmHandle = await createCodeEditor(cmHostEl.value, {
         value: tab.draft ?? tab.data.content ?? '',
