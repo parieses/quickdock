@@ -952,10 +952,14 @@ onUnmounted(() => {
           <Puzzle v-else :size="22" class="card-icon-fallback" />
         </div>
 
-        <!-- 名称 -->
-        <div class="card-name">{{ pluginName(p, locale) }}</div>
+        <!-- 名称：独占整行。状态徽标挪到元信息行后，这里才有整行宽度，
+             名称不再被挤到只剩三四个字；仍超长时单行 ellipsis + 悬停看全名 -->
+        <div
+          class="card-name"
+          @mouseenter="applyOverflowTitle($event, pluginName(p, locale))"
+        >{{ pluginName(p, locale) }}</div>
 
-        <!-- 元信息行 -->
+        <!-- 元信息行：版本 / 用量 / 状态靠右 -->
         <div class="card-meta">
           <span v-if="newFlags.has(p.id)" class="new-badge">{{ t('pluginNewBadge') }}</span>
           <span class="card-version">v{{ p.version }}</span>
@@ -963,13 +967,17 @@ onUnmounted(() => {
             <Play :size="10" class="usage-icon" />
             <span class="usage-count">{{ p.usageCount }}</span>
           </span>
+          <span :class="['status-badge', statusBadgeClass(p)]">{{ statusLabel(p) }}</span>
         </div>
-
-        <span :class="['status-badge', statusBadgeClass(p)]">{{ statusLabel(p) }}</span>
 
         <!-- 权限审计：装完之后仍能看到这个插件能碰什么，不必回去翻 plugin.json -->
         <div v-if="permTags(p).length" class="card-perms">
-          <span v-for="tag in permTags(p)" :key="tag" class="perm-tag">{{ permLabel(tag) }}</span>
+          <span
+            v-for="tag in permTags(p)"
+            :key="tag"
+            class="perm-tag"
+            @mouseenter="applyOverflowTitle($event, permLabel(tag))"
+          >{{ permLabel(tag) }}</span>
         </div>
 
         <!--
@@ -982,10 +990,19 @@ onUnmounted(() => {
           :title="cmdListTitle(p)"
           @click.stop="openCmdList(p)"
         >
-          <span v-for="c in p.commands.slice(0, 2)" :key="c.id" class="cmd-chip">
+          <!-- 卡片上只留「热键 + 命令标题」：触发方式（扫描/手动）是第三个文字块，
+               在 158px 的卡片里会把标题挤成单个字。触发方式并入 chip 的 title 提示。 -->
+          <span
+            v-for="c in p.commands.slice(0, 2)"
+            :key="c.id"
+            class="cmd-chip"
+            :title="`[${triggerLabelFor(c)}] ${cmdTitle(c)}`"
+          >
             <kbd v-if="c.hotkey" class="cmd-kbd">{{ c.hotkey }}</kbd>
-            <span class="cmd-trigger">{{ triggerLabelFor(c) }}</span>
-            <span class="cmd-chip-title">{{ cmdTitle(c) }}</span>
+            <span
+              class="cmd-chip-title"
+              @mouseenter="applyOverflowTitle($event, cmdTitle(c))"
+            >{{ cmdTitle(c) }}</span>
           </span>
           <span v-if="p.commands.length > 2" class="cmd-more">+{{ p.commands.length - 2 }}</span>
         </div>
@@ -1199,26 +1216,29 @@ onUnmounted(() => {
 .empty-desc { font-size: var(--text-sm); margin: var(--space-3) 0 0; color: var(--color-text-muted); }
 
 /* ---- 网格 ---- */
+/* 最小列宽 158px：再窄的话一行只剩三四个汉字，名称和描述全被截断成省略号，
+   而卡片里已经没有别的信息可看。放宽后 1440 宽约 8 列，仍比列表紧凑。 */
 .plugin-grid {
   flex: 1; overflow-y: auto;
   min-height: 0; /* 同上：允许网格收缩到可视高度，超出才滚动 */
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
   gap: var(--space-4);
   align-content: start;
   padding: var(--space-1) 0;
 }
 
 /* ---- 插件卡片 ---- */
-/* 紧凑左对齐列表行：第一行「图标 + 名称 + 状态」，次要信息从第二行起左对齐流水排布。
-   用 grid 显式定位而非 flex 居中堆叠：名称能伸缩 ellipsis，状态徽标固定在右端。 */
+/* 紧凑左对齐列表行：第一行「图标 + 名称」，状态与版本等次要信息从第二行起
+   左对齐流水排布（状态徽标靠右）。名称独占第一行剩余宽度，才不会被状态徽标
+   挤成三四个字。 */
 .plugin-card {
   background: var(--color-card-bg);
   border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
   padding: var(--space-3) var(--space-4);
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
+  grid-template-columns: 28px minmax(0, 1fr);
   align-items: center;
   align-content: start;
   column-gap: var(--space-3);
@@ -1279,13 +1299,14 @@ onUnmounted(() => {
 .card-icon-img { width: 28px; height: 28px; object-fit: contain; }
 .card-icon-fallback { color: var(--color-text-muted); }
 
-/* 名称 */
-.card-name { grid-column: 2; grid-row: 1; font-size: var(--text-sm); font-weight: 500; color: var(--color-text-primary); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+/* 名称：第一行独占（图标右侧整行），单行 ellipsis，悬停由 applyOverflowTitle 补全名 */
+.card-name { grid-column: 2 / -1; grid-row: 1; min-width: 0; font-size: var(--text-sm); font-weight: 500; color: var(--color-text-primary); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .card-meta { grid-column: 2 / -1; display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .card-version { font-size: var(--text-2xs); color: var(--color-text-muted); }
 
-/* 状态 */
-.status-badge { grid-column: 3; grid-row: 1; justify-self: end; font-size: var(--text-2xs); padding: 0 var(--space-3); border-radius: var(--radius-md); font-weight: 500; line-height: 16px; }
+/* 状态：跟在元信息行末尾靠右。不再占第一行的独立网格列 —— 那样会把名称压到
+   只剩几个字。flex-wrap 生效时它换行到下一排，仍靠右对齐。 */
+.status-badge { margin-left: auto; font-size: var(--text-2xs); padding: 0 var(--space-3); border-radius: var(--radius-md); font-weight: 500; line-height: 16px; white-space: nowrap; }
 .badge-running { background: var(--color-success-bg); color: var(--color-success); }
 .badge-stopped { background: var(--color-border); color: var(--color-text-muted); }
 /* disabled 是中性「被关掉」，不该和 crashed 同为红色；红色只留给真正的崩溃 */
@@ -1298,6 +1319,10 @@ onUnmounted(() => {
 /* 权限标签：与状态徽标同尺寸，但用中性底 —— 权限是"事实"不是"状态"，
    给它们上色会和运行状态抢注意力 */
 .card-perms { grid-column: 2 / -1; display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+
+/* 每个标签最多约 8 个汉字宽，超出的截断并悬停看全文。
+   原来是 max-width:100%，一个长标签（「可执行程序白名单」）就独占整行，
+   下面的命令区和描述被推下去，卡片高矮差一截。 */
 .perm-tag {
   font-size: var(--text-2xs);
   line-height: 15px;
@@ -1305,7 +1330,7 @@ onUnmounted(() => {
   border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
   color: var(--color-text-muted);
-  max-width: 100%;
+  max-width: 8.5em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1320,7 +1345,7 @@ onUnmounted(() => {
 }
 .cmd-chip {
   display: inline-flex; align-items: center; gap: var(--space-2);
-  max-width: 100%;
+  min-width: 0; max-width: 100%;
   font-size: var(--text-2xs);
   color: var(--color-text-secondary);
 }
@@ -1334,9 +1359,21 @@ onUnmounted(() => {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   white-space: nowrap;
+  /* 组合键（Ctrl+Alt+Shift+F12）比命令标题还长时，让它先让位并省略，
+     而不是把后面的标题压成一个字 */
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+/* 标题吃掉 chip 的剩余宽度再省略，而不是固定 96px：
+   热键（Ctrl+Alt+S）已经占掉半张卡时，固定宽度会把标题挤成单个字。
+   宽度自适应后至少还能保留「扫描…」这种可读前缀。 */
 .cmd-chip-title {
-  max-width: 96px;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--color-text-muted);
 }
