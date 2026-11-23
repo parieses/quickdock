@@ -358,6 +358,24 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">Full UI refresh, more entry points, and a batch of “nothing happened” fixes</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>Visual overhaul: consistent overlays, selection states, layering and icons — four shared components replace the per-page copies</li>
+          <li>Todos gain a four-quadrant view; completing a recurring task can apply to “this one” or “all”, and you can snooze it on the spot</li>
+          <li>Create notes and todos right from the command palette; save AI answers, notes and clipboard entries as a note, a todo, or into the knowledge base</li>
+          <li>Running a scheduled task by hand is now asynchronous: watch which step it is on and cancel it midway</li>
+          <li>Send the current log to AI for analysis in one click; SSH batch runs can export results, retry only the failed hosts, and test reachability of saved hosts</li>
+          <li>The PATH panel in Environment management toggles bin dirs per version; site setup is now a three-step wizard (directory → domain → certificate)</li>
+          <li>A batch of “failure treated as empty state” fixes: a failed lock-status read no longer says “disabled”, a failed note read never overwrites the original with an empty draft, and stale page requests no longer overwrite fresh content</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.54</span>
+          <span class="log-date">2026-11-22</span>
           <span class="log-title">Arrange your dashboard cards, steadier AI memory and long chats, more note links and MCP tools</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -397,26 +415,6 @@
           <li>After a long conversation is compressed, the AI no longer suddenly "forgets the rules": how to split work, where to put temp files, whether it may spawn agents, and where it left off are all re-attached. The new context panel shows how many tokens this session uses, how close it is to the window and budget, and how many times it compressed — with a button to compress manually.</li>
           <li>Tool approval is stricter. Previously, allowing <code>npm</code> also let chained commands like <code>npm install &amp;&amp; curl …</code> slip through without asking; multi-part commands now always prompt again. When a model writes a broken tool argument (half-finished JSON), it used to fail the whole round with a 400 on the way back to the provider; it is now normalized to valid JSON first, and errors name the tool whose arguments were bad.</li>
           <li>A batch of stability fixes: cleaning AI scratch files no longer follows a symlink out of the working directory; sub-agents still run with tracing off but leave no records; and replayed sessions no longer show finished runs as "in progress".</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.51</span>
-          <span class="log-date">2026-11-16</span>
-          <span class="log-title">Cloud drive and cross-machine migration arrive; AI permissions collapse to three levels, downloads survive restarts</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>New "Cloud Drive" page: OpenList aggregates your cloud accounts into WebDAV and QuickDock draws its own browser instead of embedding the vendor console. Browse directories, preview images / video / audio / PDF / text inline (video seeking works), create / rename / delete, search and sort. Sending a batch to the downloader now carries real file names instead of a row of "f". The gateway is still installed and managed under Environment → OpenList, and its admin password is re-synced on every start — a drifted password used to leave the drive page permanently empty with no error.</li>
-          <li>Switching computers no longer means setting everything up again: Settings → Storage now has whole-install export / import. Machine A packs everything into one zip (including a consistent database snapshot); importing on machine B <em>merges</em> rather than replaces — records already on B are kept as-is, only missing ones are added, and there is no directory switch or restart. The credential vault can be sealed into the package with a passphrase and restored on B with the same phrase; leave it blank to migrate data only. Packages are validated and their origin shown before import, with progress throughout.</li>
-          <li>AI execution permissions collapse into one three-level axis: read-only / default / full access. On read-only, write tools are never attached to the model — not attached-then-blocked. Full access needs a one-time risk acknowledgement to take effect; tightening back is a single step. The old "capability tier" and the switch beside it fold in here, so there is no longer a pair of toggles to combine mentally. The level can also be changed on the new-task landing page and applies from your very first message.</li>
-          <li>Using a skill no longer triggers an out-of-scope confirmation, and you can tell whether it actually took effect: reading a selected skill's SKILL.md no longer prompts just because it lives outside the task directory. Your message bubble now shows which skills were actually attached, so you don't have to infer it from the answer. A related bug where a newly selected skill only worked from the second message is fixed too.</li>
-          <li>Downloads and their history no longer vanish on restart: aria2 forgets finished tasks when its process exits, so status, size, errors and finish time are now persisted, and the engine is asked to save its session before shutting down. Finished / failed jobs stay in the list as history entries offering only "open folder / delete record" — no more rows of controls that do nothing.</li>
-          <li>AI tool switches are now two independent sets: toggling something in the MCP panel no longer changes the AI settings, and vice versa — previously either side could silently turn off the other. Tool capability assembly and execution also converge onto a single path, so read-only can't accidentally grow write operations, and the default / full boundary matches the three levels shown in the UI.</li>
-          <li>The "run at startup" switches for Everything and DSH move to their page headers using the same control as other runtimes. With resident mode off, the file-search toggle can no longer quietly start Everything in the background — before, the UI showed off while the process ran. The duplicate checkbox inside the DSH panel is gone; the header is the single entry point.</li>
-          <li>The "?" info card beside each runtime in Environment now also opens for special entries not in the runtime list, such as DSH; previously it mistakenly showed node's description.</li>
-          <li>Replies now end with a fixed note: "AI-generated content — verify important information." The "Regenerate" button also moves from the bottom of the conversation onto the message you sent, so it's no longer a long scroll or an easy misclick.</li>
         </ul>
       </details>
 
