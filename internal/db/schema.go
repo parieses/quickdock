@@ -932,6 +932,68 @@ var ftsTables = []string{
 		tokenize='trigram'
 	)`,
 
+	// 脚本任务（青龙式）：正文与依赖文件在 dataDir/scripts/<id>/ 下，磁盘是唯一
+	// 真相源；本表只存索引与运行策略（详见 internal/db/script.go 的文件头注释）。
+	// 三张表都刻意不进 snapshot 的 syncExtraTables：脚本目录本身不随快照走，
+	// 只带元数据回来等于得到一堆指向空文件的记录；要迁移走「导出 zip」。
+	`CREATE TABLE IF NOT EXISTS scripts (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		description TEXT NOT NULL DEFAULT '',
+		lang TEXT NOT NULL DEFAULT 'python',
+		entry TEXT NOT NULL DEFAULT 'main.py',
+		interpreter TEXT NOT NULL DEFAULT '',
+		default_args TEXT NOT NULL DEFAULT '[]',
+		timeout_sec INTEGER NOT NULL DEFAULT 0,
+		concurrency INTEGER NOT NULL DEFAULT 1,
+		auto_install INTEGER NOT NULL DEFAULT 0,
+		pinned INTEGER NOT NULL DEFAULT 0,
+		mcp_allowed INTEGER NOT NULL DEFAULT 0,
+		tags TEXT NOT NULL DEFAULT '',
+		run_count INTEGER NOT NULL DEFAULT 0,
+		fail_count INTEGER NOT NULL DEFAULT 0,
+		last_run TEXT NOT NULL DEFAULT '',
+		last_status TEXT NOT NULL DEFAULT '',
+		last_duration_ms INTEGER NOT NULL DEFAULT 0,
+		sort INTEGER NOT NULL DEFAULT 0,
+		-- watch_path：事件触发监听的路径（文件或目录，空 = 不监听）。
+		-- 走 5 秒轮询 mtime，不引 fsnotify：脚本目录本来就在本机磁盘上，
+		-- 一个 ticker 扫全部启用项的成本远小于多一个原生依赖的维护成本。
+		watch_path TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL DEFAULT ''
+	)`,
+
+	// 脚本变量：script_id 为空 = 全局。env_key / env_value 而不是 key / value
+	// （KEY 在部分 SQL 方言里是保留字，且 list 通用列名容易撞）。
+	`CREATE TABLE IF NOT EXISTS script_envs (
+		id TEXT PRIMARY KEY,
+		script_id TEXT NOT NULL DEFAULT '',
+		env_key TEXT NOT NULL,
+		env_value TEXT NOT NULL DEFAULT '',
+		secret INTEGER NOT NULL DEFAULT 0,
+		remark TEXT NOT NULL DEFAULT '',
+		sort INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL
+	)`,
+
+	// 运行记录：与 schedule_runs 并存（定时触发两边都写，靠 runID 关联）——
+	// 手动/HTTP/MCP 触发根本不经过调度器，没有独立记录就查不到这三次运行。
+	`CREATE TABLE IF NOT EXISTS script_runs (
+		id TEXT PRIMARY KEY,
+		script_id TEXT NOT NULL,
+		script_name TEXT NOT NULL DEFAULT '',
+		trigger_kind TEXT NOT NULL DEFAULT 'manual',
+		status TEXT NOT NULL DEFAULT 'running',
+		exit_code INTEGER NOT NULL DEFAULT 0,
+		duration_ms INTEGER NOT NULL DEFAULT 0,
+		log_path TEXT NOT NULL DEFAULT '',
+		summary TEXT NOT NULL DEFAULT '',
+		ai_patch TEXT NOT NULL DEFAULT '',
+		started_at TEXT NOT NULL DEFAULT '',
+		finished_at TEXT NOT NULL DEFAULT ''
+	)`,
+
 	// 笔记正文/标题/标签的全文索引。
 	// 与 items_fts（unicode61）不同，这里必须用 trigram：笔记以中文为主，
 	// unicode61 没有空格就把整句切成一个 token，搜「数据库」永远 0 命中。
@@ -1282,6 +1344,9 @@ func (d *Database) migrate() error {
 		{"dl_tasks", "error", "TEXT NOT NULL DEFAULT ''"},
 		{"dl_tasks", "updated_at", "INTEGER NOT NULL DEFAULT 0"},
 		{"dl_tasks", "finished_at", "INTEGER NOT NULL DEFAULT 0"},
+		// scripts.watch_path：事件触发监听的路径（空 = 不监听）。
+		// 老库补空串 = 关闭，升级后行为与之前一致。
+		{"scripts", "watch_path", "TEXT NOT NULL DEFAULT ''"},
 	}
 	var addedCols []string
 	for _, m := range columnMigrations {
@@ -1377,6 +1442,15 @@ func (d *Database) migrate() error {
 		// 笔记「最近编辑」按 updated_at 倒序取；修订列表按单篇 + 时间倒序分页。
 		`CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_note_revisions_note ON note_revisions(note_id, created_at DESC)`,
+		// 脚本：唯一索引是 UpsertScriptEnv 的 ON CONFLICT 靶子 —— 没有它，
+		// 保存同名变量会插出两行，运行时的 env 合并就会「后写覆盖先写」，
+		// 表现为「改了 Cookie 但脚本用的还是旧值」。
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_script_envs_uniq ON script_envs(script_id, env_key)`,
+		// 列表默认「置顶 + 手动排序」，运行历史按脚本 + 时间倒序取，都是固定形态。
+		`CREATE INDEX IF NOT EXISTS idx_scripts_order ON scripts(pinned DESC, sort ASC)`,
+		`CREATE INDEX IF NOT EXISTS idx_script_runs_script ON script_runs(script_id, started_at DESC)`,
+		// 并发闸门与启动时的 running 收尾都按 status 过滤。
+		`CREATE INDEX IF NOT EXISTS idx_script_runs_status ON script_runs(status)`,
 	}
 	for _, sql := range postMigrations {
 		if _, err := d.conn.Exec(sql); err != nil {

@@ -81,6 +81,11 @@ var validTables = map[string]bool{
 	"kb_chunks":    true,
 	// 下载任务元数据：只存 gid / 链接 / 目录 / 来源，不存进度（进度实时问 aria2）。
 	"dl_tasks": true,
+	// 脚本任务：三张表都登记，但**刻意不进 snapshot 的 syncExtraTables**——
+	// 脚本正文在磁盘目录，只带元数据回去等于一堆指向空文件的记录。要迁移走导出 zip。
+	"scripts":     true,
+	"script_envs": true,
+	"script_runs": true,
 }
 
 // 已知列名的白名单（允许在 SQL 拼接中出现的列名，不含反引号/引号）。
@@ -125,6 +130,15 @@ var validColumns = map[string]bool{
 	"proxy_command": true, "proxy_command_enabled": true, "keepalive_interval": true,
 	"permissions": true, "manifest": true, "configurable": true, "built_in": true,
 	"installed": true, "enabled": true,
+	// 脚本任务三表（scripts / script_envs / script_runs）。白名单全局共用、不按表分，
+	// 漏一个就是该表所有走 structToMap 的插入报「非法列名」。
+	"pinned": true, "lang": true, "entry": true, "interpreter": true,
+	"default_args": true, "concurrency": true, "auto_install": true,
+	"run_count": true, "fail_count": true, "last_duration_ms": true,
+	"script_id": true, "script_name": true, "env_key": true, "env_value": true,
+	// exit_code / duration_ms / log_path 在上面的插件日志与 ai_jobs 处已声明，
+	// 白名单全局共用，这里不能再写一遍（重复 key 直接编译失败）。
+	"secret": true, "trigger_kind": true, "ai_patch": true, "watch_path": true,
 	"kind": true, "label": true, "note": true, "payload": true, "size": true,
 	"key":  true,
 	"text": true, "content_type": true, "text_type": true, "text_content": true, "image_path": true,
