@@ -221,7 +221,7 @@ async function remove() {
   const ok = await toast.confirm(t('credDeleteConfirm', { name: item.name }))
   if (!ok) return
   try {
-    await DeleteCredential(item.id)
+    unwrap(await DeleteCredential(item.id))
     toast.success(t('credDeleted'))
     selectedId.value = ''
     await load()
@@ -289,7 +289,7 @@ async function toggleExtension() {
     if (!ok) return
     extBusy.value = true
     try {
-      await DisableExtension()
+      unwrap(await DisableExtension())
       await loadStatus()
       toast.success(t('credExtDisabled'))
     } catch (e) {
@@ -302,7 +302,7 @@ async function toggleExtension() {
   }
   extBusy.value = true
   try {
-    await EnableExtension()
+    unwrap(await EnableExtension())
     await loadStatus()
     toast.success(t('credExtEnabled'))
   } catch (e) {
@@ -316,7 +316,7 @@ async function toggleExtension() {
 /** 复制连接密钥：由后端写剪贴板，避免密钥被记进剪贴板历史。 */
 async function copyExtKey() {
   try {
-    await CopyExtensionKey()
+    unwrap(await CopyExtensionKey())
     toast.success(t('credExtCopied'))
   } catch (e) {
     toast.error(getErrorMessage(e) || t('credExtEnableFailed'))

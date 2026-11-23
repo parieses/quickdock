@@ -953,11 +953,19 @@ const themeOptions = computed(() => [
 const currentLocale = ref('zh-CN')
 
 async function setLocale(newLocale: string) {
+  const oldLocale = currentLocale.value
   currentLocale.value = newLocale
   i18n.global.locale.value = newLocale as 'zh-CN' | 'en-US'
   try {
-    await SetValue('locale', newLocale)
-  } catch (e) { logErr('SettingsModal', e) }
+    // code!=0 必须抛错：否则语言当下切了、重启又变回去，用户还不知道失败了。
+    unwrap(await SetValue('locale', newLocale))
+  } catch (e) {
+    // 持久化失败就回滚到旧语言，界面与下次启动的落库状态保持一致，别留下「假切换」。
+    currentLocale.value = oldLocale
+    i18n.global.locale.value = oldLocale as 'zh-CN' | 'en-US'
+    toast.error(getErrorMessage(e) || t('settingLocaleFailed'))
+    logErr('SettingsModal.setLocale', e)
+  }
 }
 
 // 三处分段切换统一走 QdTabs：语言名是语言自名（两种语言下写法相同、无需翻译的专有名词），

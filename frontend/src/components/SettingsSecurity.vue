@@ -21,6 +21,9 @@ const props = defineProps<{ visible: boolean }>()
 const { t } = useI18n()
 
 const hasPassword = ref(false)
+// 读取状态失败必须与「确实没设密码」区分开：否则已有密码的机器会显示「未启用」，
+// 用户点「设置密码」等于把原密码覆盖掉（后端 set 是直接覆盖，不校验旧密码）。
+const loadFailed = ref(false)
 const loading = ref(false)
 const busy = ref(false)
 // mode 为空表示没有展开任何表单
@@ -43,8 +46,10 @@ async function load() {
   try {
     const st = unwrap<{ hasPassword?: boolean }>(await LockStatus())
     hasPassword.value = !!st?.hasPassword
+    loadFailed.value = false
   } catch (e) {
     logErr('SettingsSecurity.load', e)
+    loadFailed.value = true
   } finally {
     loading.value = false
   }
@@ -163,13 +168,17 @@ function dismissRecovery() {
     <div class="setting-row">
       <span class="setting-label">{{ t('securityPassword') }}</span>
       <div class="setting-control">
-        <span class="sec-state" :class="{ 'is-on': hasPassword }">
+        <template v-if="loadFailed">
+          <span class="sec-state">{{ t('statusError') }}</span>
+          <button class="btn btn-secondary" @click="load">{{ t('statusRetry') }}</button>
+        </template>
+        <span v-else class="sec-state" :class="{ 'is-on': hasPassword }">
           {{ hasPassword ? t('securityEnabled') : t('securityDisabled') }}
         </span>
       </div>
     </div>
 
-    <div v-if="!loading" class="setting-row">
+    <div v-if="!loading && !loadFailed" class="setting-row">
       <span class="setting-label">{{ t('securityActions') }}</span>
       <div class="setting-control">
         <template v-if="!hasPassword">

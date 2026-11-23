@@ -15,7 +15,12 @@ const sa = useSaveAs()
 
 const note = ref('')
 const loaded = ref(false)
-const status = ref<'idle' | 'saving' | 'saved'>('idle')
+// 读取失败必须与「笔记本来是空的」区分：以前失败就 note='' + loaded=true，
+// 随后输入触发的自动保存会把后端原有内容整篇覆盖掉。
+const loadFailed = ref(false)
+const status = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
+// 卸载 flush 失败时的兜底草稿：内容还没落库就关窗，下次打开优先恢复，别静默丢内容。
+const NOTE_DRAFT_KEY = 'qd_note_unsaved_draft'
 // 编辑器宿主（textarea → CodeMirror：markdown 便签也能看出结构）
 const editorHost = ref<HTMLElement | null>(null)
 let editor: CodeEditorHandle | null = null
@@ -26,25 +31,52 @@ async function load() {
   try {
     const s = unwrap<{ content: string }>(await GetNote())
     if (s) note.value = s.content || ''
-  } catch (_) {
-    note.value = ''
+    loadFailed.value = false
+  } catch (e) {
+    // 不动 note、不置 loaded：让自动保存保持关闭，等用户重试。
+    logErr('NotePanel.load', e)
+    loadFailed.value = true
+    return
+  }
+  // 有上次退出时没存成的草稿就恢复，避免 flush 失败的内容被静默吞掉。
+  try {
+    const draft = localStorage.getItem(NOTE_DRAFT_KEY)
+    if (draft) note.value = draft
+  } catch (e) {
+    logErr('NotePanel.restoreDraft', e)
   }
   loaded.value = true
 }
 
+/** 加载失败后的重试：成功后把内容灌进已挂载的编辑器并放开自动保存。 */
+async function retryLoad() {
+  await load()
+  if (!loadFailed.value) {
+    editor?.setValue(note.value)
+    editor?.focus()
+  }
+}
+
+/** 统一的落盘出口：unwrap 让后端 code!=0 抛错，失败落 error 态并记日志。 */
+async function persist(content: string) {
+  try {
+    unwrap(await SaveNote(content))
+    // 存成功就清掉兜底草稿，免得下次打开又把旧内容盖回来。
+    try { localStorage.removeItem(NOTE_DRAFT_KEY) } catch (e) { logErr('NotePanel.clearDraft', e) }
+    status.value = 'saved'
+    setTimeout(() => { if (status.value === 'saved') status.value = 'idle' }, 1500)
+  } catch (e) {
+    status.value = 'error'
+    logErr('NotePanel.save', e)
+  }
+}
+
 function scheduleSave() {
-  if (!loaded.value) return
+  if (!loaded.value || loadFailed.value) return
   status.value = 'saving'
   pending = note.value
   if (timer) clearTimeout(timer)
-  timer = setTimeout(() => {
-    SaveNote(pending).then(() => {
-      status.value = 'saved'
-      setTimeout(() => { if (status.value === 'saved') status.value = 'idle' }, 1500)
-    }).catch(() => {
-      status.value = 'idle'
-    })
-  }, 500)
+  timer = setTimeout(() => { void persist(pending) }, 500)
 }
 
 watch(note, (v) => {
@@ -73,7 +105,7 @@ async function mountEditor() {
       onChange: (v) => {
         note.value = v
       },
-      onSave: () => { void SaveNote(note.value).catch(() => {}) },
+      onSave: () => { void persist(note.value) },
     })
     editor.focus()
   } catch (e) {
@@ -89,8 +121,11 @@ onUnmounted(() => {
   if (timer) {
     clearTimeout(timer)
     timer = null
-    // flush 防抖 pending 内容
-    SaveNote(note.value).catch(() => {})
+    // flush 防抖 pending 内容；失败时留草稿兜底，别把没存成的内容静默丢掉。
+    void SaveNote(note.value).then((r) => unwrap(r)).catch((e) => {
+      try { localStorage.setItem(NOTE_DRAFT_KEY, note.value) } catch (se) { logErr('NotePanel.draft', se) }
+      logErr('NotePanel.flush', e)
+    })
   }
   editor?.destroy()
   editor = null
@@ -165,10 +200,19 @@ function selSaveAs(e: MouseEvent) {
           <Check v-else-if="status === 'saved'" :size="12" />
           <template v-if="status === 'saving'">{{ t('noteSaving') }}</template>
           <template v-else-if="status === 'saved'">{{ t('noteSaved') }}</template>
+          <template v-else-if="status === 'error'">{{ t('noteSaveFailed') }}</template>
         </span>
       </div>
     </div>
-    <div ref="editorHost" class="note-editor"></div>
+    <div class="note-editor-wrap">
+      <div ref="editorHost" class="note-editor"></div>
+
+      <!-- 读不到内容时盖住编辑区：否则用户对着空稿输入，自动保存会把后端原文覆盖掉 -->
+      <div v-if="loadFailed" class="note-load-error">
+        <span>{{ t('statusError') }}</span>
+        <button class="note-retry" @click="retryLoad">{{ t('statusRetry') }}</button>
+      </div>
+    </div>
 
     <!-- AI 面板覆盖在编辑区之上：关掉就回到原文，不打断"边看边改"。 -->
     <NoteAiPanel v-if="aiOpen" :text="aiText" @close="aiOpen = false" />
@@ -198,11 +242,23 @@ function selSaveAs(e: MouseEvent) {
 .note-ask:disabled { opacity: 0.4; cursor: not-allowed; }
 .note-status { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--color-text-muted); }
 .note-status.saved { color: var(--color-success); }
+.note-status.error { color: var(--color-danger); }
 .spin { animation: note-spin 1s linear infinite; }
 @keyframes note-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 /* 编辑区：CodeMirror 撑满剩余高度。内边距落在 .cm-content 上，
    与原 textarea 的留白观感一致 */
 .note-editor { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--color-bg-primary); }
+/* 加载失败蒙层的定位上下文：不用写死页头高度，蒙层正好盖住编辑区 */
+.note-editor-wrap { position: relative; flex: 1; min-height: 0; display: flex; }
 .note-editor :deep(.cm-editor) { flex: 1; min-height: 0; }
 .note-editor :deep(.cm-content) { padding: var(--space-6); }
+.note-load-error {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  gap: var(--space-4); font-size: var(--text-sm); color: var(--color-text-secondary);
+  background: var(--color-bg-primary);
+}
+.note-retry {
+  padding: 3px var(--space-5); border-radius: var(--radius-sm); cursor: pointer;
+  font-size: var(--text-sm); color: var(--color-accent-text); background: var(--color-accent); border: none;
+}
 </style>

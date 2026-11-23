@@ -992,17 +992,25 @@ async function saveEdit() {
       const originalDue = orig.dueDate
       const advanced = nextDueDate(originalDue, parseRecurrence(orig.recurrence))
       if (editScope.value === 'thisOnly') {
-        // 仅本次：模板保留原始内容、只把截止日推到下一周期（recurrence 仍在，调度继续生成未来实例）；
-        // 本次的编辑落在新的一条独立待办上（不带 recurrence，截止日=原日期）。
-        await unwrap(await UpdateTodo(
-          orig.id, orig.title, orig.priority, advanced, orig.note,
-          orig.startTime, orig.endTime, orig.reminderTime, orig.recurrence,
-          orig.tags, orig.status,
-        ))
-        await unwrap(await CreateTodo(
-          title, editPriority.value, originalDue, editNote.value,
-          editedStart, editedEnd, editedReminder, '', editedTags,
-        ))
+        // 仅本次：先建本次的独立待办（不带 recurrence、截止日=原日期），成功后再推进模板。
+        // 顺序反了会在「模板已推进、本次未建成」时把本周期整条弄丢。
+        let created: Todo | null = null
+        try {
+          created = unwrap<Todo>(await CreateTodo(
+            title, editPriority.value, originalDue, editNote.value,
+            editedStart, editedEnd, editedReminder, '', editedTags,
+          ))
+          await unwrap(await UpdateTodo(
+            orig.id, orig.title, orig.priority, advanced, orig.note,
+            orig.startTime, orig.endTime, orig.reminderTime, orig.recurrence,
+            orig.tags, orig.status,
+          ))
+        } catch (e) {
+          if (created?.id) {
+            try { unwrap(await DeleteTodo(created.id)) } catch (e2) { logErr('TodoPage.rollbackOccurrence', e2) }
+          }
+          throw e
+        }
         invalidateLinkTargets() // 新 occurrence 立即可当互链目标
       } else {
         // 从下次起：改模板本身，但把截止日推到下一周期——编辑从下一次开始生效，本次保持原样。
@@ -1108,15 +1116,11 @@ function onCompleteClick(todo: Todo) {
 async function completeRecurring(todo: Todo, scope: EditScope) {
   completeScopeFor.value = ''
   if (scope === 'all') { await toggle(todo); return }
+  // 顺序很重要：先落「本次」的完成记录，再推进模板。
+  // 反过来的话，模板已推进而本次没建成 → 本周期既无完成记录、列表里也再看不到这条（数据丢失）。
+  let created: Todo | null = null
   try {
-    const advanced = nextDueDate(todo.dueDate || todayStr.value, parseRecurrence(todo.recurrence))
-    await unwrap(await UpdateTodo(
-      todo.id, todo.title, todo.priority, advanced, todo.note,
-      todo.startTime, todo.endTime, todo.reminderTime, todo.recurrence,
-      todo.tags as unknown as string, scope === 'thisOnly' ? (todo.status || 'todo') : 'done',
-    ))
-    // 拆出「本次」：截止日=原日期、不带 recurrence，建完再 UpdateTodo 标完成。
-    const created = unwrap<Todo>(await CreateTodo(
+    created = unwrap<Todo>(await CreateTodo(
       todo.title, todo.priority, todo.dueDate || todayStr.value, todo.note,
       todo.startTime, todo.endTime, todo.reminderTime, '', todo.tags as unknown as string,
     ))
@@ -1125,12 +1129,28 @@ async function completeRecurring(todo: Todo, scope: EditScope) {
         created.id, created.title, created.priority, created.dueDate, created.note,
         created.startTime, created.endTime, created.reminderTime, '', created.tags as unknown as string, 'done',
       ))
-      invalidateLinkTargets() // 新拆出的 occurrence 立即可当互链目标
     }
-    await refresh()
   } catch (e) {
     error.value = getErrorMessage(e)
+    await refresh()
+    return
   }
+  try {
+    const advanced = nextDueDate(todo.dueDate || todayStr.value, parseRecurrence(todo.recurrence))
+    await unwrap(await UpdateTodo(
+      todo.id, todo.title, todo.priority, advanced, todo.note,
+      todo.startTime, todo.endTime, todo.reminderTime, todo.recurrence,
+      todo.tags as unknown as string, scope === 'thisOnly' ? (todo.status || 'todo') : 'done',
+    ))
+    invalidateLinkTargets() // 新拆出的 occurrence 立即可当互链目标
+  } catch (e) {
+    error.value = getErrorMessage(e)
+    // 模板没推进成功就把刚建的本次记录撤掉，别留下一条重复的完成项
+    if (created?.id) {
+      try { unwrap(await DeleteTodo(created.id)) } catch (e2) { logErr('TodoPage.rollbackOccurrence', e2) }
+    }
+  }
+  await refresh()
 }
 async function remove(todo: Todo) {
   delTodo.value = todo
@@ -1583,7 +1603,7 @@ onUnmounted(() => {
                   <template v-for="tg in parseTags(card.tags)" :key="tg">
                     <span v-key-click class="tag-chip" @click.stop="activeTag = tg">{{ tg }}</span>
                   </template>
-                  <span v-if="subtasksOf(card.id).length" class="sub-badge">▸{{ subProgress(card.id).done }}/{{ subProgress(card.id).total }}</span>
+                  <span v-if="subtasksOf(card.id).length"><ChevronRight :size="12" /> {{ subProgress(card.id).done }}/{{ subProgress(card.id).total }}</span>
                 </div>
               </div>
               <div v-if="statusTodos(st).length === 0" class="kanban-empty">{{ t('todoKanbanEmpty') }}</div>
@@ -1623,7 +1643,7 @@ onUnmounted(() => {
                     <template v-for="tg in parseTags(card.tags)" :key="tg">
                       <span v-key-click class="tag-chip" @click.stop="activeTag = tg">{{ tg }}</span>
                     </template>
-                    <span v-if="subtasksOf(card.id).length" class="sub-badge">▸{{ subProgress(card.id).done }}/{{ subProgress(card.id).total }}</span>
+                    <span v-if="subtasksOf(card.id).length"><ChevronRight :size="12" /> {{ subProgress(card.id).done }}/{{ subProgress(card.id).total }}</span>
                   </div>
                 </div>
                 <div v-if="todosInQuadrant(q).length === 0" class="quadrant-empty">{{ t('todoQuadrantEmpty') }}</div>

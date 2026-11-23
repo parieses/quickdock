@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { logErr } from '../utils/logger'
-import { ref, watch, computed, toRef, inject } from 'vue';
+import { ref, watch, computed, toRef, inject, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useWorkspaceStore } from '../stores/workspace'
 import { useFocusTrap } from '../utils/focusTrap'
@@ -224,8 +224,13 @@ function envJSON(): string {
   return entries.length ? JSON.stringify(entries) : ''
 }
 
+// 弹窗回填 type 时也会触发下面的 watch(type)。回填不是用户改类型，
+// 不能顺手改写 value（旧数据里没有 {query} 的链接会被静默改成 …{query}）。
+let hydrating = false
+
 watch(() => [props.visible, props.item], ([v]) => {
   if (v) {
+    hydrating = true
     name.value = props.item?.name ?? '';
     type.value = props.item?.type ?? ITEM_TYPE.DIR;
     value.value = props.item?.value ?? '';
@@ -243,11 +248,13 @@ watch(() => [props.visible, props.item], ([v]) => {
       if (suggested) toolId.value = suggested.id
     }
     loadProjectEnv()
+    // 两个 watcher 同属 pre flush，按声明顺序执行，必须等本轮 flush 结束后才解除标记
+    void nextTick(() => { hydrating = false })
   }
 });
 
 watch(type, (newType) => {
-  if (newType === ITEM_TYPE.LINK && !value.value.includes('{query}')) {
+  if (!hydrating && newType === ITEM_TYPE.LINK && !value.value.includes('{query}')) {
     // 自动补成「协议 + 域名 + {query}」的示例，但不能无脑拼前缀：
     // 用户填的常常已经是完整地址（https://a.com/search?q=），再拼一次就变成
     // https://https://a.com/search?q={query}，点了直接打不开。

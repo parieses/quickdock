@@ -1211,15 +1211,6 @@ function dailyTooltipExtra(index: number): string {
     + `<div>${t('chartTooltipCost')}: ${fmtCost(d.estimatedCost)}</div>`
 }
 
-watch(() => props.visible, (v) => {
-  if (!v) return
-  loadAIProfiles()
-  loadUsage()
-  loadApprovalRules()
-  loadExtServers()
-  loadMemoryAuto()
-}, { immediate: true })
-
 // ---- 记忆自动整理 ----
 //
 // 开关状态只在后端（ai_memory_auto），前端不缓存到 localStorage：
@@ -1293,8 +1284,10 @@ async function saveAIProfiles() {
     unwrap(await AISaveProfiles({ active: aiActive.value, askActive: aiAskActive.value, profiles }))
     Events.Emit('ai:profiles-updated')
     showAIMsg(t('saved'))
+    return true
   } catch (e) {
     showAIMsg(t('saveFailed2') + ': ' + getErrorMessage(e), true)
+    return false
   }
 }
 async function testAIConnection() {
@@ -1401,14 +1394,31 @@ function closeAIEditor() {
   keyPlain.value = ''
   keyVisible.value = false
 }
-function saveAIModal() {
+async function saveAIModal() {
   const draft = aiEditDraft.value
   if (!draft) return
   const idx = aiProfiles.value.findIndex((p) => p.id === draft.id)
+  // 先替换本地再落库，失败必须回滚：否则列表里显示的是没存进去的值，
+  // 下次保存别的档案会把这份失败内容一起写进库。
+  const prev = idx >= 0 ? aiProfiles.value[idx] : null
   if (idx >= 0) aiProfiles.value[idx] = { ...draft }
   aiEditDraft.value = null
-  saveAIProfiles()
+  if (!await saveAIProfiles()) {
+    if (prev) aiProfiles.value[idx] = prev
+    aiEditDraft.value = draft // 失败把表单还回去，别让用户重填
+  }
 }
+
+// 必须放在所有 ref / 函数声明之后：immediate watch 在 setup 期同步执行，
+// 提前声明会先于 memoryAuto 等 const 初始化触发暂时性死区（浮窗问 AI 未配 Key 时自动弹本页必崩）。
+watch(() => props.visible, (v) => {
+  if (!v) return
+  loadAIProfiles()
+  loadUsage()
+  loadApprovalRules()
+  loadExtServers()
+  loadMemoryAuto()
+}, { immediate: true })
 </script>
 
 <template>
@@ -1937,7 +1947,7 @@ function saveAIModal() {
             </div>
             <div class="ai-ext-item-ops">
               <button
-                class="btn btn-ghost btn-sm ai-ext-expand"
+                class="qd-btn qd-btn-ghost qd-btn-sm ai-ext-expand"
                 :class="{ 'is-open': extExpanded === s.name }"
                 :disabled="extSaving || s.status === 'disabled'"
                 :title="extExpanded === s.name ? t('aiExtToolsHide') : t('aiExtToolsShow')"

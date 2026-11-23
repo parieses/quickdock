@@ -71,6 +71,7 @@ const formOpen = ref(false)
 const form = ref({ name: '', domain: '', dir: '', docRoot: '' })
 // 编辑中的站点 id（'' = 新增态）
 const editingId = ref('')
+const editingEnabled = ref(true)
 
 function openCreate() {
   editingId.value = ''
@@ -80,6 +81,9 @@ function openCreate() {
 
 function openEdit(s: SiteItem) {
   editingId.value = s.id
+  // 编辑表单里没有「启用」开关，提交时必须回传原值：以前硬编码 true，
+  // 编辑一个已停用的站点会把它静默重新启用并重写 hosts。
+  editingEnabled.value = s.enabled
   form.value = { name: s.name, domain: s.domain, dir: s.dir, docRoot: s.docRoot ?? '' }
   formOpen.value = true
 }
@@ -131,7 +135,7 @@ async function submit() {
   try {
     const name = form.value.name || form.value.domain
     if (editingId.value) {
-      unwrap(await SitesUpdate(editingId.value, name, form.value.domain, form.value.dir, true, form.value.docRoot))
+      unwrap(await SitesUpdate(editingId.value, name, form.value.domain, form.value.dir, editingEnabled.value, form.value.docRoot))
       toast.success(t('siteUpdated'))
     } else {
       unwrap(await SitesCreate(name, form.value.domain, form.value.dir, form.value.docRoot))
