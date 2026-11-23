@@ -50,34 +50,53 @@ watch(() => props.visible, (v) => {
 })
 
 function reset() {
+  pickSeq++
   scenes.value = []; collections.value = []; items.value = []
   activeScene.value = null; activeCollection.value = null
   level.value = 'scene'; err.value = ''
 }
 
+// 逐级下钻共用一个 loading，请求必须带序号：连点 A 场景再点 B 场景时，
+// A 的响应后到会把 B 的集合列表覆盖掉（标题是 B、列表是 A）。
+let pickSeq = 0
+
 async function pickScene(s: Scene) {
   activeScene.value = s
   level.value = 'collection'
+  const seq = ++pickSeq
   loading.value = true; err.value = ''
   try {
-    collections.value = normalize(unwrap<any[]>(await ListCollections(s.id))) as Collection[]
-  } catch (e) { err.value = getErrorMessage(e) }
-  finally { loading.value = false }
+    const list = normalize(unwrap<any[]>(await ListCollections(s.id))) as Collection[]
+    if (seq !== pickSeq || activeScene.value?.id !== s.id) return
+    collections.value = list
+  } catch (e) {
+    if (seq !== pickSeq) return
+    err.value = getErrorMessage(e)
+  }
+  finally { if (seq === pickSeq) loading.value = false }
 }
 
 async function pickCollection(c: Collection) {
   activeCollection.value = c
   level.value = 'item'
+  const seq = ++pickSeq
   loading.value = true; err.value = ''
   try {
-    items.value = normalize(unwrap<any[]>(await ListItems(c.id))) as CollectionItem[]
-  } catch (e) { err.value = getErrorMessage(e) }
-  finally { loading.value = false }
+    const list = normalize(unwrap<any[]>(await ListItems(c.id))) as CollectionItem[]
+    if (seq !== pickSeq || activeCollection.value?.id !== c.id) return
+    items.value = list
+  } catch (e) {
+    if (seq !== pickSeq) return
+    err.value = getErrorMessage(e)
+  }
+  finally { if (seq === pickSeq) loading.value = false }
 }
 
 function chooseItem(it: CollectionItem) { emit('select', it) }
 
 function back() {
+  pickSeq++ // 返回上层时作废在途请求，别让它在回到上层后又把内容塞回来
+  loading.value = false
   if (level.value === 'item') { level.value = 'collection'; items.value = [] }
   else if (level.value === 'collection') { level.value = 'scene'; collections.value = [] }
 }

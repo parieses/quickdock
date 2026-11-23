@@ -89,7 +89,7 @@ const props = defineProps<{
    * 空串表示不下发。目录仍是本组件内部状态，父级只给一个「请切到这里」的信号，
    * 不接管 pwd，这样手动点目录、刷新、选中行等既有行为都不受影响。
    */
-  followPath?: string
+  followPath?: { path: string; seq: number } | null
 }>()
 
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -246,8 +246,13 @@ function commitPath() {
   if (next !== pwd.value) void load(next)
 }
 
+// 列目录请求序号：双击两个文件夹（或换目录同时刷新）时，慢的那次后到会把
+// pwd/entries 覆盖成上一个目录——面包屑与列表指向不同地方，误删风险很高。
+let listSeq = 0
+
 async function load(path = pwd.value) {
   if (!path) path = ''
+  const seq = ++listSeq
   loading.value = true
   errMsg.value = ''
   // 留在同一目录的刷新要保住选中行：换个目录才清，
@@ -263,6 +268,7 @@ async function load(path = pwd.value) {
       entries: SftpEntry[]
       truncated: boolean
     }>(await SftpList(props.host.id, path))
+    if (seq !== listSeq) return
     pwd.value = res?.path || '/'
     parent.value = res?.parent || '/'
     entries.value = res?.entries || []
@@ -271,12 +277,13 @@ async function load(path = pwd.value) {
       keep && entries.value.some(e => e.path === keep.path) ? keep : null
     checked.value = new Set([...prevChecked].filter(p => entries.value.some(e => e.path === p)))
   } catch (e) {
+    if (seq !== listSeq) return
     errMsg.value = getErrorMessage(e)
     entries.value = []
     selected.value = null
     checked.value = new Set()
   } finally {
-    loading.value = false
+    if (seq === listSeq) loading.value = false
   }
 }
 
@@ -295,9 +302,12 @@ watch(
 // 无谓的 SFTP 请求；同目录不重复 load，避免每次提示符都重列一遍目录。
 // 路径来自远端且可伪造，终端侧已挡掉非绝对路径 / .. / 控制字符，这里再走一次
 // normalizeRemotePath 兜底，并且只用于列目录，不触发任何写操作。
+// 按 seq 触发而不是按路径值：远端每个提示符都上报同一个 $PWD，用户手动把面板
+// 切到别处后，路径值与上次相同、watch 不触发，「跟随」就只生效一次。
 watch(
-  () => props.followPath,
-  (next) => {
+  () => props.followPath?.seq,
+  () => {
+    const next = props.followPath?.path
     if (!props.active || !next) return
     const normalized = normalizeRemotePath(next)
     if (!normalized || normalized === pwd.value) return
@@ -1825,7 +1835,7 @@ async function copyPath(e: SftpEntry) {
 .sfp-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1400;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1924,7 +1934,7 @@ async function copyPath(e: SftpEntry) {
 .sfp-menu-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 3000;
+  z-index: var(--z-context);
 }
 .sfp-menu {
   position: fixed;

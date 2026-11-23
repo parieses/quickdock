@@ -31,8 +31,10 @@ const filtered = computed(() => {
   )
 })
 
-async function load() {
-  loading.value = true
+// silent：轮询/事后刷新不碰 loading。每 5 秒把刷新按钮置灰并闪一下「刷新中」，
+// 用户正好在这瞬间点刷新会被直接丢弃（按钮是 disabled 的）。
+async function load(silent = false) {
+  if (!silent) loading.value = true
   error.value = ''
   try {
     const r = unwrap<PortInfo[]>(await ListListeningPorts()) || []
@@ -40,7 +42,7 @@ async function load() {
   } catch (e: any) {
     error.value = getErrorMessage(e)
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -70,13 +72,13 @@ onMounted(() => {
   // 窗口最小化/被遮挡时照跑是白烧 CPU（对齐 MonitorPage 的既有范式）。
   refreshTimer = setInterval(() => {
     if (document.hidden) return
-    load()
+    load(true)
   }, 5000)
   document.addEventListener('visibilitychange', onVisibility)
 })
 // 回前台立刻补一次，避免后台期间积压的 5s 间隔造成数据过期感
 function onVisibility() {
-  if (!document.hidden) load()
+  if (!document.hidden) load(true)
 }
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
@@ -96,7 +98,7 @@ onUnmounted(() => {
           <Search :size="13" />
           <input v-model="kw" :placeholder="t('portsSearch')" class="port-search-input" />
         </div>
-        <button class="port-btn" :class="{ 'is-loading': loading }" :disabled="loading" @click="load">
+        <button class="port-btn" :class="{ 'is-loading': loading }" :disabled="loading" @click="load()">
           <RefreshCw :size="13" class="port-btn-icon" />
           <span v-if="loading && ports.length">{{ t('portsRefreshing') }}</span>
           <span v-else>{{ t('portsRefresh') }}</span>

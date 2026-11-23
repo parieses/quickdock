@@ -72,14 +72,19 @@ async function loadConfig() {
   } catch { /* 无配置时静默 */ }
 }
 
-async function saveConfig() {
+/** 返回是否真的落盘：调用方（测试连接）必须据此判断，别再拿旧配置去测。 */
+async function saveConfig(): Promise<boolean> {
   try {
     unwrap(await SetSyncConfig({
       type: syncType.value,
       webdav: { url: webdavURL.value, username: webdavUser.value, password: webdavPass.value },
     }))
     showMsg(t('saved'))
-  } catch (e) { showMsg(t('saveFailed2') + ': ' + getErrorMessage(e)) }
+    return true
+  } catch (e) {
+    showMsg(t('saveFailed2') + ': ' + getErrorMessage(e))
+    return false
+  }
 }
 
 async function testConnection() {
@@ -89,7 +94,8 @@ async function testConnection() {
   }
   loading.value = true
   try {
-    await saveConfig()
+    // 保存失败就直接停：否则会拿库里的旧地址测出「成功」，与刚才的保存失败自相矛盾
+    if (!await saveConfig()) return
     unwrap(await SyncTestConnection())
     showMsg(t('webdavTestSuccess'))
   } catch (e) { showMsg(t('webdavTestFailed') + ': ' + getErrorMessage(e)) }

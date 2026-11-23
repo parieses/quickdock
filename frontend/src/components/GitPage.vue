@@ -463,10 +463,12 @@ async function loadRepo(silent = false) {
     if (!silent && changeCount.value > 0) worktreeMode.value = true
     if (fileHist.value) await loadFileCommits()
   } catch (e) {
+    if (path !== activePath.value) return
     error.value = getErrorMessage(e)
     logErr('git.loadRepo', e)
   } finally {
-    loading.value = false
+    // 旧仓库的请求回来时不能把新仓库的「加载中」关掉（数据有 path 校验，loading 也得有）
+    if (path === activePath.value) loading.value = false
   }
 }
 
@@ -616,7 +618,10 @@ async function selectCommit(c: Commit) {
   detail.value = null
   detailFailed.value = false
   try {
-    detail.value = unwrap<CommitDetail>(await GitCommitDetail(activePath.value, c.hash, true)) || null
+    const d = unwrap<CommitDetail>(await GitCommitDetail(activePath.value, c.hash, true)) || null
+    // 连点两条提交时先发的可能后到：只在仍选中这条时才回填，否则右侧会显示上一条的 diff
+    if (selectedHash.value !== c.hash) return
+    detail.value = d
     // 在「文件历史」里点提交：用户想看的就是这个文件，顺手选上，省一次点击
     const want = fileHist.value?.path
     if (want && detail.value?.files) {
@@ -624,6 +629,7 @@ async function selectCommit(c: Commit) {
       if (hit) selectedFile.value = blockPath(hit)
     }
   } catch (e) {
+    if (selectedHash.value !== c.hash) return
     detailFailed.value = true
     toast.error(getErrorMessage(e))
     logErr('git.commitDetail', e)
@@ -1182,8 +1188,12 @@ async function selectStash(s: StashEntry) {
   detail.value = null
   detailFailed.value = false
   try {
-    detail.value = unwrap<CommitDetail>(await GitStashShow(activePath.value, s.ref)) || null
+    const d = unwrap<CommitDetail>(await GitStashShow(activePath.value, s.ref)) || null
+    // 同 selectCommit：以「当前仍选中这条贮藏」为准，迟到的旧响应直接丢弃
+    if (selectedStash.value?.ref !== s.ref) return
+    detail.value = d
   } catch (e) {
+    if (selectedStash.value?.ref !== s.ref) return
     detailFailed.value = true
     toast.error(getErrorMessage(e))
     logErr('git.stashShow', e)

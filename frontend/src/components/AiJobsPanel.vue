@@ -142,17 +142,21 @@ async function toggleLog(j: AIJobView) {
     return
   }
   openLog.value = j.id
+  const want = j.id
   logBusy.value = true
   logText.value = ''
   logTruncated.value = false
   try {
-    const res = unwrap<{ output: string; truncated: boolean }>(await AIJobLog(j.id))
+    const res = unwrap<{ output: string; truncated: boolean }>(await AIJobLog(want))
+    // 期间用户又点了别的任务：这份输出属于上一条，别写到当前行下面
+    if (openLog.value !== want) return
     logText.value = res?.output || ''
     logTruncated.value = !!res?.truncated
   } catch (e: any) {
+    if (openLog.value !== want) return
     logText.value = e?.message || String(e)
   } finally {
-    logBusy.value = false
+    if (openLog.value === want) logBusy.value = false
   }
 }
 

@@ -927,6 +927,15 @@ async function togglePathEntry(id: string, version: string, inPath: boolean) {
 
 // 操作列下拉菜单（设置别名 / 删除 收纳于此）
 const openMenu = ref<string | null>(null)
+/**
+ * 安装行的唯一键。
+ *
+ * 不能只用 version：同一个运行时可能同时装了 portable 与 system 的同版本
+ * （表头 :key 早就是 scope|path|version），用 version 当下拉键会让两行菜单同时展开。
+ */
+function insKey(ins: { scope: string; path: string; version: string }): string {
+  return ins.scope + '|' + ins.path + '|' + ins.version
+}
 function toggleMenu(v: string) {
   const willOpen = openMenu.value !== v
   openMenu.value = willOpen ? v : null
@@ -935,7 +944,7 @@ function toggleMenu(v: string) {
   if (!cur) return
   // 展开 RabbitMQ 操作菜单时，拉取管理后台启用状态以决定显示「启用/关闭」
   if (cur.id === 'rabbitmq') {
-    const ins = cur.installed.find(i => i.version === v)
+    const ins = cur.installed.find(i => v.endsWith('|' + i.version))
     if (ins) fetchMgmt(ins.version)
   }
   // 镜像项文案取决于当前是否已在用国内源，展开菜单时补一次状态
@@ -1472,6 +1481,17 @@ async function install(r: RuntimeInfo) {
   try {
     const custom = s.source === 'custom' ? s.custom : ''
     unwrap(await EnvInstall(r.id, s.version, s.source, custom))
+    // 收尾完全依赖 quickdock:env:progress 事件：事件丢了（后端异常退出、通道未就绪）
+    // 按钮就永久禁用，页面上永远显示「安装中」。这里挂一个超时兜底，与「更新全部」同款。
+    void (async () => {
+      const settled = await waitInstallSettled(r)
+      if (settled) return
+      s.installing = false
+      s.total = -1
+      s.error = true
+      s.message = t('envInstallTimeout')
+      toast.error(r.id.toUpperCase() + ': ' + s.message)
+    })()
   } catch (e: any) {
     failState(r, e)
   }
@@ -2675,10 +2695,10 @@ const dialogCtx = reactive({
                 </template>
               </div>
               <div class="col-ops">
-                <button class="op-btn menu-trigger" @click.stop="toggleMenu(ins.version)">
+                <button class="op-btn menu-trigger" @click.stop="toggleMenu(insKey(ins))">
                   {{ t('operations') }}<ChevronDown :size="12" class="caret" />
                 </button>
-                <div v-if="openMenu === ins.version" class="op-menu">
+                <div v-if="openMenu === insKey(ins)" class="op-menu">
                   <button class="op-item" :class="{ on: ins.inSystemPath }" :title="t('setEnvVarHint')" @click="toggleEnvVar(selected, ins); openMenu = null">
                     {{ ins.inSystemPath ? t('unsetEnvVar') : t('setEnvVar') }}
                   </button>

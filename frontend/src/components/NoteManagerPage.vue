@@ -370,9 +370,13 @@ async function load() {
   } finally { loading.value = false }
 }
 
+// 树搜索的请求序号：防抖只减少请求数，不保证顺序，旧响应后到会把新结果（或整棵树）盖掉。
+let treeSearchSeq = 0
+
 async function doSearch() {
   const q = searchQuery.value.trim()
-  if (!q) { await load(); return }
+  if (!q) { treeSearchSeq++; await load(); return }
+  const seq = ++treeSearchSeq
   try {
     // 后端按 name/content/tags 子串匹配；再叠加前端拼音匹配 name/keyword，
     // 二者取并集（按 id 去重）。拼音逻辑统一走 utils/pinyin，与命令面板/工作空间一致。
@@ -381,8 +385,9 @@ async function doSearch() {
     const byId = new Map<string, Note>()
     for (const n of sub) byId.set(n.id, n)
     for (const n of py) if (!byId.has(n.id)) byId.set(n.id, n)
+    if (seq !== treeSearchSeq || searchQuery.value.trim() !== q) return
     nodes.value = [...byId.values()]
-  } catch (e) { toast.error(getErrorMessage(e)) }
+  } catch (e) { if (seq === treeSearchSeq) toast.error(getErrorMessage(e)) }
 }
 // 输入防抖：每敲一个字符都会打一次后端 LIKE + 一遍全量拼音扫描，
 // 中文输入法逐字上屏时这个代价非常明显。
@@ -452,7 +457,7 @@ function collapseAll() { expanded.value = new Set() }
 // 新建（直接在目标文件夹下创建，无弹菜单）
 async function newFolderAt(folderId: string) {
   try {
-    const r = unwrap<Note>(await CreateNoteFolder(folderId, '新文件夹'))
+    const r = unwrap<Note>(await CreateNoteFolder(folderId, t('noteNewFolder')))
     if (r) { if (folderId) expanded.value.add(folderId); expanded.value.add(r.id) }
     await load()
     // 创建后进入重命名，方便直接命名（load 完成后再 startRename，确保节点已在树中，自动聚焦可用）
@@ -461,7 +466,7 @@ async function newFolderAt(folderId: string) {
 }
 async function newDocAt(folderId: string) {
   try {
-    const r = unwrap<Note>(await CreateNoteDoc(folderId, '未命名笔记', '', 'markdown'))
+    const r = unwrap<Note>(await CreateNoteDoc(folderId, t('noteUntitledDoc'), '', 'markdown'))
     if (folderId) expanded.value.add(folderId)
     invalidateLinkTargets() // 新笔记立刻可当互链目标，不等候选缓存 TTL
     await load()
@@ -503,7 +508,7 @@ async function createFromTemplate(tpl: NoteTemplate) {
 async function setFormat(fmt: string) {
   if (!selectedDocId.value || !selectedDoc.value || selectedDoc.value.format === fmt) return
   try {
-    await SetNoteDocFormat(selectedDocId.value, fmt)
+    unwrap(await SetNoteDocFormat(selectedDocId.value, fmt))
     selectedDoc.value.format = fmt
   } catch (e) { toast.error(getErrorMessage(e)) }
 }
@@ -586,7 +591,7 @@ async function reorderNode(dragId: string, targetId: string, before: boolean) {
     for (let i = 0; i < next.length; i++) {
       const want = (i + 1) * 10
       if ((next[i].sort || 0) === want) continue
-      await SetNoteSort(next[i].id, want)
+      unwrap(await SetNoteSort(next[i].id, want))
       next[i].sort = want
     }
   } catch (e) {
@@ -752,6 +757,12 @@ async function onDoc(d: Note) {
     cur = par?.parentId ?? ''
   }
   expanded.value = s
+  // 修订历史贴着具体文档：切走后必须重载，否则列表还是上一篇的，
+  // 点「恢复」会把旧正文写回旧文档，当前文档却提示「已恢复」。
+  if (historyOpen.value) {
+    historyPreview.value = null
+    void loadRevisions()
+  }
 }
 function onDocInput() {
   saveStatus.value = 'saving'
@@ -906,6 +917,7 @@ interface NoteRevision {
 }
 const historyOpen = ref(false)
 const historyLoading = ref(false)
+let revSeq = 0
 const revisions = ref<NoteRevision[]>([])
 const historyPreview = ref<NoteRevision | null>(null)
 const restoringRevId = ref('')
@@ -929,13 +941,18 @@ function openHistory() {
 async function loadRevisions() {
   const id = selectedDocId.value
   if (!id) { revisions.value = []; return }
+  const seq = ++revSeq
   historyLoading.value = true
   try {
-    revisions.value = unwrap<NoteRevision[]>(await ListNoteRevisions(id, 50)) || []
+    const list = unwrap<NoteRevision[]>(await ListNoteRevisions(id, 50)) || []
+    // 期间切了文档：这次结果属于上一篇，丢弃
+    if (seq !== revSeq || id !== selectedDocId.value) return
+    revisions.value = list
   } catch (e) {
+    if (seq !== revSeq) return
     logErr('NoteManager:listRevisions', e)
     toast.error(getErrorMessage(e))
-  } finally { historyLoading.value = false }
+  } finally { if (seq === revSeq) historyLoading.value = false }
 }
 async function previewRevision(revId: string) {
   try {
@@ -973,6 +990,13 @@ async function confirmRestore() {
   showRestoreConfirm.value = false
   restoringRevId.value = ''
   if (!revId) return
+  // 兜底：万一列表仍是别的文档的（重载还没回来），别把那一篇的正文恢复到这里
+  const rev = revisions.value.find(r => r.id === revId)
+  if (rev && rev.noteId && rev.noteId !== selectedDocId.value) {
+    toast.error(t('notesHistoryStale'))
+    void loadRevisions()
+    return
+  }
   try {
     unwrap(await RestoreNoteRevision(revId))
     toast.success(t('notesHistoryRestored'))
@@ -1126,7 +1150,13 @@ async function saveDoc() {
 }
 async function copyDoc() {
   if (!docContent.value) return
-  try { await CopyText(docContent.value); toast.success(t('copied')) } catch (e) { toast.error(getErrorMessage(e)) }
+  try {
+    unwrap(await CopyText(docContent.value))
+    toast.success(t('copied'))
+  } catch (e) {
+    logErr('NoteManagerPage.copyDoc', e)
+    toast.error(getErrorMessage(e))
+  }
 }
 
 // ---- 页内 AI ----
@@ -1556,7 +1586,15 @@ function insertMdSample(sample: string) {
 
 async function renameCurrent() {
   if (!selectedDoc.value) return
-  try { unwrap(await RenameNoteNode(selectedDoc.value.id, selectedDoc.value.name)); await load() } catch (e) { toast.error(getErrorMessage(e)) }
+  try {
+    unwrap(await RenameNoteNode(selectedDoc.value.id, selectedDoc.value.name))
+    await load()
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+    // 行内改名是直接 v-model 到树节点的（乐观更新），失败必须重读一次把名字还原，
+    // 否则树和标题一直显示一个没落库的新名字，用户以为已经改好了。
+    await load()
+  }
 }
 
 onMounted(() => {

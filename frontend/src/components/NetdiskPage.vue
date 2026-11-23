@@ -26,6 +26,7 @@ import {
   Folder,
   FolderPlus,
   Pencil,
+  PlugZap,
   Power,
   RefreshCw,
   Search,
@@ -60,6 +61,7 @@ import {
   NetdiskSearch,
   NetdiskSendToDownloader,
   NetdiskStatus,
+  NetdiskTest,
   NetdiskUpload,
 } from '../../bindings/quickdock/services/netdisk/netdiskservice'
 
@@ -112,7 +114,10 @@ const entries = ref<Entry[]>([])
 /** 当前目录（相对 WebDAV 根，"/" 表示根）。 */
 const dir = ref('/')
 const loading = ref(false)
-const busy = ref('') // install | start | ''
+const busy = ref('') // install | start | restart | ''
+const testing = ref(false) // 测试连接独立标志：网关卡住时不影响安装/重启按钮
+// 首屏状态探测失败：此时 gw 还是 null，模板没有可用分支，必须显式给出重试
+const statusError = ref('')
 const installText = ref('')
 const jobs = ref<JobRow[]>([])
 
@@ -176,6 +181,7 @@ const allSelected = computed(
 async function refreshStatus(silent = false) {
   try {
     gw.value = unwrap<GatewayInfo>(await NetdiskStatus())
+    statusError.value = ''
     // 后端在 Status 里探测过根目录：没存储时直接进引导页，不再发那次注定
     // 返回 500 的列目录请求；用户在后台加完存储点「刷新」就会重新探测。
     needSetup.value = !!gw.value?.needSetup
@@ -193,14 +199,25 @@ async function refreshStatus(silent = false) {
     if (gw.value?.running) {
       gw.value = { ...gw.value, running: false }
       entries.value = []
+    } else if (!gw.value) {
+      // 首屏就失败：没有任何 gw 可供分支渲染，必须自带错误落点，
+      // 否则页面空白（看着像一直在加载），用户不知道该点哪里。
+      statusError.value = getErrorMessage(e)
     }
   }
 }
 
+// 列表请求序号：列目录与递归搜索都写 entries，双击两个目录 / 搜完立刻换目录时，
+// 慢的那次后到会把旧目录的内容盖到新目录上（面包屑是新的、列表是旧的）。
+let listSeq = 0
+
 async function loadDir(path: string) {
+  const seq = ++listSeq
   loading.value = true
   try {
-    entries.value = unwrap<Entry[]>(await NetdiskListDir(path)) ?? []
+    const list = unwrap<Entry[]>(await NetdiskListDir(path)) ?? []
+    if (seq !== listSeq) return
+    entries.value = list
     dir.value = path
     // 换目录等于换上下文：搜索词、搜索结果、多选都得清空，否则会出现
     // 「在这个目录勾选、去那个目录删除」这种灾难性误操作。
@@ -208,10 +225,11 @@ async function loadDir(path: string) {
     keyword.value = ''
     selected.value = []
   } catch (e) {
+    if (seq !== listSeq) return
     logErr('NetdiskPage.loadDir', e)
     toast.error(getErrorMessage(e))
   } finally {
-    loading.value = false
+    if (seq === listSeq) loading.value = false
   }
 }
 
@@ -279,6 +297,21 @@ async function restartGateway() {
   }
 }
 
+/** 测试网关 WebDAV：后端把 401/500+库锁/未配置翻译成可照做的指引，原样展示。 */
+async function testGateway() {
+  if (testing.value) return
+  testing.value = true
+  try {
+    unwrap(await NetdiskTest())
+    toast.success(t('netdiskTestOk'))
+  } catch (e) {
+    logErr('NetdiskPage.test', e)
+    toast.error(getErrorMessage(e))
+  } finally {
+    testing.value = false
+  }
+}
+
 async function downloadFile(e: Entry) {
   try {
     const dest = unwrap<string>(await SelectSavePath(t('netdiskSaveTitle'), e.name)) || ''
@@ -342,18 +375,23 @@ const selectedFiles = computed(() => selectedEntries.value.filter((e) => !e.isDi
 async function runSearch() {
   const kw = keyword.value.trim()
   if (!kw || searching.value) return
+  const seq = ++listSeq
+  const at = dir.value
   searching.value = true
   try {
-    const found = unwrap<Entry[]>(await NetdiskSearch(dir.value, kw)) ?? []
+    const found = unwrap<Entry[]>(await NetdiskSearch(at, kw)) ?? []
+    // 期间换了目录：这批结果是旧目录的，落进去会让删除/下载作用在错的条目上
+    if (seq !== listSeq || dir.value !== at) return
     entries.value = found
     searchMode.value = true
     selected.value = []
     if (!found.length) toast.success(t('netdiskSearchEmpty', { kw }))
   } catch (e) {
+    if (seq !== listSeq) return
     logErr('NetdiskPage.search', e)
     toast.error(getErrorMessage(e))
   } finally {
-    searching.value = false
+    if (seq === listSeq) searching.value = false
   }
 }
 
@@ -538,16 +576,21 @@ async function openFile(e: Entry) {
   preview.value = e
   previewText.value = ''
   if (!isTextKind(e.kind)) return
+  const want = e.path
   previewLoading.value = true
   try {
     const res = await fetch(previewUrl(e, true))
     if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`)
-    previewText.value = await res.text()
+    const text = await res.text()
+    // 期间又点了别的文件：这份正文属于上一个文件，别写进当前预览浮层
+    if (preview.value?.path !== want) return
+    previewText.value = text
   } catch (err) {
+    if (preview.value?.path !== want) return
     logErr('NetdiskPage.preview', err)
     previewText.value = t('netdiskPreviewFailed') + '：' + getErrorMessage(err)
   } finally {
-    previewLoading.value = false
+    if (preview.value?.path === want) previewLoading.value = false
   }
 }
 
@@ -763,6 +806,9 @@ function shortTime(s: string): string {
         <button class="qd-btn" :disabled="!gw" @click="openAdmin">
           <Settings2 :size="14" />{{ t('netdiskOpenAdmin') }}
         </button>
+        <button v-if="gw?.running" class="qd-btn" :disabled="testing" @click="testGateway">
+          <PlugZap :size="14" />{{ testing ? t('netdiskTesting') : t('netdiskTest') }}
+        </button>
         <button v-if="gw?.installed" class="qd-btn" :disabled="!!busy" @click="restartGateway">
           <Power :size="14" />{{ busy === 'restart' ? t('netdiskRestarting') : t('netdiskRestartGateway') }}
         </button>
@@ -772,8 +818,18 @@ function shortTime(s: string): string {
       </div>
     </PageHeader>
 
+    <!-- 首屏状态未知：探测失败时给错误 + 重试，别让内容区一片空白 -->
+    <section v-if="!gw" class="nd-empty">
+      <Cloud :size="28" class="nd-empty-icon" />
+      <p class="nd-empty-title">{{ statusError ? t('statusError') : t('loading') }}</p>
+      <p v-if="statusError" class="nd-empty-desc">{{ statusError }}</p>
+      <button v-if="statusError" class="qd-btn" @click="() => refreshStatus()">
+        <RefreshCw :size="14" />{{ t('statusRetry') }}
+      </button>
+    </section>
+
     <!-- 未安装：给一键安装 -->
-    <section v-if="gw && !gw.installed" class="nd-empty">
+    <section v-else-if="!gw.installed" class="nd-empty">
       <Cloud :size="28" class="nd-empty-icon" />
       <p class="nd-empty-title">{{ t('netdiskNotInstalled') }}</p>
       <p class="nd-empty-desc">{{ t('netdiskNotInstalledHint') }}</p>
@@ -783,7 +839,7 @@ function shortTime(s: string): string {
     </section>
 
     <!-- 已安装未运行：给启动 -->
-    <section v-else-if="gw && !gw.running" class="nd-empty">
+    <section v-else-if="!gw.running" class="nd-empty">
       <Cloud :size="28" class="nd-empty-icon" />
       <p class="nd-empty-title">{{ t('netdiskStopped') }}</p>
       <p class="nd-empty-desc">{{ t('netdiskStoppedHint') }}</p>

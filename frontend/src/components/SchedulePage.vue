@@ -628,6 +628,13 @@ const runningTask = computed(() => tasks.value.find(x => x.id === runningId.valu
 const runNotice = ref('')
 const runProgress = ref('')
 const cancelingId = ref('')
+// 收尾只靠 schedule:run-updated 事件：后端重启或事件通道没建起来时它不会来，
+// 「运行」按钮就永久禁用。到点强制收尾，真实状态以运行历史为准。
+let runGuardTimer: number | null = null
+function armRunGuard() {
+  if (runGuardTimer) clearTimeout(runGuardTimer)
+  runGuardTimer = window.setTimeout(() => { finishRun() }, 30 * 60 * 1000)
+}
 async function runNow(t0: ScheduledTask) {
   error.value = ''
   runNotice.value = ''
@@ -640,6 +647,7 @@ async function runNow(t0: ScheduledTask) {
       return
     }
     runningId.value = t0.id
+    armRunGuard()
     runNotice.value = t('sched_run_started', { name: t0.name })
     runProgress.value = t('sched_run_progress_start')
   } catch (e) {
@@ -663,6 +671,7 @@ async function cancelRun() {
 // 收尾：清运行态并刷新（这样运行历史/结果立刻可见）。error 不在这里写——
 // 失败结果进运行历史与通知，UI 不抢它的语义。
 function finishRun() {
+  if (runGuardTimer) { clearTimeout(runGuardTimer); runGuardTimer = null }
   if (!runningId.value) return
   runningId.value = ''
   runNotice.value = ''
@@ -749,7 +758,7 @@ const offRunProgress = Events.On('schedule:run-progress', (payload: any) => {
   const tool = String(d?.tool || '').trim()
   if (tool && tool !== 'start') runProgress.value = t('sched_run_progress_step', { tool })
 })
-onBeforeUnmount(() => { offRunUpdated?.(); offRunProgress?.() })
+onBeforeUnmount(() => { offRunUpdated?.(); offRunProgress?.(); if (runGuardTimer) { clearTimeout(runGuardTimer); runGuardTimer = null } })
 
 // ---- 通知中心深链定位 ----
 // 点一条定时任务通知后停在对应那条上，而不是回到列表顶部。

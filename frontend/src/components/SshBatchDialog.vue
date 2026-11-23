@@ -203,6 +203,7 @@ function clearAll() {
   if (running.value) return
   selected.value = new Set()
   plan.value = null
+  plannedKey = ''
 }
 
 /**
@@ -223,21 +224,34 @@ function schedulePlan() {
   planTimer = setTimeout(() => { void loadPlan() }, 250)
 }
 
+/** 当前勾选 + 命令的指纹：用来判断预演结果是不是这一份输入的。 */
+function planKey(): string {
+  return [...selected.value].sort().join(',') + '\u0000' + command.value
+}
+// 最近一次成功预演对应的指纹。去抖窗口内点「执行」时，plan 还是上一份输入的，
+// 直接拿它判风险会跳过生产机确认、也无法回填结果表。
+let plannedKey = ''
+
 async function loadPlan() {
   if (selected.value.size === 0) {
     plan.value = null
+    plannedKey = ''
     return
   }
+  const key = planKey()
   try {
-    plan.value = unwrap<BatchPlan>(
+    const p = unwrap<BatchPlan>(
       await SshBatchPlan({ hostIds: [...selected.value], command: command.value }),
     ) || null
+    plan.value = p
+    plannedKey = p ? key : ''
     planErr.value = ''
   } catch (e) {
     // 预演失败不挡住执行按钮之外的任何东西——但要说清楚为什么没有风险提示。
     // 拿不到风险标注时必须按最保守处理：见 canRun 里的 plan 判空。
     planErr.value = getErrorMessage(e)
     plan.value = null
+    plannedKey = ''
   }
 }
 
@@ -347,6 +361,12 @@ const runHint = computed(() => {
 })
 
 async function onRunClick() {
+  // 去抖窗口（250ms）内改了勾选或命令就点执行时，预演还是旧输入的：
+  // 先按当前输入重算一次，否则生产机确认会被跳过、命令却照发。
+  if (plannedKey !== planKey()) {
+    if (planTimer) { clearTimeout(planTimer); planTimer = null }
+    await loadPlan()
+  }
   if (!canRun.value) return
   // 生产机 / 高风险命令：执行前过一次 toast.confirm，确认前不发任何字节。
   if (needsConfirm.value && !(await confirm(t('sshBatchRunConfirm')))) return
@@ -581,6 +601,7 @@ function reset() {
   timeoutSec.value = 30
   concurrency.value = 6
   plan.value = null
+  plannedKey = ''
   planErr.value = ''
   running.value = false
   batchId.value = ''
@@ -965,7 +986,7 @@ onBeforeUnmount(() => {
 .batch-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1300;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;

@@ -142,6 +142,8 @@ interface AskMessage {
 const sources = ref<KBSource[]>([])
 const status = ref<KBStatus | null>(null)
 const loading = ref(false)
+// 左栏列表加载失败：与「这个库是空的」分开，否则用户以为文档全丢了会重新导入一遍
+const sourcesFailed = ref(false)
 const selectedId = ref('')
 const chunks = ref<KBChunk[]>([])
 const chunksLoading = ref(false)
@@ -252,14 +254,23 @@ async function loadLibraries() {
 }
 
 async function loadSources() {
+  const want = libId.value
   loading.value = true
   try {
-    sources.value = unwrap<KBSource[]>(await ListKBSources(libId.value)) ?? []
+    const list = unwrap<KBSource[]>(await ListKBSources(want)) ?? []
+    // 期间切了库：旧库的列表不能盖到新库上（标题是新的、左栏还是旧文档）
+    if (libId.value !== want) return
+    sources.value = list
+    sourcesFailed.value = false
   } catch (e) {
+    if (libId.value !== want) return
+    // 失败时清空并标记，避免把「加载失败」渲染成「这个库是空的」
+    sources.value = []
+    sourcesFailed.value = true
     toast.error(getErrorMessage(e))
     logErr('kb', e)
   } finally {
-    loading.value = false
+    if (libId.value === want) loading.value = false
   }
 }
 
@@ -332,7 +343,7 @@ async function saveLibrary() {
   librarySaving.value = true
   try {
     if (libraryModal.id) {
-      await RenameKBLibrary(libraryModal.id, name, libraryModal.icon)
+      unwrap(await RenameKBLibrary(libraryModal.id, name, libraryModal.icon))
     } else {
       const lib = unwrap<KBLibrary>(await CreateKBLibrary(name, libraryModal.icon))
       if (lib) libId.value = lib.id
@@ -355,7 +366,7 @@ async function removeLibrary(lib: KBLibrary) {
   const ok = await toast.confirm(t('kbLibraryDeleteConfirm', { name: libLabel(lib), n: lib.sourceCount }))
   if (!ok) return
   try {
-    await DeleteKBLibrary(lib.id)
+    unwrap(await DeleteKBLibrary(lib.id))
     if (libId.value === lib.id) libId.value = ''
     selectedId.value = ''
     chunks.value = []
@@ -373,7 +384,7 @@ async function moveSelected(ev: Event) {
   const target = (ev.target as HTMLSelectElement).value
   if (!src || !target || target === src.libraryId) return
   try {
-    await MoveKBSource(src.id, target)
+    unwrap(await MoveKBSource(src.id, target))
     await refreshAll()
     // 挪出当前视图后清掉选中：否则左栏已经找不到它，
     // 抽屉里还挂着它的分段，看着像数据错乱。
@@ -435,7 +446,7 @@ async function rescan() {
 
 async function reindexAll() {
   try {
-    await ReindexAll()
+    unwrap(await ReindexAll())
     toast.success(t('kbReindexStarted'))
     await refreshAll()
   } catch (e) {
@@ -447,7 +458,7 @@ async function reindexAll() {
 async function reindexOne(src: KBSource, ev: Event) {
   ev.stopPropagation()
   try {
-    await ReindexKBSource(src.id)
+    unwrap(await ReindexKBSource(src.id))
     toast.success(t('kbReindexStarted'))
     await refreshAll()
   } catch (e) {
@@ -461,7 +472,7 @@ async function removeOne(src: KBSource, ev: Event) {
   const ok = await toast.confirm(t('kbRemoveConfirm', { name: src.name }))
   if (!ok) return
   try {
-    await RemoveKBSource(src.id)
+    unwrap(await RemoveKBSource(src.id))
     if (selectedId.value === src.id) {
       selectedId.value = ''
       chunks.value = []
@@ -505,15 +516,23 @@ async function selectDoc(src: KBSource) {
   await loadChunksFor(src.id)
 }
 
+let chunksSeq = 0
+
 async function loadChunksFor(id: string) {
+  const seq = ++chunksSeq
   chunksLoading.value = true
   try {
-    chunks.value = unwrap<KBChunk[]>(await ListKBChunks(id)) ?? []
+    const list = unwrap<KBChunk[]>(await ListKBChunks(id)) ?? []
+    if (seq !== chunksSeq) return // 连点了别的文档，这份结果过期
+    chunks.value = list
   } catch (e) {
+    if (seq !== chunksSeq) return
+    // 失败要清空：否则抽屉里继续显示上一篇的分段，看着像新文档的内容
+    chunks.value = []
     toast.error(getErrorMessage(e))
     logErr('kb', e)
   } finally {
-    chunksLoading.value = false
+    if (seq === chunksSeq) chunksLoading.value = false
   }
 }
 
@@ -570,8 +589,11 @@ watch(query, () => {
   if (searchTimer) clearTimeout(searchTimer)
   const q = query.value.trim()
   if (q.length < 3) {
+    // 关键词短到不检索时，也要作废在途请求：否则它回来会把结果填回空搜索框下面
+    searchSeq++
     hits.value = []
     searched.value = false
+    searching.value = false
     return
   }
   // 250ms 防抖：每次检索要走向量接口（几百毫秒），逐字触发会把请求堆成雪崩。
@@ -609,6 +631,8 @@ async function runSearch() {
 // 清空检索：一并把防抖定时器掐掉，否则刚清空又会被上一次的延迟调用刷回结果。
 function clearQuery() {
   if (searchTimer) clearTimeout(searchTimer)
+  searchSeq++ // 作废在途检索，避免清空后结果又被填回来
+  searching.value = false
   query.value = ''
   hits.value = []
   searched.value = false
@@ -675,14 +699,14 @@ function openSettings() {
 async function saveSettings() {
   settingsSaving.value = true
   try {
-    await SaveKBSettings({
+    unwrap(await SaveKBSettings({
       embedModel: settings.embedModel.trim(),
       embedBaseURL: settings.embedBaseURL.trim(),
       // 掩码原样回传（= 不改 Key），用户清空 = 回退到激活档案。
       embedAPIKey: settings.embedAPIKey.trim(),
       topN: settings.topN,
       vectorOn: settings.vectorOn,
-    })
+    }))
     settingsOpen.value = false
     toast.success(t('save'))
     await refreshAll()
@@ -881,7 +905,12 @@ onScopeDispose(() => {
           </button>
         </div>
         <div class="kb-side-list">
-          <div v-if="!sources.length && !loading" class="kb-empty-side">
+          <div v-if="sourcesFailed" class="kb-empty-side">
+            <BookOpen :size="22" />
+            <p class="kb-empty-title">{{ t('statusError') }}</p>
+            <button class="qd-btn qd-btn-sm" @click="loadSources()">{{ t('statusRetry') }}</button>
+          </div>
+          <div v-else-if="!sources.length && !loading" class="kb-empty-side">
             <BookOpen :size="22" />
             <p class="kb-empty-title">{{ libId ? t('kbLibraryEmpty') : t('kbEmptyTitle') }}</p>
             <p class="kb-empty-desc">{{ t('kbEmptyDesc') }}</p>

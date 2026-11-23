@@ -45,6 +45,10 @@ export function useAiMention(deps: AiMentionDeps) {
 
   const mentionOpen = computed(() => mentionQuery.value !== null && mentionItems.value.length > 0)
 
+  /**
+   * 防抖只减少请求数，不保证顺序：@a → @ab 时若前一次后返回，
+   * 列表会停在 @a 的候选、与输入框里的关键词对不上。按关键词校验丢弃过期结果。
+   */
   async function loadMentionItems(q: string) {
     const out: AIMentionItem[] = []
     // 会话从本地列表里筛：这些数据页面已经有了，为它再走一次 RPC 只是多一次往返。
@@ -61,6 +65,7 @@ export function useAiMention(deps: AiMentionDeps) {
     } catch {
       // 没有工作目录 / 目录已失效：只给会话项。这不是错误，不该弹提示打断输入。
     }
+    if (mentionQuery.value !== q) return // 关键词已变，这次结果过期
     mentionItems.value = out
     mentionIdx.value = 0
   }

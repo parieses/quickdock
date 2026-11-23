@@ -432,7 +432,8 @@ async function loadCheckpoints(convID: string) {
   } catch {
     // 拉不到回滚点不该弹错：它是附加能力（比如老库还没迁移完），
     // 拿它打扰正常对话不值得，卡片上少一个按钮即可。
-    checkpoints.value = []
+    // 但同样要校验会话：切到 B 之后 A 的请求失败，不能把 B 已拿到的回滚点清掉。
+    if (activeId.value === convID) checkpoints.value = []
   }
 }
 
@@ -1115,6 +1116,12 @@ async function loadMessages(convID: string, full = false) {
     messages.value = list
   } catch (e) {
     if (gen !== messagesGen) return
+    // 失败时必须清空：侧栏/标题/模型已经切到新会话了，留着上一条的消息
+    // 会让人以为看的就是这条会话的历史，还可能在上面做引用与回滚。
+    messages.value = []
+    checkpoints.value = []
+    pageError.value = getErrorMessage(e)
+    pageErrorRetry.value = () => { void loadMessages(convID, full) }
     toast.error(getErrorMessage(e))
     return
   }
@@ -3713,6 +3720,7 @@ onUnmounted(() => {
         :msg-stat="msgStat"
         :format-stat="formatStat"
         :cp-for-call="cpForCall"
+        :cp-version="checkpoints.length"
         :job-rows="jobRows"
         :job-seq="jobSeq"
         :sched-times="activeIsScheduled"
@@ -4229,7 +4237,7 @@ onUnmounted(() => {
   justify-content: center;
   flex-wrap: wrap;
   gap: var(--space-2);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
 }

@@ -79,17 +79,21 @@ async function loadTimeline(silent = false) {
   // 换成加载提示、列表 DOM 被销毁重建，用户下拉到一半就被弹回顶部。
   if (!silent) sessionLoading.value = true
   sessionFailed.value = ''
+  const want = props.convId
   try {
-    const res = unwrap<SessionTimeline>(await AISessionTimeline(props.convId, 0))
+    const res = unwrap<SessionTimeline>(await AISessionTimeline(want, 0))
+    // 期间换了会话：这次结果属于上一条，回填会把时间线闪回旧内容
+    if (props.convId !== want) return
     timeline.value = res?.runs ?? []
     // 默认展开最近一次；用户手动选过 run 之后就不再自动切换。
     const last = timeline.value[timeline.value.length - 1]
     if (last && !runToggleTouched.value) openRuns.value[last.run.id] = true
   } catch (e) {
+    if (props.convId !== want) return
     sessionFailed.value = getErrorMessage(e)
     logErr('ai:traceTimeline', e)
   } finally {
-    if (!silent) sessionLoading.value = false
+    if (!silent && props.convId === want) sessionLoading.value = false
   }
 }
 
@@ -346,14 +350,19 @@ async function load(silent = false) {
   // 轮询时不要亮「加载中」：抽屉一直闪一下就没人看得清步骤在长。
   if (!silent) loading.value = true
   failed.value = ''
+  const want = props.runId
   try {
-    tree.value = unwrap<RunTree>(await AIAgentRunTree(props.runId, 0))
+    const next = unwrap<RunTree>(await AIAgentRunTree(want, 0))
+    // 快速切换 run 或轮询与新请求并发时，旧响应不能覆盖当前树
+    if (props.runId !== want) return
+    tree.value = next
   } catch (e) {
+    if (props.runId !== want) return
     failed.value = getErrorMessage(e)
     logErr('AiTraceDrawer.load', e)
     tree.value = null
   } finally {
-    loading.value = false
+    if (!silent && props.runId === want) loading.value = false
   }
 }
 
@@ -739,7 +748,7 @@ onBeforeUnmount(() => {
   position: fixed;
   inset: 0;
   background: var(--color-bg-overlay);
-  z-index: 200;
+  z-index: var(--z-modal);
 }
 
 /* 居中弹框（对齐 DSH 的子任务面板）：不再从左侧滑出。列表项右侧那列
@@ -759,7 +768,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
-  z-index: 201;
+  z-index: calc(var(--z-modal) + 1);
   overflow: hidden;
 }
 

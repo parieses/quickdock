@@ -901,6 +901,10 @@ watch(selectedId, async (gid) => {
   if (!gid) { detail.value = null; return }
   detailTab.value = 'overview'
   await loadDetail()
+  // await 期间用户可能又点了另一个任务：此时新一轮 watch 已经开始跑，
+  // 这里再建定时器就会多出一个永不清理的轮询（句柄还被覆盖掉）。
+  if (selectedId.value !== gid) return
+  if (detailTimer) { clearInterval(detailTimer); detailTimer = null }
   // 打开期间每 2s 静默重拉当前详情：peers / servers / uris / files 都是会变的实时数据，
   // 只在 gid 变化时拉一次会让这些页签永远停在打开那一刻。
   detailTimer = setInterval(() => {
@@ -909,17 +913,20 @@ watch(selectedId, async (gid) => {
 })
 
 async function loadDetail(silent = false) {
-  if (!selectedId.value) return
+  const gid = selectedId.value
+  if (!gid) return
   // 历史记录在 aria2 里已经没有这个 gid，DlDetail 必然失败；直接按只读概览渲染，
   // 不去打一次注定报错的 RPC，也别在日志里刷一条「任务不存在」。
-  if (tasks.value.find((x) => x.gid === selectedId.value)?.stale) {
+  if (tasks.value.find((x) => x.gid === gid)?.stale) {
     detail.value = null
     detailLoading.value = false
     return
   }
   // 周期刷新不走 loading 分支：否则弹框每次轮询都闪成「加载中」，滚动位置也会丢。
   if (!silent) detailLoading.value = true
-  const d = await detailOf(selectedId.value)
+  const d = await detailOf(gid)
+  // 拉的过程中切了任务：这份详情属于上一个 gid，落进去会覆盖新任务的数据
+  if (selectedId.value !== gid) return
   if (d) {
     detail.value = d
     // 静默刷新只换数据，不覆盖用户在文件页的勾选和选项页正在编辑的输入。
