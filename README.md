@@ -8,7 +8,7 @@
 Windows 桌面工具。资源集合、快速启动、本地开发环境、若干常用工具，都放在一个窗口里。
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-4a9eff)
-![Version](https://img.shields.io/badge/Version-v0.0.55-4a9eff)
+![Version](https://img.shields.io/badge/Version-v0.0.56-4a9eff)
 ![License](https://img.shields.io/badge/License-MIT-4a9eff)
 ![Built with](https://img.shields.io/badge/Built%20with-Go%20%2B%20Vue-4a9eff)
 ![Framework](https://img.shields.io/badge/Framework-Wails%20v3-4a9eff)
@@ -33,6 +33,7 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 - **快捷键**：`Ctrl+Space` 主窗口、`Ctrl+K` 命令面板、`` Ctrl+` `` 剪贴板、`F1` 截图，均可改键
 - **运行环境**：语言、数据库、中间件、网络服务到 AI 工具的运行时管理，安装、切换版本、启停、看日志都在应用内完成
 - **AI**：能改文件、跑命令的本地 agent（每步可审批、可回滚），多模型对话、SSH 终端侧栏、剪贴板与笔记的快捷问答，对外提供 MCP 服务
+- **脚本任务**：青龙式的本机脚本站，JS / Python / Shell / Go / PHP 直接跑，依赖随脚本安装，代码与日志都能在界面里看，也能交给 AI 建和改
 - **网盘**：自建浏览页接管聚合网关，在线预览 / 播放、批量下载交给下载器，不内嵌厂商后台
 - **跨机迁移**：整机数据导出 zip、在另一台电脑合并导入，密码库用口令加密随包带走
 - **密码库**：SSH、网站登录等场景共用一处，AES-256-GCM 本地加密、密钥由系统 DPAPI 包裹；配浏览器扩展可在网页里自动填充，不联网、不外传
@@ -58,7 +59,7 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 | 日志查看器 | — | 「设置 → 日志」按天查看应用日志与崩溃记录，可过滤级别、清理旧日志，也能把当前这段日志一键交给 AI 分析 |
 | 日志实时尾随 | — | 命令面板输入 `logtail`，对任意本机文件执行 `tail -f`，支持暂停与关键字高亮，顶栏状态条实时显示跟随 / 暂停与已读行数 |
 | 通知中心 | — | 侧栏底部铃铛，汇总监控状态、定时任务结果、邮件验证码与 AI 回答完成，未读带角标；可按类型筛选与搜索，点通知直达对应监控 / 任务 / 会话；Webhook 机器人也可手动发一条测试消息 |
-| 总览 | — | 首页顶部是日期条（农历 / 节气 / 今日宜忌 / 城市天气，可整块关掉）与六个概览读数，下面十张卡：接下来、最近使用、文件置物架、今日待办、邮件验证码、端口占用、常驻服务、Git 仓库状态、网站健康、AI 用量；卡片可自定义显隐与排序，每一行都能点进对应页面并停在那一条；读数超过 5 分钟标黄、30 分钟标红，拉取失败就地标注不显示旧值 |
+| 总览 | — | 首页顶部是日期条（农历 / 节气 / 今日宜忌 / 城市天气，可整块关掉）与六个概览读数，下面十一张卡：接下来、最近使用、文件置物架、今日待办、脚本任务、邮件验证码、端口占用、常驻服务、Git 仓库状态、网站健康、AI 用量；顶部快捷动作可新建待办 / 笔记 / AI 任务 / 脚本；卡片可自定义显隐与排序，每一行都能点进对应页面并停在那一条；读数超过 5 分钟标黄、30 分钟标红，拉取失败就地标注不显示旧值 |
 | 文件置物架 | — | 把今天要用的文件或目录拖到总览卡上，也可点「添加」选文件 / 选目录；双击即开，可在资源管理器定位或移出。只记路径不搬文件，上限 200 条 |
 | 邮件验证码 | — | 可配多个 IMAP 邮箱同时收取（只读收件箱），新验证码按账号合并出现在总览卡上，点一下复制，同时推通知中心；可点开看邮件原文（HTML 按卡片样式渲染），密码变更 / 异地登录等安全告警也会进卡与通知中心；不会标记已读，也不发信、不删信 |
 | 今日天气与宜忌 | — | 天气支持 Open-Meteo / 和风 / 彩云 / wttr.in 多源，可钉住一个源也能自动降级：一个源不通就换下一个，前端保留上一次成功结果，卡片不会再整块空白；昼夜判定按日出日落反推城市当地时间，晚上看异地城市不会判错白天。叠加离线农历 / 节气；宜忌按建除十二神与神煞表本地算，词条保留传统写法，UI 注明属民俗参考；城市搜索支持城市、省份 / 简称与中英文，输省名自动定位省会，同名村镇按人口与行政级别筛掉 |
@@ -73,7 +74,8 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 | 能力 | 说明 |
 |------|------|
 | 待办 | 列表 / 看板 / 四象限视图，子任务、标签、重复规则、到期提醒；子任务可单独设截止日，页内可搜索；日历可直接拖拽改截止日；重复任务完成后留痕而不是原地下次，完成时可选「仅本次」或「全部」，也能顺手稍后提醒；番茄专注时长可自定义并留有历史，结束后发系统通知，可选机器人推送 |
-| 定时任务 | 6 种动作 × 6 种调度（一次性 / 间隔 / 每天 / 每周 / 每月 / 标准 cron），列表可拼音搜索与批量启停、显示下次执行倒计时，执行历史可跨任务统计并导出 CSV，可手动立即执行。动作里可以跑一段 AI 提示词，结果按执行时间追加进同一条会话（定时任务专属空间带未读标记，能从历史反查这次跑的是哪个会话）；任务可设生效期，过期自动停用并停止排下一次，关机期间错过的调度点按 catch-up 窗口回补；手动立即执行是异步的：能看到当前跑到哪一步、也能中途取消；通知分「每次 / 仅失败 / 不推送」，通知中心始终留档 |
+| 定时任务 | 7 种动作 × 6 种调度（一次性 / 间隔 / 每天 / 每周 / 每月 / 标准 cron），列表可拼音搜索与批量启停、显示下次执行倒计时，执行历史可跨任务统计并导出 CSV，可手动立即执行。动作里可以跑一段 AI 提示词或选中一个已有脚本，AI 结果按执行时间追加进同一条会话（定时任务专属空间带未读标记，能从历史反查这次跑的是哪个会话）；任务可设生效期，过期自动停用并停止排下一次，关机期间错过的调度点按 catch-up 窗口回补；手动立即执行是异步的：能看到当前跑到哪一步、也能中途取消；通知分「每次 / 仅失败 / 不推送」，通知中心始终留档 |
+| 脚本任务 | 浏览器式管理本机脚本：JS / Python / Shell / Go / PHP 直接运行，代码、依赖文件与变量在页面里编辑；按脚本自动装 requirements / npm / go mod / composer 依赖，解释器优先用脚本指定的，其次环境管理里装过的，最后才找系统 PATH；支持手动、定时、文件变化与本地 HTTP 触发，并发闸门、超时、日志与运行历史齐全，脚本可导出 zip 换机导入 |
 | 网站监控 | 六种探针（HTTP / TCP 端口 / DNS / Ping / 本机进程 / 自定义命令），HTTP 状态码与响应时间、SSL 到期预警、关键字与正则匹配、响应趋势图、正常率环形图；近 24h p95 / p99 响应时间分位数；内置「状态页」视图可只读汇总并导出静态 HTML 快照。状态变化推送通知，除内置 6 家机器人外可添加 Bark / Discord / Slack / Ntfy / Gotify / 自定义 Webhook。支持搜索、批量启停、拖拽排序、全站统一回收站（设置 → 历史，30 天自动清理）、维护窗口与告警静默 |
 
 </details>
@@ -95,9 +97,9 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 | 剪贴板 AI | 条目上「问 AI」就地弹层，预置翻译、摘要、格式化和自由提问 |
 | 笔记 AI | 笔记浮窗内嵌面板，支持总结、润色、续写、翻译 |
 | DeepSeek Harness | 内嵌完整 Agent 编程入口，自动装填便携 Node，原生窗口承载 3080 端口；打开前校验 WebView2 版本，进程意外退出自动重拉 |
-| MCP 服务 | `http://127.0.0.1:9230/mcp`，工具分只读、低危写、高危三级权限（默认开放只读 + 低危写）；含下载器工具域（查任务与进度、暂停 / 恢复 / 删除）与 SSH 工具域（列主机、SFTP 读、受限执行——默认一台主机都不授权，需逐台勾选 `mcpAllowed`，写文件与上传类工具刻意不注册）；高危的杀进程与执行系统指令恒不注册，等同工具不存在 |
+| MCP 服务 | `http://127.0.0.1:9230/mcp`，工具分只读、低危写、高危三级权限（默认开放只读 + 低危写）；含下载器工具域（查任务与进度、暂停 / 恢复 / 删除）、SSH 工具域（列主机、SFTP 读、受限执行——默认一台主机都不授权，需逐台勾选 `mcpAllowed`，写文件与上传类工具刻意不注册）与脚本工具域（看脚本 / 看源码 / 看日志，AI 可直接建脚本、写代码和依赖文件；运行仍需脚本勾选允许）；高危的杀进程与执行系统指令恒不注册，等同工具不存在 |
 | Git 面板 | 对标 SourceTree 的仓库视角：分支 / 标签 / 远端 / 子模块管理，贮藏，文件历史与逐行归属（blame），amend、cherry-pick、revert，分支对比、side-by-side diff，SSH 密钥一键配置 GitHub / GitLab，多选批量操作与存档导出 |
-| 环境管理 | 运行时的安装、切换、启停、配置、日志、控制台，全部在用户目录内；每个运行时标题旁的「?」给一张资料卡（分组、本页能做什么、上手提示、实时状态与官网 / 文档 / 源码链接），DSH 等不在运行时列表里的特殊项也能单独打开自己的资料卡；可对项目目录做只读体检：版本声明逐个对照已装与激活版本，依赖清单（`package.json` / `go.mod` / `pyproject.toml` 等）出一份快照；PATH 面板可视化列出每个运行时的 bin 目录，可按版本单独启用 / 注销而不是整段覆盖 |
+| 环境管理 | 运行时的安装、切换、启停、配置、日志、控制台，全部在用户目录内；上游版本列表内存 + 落盘缓存，过期后台补拉，打开「更新总览」不再反复打上游；每个运行时标题旁的「?」给一张资料卡（分组、本页能做什么、上手提示、实时状态与官网 / 文档 / 源码链接），DSH 等不在运行时列表里的特殊项也能单独打开自己的资料卡；可对项目目录做只读体检：版本声明逐个对照已装与激活版本，依赖清单（`package.json` / `go.mod` / `pyproject.toml` 等）出一份快照；PATH 面板可视化列出每个运行时的 bin 目录，可按版本单独启用 / 注销而不是整段覆盖 |
 | 下载器 | 以 aria2 为引擎：链接、批量、磁力、种子、Metalink；状态分页与七标签详情、多选批量、速度曲线、下载前空间预检、失败重试、完成通知。可逐任务指定目录、按文件名独立建文件夹；大文件写满有磁盘守卫与引擎自愈，还支持换机续传导入。退出前让 aria2 自己落盘会话、历史跨重启保留（已完成 / 失败的任务不再凭空消失，标为历史项只留打开目录与删除）。支持 BT 与远程引擎，也能在 MCP 里查进度 |
 | 网盘 | 以 OpenList 为聚合网关（百度 / 夸克等转 WebDAV + 网页后台），自建浏览页而非内嵌厂商后台：目录浏览、图片 / 视频 / 音频 / PDF / 文本在线预览（本地代理只绑回环 + 随机令牌，视频拖进度原样透传 Range）、新建 / 重命名 / 删除 / 深搜与排序、批量下载交给下载器（显式传落盘名，不再全叫 f）。网关由环境管理托管，密码每次启动自动与网关库对齐 |
 | 知识库 | 把本地文档（Word / Excel / PDF / Markdown / 纯文本）导进来做问答与检索：中文走 FTS5 trigram，配了 embedding 模型就同时跑向量召回，两路按 RRF 融合。检索结果给到出处片段，可点回原文核对；文档按库分组，同一份文件只入库一次；AI 回答、笔记正文与剪贴板条目也能一键加入 |
@@ -233,7 +235,7 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 - **读数可点且说实话**：逾期待办直接落到第一条并高亮，掉线监控落到那一条，有变更的仓库落到对应仓库，端口读数落到端口区块；拉取失败的读数显示「加载失败」而不是上次的值，超过 5 分钟标黄、30 分钟标红并给「重试」入口
 - **接下来**：把临近的待办与定时任务按时间合成一条通栏，点一下直接落到那一条；没有就明说没有，不拿空占位充数
 - **近 7 天活动**：定时任务执行次数、AI 调用次数、待处理仓库数只报真实拿得到的数，没有完成时间字段就不编「完成 N 项待办」
-- **页头快捷动作**：「新建待办」直接打开新建弹窗（不必先切页再点加号），「复制验证码」取邮件卡里最新一条
+- **页头快捷动作**：「新建待办 / 新建笔记 / 新建 AI 任务 / 新建脚本」点一下直接落到对应页面的新建状态，「复制验证码」取邮件卡里最新一条；脚本卡只列失败优先与最近跑过的 5 条，点哪条就选中哪个脚本，新建、改动或跑完由事件即时刷新，不额外轮询
 
 </details>
 
@@ -384,7 +386,8 @@ AI 完成通知有前置判断：主窗口可见且当前停在 AI 对话页时�
 <details>
 <summary><b>定时任务</b></summary>
 
-- 6 种动作：打开软件、目录、网页、执行命令、发送 HTTP 请求、执行 AI 提示词
+- 7 种动作：打开软件、目录、网页、执行命令、运行脚本、发送 HTTP 请求、执行 AI 提示词
+- **脚本动作**：从下拉里选一个已有脚本，target 存脚本 id 而不是路径——改脚本不用改任务，脚本被删了会在运行时明确报错；到点同步等脚本跑完，成败与摘要写进执行历史，取消任务会连脚本进程一起杀
 - 6 种调度：一次性、按间隔、每天、每周、每月（可指定几号 / 月末）、标准 cron（五段表达式，支持区间、列表、步长与常用预设）
 - **AI 动作**：到点把提示词丢给 AI 助手跑，结果按执行时间追加进同一条会话。定时任务在 AI 页有自己的空间（闹钟图标、未读标记），运行历史里能反查「这次跑出的是哪个会话」并跳过去
 - **无人值守的边界**：同时最多 2 个任务在跑，超了直接记一条可见的失败而不是塞进看不见的队列；单轮工具循环 24 轮、上下文 8 倍预算，叠加原有的 600 秒超时。这些预算走可选参数，普通对话完全不变
@@ -394,6 +397,21 @@ AI 完成通知有前置判断：主窗口可见且当前停在 AI 对话页时�
 - 执行历史可只看失败、导出 CSV，保留最近 500 次或 30 天；**运行统计跨任务统计**（近 7 天 / 30 天失败几次、一共跑了多少），单任务视角回答不了这个问题
 - 机器人推送地址统一在「设置 → 机器人通知」配一次，任务里只决定发不发、走哪个渠道
 - 删除的任务进入回收站，回收站内单独一类。恢复时按当前时间重新计算下次运行时间，避免快照中已过期的运行时间导致恢复后立刻补跑
+
+</details>
+
+<details>
+<summary><b>脚本任务</b></summary>
+
+侧栏「脚本任务」是一页本机脚本站，形态接近青龙面板，但脚本就放在自己的数据目录里，不依赖 Docker。
+
+- **语言与入口**：Python、JavaScript、Shell、Go、PHP（外加自定义解释器），新建时自动给默认入口 `main.py` / `main.js` / `main.sh` / `main.go` / `main.php`；每个脚本有自己的文件列表，代码用与 AI 文件编辑同一套 CodeMirror 内核写，内核动态加载失败会降级成能正常保存的纯文本编辑区，不会出现「建好了却写不了代码」
+- **解释器从哪来**：脚本里指定 > 环境管理里装过的对应运行时 > 系统 PATH。所以 Python 可以指向自己的 venv，Go / PHP 没装时先在环境管理里装，不必先配全局变量
+- **依赖**：按语言认 `requirements.txt`、`package.json`、`go.mod`、`composer.json`，首次运行自动装（Go 缺 `go.mod` 会自动补）；改完依赖文件可以立刻点「安装依赖」重装。装包失败会显示原始输出，例如 pip 源返回 403 时可在脚本变量里设 `PIP_INDEX_URL` 换源
+- **变量**：全局与脚本级两层，同名以脚本级为准；敏感值可标为秘密，不在列表里明文展示
+- **触发方式**：手动立即跑、定时任务选脚本、监听文件或目录变化（按 mtime 轮询）、本地 HTTP 触发、MCP 触发。同一脚本同时只允许一个实例，重复触发会明确报「正在运行」；可设超时与默认参数，取消执行会连同子进程一起终止
+- **日志与历史**：输出实时清洗 ANSI 控制码后落盘，运行记录含触发方式、退出码、耗时、摘要与 AI 补丁来源；失败脚本在总览脚本卡上排最前，点进去直接选中它。启动时会把上次进程遗留的「运行中」收尾成失败，避免重启后第一次定时任务被旧记录挡掉
+- **迁移与授权**：脚本正文在磁盘、DB 只存索引，所以整机快照刻意不带这三张表；换机请导出 / 导入脚本 zip。删除、改名不通过 MCP 提供；MCP 的九个 `script_*` 工具里，建脚本 / 写文件 / 装依赖 / 运行是低危写，每次要审批，且运行还要求脚本自身勾选「允许 MCP 调用」
 
 </details>
 
@@ -567,14 +585,15 @@ AI 完成通知有前置判断：主窗口可见且当前停在 AI 对话页时�
 
 - **地址**：`http://127.0.0.1:9230/mcp`，Streamable HTTP，仅接受 POST，协议版本 2025-06-18
 - **分三级权限**，默认开放只读 + 低危写，高危恒不开放；可在环境管理页按档位或逐个工具开关：
-  - 只读：`app_info`、`env_list`、`env_status`、`env_log`、`env_versions`、`env_port_conflict`、`env_project_versions`、`env_disk_usage`、`file_search`、`file_find`、`file_read`、`file_grep`、`workspace_list`、`workspace_list_all`、`item_search`、`item_list`、`recent_items`、`scene_list`、`collection_list`、`shelf_list`、`todo_list`、`note_search`、`note_read`、`note_tags`、`note_revisions`、`note_revision_read`、`note_quick_read`、`clipboard_recent`、`clipboard_search`、`port_list`、`log_list`、`log_read`、`crash_list`、`crash_read`、`log_storage`、`schedule_list`、`schedule_runs`、`monitor_list`、`monitor_logs`、`monitor_logs_since`、`plugin_list`、`plugin_exec_logs`、`download_status`、`download_list`、`download_detail`、`download_global_stat`、`netdisk_status`、`netdisk_list_dir`、`netdisk_search`、`kb_list`、`kb_search`、`kb_libraries`、`kb_status`、`kb_chunks`、`mail_codes`、`mail_read`、`credentials_status`、`password_generate`、`ssh_list_hosts`、`ssh_list_sessions`、`ssh_terminal_read`、`ssh_sftp_list`、`ssh_sftp_read`
-  - 低危写：`env_start`、`env_stop`、`env_restart`、`robot_notify`、`item_open`、`todo_create`、`todo_update`、`todo_done`、`clipboard_copy`、`note_create`、`note_update`、`note_quick`、`note_folder_create`、`note_move`、`note_restore`、`note_delete`、`schedule_run_now`、`monitor_check_now`、`plugin_execute`、`plugin_open`、`download_pause`、`download_resume`、`download_remove`、`ssh_exec`
+  - 只读：`app_info`、`env_list`、`env_status`、`env_log`、`env_versions`、`env_port_conflict`、`env_project_versions`、`env_disk_usage`、`file_search`、`file_find`、`file_read`、`file_grep`、`workspace_list`、`workspace_list_all`、`item_search`、`item_list`、`recent_items`、`scene_list`、`collection_list`、`shelf_list`、`todo_list`、`note_search`、`note_read`、`note_tags`、`note_revisions`、`note_revision_read`、`note_quick_read`、`clipboard_recent`、`clipboard_search`、`port_list`、`log_list`、`log_read`、`crash_list`、`crash_read`、`log_storage`、`schedule_list`、`schedule_runs`、`monitor_list`、`monitor_logs`、`monitor_logs_since`、`plugin_list`、`plugin_exec_logs`、`download_status`、`download_list`、`download_detail`、`download_global_stat`、`netdisk_status`、`netdisk_list_dir`、`netdisk_search`、`kb_list`、`kb_search`、`kb_libraries`、`kb_status`、`kb_chunks`、`mail_codes`、`mail_read`、`credentials_status`、`password_generate`、`ssh_list_hosts`、`ssh_list_sessions`、`ssh_terminal_read`、`ssh_sftp_list`、`ssh_sftp_read`、`script_list`、`script_files`、`script_read_file`、`script_runs`、`script_log`
+  - 低危写：`env_start`、`env_stop`、`env_restart`、`robot_notify`、`item_open`、`todo_create`、`todo_update`、`todo_done`、`clipboard_copy`、`note_create`、`note_update`、`note_quick`、`note_folder_create`、`note_move`、`note_restore`、`note_delete`、`schedule_run_now`、`monitor_check_now`、`plugin_execute`、`plugin_open`、`download_pause`、`download_resume`、`download_remove`、`ssh_exec`、`script_create`、`script_write_file`、`script_install_deps`、`script_run`
   - 高危（当前版本恒不开放，环境管理页只有「只读 / 只读+低危写」两档）：`process_kill`、`system_command`、`download_add`
 - **下载器工具域**：四个只读工具看引擎状态、任务列表、单个任务详情与全局统计，三个写工具作用于用户自己建的 gid。`download_add` 刻意归高危且当前不开放 —— 让宿主向模型给出的任意地址发请求并写盘是 SSRF 的经典形状，新建任务请走下载页
 - **SSH 工具域**：五个只看不动的工具（列已保存主机、列会话、读终端屏显、列 SFTP 目录、读远端文件）加一个 `ssh_exec`。三道闸叠着用：主机级 `mcpAllowed` 默认全关（客户端是外部进程，没这道闸等于把用户存的每台机器交给任意连上来的 Agent）、命令风险判定、审计只记命令不记输出（stdout/stderr 常夹密钥与业务数据）。写文件 / 上传 / 删除类工具刻意不注册，描述文案也反复写「只读」，免得模型以为能随意改远端。`ssh_exec` 用低危写而不是高危 —— 高危档恒不注册，标了等于工具不存在，反而失去授权与风险判定这两道可见的闸
 - **只对外提供 QuickDock 自身的能力**。抓网页、列目录、看 git、改文件、跑命令这 9 个工具只给内置 AI 用（见「AI 助手 → 工具调用」），不在这份清单里：外部客户端不缺这类工具，而「任意路径写」是最不该外包出去的那类权限
 - 文件相关：按名字找有两条路——`file_find` 在指定目录里递归找（不依赖任何外部程序，通配符或子串都行），`file_search` 走 Everything 全盘检索（**只有 Everything 已安装、es.exe 在位且正在运行时才会出现在工具列表里**，没装时模型看到的就是 `file_find`）；`file_read` 读内容（**返回的 content 每行前带行号**），`file_grep` 在目录里按正则搜内容。**读取有白名单**：只能读家目录、数据目录、快捷项里登记过的目录与工作目录，以及当前对话绑定的工作目录；路径不在范围内会报错并列出可用目录。私钥类文件（`id_rsa`、`*.pem`、`*.key` 等）、二进制与 UTF-16 文件一律拒绝，单次调用有行数/文件数/时间预算
 - 定时任务与监控：`schedule_list` / `schedule_runs` 看任务与执行历史，`monitor_list` / `monitor_logs` 看监控状态与逐次检测记录；只给了「立即跑一次」（`schedule_run_now` / `monitor_check_now`）两个写工具，**不提供创建与删除**——建任务是用户的排期决定，删监控会连历史一起没，且给 `action=command` 开写入口等于架空 `system_command` 的高危门
+- 脚本工具域：九个 `script_*` 工具。只读的看脚本清单、目录、源码、运行记录和日志；`script_create` 可以一次写入入口正文与多个依赖文件（`code` 是入口简写，`files` 是「相对路径 → 内容」，Go 缺 `go.mod` 自动补），AI 因此能把带第三方依赖的脚本一次建好。写文件是整体覆盖、按脚本 id 记本次会话授权；`script_run` 另需脚本勾选「允许 MCP 调用」，删除 / 改名刻意不开放
 - 插件相关：`plugin_execute` 可传结构化参数（`input` 为字符串或 JSON 对象，键由插件定义），且**只接受插件清单里声明过的命令**——未声明的命令（插件自己界面用的内部命令）会直接被拒并提示改用 `plugin_open`，模型猜命令名也没用；纯前端插件（`runtime=none`）宿主无法执行，改用 `plugin_open` 带参打开界面；`plugin_exec_logs` 回看执行记录，AI 触发的记录来源标为 `mcp`
 - 插件通过 `host.mcp.call` 复用全部工具，沿用同一套等级门
 - **反过来也能当客户端**：`mcp.json` 里配外部 server 后，它的工具以 `mcp_<server>_<tool>` 并进内置 AI 的注册表（见「AI 助手 → 接入外部 MCP server」）。本服务仍在 9230，两者互不影响
@@ -598,7 +617,7 @@ AI 完成通知有前置判断：主窗口可见且当前停在 AI 对话页时�
 | AI 服务 | Ollama、MCP 服务（内置 9230） |
 
 - **存储结构**：`%APPDATA%\QuickDock\runtime\<name>\<version>`，便携优先，多版本共存
-- **下载**：源地址可切换，支持 `{version}` `{v}` `{os}` `{arch}` `{ext}` 占位符；版本列表智能筛选并缓存 1 小时；代理容错与多源回退；进度后台推送
+- **下载**：源地址可切换，支持 `{version}` `{v}` `{os}` `{arch}` `{ext}` 占位符；版本列表智能筛选并做内存 + 落盘缓存，过期项后台补拉后推给界面，展开「更新总览」不会反复打上游；代理容错与多源回退；进度后台推送
 - **服务管理**：启停与重启，配置编辑（Nginx、Apache、Caddy 在启动前执行 `*-t` 校验），实时日志（尾部 8KB），Web 控制台，端口总览，本地开发站点（自定义域名 + 自动 HTTPS）
 - **「?」资料卡**：每个运行时标题旁的问号给一句话定性，加分组、本页能做什么、首次上手提示、实时状态（已装版本 / 受管服务 / 常驻开关 / 控制台端口）与官网 / 文档 / 源码链接；资料按运行时 id 逐条维护中英双语，查不到条目的运行时不摆空壳问号
 - **项目体检**：选一个目录，读 `.nvmrc` / `.tool-versions` / `go.mod` / `package.json` 等版本声明（含上级目录），和本机已装、当前激活的版本逐条对比，缺的当场切过去；同时按 `packageManager` / 锁文件出一份依赖清单快照，只看不装 —— 这个页面不会替你执行任何安装命令
@@ -840,16 +859,16 @@ macOS 每个 release 产出 `quickdock-darwin-arm64` 与 `quickdock-darwin-amd64
 │                                                                   │
 │   ┌────────────────────┐      ┌────────────────────────────────┐  │
 │   │  Vue 3 前端         │◄────►│  services/  Wails 绑定门面      │  │
-│   │  (frontend/dist     │ IPC  │  AppService + 31 领域子包      │  │
-│   │   go:embed)         │      │  754 个绑定方法                 │  │
+│   │  (frontend/dist     │ IPC  │  AppService + 32 领域子包      │  │
+│   │   go:embed)         │      │  798 个绑定方法                 │  │
 │   └────────────────────┘      └───────────────┬────────────────┘  │
 │                                                │ 单向依赖          │
 │                                 ┌──────────────▼────────────────┐  │
 │                                 │  internal/  引擎层（无绑定）    │  │
 │                                 │  db / env / sites / sshx /    │  │
 │                                 │  dsh / plugin / platform /    │  │
-│                                 │  sync / webdav / mcp /        │  │
-│                                 │  mcpclient / fsguard /        │  │
+│                                 │  scriptrun / sync / webdav /  │  │
+│                                 │  mcp / mcpclient / fsguard /  │  │
 │                                 │  screenshot / winmgr / dl /   │  │
 │                                 │  weather / mailbox / logger / │  │
 │                                 │  credentials / kb / sysutil / │  │
@@ -860,12 +879,12 @@ macOS 每个 release 产出 `quickdock-darwin-arm64` 与 `quickdock-darwin-amd64
 
 几点实现上的选择：
 
-- **门面分层**：领域能力下沉到 31 个门面子包，宿主核心留在 AppService；`wails3 generate bindings` 生成 33 个 Service / 754 个绑定方法（口径以 bindings 导出函数为准，见下方项目结构）
+- **门面分层**：领域能力下沉到 32 个门面子包，宿主核心留在 AppService；`wails3 generate bindings` 生成 34 个 Service / 798 个绑定方法（口径以 bindings 导出函数为准，见下方项目结构）
 - **截图层用原生窗口**：自建 Win32 分层窗口整帧提交，工具条、标注、图形都画进同一张 DIB，可以避免 WebView 流程带来的闪烁
 - **次级窗口延迟创建**：首次热键触发时才创建 WebView2，减少启动白屏；浮窗位置经 kvstore 持久化
 - **后台服务**：SQLite WAL、待办（10s）、定时与监控调度器、AI 流式 HTTP 服务、邮件 IMAP 长连接、天气轮询、插件健康检查、DSH 隐藏进程、内置 MCP（9230）
 - **安全**：纯 Go SQLite 无 CGO，SQL 列名白名单，API Key、邮箱授权码与密码库统一走 DPAPI，单实例锁防止并发写库，本地流式服务使用随机端口与随机 token；AI 的外部工具调用另过审批闸门，文件读写统一走 `fsguard` 白名单。给浏览器扩展用的本地 API 只绑回环、校验扩展 Origin 与 Bearer token，且只在开关打开时监听
-- **规模**：Go 源码约 18.7 万行（`services` 7.9 万 + `internal` 10.4 万 + 入口与窗口 0.37 万，含 193 个测试文件），前端约 13.4 万行（147 个 Vue 组件 + 162 个 TS 模块，其中 36 个单测文件）
+- **规模**：Go 源码约 19.3 万行（`services` 8.3 万 + `internal` 10.6 万 + 入口与窗口 0.37 万，含 197 个测试文件），前端约 13.6 万行（148 个 Vue 组件 + 163 个 TS 模块，其中 36 个单测文件）
 
 ---
 
@@ -897,7 +916,7 @@ macOS 每个 release 产出 `quickdock-darwin-arm64` 与 `quickdock-darwin-amd64
 | lunar-typescript | 今日宜忌（离线规则库，农历与节气由 ICU 与天文近似自算） |
 | marked 18 + DOMPurify | Markdown 渲染与净化 |
 | KaTeX、Mermaid、highlight.js | 公式、流程图、代码高亮，按需分包 |
-| CodeMirror 6 | 配置文件与产物文件编辑，按需动态加载 |
+| CodeMirror 6 | 配置文件、产物与脚本文件编辑，按需动态加载；加载失败自动降级为可保存的纯文本 |
 | @floating-ui/vue 2 | 浮层定位 |
 | @wailsio/runtime 3.0.0-alpha.96 | Wails 前端运行时 |
 
@@ -941,6 +960,7 @@ wails3 generate bindings -ts -i -clean   # 等价于 cd frontend && npm run bind
 |------|------|
 | `~/.quickdock/quickdock.db` | SQLite，WAL 模式、外键开启、busy timeout 5s |
 | `~/.quickdock/images/` | 剪贴板图片 |
+| `~/.quickdock/scripts/<id>/` | 脚本正文与依赖文件；DB 只存索引，换机走脚本导出 / 导入 |
 | `~/.quickdock/plugins/` | 已安装插件 |
 | `%APPDATA%/QuickDock/` | 应用配置 |
 | `~/.quickdock/runtime/node`、`~/.quickdock/dsh` | 便携 Node 与 DSH |
@@ -952,7 +972,7 @@ wails3 generate bindings -ts -i -clean   # 等价于 cd frontend && npm run bind
 ```
 quickdock/
 ├── main.go / tray.go / windows.go        # 入口、托盘、浮动窗口、单实例锁
-├── services/                             # Wails 门面层，宿主 + 31 领域子包，754 个绑定方法
+├── services/                             # Wails 门面层，宿主 + 32 领域子包，798 个绑定方法
 │   ├── service.go  api_result.go  types.go  lifecycle.go
 │   ├── hotkey.go  theme.go  autostart.go  winmgr_service.go
 │   ├── app_launcher.go  focus.go  tool.go  clipboard_sys.go  clipboard_files.go
@@ -962,10 +982,10 @@ quickdock/
 │   ├── storage.go  storage_service.go  clipboard_image.go
 │   └── ai/ clipboard/ collection/ credentials/ diag/ download/ dsh/ env/
 │       frecency/ git/ item/ kb/ logtail/ mailbox/ mcp/ monitor/ note/ notify/
-│       netdisk/ plugin/ port/ recycle/ scene/ shelf/ snapshot/ sshx/ system/ todo/
-│       update/ weather/ workspace/
+│       netdisk/ plugin/ port/ recycle/ scene/ script/ shelf/ snapshot/ sshx/
+│       system/ todo/ update/ weather/ workspace/
 ├── internal/                             # 引擎层，被门面调用，无 Wails 绑定
-│   ├── db/  env/  sites/  sshx/  dsh/  plugin/  platform/  sync/  webdav/  webdavsrv/
+│   ├── db/  env/  sites/  sshx/  dsh/  plugin/  platform/  scriptrun/  sync/  webdav/  webdavsrv/
 │   ├── mcp/  mcpclient/  fsguard/  fsview/   # 宿主 MCP、外部 MCP 客户端、文件读写闸门与浏览器
 │   ├── credentials/  lock/  kb/               # 密码库引擎、启动密码锁、知识库解析与向量
 │   ├── mailbox/  weather/  aria2/  netdisk/    # 只读 IMAP、Open-Meteo、下载引擎 RPC、网盘 WebDAV/预览代理（都只由宿主发请求）
@@ -974,8 +994,8 @@ quickdock/
 ├── frontend/src/                         # Vue 3 + TS
 │   ├── App.vue  main.ts  style.css  pages/  i18n/  stores/  types/  styles/  constants/
 │   ├── composables/                      # AI / 环境 / 命令面板的逻辑，commandSearch/ 检索编排、useDialogFocus 焦点陷阱
-│   ├── utils/                            # a11y 指令（v-dialog / v-key-click）、日志、格式化等无状态工具
-│   └── components/                       # 三栏主界面、面板、设置、插件、环境、监控等；QdModal/QdSwitch/QdTabs 为统一样式地基
+│   ├── utils/                            # a11y 指令、日志、格式化、lazyImport（动态导入重试与降级）等无状态工具
+│   └── components/                       # 三栏主界面、面板、设置、插件、环境、脚本任务（ScriptPage）、监控等；QdModal/QdSwitch/QdTabs 为统一样式地基
 ├── plugins/                              # 宿主骨架与开发模板，外部插件在独立仓库
 ├── browser-ext/                          # Chrome / Edge 扩展（MV3），与桌面同仓；出包见 pack.py
 ├── build/  docs/  website/  image/  Taskfile.yml

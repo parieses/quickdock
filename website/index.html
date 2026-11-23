@@ -358,6 +358,23 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">新增脚本任务：JS / Python / Go / PHP 直接跑，AI 也能建脚本</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>新增「脚本任务」页：Python、JavaScript、Shell、Go、PHP 脚本可直接在界面里建、写代码、看文件与日志，支持手动、定时、文件变化和本地 HTTP 触发；每个脚本单独限制并发，取消执行会连同子进程一起终止，运行历史记下退出码、耗时与日志。</li>
+          <li>依赖随脚本走：Python 读 requirements.txt、Node 读 package.json、Go 读 go.mod、PHP 读 composer.json，首次运行自动安装，改完可一键重装；解释器优先用脚本指定的，其次是环境管理里装好的运行时，最后才找系统 PATH，venv 与便携 Go / PHP 都能对上。</li>
+          <li>AI 可以直接建脚本并一次写入代码与依赖文件，复杂脚本不用再手工搬运；写文件与运行都要逐次审批，运行还要求脚本自身勾选「允许 MCP 调用」，删除和改名不开放。</li>
+          <li>总览顶部新增「新建笔记 / 新建 AI 任务 / 新建脚本」快捷动作，并多了一张脚本状态卡：失败排最前、只列最近跑过的几条，点哪条就跳到那个脚本，跑完自动刷新。</li>
+          <li>定时任务新增「运行脚本」动作，从下拉里选已有脚本即可，到点同步跑完并把结果与摘要写进执行历史；脚本改名不用改任务。</li>
+          <li>环境管理的「更新总览」不再反复打上游：版本列表改为内存 + 落盘缓存、过期后台补齐，避免撞上匿名限额后把旧清单当成最新版显示。代码编辑器内核加载失败时会自动降级成可正常保存的纯文本，不再留下空白编辑区。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.55</span>
+          <span class="log-date">2026-11-23</span>
           <span class="log-title">全站界面重做，功能入口补齐，修掉一批「点了没反应」的老毛病</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -400,21 +417,6 @@
           <li>子任务树和轨迹抽屉的状态颜色统一了：进行中蓝、已完成绿、有失败红、已停止橙，不再有「进行中」和「已停止」都显示成灰字的情况。正在跑的分支左边框会亮起来，状态点还会轻轻呼吸，一排任务里扫一眼就知道谁还在跑、谁失败了，不用逐条读文字。系统开了「减少动态效果」时这些动画会自动关掉。</li>
           <li>轨迹的节点树加了层级引导线，缩进之外还能看清哪个节点派出了哪个子任务；失败的步骤会把序号和标题一起标红，长长的时间线里也能立刻定位到出错那一步。还没开跑的子任务此前在气泡树里被错写成「已完成」，现在和抽屉一致显示「进行中」。</li>
           <li>停掉某个子任务的按钮，以前只有鼠标悬停才看得见，现在用键盘 Tab 聚焦时也会显形并给出焦点环；弹框里的箭头、按钮过渡也一并尊重系统的减少动态效果设置。</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.52</span>
-          <span class="log-date">2026-11-18</span>
-          <span class="log-title">AI 运行轨迹能回看了，长对话压缩不再「失忆」，工具调用更稳</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>AI 工具栏新增「轨迹」抽屉：一次回答跑了哪些工具、各自耗时与改动行数、派出去的子 agent 都按运行树列出来，跑完的会话也能回看；「子任务」视图汇总本次会话的所有 agent。运行中每秒刷新，跑完自动停，不再一直空转。长对话的上下文压缩现在会在正文和轨迹里都留痕，看得到压缩前后的体积。</li>
-          <li>长对话压缩后 AI 不再突然「不懂规矩」：拆任务、临时文件放哪、能不能派子 agent、上次做到哪这些约定，压缩后会一并贴回，不会一压就忘。工具栏的上下文统计弹框能实时看本会话占了多少 token、离窗口和预算还有多远、压缩过几次，也能手动压一次。</li>
-          <li>工具审批更严：以前批准过 <code>npm</code> 后，<code>npm install &amp;&amp; curl …</code> 这类拼接命令会蒙混过关跳过确认，现在多段命令一律重新问。模型偶尔把工具参数写坏（半截 JSON）时，本地能纠正，但回传上游会导致整轮请求报 400，现在会在发出前收拾成合法格式，不再无端失败；报错时也会说清是哪个工具的参数出了问题。</li>
-          <li>修掉一批稳定性问题：清理 AI 辅助文件时，目录里若有软链指向外面，不会再误删到工作目录之外；关掉轨迹后子 agent 照常干活但一条记录都不留；历史会话回放不再把已结束的运行显示成「进行中」。</li>
         </ul>
       </details>
 

@@ -358,6 +358,23 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">Script tasks arrive: run JS, Python, Go and PHP locally — and let AI write them</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>A new Script tasks page lets you create Python, JavaScript, Shell, Go and PHP scripts, edit their code and files, and read logs right in the app. Run them by hand, on a schedule, when a file changes, or over local HTTP. Concurrent runs of the same script are blocked, canceling a run kills its child processes, and history records exit code, duration and log output.</li>
+          <li>Dependencies follow the script: requirements.txt for Python, package.json for Node, go.mod for Go and composer.json for PHP are installed automatically on first run and can be reinstalled in one click. Interpreters resolve in order — the one set on the script, a runtime installed in Environment management, then system PATH — so venvs and portable Go/PHP work without extra setup.</li>
+          <li>AI can now create a script and write its code plus dependency files in one go, so complex scripts no longer need manual copying. Writing files and running a script each need approval, running also requires the script's own "allow MCP" flag, and delete/rename are intentionally not exposed.</li>
+          <li>The dashboard header gained New note / New AI task / New script shortcuts, plus a script card that puts failures first, lists only the most recent runs, and jumps straight to the script you click. It refreshes from events the moment a run finishes.</li>
+          <li>Scheduled tasks gained a Run script action: pick an existing script from a dropdown and it runs synchronously at the scheduled time, with status and summary recorded in task history. Renaming a script does not break the task.</li>
+          <li>Environment's update overview no longer hammers upstream sources: version lists are cached in memory and on disk, with stale entries refreshed in the background, so hitting an anonymous rate limit can no longer make outdated built-in lists look like the latest release. When the code editor engine fails to load it now falls back to a plain text area that still saves, instead of leaving an empty pane.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.55</span>
+          <span class="log-date">2026-11-23</span>
           <span class="log-title">Full UI refresh, more entry points, and a batch of “nothing happened” fixes</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -400,21 +417,6 @@
           <li>Status colors are now consistent across the subtask tree and the trace drawer: running is blue, done green, failed red, and canceled orange — no more "running" and "canceled" both showing as gray. The branch that is still running lights up its left edge and pulses its status dot, so you can scan a list of subtasks and instantly see which one is still going or which one failed, without reading every line. These animations turn off automatically when your system requests reduced motion.</li>
           <li>The trace node tree now has hierarchy guide lines, so besides indentation you can see exactly which node spawned which subtask. Failed steps highlight both their number and title in red, making them easy to spot in a long timeline. A subtask that has not started yet used to be mislabeled "Done" in the message bubble; it now reads "Running", matching the drawer.</li>
           <li>The button that stops an individual subtask was only visible on mouse hover; it now also appears on keyboard focus with a visible focus ring. Arrow and button transitions in the drawer also respect the system's reduced-motion setting.</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.52</span>
-          <span class="log-date">2026-11-18</span>
-          <span class="log-title">AI runs are now replayable, long chats stop forgetting themselves, tool calls get steadier</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>The AI toolbar has a new "Trace" drawer: see every tool an answer ran, how long each took, what it changed, and which sub-agents it spawned, laid out as a run tree you can replay after the fact. The "Subtasks" view collects all agents in a session. It refreshes each second while running and stops when the run finishes. Long-chat context compression now leaves a visible trace in both the answer and the trace, with before/after sizes.</li>
-          <li>After a long conversation is compressed, the AI no longer suddenly "forgets the rules": how to split work, where to put temp files, whether it may spawn agents, and where it left off are all re-attached. The new context panel shows how many tokens this session uses, how close it is to the window and budget, and how many times it compressed — with a button to compress manually.</li>
-          <li>Tool approval is stricter. Previously, allowing <code>npm</code> also let chained commands like <code>npm install &amp;&amp; curl …</code> slip through without asking; multi-part commands now always prompt again. When a model writes a broken tool argument (half-finished JSON), it used to fail the whole round with a 400 on the way back to the provider; it is now normalized to valid JSON first, and errors name the tool whose arguments were bad.</li>
-          <li>A batch of stability fixes: cleaning AI scratch files no longer follows a symlink out of the working directory; sub-agents still run with tracing off but leave no records; and replayed sessions no longer show finished runs as "in progress".</li>
         </ul>
       </details>
 
