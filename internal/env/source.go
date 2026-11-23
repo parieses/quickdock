@@ -1049,41 +1049,40 @@ func Versions(rt Runtime) []string {
 	return out
 }
 
-// ---- 版本列表缓存 ----
+// ---- 版本列表 ----
 //
-// AvailableVersions 每次调用都会请求上游，频繁切换运行时时会重复拉取。
-// 加一层内存缓存：TTL=1h，key=runtime+sourceID+custom，命中直接返回，
-// 同时 sourceID/custom 变化时自动失效（换源意味着要重新拉取对应列表）。
-type versCacheEntry struct {
-	vs      []string
-	expired time.Time
-	fetched bool // true=上游拉取成功, false=兜底列表(不应缓存,允许立即重试)
+// 读路径的缓存策略见 verscache.go（内存 + 落盘 + 后台刷新）。
+// 本文件只负责「网络拉取 + 解析」这一层。
+
+// AvailableVersions 返回某运行时的全量可下载版本（上游列表，失败兜底推荐清单）。
+// 返回的版本号格式与 CandidateURLs 的 version 参数一致（如 Go "1.25.0" / Node "v22.22.2"）。
+//
+// 三种情况：
+//   - 缓存未过期：直接返回，不联网；
+//   - 缓存已过期但还有旧值：先把旧值给出去，同时后台刷新（刷完推事件，界面再更新）——
+//     「更新总览」一次要问二十多个运行时，不能让用户盯着转圈等十几个上游；
+//   - 完全没缓存：同步拉一次并写入缓存（首次运行；失败也按短 TTL 记，避免反复重试）。
+func AvailableVersions(rt Runtime, sourceID, custom string) []string {
+	key := versCacheKey(rt, sourceID, custom)
+	if e, ok := versCacheGet(key); ok && len(e.vs) > 0 {
+		if time.Now().Before(e.expired) {
+			return e.vs
+		}
+		go refreshVersions(rt, sourceID, custom)
+		return e.vs
+	}
+	vs, fetched := fetchUpstreamVersions(rt)
+	if len(vs) == 0 {
+		return nil
+	}
+	versCachePut(key, rt, vs, fetched, time.Now())
+	return vs
 }
 
-var (
-	versCacheMu sync.RWMutex
-	versCache   = make(map[string]versCacheEntry)
-	versTTLSec  = 1 * time.Hour
-)
-
-// AvailableVersions 拉取某运行时的全量可下载版本（上游列表）；任何失败均兜底返回推荐列表。
-// 带 1h 内存缓存，sourceID/custom 变化时自动失效。
-// 返回的版本号格式与 CandidateURLs 的 version 参数一致（如 Go "1.25.0" / Node "v22.22.2"）。
-func AvailableVersions(rt Runtime, sourceID, custom string) []string {
-	cacheKey := string(rt) + "|" + sourceID + "|" + custom
-	now := time.Now()
-
-	versCacheMu.RLock()
-	entry, hit := versCache[cacheKey]
-	versCacheMu.RUnlock()
-
-	if hit && now.Before(entry.expired) && len(entry.vs) > 0 {
-		return entry.vs
-	}
-
+// fetchUpstreamVersions 按 registry 配置拉取上游版本列表。
+// fetched=false 表示主地址与备用地址都没拿到，vs 是内置推荐清单（可能滞后）。
+func fetchUpstreamVersions(rt Runtime) (vs []string, fetched bool) {
 	def := registry[rt]
-	var vs []string
-	fetched := false
 	primaryFailed := false
 	if def.versURL != "" && def.versParse != nil {
 		if body, err := fetchURL(def.versURL); err == nil {
@@ -1131,15 +1130,7 @@ func AvailableVersions(rt Runtime, sourceID, custom string) []string {
 	// 并补回每个维护线的最新版）。注意上面的 sortVersionsDesc 会按版本号重排，
 	// 所以解析器里的排序只影响「谁被截掉」，不影响最终展示顺序。
 
-	// 写缓存：仅上游拉取成功时缓存（TTL 1h）。
-	// 失败时不缓存，下次调用立即重试——避免网络抖动时用户长时间看到兜底列表。
-	if fetched {
-		versCacheMu.Lock()
-		versCache[cacheKey] = versCacheEntry{vs: vs, expired: now.Add(versTTLSec), fetched: true}
-		versCacheMu.Unlock()
-	}
-
-	return vs
+	return vs, fetched
 }
 
 // fetchURL 拉取 URL 内容（带代理与超时兜底），最多 32MB。

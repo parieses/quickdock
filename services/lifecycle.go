@@ -241,6 +241,11 @@ func (a *AppService) ServiceShutdown() error {
 	if a.EnvWatchdogCancel != nil {
 		a.EnvWatchdogCancel()
 	}
+	// 版本列表后台刷新同样要停：它的拉取最长 30s，退出后继续跑只会在
+	// 已关闭的数据目录/网络上白耗一次，还会拖住进程退出。
+	if a.EnvVersionsCancel != nil {
+		a.EnvVersionsCancel()
+	}
 
 	// 先停止所有插件并关闭插件窗口，避免它们在 DB 关闭后仍尝试写入，
 	// 导致 panic 或数据丢失（原顺序先关 DB，而插件子进程/goja 仍在运行）。

@@ -17,6 +17,13 @@ import (
 
 const DefaultWorkspaceName = "默认工作空间"
 
+// envVersionsEvent 上游版本列表刷新完成的事件载荷（quickdock:env:versions）。
+// 前端收到后直接替换该运行时的可选版本，不必自己再发一次查询。
+type envVersionsEvent struct {
+	Runtime  string   `json:"runtime"`
+	Versions []string `json:"versions"`
+}
+
 // AppService 应用服务 — 所有 Wails 前端绑定方法集中在此
 type AppService struct {
 	app *application.App
@@ -238,6 +245,9 @@ type AppService struct {
 	// 它会一直跑到进程结束，甚至把刚被 StopAll 停掉的服务又拉起来。
 	EnvWatchdogCancel func()
 
+	// 上游版本列表后台刷新的取消函数（见 SetApp 里的 StartVersionRefresher）。
+	EnvVersionsCancel func()
+
 	// 剪贴板变更信号（容量 1，丢弃式发送做合并）：Win32 消息线程只置信号，
 	// 真正的读取/解析/入库在 startClipboardWorker 起的协程上执行（见 clipboard_sys.go）。
 	clipboardWake chan struct{}
@@ -317,6 +327,16 @@ func (a *AppService) SetApp(app *application.App) {
 		watchdogCtx, watchdogCancel := context.WithCancel(context.Background())
 		a.EnvWatchdogCancel = watchdogCancel
 		a.Env.StartWatchdog(watchdogCtx)
+		// 上游版本列表：只在这里推「已刷新」事件，具体缓存与刷新节奏由 env 包负责
+		// （内存 + env/verscache.json 落盘 + 按 TTL 后台补拉）。环境管理的「更新总览」
+		// 一次要问二十多个运行时，让 UI 每次打开都同步打上游会直接撞上 GitHub 匿名限额，
+		// 撞穿后各运行时退回内置清单，表现为「最新版比已装的还旧」。
+		env.SetVersionsUpdateHook(func(rt env.Runtime, vs []string) {
+			app.Event.Emit("quickdock:env:versions", envVersionsEvent{Runtime: string(rt), Versions: vs})
+		})
+		versCtx, versCancel := context.WithCancel(context.Background())
+		a.EnvVersionsCancel = versCancel
+		env.StartVersionRefresher(versCtx)
 		// Everything 启动预热：常驻状态取自 states.json，是整个应用唯一的进程生命周期门禁；
 		// 关了常驻却仍被文件搜索开关拉起会让 UI 与后台矛盾。引擎内部再判断已装/未运行/能否建索引，
 		// 把冷索引空窗挪出用户交互期。

@@ -399,7 +399,6 @@ const loadFailed = ref(false)
 const showUpdateOverview = ref(false)
 const overviewLoading = ref(false) // 批量拉取版本列表进行中（按钮防连点）
 const bulkUpdating = ref(false)    // 一键更新全部进行中（串行队列防重入）
-const overviewFetched = new Set<string>() // 已发起过拉取的 id：available 可能确实为空，别每次开总览都重试
 
 const selected = computed<RuntimeInfo | null>(() => {
   return runtimes.value.find((r) => r.id === selectedId.value) || runtimes.value[0] || null
@@ -1306,6 +1305,26 @@ async function loadAvailable(id: string) {
   }
 }
 
+// 后端后台刷新完某个运行时的上游版本列表：就地回填，不再自己发查询。
+//
+// 「更新总览」一次要问二十多个运行时。若每次打开都让前端同步问上游，GitHub 的
+// 匿名限额（60 次/小时）一次就能撞穿，撞穿后各运行时退回内置清单，界面就会出现
+// 「最新版比已装版还旧」。所以查询走后端落盘缓存，新鲜度交给后端按 TTL 后台补拉，
+// 补拉完成经这个事件回填。
+function onVersionsRefresh(payload: any) {
+  const p = payload?.data ?? payload
+  const id = p?.runtime as string
+  const vs = p?.versions as string[] | undefined
+  if (!id || !Array.isArray(vs) || !vs.length) return
+  const r = runtimes.value.find((x) => x.id === id)
+  if (!r) return
+  const st = stateFor(r.id, r)
+  st.available = vs
+  st.loadError = ''
+  // 用户已经选过版本（点选或手动输入）就不覆盖，空着才填最新。
+  if (!st.version) st.version = vs[0]
+}
+
 // 切换版本列表展开/收起
 function toggleVersionList(id: string) {
   const s = ui[id]
@@ -1551,20 +1570,20 @@ async function ensureOverviewVersions() {
   if (overviewLoading.value) return
   // loadAvailable 直接读写 ui[id]，未点开过的运行时可能还没有状态，先统一建好。
   for (const r of runtimes.value) stateFor(r.id, r)
-  // 已有 available / loadError / 正在拉取 / 本会话已拉取过的都不重复请求，之后走缓存。
+  // 只补「还没有数据」的行。后端有内存 + env/verscache.json 缓存，命中即返回，
+  // 重复打开总览不会重新联网；过期项由后端按 TTL 在后台补拉，补完推
+  // quickdock:env:versions 回填（见 onVersionsRefresh）。失败行也重新问一次：
+  // 后端把失败按 10 分钟短 TTL 记着，不会因此反复打上游。
   const targets = runtimes.value.filter((r) => {
     const st = ui[r.id]
-    return !overviewFetched.has(r.id) && !st.available.length && !st.loadError && !st.fetching
+    return !st.available.length && !st.fetching
   })
   if (!targets.length) return
   overviewLoading.value = true
   try {
     // 复用本页已有的 chunk 分批：每批 6 个并发，loadAvailable 自带 fetching 守卫。
     for (const batch of chunk(targets, OVERVIEW_BATCH)) {
-      await Promise.all(batch.map((r) => {
-        overviewFetched.add(r.id)
-        return loadAvailable(r.id)
-      }))
+      await Promise.all(batch.map((r) => loadAvailable(r.id)))
     }
   } finally {
     overviewLoading.value = false
@@ -1963,6 +1982,7 @@ let offSourceCheck: (() => void) | null = null
 let offSourceCheckDone: (() => void) | null = null
 let offDshExited: (() => void) | null = null
 let offDshStarted: (() => void) | null = null
+let offEnvVersions: (() => void) | null = null
 // 点击外部时收起版本列表
 function onDocClick(e: MouseEvent) {
   const target = e.target as HTMLElement
@@ -1993,6 +2013,8 @@ onMounted(() => {
   // 页面就一直挂着一个绿灯。这两个事件是唯一可靠的信号（时间点由 reaper 决定，轮询抓不到）。
   offDshExited = Events.On('quickdock:dsh:exited', () => { void loadDshRunning() })
   offDshStarted = Events.On('quickdock:dsh:started', () => { void loadDshRunning() })
+  // 后端按 TTL 在后台补齐上游版本列表，完成后逐个推过来（缓存见 internal/env/verscache.go）
+  offEnvVersions = Events.On('quickdock:env:versions', onVersionsRefresh)
   // 周期轮询统一交给 statusPoller（3s；窗口最小化/后台自动暂停）
   statusPoller.start()
 })
@@ -2033,6 +2055,7 @@ onUnmounted(() => {
   if (offSourceCheckDone) offSourceCheckDone()
   if (offDshExited) offDshExited()
   if (offDshStarted) offDshStarted()
+  if (offEnvVersions) offEnvVersions()
   // 兜底：调度器自身也在 onUnmounted 里 stop 了一次，这里显式停一次是为了
   // 让「谁负责停」在本文件里可读——页面级定时器全在这一个函数里收口。
   statusPoller.stop()
