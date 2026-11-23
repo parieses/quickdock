@@ -146,7 +146,7 @@ function dismissRecovery() {
 
 <template>
   <div class="section">
-    <h2 class="section-title">{{ t('securityTitle') }}</h2>
+    <h3 class="section-title">{{ t('securityTitle') }}</h3>
     <p class="section-desc">{{ t('securityDesc') }}</p>
 
     <!-- 恢复码：一次性展示，必须显眼到不会被忽略 -->

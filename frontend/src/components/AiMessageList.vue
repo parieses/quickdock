@@ -12,8 +12,9 @@
 import { computed, nextTick, ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAiCostPreference } from '../composables/useAiCostPreference'
+import { useSaveAs } from '../composables/useSaveAs'
 import {
-  ArrowDown, Bot, Check, ChevronDown, ChevronRight, Copy, ExternalLink, FileText, Globe, Loader2, Play, Sparkles, StickyNote, Undo2, Wrench,
+  ArrowDown, Bot, Check, ChevronDown, ChevronRight, Copy, ExternalLink, FileText, Globe, Loader2, Play, Sparkles, StickyNote, Undo2, Wrench, Save,
 } from '@lucide/vue'
 import AgentRunTree from './AgentRunTree.vue'
 import AgentTeamCard from './AgentTeamCard.vue'
@@ -77,6 +78,11 @@ const props = defineProps<{
    * 一模一样；不标时间的话，两次运行在界面上就是两段看不出区别的问答。
    */
   schedTimes?: boolean
+  /** 消息分页：后端还有更早的消息 / 正在拉取 / 拉取动作（状态在 AIPage）。
+   *  首屏只取最新 50 条，所以需要一条「从服务器加载更早」的入口。 */
+  canLoadEarlier: boolean
+  loadingEarlier: boolean
+  loadEarlier: () => Promise<void>
 }>()
 
 // —— 流式状态从 runs 里自己取 ——
@@ -155,12 +161,28 @@ const emit = defineEmits<{
   /** 点某条回复末尾的「本轮用量」：打开这条消息自己的 token 明细弹框 */
   (e: 'open-usage', m: AIMessage): void
   (e: 'retry'): void
+  /** 被中断/停止的回复旁「继续生成」：让父组件把「继续」作为新 user 消息发出 */
+  (e: 'continue'): void
   (e: 'msg-click', ev: MouseEvent): void
   (e: 'msg-mouseup', ev: MouseEvent | KeyboardEvent): void
   (e: 'msg-contextmenu', ev: MouseEvent): void
 }>()
 
 const { t } = useI18n()
+const sa = useSaveAs()
+
+/** 逐条回复的「另存为」：共享菜单一次给出笔记 / 待办 / 知识库三个目标。 */
+function saveAsMsg(e: MouseEvent, m: AIMessage) {
+  if (!m.content) return
+  sa.open(
+    {
+      text: m.content,
+      source: 'ai',
+      sourceMeta: { convId: props.activeId, messageId: m.id },
+    },
+    { x: e.clientX, y: e.clientY },
+  )
+}
 
 // —— 单条费用（气泡尾部）——
 //
@@ -486,6 +508,17 @@ async function showOlder() {
   if (el) el.scrollTop = beforeTop + (el.scrollHeight - beforeH)
 }
 
+// 「从服务器加载更早」：与 showOlder（只放开已加载的窗口）不同，这条真的去后端
+// 拉更旧的消息并 prepend 到 messages。同样做 scrollTop 补偿，别让正在看的位置滑走。
+async function onLoadEarlier() {
+  const el = msgArea.value
+  const beforeH = el ? el.scrollHeight : 0
+  const beforeTop = el ? el.scrollTop : 0
+  await props.loadEarlier()
+  await nextTick()
+  if (el) el.scrollTop = beforeTop + (el.scrollHeight - beforeH)
+}
+
 // 切会话（或清空）时回到默认批量：否则上一条会话把上限顶到几千，
 // 切到新会话又变成全量渲染，等于没做。
 watch(
@@ -718,6 +751,11 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
       </div>
 
       <template v-else>
+        <!-- 从后端加载更早的历史：首屏只取最新 50 条（见 AIPage.loadMessages），
+             这里把窗口往上扩。样式与「放开已加载窗口」的按钮共用。 -->
+        <button v-if="canLoadEarlier" class="ai-load-older" :disabled="loadingEarlier" @click="onLoadEarlier">
+          {{ loadingEarlier ? t('aiLoadEarlierDoing') : t('aiLoadEarlierFromServer') }}
+        </button>
         <!-- 更早的历史按需放出来（默认只挂最近 200 条，理由见 aiMsgRenderTail） -->
         <button v-if="olderHidden > 0" class="ai-load-older" @click="showOlder">
           {{ t('aiLoadOlder', { n: Math.min(olderHidden, aiMsgRenderTail) }) }}
@@ -925,6 +963,16 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
               class="ai-msg-stopped"
               :title="m.interrupted ? t('aiInterruptedHint') : t('aiStoppedHint')"
             >{{ t('aiStopped') }}</span>
+            <!-- 继续生成：把「继续」作为新 user 消息发出，后端续写这段半截回答。
+                 只给最后一条 assistant 消息挂（更早的中断回答已经翻篇，再续会接错上下文）。 -->
+            <button
+              v-if="m.stopped && m.id === messages[messages.length - 1]?.id"
+              class="ai-copy ai-continue"
+              :title="t('aiContinueHint')"
+              @click="emit('continue')"
+            >
+              <Play :size="12" /> {{ t('aiContinue') }}
+            </button>
             <!-- 计划模式下的执行入口。原来挂在「计划」卡片头上，卡片去掉后
                  没有它，计划模式就只剩只读，永远迈不出执行那一步。
                  只给最后一条：历史回答早就执行过了，每条都挂一个只会误导。 -->
@@ -939,8 +987,8 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
             <button v-if="m.content" class="ai-copy" @click="emit('copy', m.content)" :title="t('copy')">
               <Copy :size="12" /> {{ t('copy') }}
             </button>
-            <button v-if="m.role === 'assistant' && m.content" class="ai-copy" @click="emit('save-note', m.content)" :title="t('aiSaveToNote')">
-              <StickyNote :size="12" /> {{ t('aiSaveToNote') }}
+            <button v-if="m.role === 'assistant' && m.content" class="ai-copy" @click="saveAsMsg($event, m)" :title="t('saveAsTitle')">
+              <Save :size="12" /> {{ t('saveAsTitle') }}
             </button>
             <!-- 单条回复统计：耗时 / 首字延迟 / token 用量。末尾补完成时刻：
                  同屏里日期都一样，只给 HH:mm，回答「这条几点跑完的」。 -->
@@ -1588,6 +1636,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   cursor: pointer;
 }
 .ai-load-older:hover { color: var(--color-text-primary); border-color: var(--color-border-light); }
+.ai-load-older:disabled { opacity: 0.6; cursor: default; }
 
 .ai-msg.user { align-self: flex-end; align-items: flex-end; }
 
@@ -1679,6 +1728,10 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 .ai-copy.ai-run-plan { color: var(--color-accent); font-weight: 500; }
 
 .ai-copy.ai-run-plan:hover { color: var(--color-accent); background: var(--color-accent-bg); }
+
+/* 继续生成：跟「开始执行」同款强调色，让被中断的回复旁这个操作看得见 */
+.ai-copy.ai-continue { color: var(--color-accent); }
+.ai-copy.ai-continue:hover { color: var(--color-accent); background: var(--color-accent-bg); }
 
 .ai-copy {
   display: flex; align-items: center; gap: 3px;

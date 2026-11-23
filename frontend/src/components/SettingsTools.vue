@@ -154,7 +154,7 @@ async function setDefault(tool: OpenTool) {
 
     <p v-if="error" class="tool-error">{{ error }}</p>
 
-    <div v-if="loading" class="tool-loading">{{ t('loadFailed') }}…</div>
+    <div v-if="loading" class="tool-loading">{{ t('loading') }}…</div>
 
     <div v-else-if="groupedTools.length === 0" class="tool-empty">
       {{ t('noTools') }}
@@ -309,7 +309,7 @@ async function setDefault(tool: OpenTool) {
 .tool-groups {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: var(--space-5);
 }
 .tool-group {
   display: flex;
@@ -351,11 +351,11 @@ async function setDefault(tool: OpenTool) {
   display: flex;
   align-items: center;
   gap: var(--space-5);
-  padding: var(--space-5) 14px;
+  padding: var(--space-5);
   background: var(--color-card-bg);
   border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
-  transition: border-color 0.12s;
+  transition: border-color var(--transition-fast);
 }
 .tool-item:hover {
   border-color: var(--color-border-light);
@@ -434,7 +434,7 @@ async function setDefault(tool: OpenTool) {
   color: var(--color-text-muted);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background-color 0.12s, color 0.12s;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 .tool-action:hover {
   background: var(--color-bg-hover);
@@ -449,7 +449,7 @@ async function setDefault(tool: OpenTool) {
 .tool-modal-body {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-5);
 }
 .field {
   display: flex;
@@ -465,11 +465,11 @@ async function setDefault(tool: OpenTool) {
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  padding: 9px var(--space-5);
+  padding: var(--space-3) var(--space-5);
   color: var(--color-text-primary);
   font-size: var(--text-md);
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color var(--transition-base);
   font-family: inherit;
   width: 100%;
   box-sizing: border-box;
@@ -492,22 +492,4 @@ async function setDefault(tool: OpenTool) {
   cursor: pointer;
 }
 .tool-default-toggle input { cursor: pointer; }
-
-/* 复用设置页通用按钮样式 */
-.btn {
-  height: 28px; padding: 0 11px;
-  border: none;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
-  cursor: pointer;
-  font-family: inherit;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
-}
-.btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
 </style>

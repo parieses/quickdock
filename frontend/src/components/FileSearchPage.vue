@@ -18,11 +18,12 @@ import { KEEP_ALIVE } from '../pages/keepAlive'
 // 的名字，靠文件名推断容易在重构时静默失效（见 pages/keepAlive.ts 的说明）。
 defineOptions({ name: KEEP_ALIVE.filesearch })
 import {
-  Search, RefreshCw, File as FileIcon, FolderOpen, ExternalLink, Copy, Loader2, X,
+  Search, File as FileIcon, FolderOpen, ExternalLink, Copy, Loader2, X, BookMarked,
 } from '@lucide/vue'
 import EverythingGate from './EverythingGate.vue'
 import FilePreviewPane from './FilePreviewPane.vue'
 import { useToast } from '../composables/useToast'
+import { useSaveAs } from '../composables/useSaveAs'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
@@ -34,6 +35,7 @@ import type { FileSearchResult } from '../types'
 
 const { t } = useI18n()
 const toast = useToast()
+const sa = useSaveAs()
 
 const query = ref('')
 const sortBy = ref('name')
@@ -189,6 +191,29 @@ function rowAction(e: MouseEvent, r: FileSearchResult, kind: 'reveal' | 'open') 
   void runOn([r], kind)
 }
 
+// 加入知识库：命中文件走磁盘路径管线（可溯源），用鼠标坐标弹出共享菜单。
+function addRowToKB(e: MouseEvent, r: FileSearchResult) {
+  e.stopPropagation()
+  if (!r.path) return
+  sa.open(
+    { text: r.name || r.path, source: 'filesearch', sourceMeta: { paths: [r.path], label: r.name } },
+    { x: e.clientX, y: e.clientY },
+  )
+}
+function addSelectedToKB(e: MouseEvent) {
+  const items = selectedRows.value
+  if (!items.length) return
+  const paths = items.map(r => r.path!).filter(Boolean)
+  sa.open(
+    {
+      text: items.map(r => r.name || r.path).filter(Boolean).join('\n'),
+      source: 'filesearch',
+      sourceMeta: { paths, label: t('saveAsKB') },
+    },
+    { x: e.clientX, y: e.clientY },
+  )
+}
+
 // 容器级键盘导航：预览面板自己不处理 Esc（命令面板里那是文档级 capture 监听）。
 // 这里收掉预览内搜索/放大态，并给结果行补 ↑↓ / Enter / Esc，与剪贴板页一致。
 function scrollToActive() {
@@ -258,11 +283,6 @@ function onKeydown(e: KeyboardEvent) {
         <h2 class="qd-page-title">{{ t('fileSearchTitle') }}</h2>
         <span class="qd-page-sub">{{ t('fileSearchSubtitle') }}</span>
       </template>
-      <div class="qd-page-actions">
-        <button class="qd-btn qd-btn-sm" :disabled="loading" @click="doSearch">
-          <RefreshCw :size="13" /> {{ t('evTestSearch') }}
-        </button>
-      </div>
     </PageHeader>
 
     <EverythingGate>
@@ -301,6 +321,7 @@ function onKeydown(e: KeyboardEvent) {
           <button class="qd-btn qd-btn-sm" @click="copyField('name')"><Copy :size="12" /> {{ t('fileSearchBulkCopyName') }}</button>
           <button class="qd-btn qd-btn-sm" @click="bulk('reveal')"><FolderOpen :size="12" /> {{ t('fileSearchBulkReveal') }}</button>
           <button class="qd-btn qd-btn-sm" @click="bulk('open')"><ExternalLink :size="12" /> {{ t('fileSearchBulkOpen') }}</button>
+          <button class="qd-btn qd-btn-sm" @click="addSelectedToKB"><BookMarked :size="12" /> {{ t('saveAsKB') }}</button>
           <span class="qd-page-fill" />
           <button class="qd-btn qd-btn-sm" @click="selectAll">{{ t('fileSearchSelectAll') }}</button>
           <button class="qd-btn qd-btn-sm" @click="clearSelection"><X :size="12" /> {{ t('fileSearchClearSelection') }}</button>
@@ -330,6 +351,7 @@ function onKeydown(e: KeyboardEvent) {
                 }]"
                 @click="onRowClick($event, i, r.path || '')"
                 @dblclick="rowAction($event, r, 'reveal')"
+                @contextmenu.prevent="addRowToKB($event, r)"
                 @mouseenter="activeIndex = i"
               >
                 <span class="qd-row-icon"><FileIcon :size="15" /></span>
@@ -342,6 +364,7 @@ function onKeydown(e: KeyboardEvent) {
                   <button class="qd-icon-btn" :title="t('actCopyPath')" @click="r.path && copyText(r.path)"><Copy :size="12" /></button>
                   <button class="qd-icon-btn" :title="t('actReveal')" @click="rowAction($event, r, 'reveal')"><FolderOpen :size="12" /></button>
                   <button class="qd-icon-btn" :title="t('fileSearchOpenDefault')" @click="rowAction($event, r, 'open')"><ExternalLink :size="12" /></button>
+                  <button class="qd-icon-btn" :title="t('saveAsKB')" @click="addRowToKB($event, r)"><BookMarked :size="12" /></button>
                 </span>
               </div>
             </template>
@@ -407,8 +430,21 @@ function onKeydown(e: KeyboardEvent) {
 .fs-preview { flex: 1 1 45%; min-width: 0; overflow: hidden; padding: var(--space-4); }
 
 .fs-row { gap: var(--space-4); }
-/* 键盘焦点态：与鼠标 selected 的填充色分开，↑↓ 移动时始终看得见焦点在哪一行 */
-.fs-row.kbd-active { outline: 1px solid var(--color-accent); outline-offset: -1px; }
+/* 与全局选中态同一套底色/竖条体系：Ctrl 多选（active）保留 select-bg 但不画竖条，
+   键盘焦点（kbd-active）多一条 3px 竖条，↑↓ 移动时两者始终可辨。 */
+.fs-row.active::before { display: none; }
+.fs-row.kbd-active { background: var(--color-select-bg); }
+.fs-row.kbd-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+}
 .fs-row-main { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: var(--space-1); }
 .fs-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fs-dir { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }

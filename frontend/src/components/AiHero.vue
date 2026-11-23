@@ -10,7 +10,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlarmClock, ArrowUp, ChevronDown, Folder, FolderOpen, GitBranch, Image as ImageIcon, Link2, Plus } from '@lucide/vue'
+import { AlarmClock, ArrowUp, ChevronDown, Folder, FolderOpen, Image as ImageIcon, Link2, Plus, X } from '@lucide/vue'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { AIConnector, AIMentionItem, AIPrompt, AISkill, AISpace } from '../types/ai'
 import type { PendingImage } from '../types'
@@ -22,6 +22,10 @@ import AiRichInput from './AiRichInput.vue'
 import AiMentionBox from './AiMentionBox.vue'
 import AiPermissionBadge from './AiPermissionBadge.vue'
 import AiWorktreeToggle from './AiWorktreeToggle.vue'
+// 发送按钮 / 分支 chip / 模型胶囊与聊天区共用同一份实现（盒模型与禁用态只写一次）
+import AiSendButton from './AiSendButton.vue'
+import AiGitBranchChip from './AiGitBranchChip.vue'
+import AiModelSelect from './AiModelSelect.vue'
 
 const props = defineProps<{
   urlInputOpen: boolean
@@ -194,11 +198,6 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onSpaceDocKey)
 })
 
-/** 先回写选中的档案，再通知父组件去应用（顺序反了 onModelChange 读到的还是旧值） */
-function onModelSelect(e: Event) {
-  emit('update:aiActive', (e.target as HTMLSelectElement).value)
-  emit('model-change')
-}
 </script>
 
 <template>
@@ -225,7 +224,7 @@ function onModelSelect(e: Event) {
           <div v-for="(a, i) in props.attachments" :key="a.id" class="ai-attach-thumb">
             <img v-if="a.kind === 'file' && a.dataUrl" :src="a.dataUrl" class="ai-attach-img" />
             <img v-else-if="a.kind === 'url'" :src="a.url" class="ai-attach-img" />
-            <button class="ai-attach-del" :title="t('delete')" @click="emit('remove-attachment', i)">×</button>
+            <button class="ai-attach-del" :title="t('delete')" @click="emit('remove-attachment', i)"><X :size="11" /></button>
           </div>
         </div>
         <!-- @ 引用：与聊天输入框同一套状态，落地页也能引用文件/历史对话 -->
@@ -268,10 +267,7 @@ function onModelSelect(e: Event) {
               <Plus :size="16" />
             </button>
             <!-- 当前目录若在 git 仓库里，左侧显示分支（与聊天输入框同款提示）。 -->
-            <div v-if="props.gitRepo" class="ai-git-branch" :title="t('aiGitBranchTip')">
-              <GitBranch :size="12" />
-              <span class="ai-git-branch-name">{{ props.gitBranch }}</span>
-            </div>
+            <AiGitBranchChip v-if="props.gitRepo" :branch="props.gitBranch" :tip="t('aiGitBranchTip')" />
             <!-- 隔离工作区：新建任务时也能勾，第一句就落在独立 worktree 里 -->
             <AiWorktreeToggle
               :git-repo="props.gitRepo"
@@ -355,15 +351,15 @@ function onModelSelect(e: Event) {
             </div>
             <!-- 没有可用模型（还没配 key）时不给这个空下拉：一个没有选项的胶囊
                  只会让人以为点它就能选。此时下方的「去设置」才是该走的路。 -->
-            <select
+            <AiModelSelect
               v-if="props.aiProfiles.length"
-              :value="props.aiActive"
-              class="ai-hero-select"
+              variant="ghost"
+              :profiles="props.aiProfiles"
+              :active="props.aiActive"
               :title="t('aiSwitchModel')"
-              @change="onModelSelect($event)"
-            >
-              <option v-for="p in props.aiProfiles" :key="p.id" :value="p.id">{{ p.name || p.model }}</option>
-            </select>
+              @update:active="emit('update:aiActive', $event)"
+              @model-change="emit('model-change')"
+            />
           </div>
           <div class="ai-hero-bar-right">
             <!-- 当前权限：落地页也能切，第一句就按这个口径执行 -->
@@ -374,14 +370,13 @@ function onModelSelect(e: Event) {
             <button v-if="props.allowUrlImage" class="ai-tool-btn" :title="t('aiAddImageUrl')" @click="emit('toggle-url')">
               <Link2 :size="16" />
             </button>
-            <button
-              class="ai-hero-send"
+            <AiSendButton
               :disabled="!props.hasKey || (!props.canSend && !props.attachments.length && !props.attachedFiles.length)"
               :title="t('send')"
               @click="emit('send')"
             >
               <ArrowUp :size="16" />
-            </button>
+            </AiSendButton>
           </div>
         </div>
         <!-- 技能和连接器面板（与聊天输入框共用组件），挂在 .ai-hero-box 内以便向上展开 -->
@@ -521,7 +516,7 @@ function onModelSelect(e: Event) {
 }
 
 /* 左组不加 overflow: hidden——AiWorktreeToggle 的分支菜单是向上弹的绝对定位元素，
-   父级一裁就整块看不见。不溢出靠子项自己收缩（.ai-git-branch 带 ellipsis）。 */
+   父级一裁就整块看不见。不溢出靠子项自己收缩（AiGitBranchChip 带 ellipsis）。 */
 .ai-hero-bar-left {
   display: flex;
   align-items: center;
@@ -555,38 +550,9 @@ function onModelSelect(e: Event) {
 
 .ai-hero-bar-right { display: flex; align-items: center; gap: var(--space-3); margin-left: auto; flex-shrink: 0; }
 
-/* 当前目录的 git 分支：在仓库里才出现的轻量提示 chip，放在底部工具条左侧。
-   高度与 Worktree chip、权限徽标对齐（都是 22px），否则一排控件高低不齐。 */
-.ai-git-branch {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  height: 22px;
-  max-width: 100%;
-  padding: 0 var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  background: var(--color-bg-secondary);
-  color: var(--color-text-secondary);
-  font-size: var(--text-xs);
-  font-family: var(--font-mono);
-  /* 可收缩：分支名可能是 feature/xxx-yyy 这种长串，固定不缩会把左组撑出底栏。
-     收缩后由 .ai-git-branch-name 的 ellipsis 收尾。 */
-  flex-shrink: 1;
-  min-width: 0;
-}
-
-.ai-git-branch-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* 底栏下拉（归属空间 / 模型）：做成与分支 chip、权限徽标同款的「小胶囊」。
-   原来它是一套独立的表单样式——28px 高、6px 圆角、实心边框、12px 字，
-   跟旁边 22px 的圆角 chip 摆在一排，高低、圆角、字重三种都不一样，
-   整条底栏就显乱；而且聚焦时整块描成强调色，看着像「被选中了」。 */
-/* 自定义空间下拉的触发按钮也吃这套胶囊样式，所以选择器不再挂 select 前缀 */
+/* 归属空间下拉的触发按钮：模型胶囊已抽到 AiModelSelect，这里只服务空间选择。
+   做成与分支 chip、权限徽标同款的「小胶囊」，与原来那套 28px/6px 圆角的
+   表单样式拉开——那套和旁边 22px 圆角 chip 摆一排时高低、圆角、字重全不齐。 */
 .ai-hero-select {
   box-sizing: border-box;
   display: inline-block;
@@ -614,15 +580,6 @@ function onModelSelect(e: Event) {
   color: var(--color-text-primary);
   border-color: var(--color-border);
   background: var(--color-bg-secondary);
-}
-
-/* 聚焦只给一层很淡的底 + 边框：外层输入框已经会因为 focus-within 变成强调色，
-   这里再描一遍，界面上就有两处在「发光」，反而看不出焦点在哪。 */
-select.ai-hero-select:focus-visible {
-  outline: none;
-  color: var(--color-text-primary);
-  border-color: var(--color-border-light);
-  background: var(--color-bg-active);
 }
 
 /* ---- 归属空间下拉 ---- */
@@ -698,22 +655,14 @@ select.ai-hero-select:focus-visible {
 .ai-space-pick-cwd { margin-left: auto; flex: none; font-size: var(--text-2xs); color: var(--color-accent); }
 .ai-space-pick-sep { height: 1px; margin: var(--space-2) var(--space-3); background: var(--color-border); }
 
-.ai-hero-send {
-  display: flex; align-items: center; justify-content: center;
-  width: 32px; height: 32px;
-  border: none; border-radius: 50%;
-  background: var(--color-accent); color: var(--color-accent-text);
-  cursor: pointer;
-  transition: opacity var(--transition-fast), background-color var(--transition-fast);
-}
-
-.ai-hero-send:disabled { background: var(--color-bg-active); color: var(--color-text-disabled); cursor: default; }
-
 .ai-hero-out {
   margin: 0;
-  font-size: var(--text-xs);
-  color: var(--color-text-disabled);
-  text-align: center;
+  /* 产物去向是「文件写到哪里」的关键信息：左对齐贴输入框左边缘，
+     不跟着 .ai-hero-inner 的 align-items:center 缩成一小撮居中小字。 */
+  align-self: stretch;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  text-align: left;
   line-height: 1.5;
   word-break: break-all;
 }

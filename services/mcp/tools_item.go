@@ -9,6 +9,7 @@ import (
 	"errors"
 
 	mcpsrv "quickdock/internal/mcp"
+	"quickdock/services"
 )
 
 func registerItemTools(s *MCPService, r *toolRegistrar) {
@@ -29,9 +30,19 @@ func registerItemTools(s *MCPService, r *toolRegistrar) {
 	r.add(func(args map[string]any) (any, error) {
 		q := mcpsrv.Arg(args, "query")
 		if q == "" {
+			// 空词语义不变：仍走 ListAllItems 返回全量池，SearchPalette("") 刻意返回空。
 			return unwrap(s.App.ListAllItems())
 		}
-		return unwrap(s.App.SearchAll(q))
+		data, err := unwrap(s.App.SearchPalette(q))
+		if err != nil {
+			return nil, err
+		}
+		// MCP 的 item_search 只要项目/命令，笔记与待办不属于这个工具。
+		payload, ok := data.(services.PaletteSearchResult)
+		if !ok {
+			return nil, errors.New("SearchPalette 返回载荷类型异常")
+		}
+		return payload.Items, nil
 	}, mcpsrv.LevelRead, "item_search", "按名称/路径关键词搜索快捷项（项目、命令、目录、网址等），留空返回全部", nil,
 		map[string]any{"query": str("关键词，留空返回全部")})
 
@@ -91,15 +102,16 @@ func registerItemTools(s *MCPService, r *toolRegistrar) {
 		if err != nil {
 			return nil, err
 		}
+		q := mcpsrv.Arg(args, "query")
 		for _, it := range items {
 			if it.ID == id {
-				if r := s.Collection.OpenItem(it.ID); r != nil && r.Code != 0 {
+				if r := s.Collection.OpenItemWithQuery(it.ID, q); r != nil && r.Code != 0 {
 					return nil, errors.New(r.Msg)
 				}
 				return "已打开 " + it.Name, nil
 			}
 		}
 		return nil, errors.New("未找到该快捷项: " + id)
-	}, mcpsrv.LevelWrite, "item_open", "打开某个快捷项（项目/命令/目录），先用 item_search 找到 id", []string{"id"},
-		map[string]any{"id": str("快捷项 id")})
+	}, mcpsrv.LevelWrite, "item_open", "打开某个快捷项（项目/命令/目录），先用 item_search 找到 id；值含 {query} 时用 query 替换", []string{"id"},
+		map[string]any{"id": str("快捷项 id"), "query": str("可选，替换 {query} 占位符")})
 }

@@ -20,7 +20,7 @@ import { KEEP_ALIVE } from '../pages/keepAlive'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
-import { FolderPlus, ListChecks, MapPin, Network, Plus, Radio, RefreshCw, Search, Send, Server, ShieldCheck, SquareTerminal, X, Zap } from '@lucide/vue'
+import { Download, FolderPlus, ListChecks, MapPin, Network, Plus, Radio, RefreshCw, Search, Send, Server, ShieldCheck, SquareTerminal, X, Zap } from '@lucide/vue'
 import {
   DeleteHost,
   Disconnect,
@@ -67,7 +67,7 @@ import SshQuickExecDialog from './SshQuickExecDialog.vue'
 import SshForwardPanel from './SshForwardPanel.vue'
 
 const { t } = useI18n()
-const { confirm, error: toastError } = useToast()
+const { confirm, error: toastError, success: toastSuccess } = useToast()
 
 const hosts = ref<SshHost[]>([])
 const loading = ref(true)
@@ -271,6 +271,32 @@ async function load() {
     hosts.value = []
   } finally {
     loading.value = false
+  }
+}
+
+/** 导出主机清单为 JSON。目录项只是分组节点、没有任何连接信息，导进去只会得到
+ *  一堆空壳，所以只导出真正的主机；SshHost 不含明文密码，可安全落盘。 */
+function exportHosts() {
+  const stamp = (d: Date) => {
+    const p = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+  }
+  try {
+    const json = JSON.stringify(hosts.value.filter((h) => !h.isFolder), null, 2)
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `quickdock-ssh-hosts-${stamp(new Date())}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    // WebView2 里 a.click() 的下载是异步取流的，立即 revoke 会提前释放 Blob
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    toastSuccess(t('sshExportHostsDone'))
+  } catch (e) {
+    toastError(getErrorMessage(e))
+    logErr('ssh.exportHosts', e)
   }
 }
 
@@ -815,6 +841,14 @@ defineExpose({
           <button
             class="ssh-tool"
             :disabled="!hostCount"
+            :title="t('sshExportHosts')"
+            @click="exportHosts"
+          >
+            <Download :size="14" />
+          </button>
+          <button
+            class="ssh-tool"
+            :disabled="!hostCount"
             :title="t('sshBatchTitle')"
             @click="openBatch([])"
           >
@@ -1102,6 +1136,9 @@ defineExpose({
 
 .ssh-side-tools {
   display: flex;
+  /* 7 个图标按钮在英文标题下会超过侧栏一行宽度换行兜底，避免工具区溢出被裁 */
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--space-2);
 }
 

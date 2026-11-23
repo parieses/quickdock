@@ -506,9 +506,13 @@ onMounted(async () => {
                 <span class="cred-item-sub">{{ item.username || item.host || kindLabel(item.kind) }}</span>
               </span>
             </button>
-            <p v-if="!loading && filtered.length === 0" class="cred-empty">
-              {{ query ? t('credNoResult') : t('credEmpty') }}
-            </p>
+            <div v-if="!loading && filtered.length === 0" class="cred-empty">
+              <KeyRound :size="22" />
+              <p class="cred-empty-title">{{ query ? t('credNoResult') : t('credEmpty') }}</p>
+              <button v-if="!query" class="qd-btn qd-btn-sm" @click="createNew">
+                <Plus :size="13" /> {{ t('credNew') }}
+              </button>
+            </div>
           </template>
         </div>
       </aside>
@@ -627,7 +631,7 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
-  padding: 5px 10px;
+  padding: var(--space-3) var(--space-4);
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
   background: transparent;
@@ -661,7 +665,7 @@ onMounted(async () => {
 
 .cred-ext {
   flex-shrink: 0;
-  padding: 10px var(--space-6);
+  padding: var(--space-5) var(--space-6);
   background: var(--color-accent-bg);
   border-bottom: 1px solid var(--color-border);
 }
@@ -703,7 +707,7 @@ onMounted(async () => {
 /* 导出/导入面板：与浏览器集成条同构，但用中性底色区分它是一次性操作。 */
 .cred-transfer {
   flex-shrink: 0;
-  padding: 10px var(--space-6);
+  padding: var(--space-5) var(--space-6);
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
 }
@@ -751,7 +755,7 @@ onMounted(async () => {
 }
 
 .cred-search {
-  padding: 10px 10px var(--space-3);
+  padding: var(--space-5) var(--space-5) var(--space-3);
 }
 
 .cred-search .qd-input {
@@ -761,15 +765,16 @@ onMounted(async () => {
 .cred-items {
   flex: 1;
   overflow-y: auto;
-  padding: 0 var(--space-3) 10px;
+  padding: 0 var(--space-3) var(--space-4);
 }
 
 .cred-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-4);
   width: 100%;
-  padding: 7px var(--space-4);
+  padding: var(--space-4);
   background: none;
   border: none;
   border-radius: var(--radius-sm);
@@ -781,9 +786,20 @@ onMounted(async () => {
 
 .cred-item:hover { background: var(--color-bg-hover); }
 
-.cred-item.is-active {
-  background: var(--color-accent-bg);
-  color: var(--color-accent);
+/* 选中态全页唯一画法：select-bg 实底 + 3px accent 竖条，文字/图标不变色。 */
+.cred-item.is-active { background: var(--color-select-bg); }
+
+/* 竖条与全局 .qd-row.active 同一画法：3px、居中 16px 高。 */
+.cred-item.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
 }
 
 .cred-item-icon { flex-shrink: 0; opacity: 0.7; }
@@ -810,9 +826,19 @@ onMounted(async () => {
 }
 
 .cred-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
   margin: var(--space-5) var(--space-3);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.cred-empty-title {
+  margin: 0;
   font-size: var(--text-xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   line-height: 1.6;
 }
 
@@ -849,18 +875,18 @@ onMounted(async () => {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: 14px 18px var(--space-7);
+  padding: var(--space-6) var(--space-7) var(--space-7);
 }
 
 .cred-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: var(--space-4);
 }
 
 .cred-field {
   display: block;
-  margin-bottom: 10px;
+  margin-bottom: var(--space-4);
 }
 
 .cred-label {
@@ -884,7 +910,7 @@ onMounted(async () => {
 
 .cred-textarea {
   height: auto;
-  padding: var(--space-3) 9px;
+  padding: var(--space-3) var(--space-4);
   resize: vertical;
   line-height: 1.6;
 }
@@ -893,7 +919,7 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
-  margin: 0 14px var(--space-4) 0;
+  margin: 0 var(--space-6) var(--space-4) 0;
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
   cursor: pointer;

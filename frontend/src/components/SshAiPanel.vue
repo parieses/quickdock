@@ -17,7 +17,7 @@
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Check, Monitor, Play, Terminal, TextSelect, X } from '@lucide/vue'
+import { Check, Monitor, Play, Terminal, TextSelect, X, Save } from '@lucide/vue'
 import { apiErrorCode } from '../utils/api'
 import { askOverStream } from '../utils/aiAskStream'
 import { copyToClipboard } from '../utils/clipboard'
@@ -26,6 +26,7 @@ import { logErr } from '../utils/logger'
 import { useAIAvailability } from '../composables/useAIAvailability'
 import { useAiStreamPreference } from '../composables/useAiStreamPreference'
 import { useToast } from '../composables/useToast'
+import { useSaveAs } from '../composables/useSaveAs'
 import AiPanel, { type AiPanelCommand, type AiPanelResult } from './AiPanel.vue'
 
 const props = defineProps<{
@@ -59,6 +60,7 @@ const emit = defineEmits<{ close: [] }>()
 
 const { t } = useI18n()
 const { error: toastError } = useToast()
+const sa = useSaveAs()
 
 const busy = ref(false)
 const errMsg = ref('')
@@ -390,6 +392,16 @@ watch(
 function dropSelection() {
   selection.value = ''
 }
+
+/** 把终端选区或本轮回答另存为笔记/待办/知识库（共享沉淀层浮层）。 */
+function saveAsResult(e: MouseEvent) {
+  const text = (selection.value || result.value?.answer || '').trim()
+  if (!text) return
+  sa.open(
+    { text, source: 'ssh', sourceMeta: { sessionId: props.sessionId } },
+    { x: e.clientX, y: e.clientY },
+  )
+}
 </script>
 
 <template>
@@ -486,6 +498,14 @@ function dropSelection() {
         <span v-else-if="command.risk === 'high'" class="ssh-ai-cmd-lock">
           {{ t('sshAiManualConfirm') }}
         </span>
+      </template>
+
+      <!-- 整段结果另存为：没有代码块的回答同样需要沉淀（见 AiPanel 的 resultActions 说明）。 -->
+      <template #resultActions>
+        <button class="ssh-ai-btn" @click="saveAsResult">
+          <Save :size="12" />
+          {{ t('saveAsTitle') }}
+        </button>
       </template>
     </AiPanel>
   </div>

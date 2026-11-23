@@ -7,7 +7,7 @@ import { KEEP_ALIVE } from '../pages/keepAlive'
 import { logErr, logWarn } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Puzzle, Power, PowerOff, Trash2, RefreshCw, RotateCcw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe, Square, Loader2, Search, DownloadCloud, X } from '@lucide/vue'
+import { Puzzle, Power, PowerOff, Trash2, RefreshCw, RotateCcw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe, Square, Loader2, Search, DownloadCloud, X, Play } from '@lucide/vue'
 
 import {
   ListPlugins,
@@ -882,9 +882,6 @@ onUnmounted(() => {
         :title="canOpenPlugin(p) ? t('pluginDblclickOpen') : undefined"
         @dblclick="onCardDblClick($event, p)"
       >
-        <!-- 「新」角标 -->
-        <span v-if="newFlags.has(p.id)" class="new-badge">新</span>
-
         <!-- 悬停操作按钮 -->
         <div class="card-actions-top">
           <button
@@ -948,9 +945,10 @@ onUnmounted(() => {
 
         <!-- 元信息行 -->
         <div class="card-meta">
+          <span v-if="newFlags.has(p.id)" class="new-badge">{{ t('pluginNewBadge') }}</span>
           <span class="card-version">v{{ p.version }}</span>
           <span v-if="p.usageCount > 0" class="card-usage">
-            <span class="usage-icon">▶</span>
+            <Play :size="10" class="usage-icon" />
             <span class="usage-count">{{ p.usageCount }}</span>
           </span>
         </div>
@@ -1200,16 +1198,21 @@ onUnmounted(() => {
 }
 
 /* ---- 插件卡片 ---- */
+/* 紧凑左对齐列表行：第一行「图标 + 名称 + 状态」，次要信息从第二行起左对齐流水排布。
+   用 grid 显式定位而非 flex 居中堆叠：名称能伸缩 ellipsis，状态徽标固定在右端。 */
 .plugin-card {
   background: var(--color-card-bg);
   border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
-  padding: 10px;
-  display: flex; flex-direction: column;
+  padding: var(--space-3) var(--space-4);
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 3px;
-  text-align: center;
-  transition: border-color 150ms, box-shadow 150ms;
+  align-content: start;
+  column-gap: var(--space-3);
+  row-gap: var(--space-1);
+  text-align: left;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
   cursor: default;
   position: relative;
   /* 同市场页 .market-card：grid item 默认 min-width:auto(=min-content)，
@@ -1221,13 +1224,12 @@ onUnmounted(() => {
 /* 能双击打开的卡片给出可点光标；禁用 / 无界面 / 未就绪的保持默认光标 */
 .plugin-card.card-openable { cursor: pointer; }
 
-/* 「新」角标 */
+/* 「新」角标：随 meta 走文档流，避免紧凑行里绝对定位压住图标 */
 .new-badge {
-  position: absolute; top: 4px; left: 4px;
   font-size: var(--text-2xs); line-height: 14px; font-weight: 600;
-  padding: 0 5px; border-radius: var(--radius-sm);
+  padding: 0 var(--space-2); border-radius: var(--radius-sm);
   background: var(--color-accent); color: var(--color-accent-text);
-  z-index: 1; letter-spacing: 0.5px;
+  letter-spacing: 0.5px;
 }
 
 /* 顶部操作悬停 */
@@ -1258,23 +1260,24 @@ onUnmounted(() => {
 
 /* 图标 */
 .card-icon-wrap {
-  width: 36px; height: 36px;
+  grid-column: 1; grid-row: 1;
+  width: 28px; height: 28px;
   display: flex; align-items: center; justify-content: center;
-  margin-bottom: var(--space-1);
 }
-.card-icon-img { width: 36px; height: 36px; object-fit: contain; }
+.card-icon-img { width: 28px; height: 28px; object-fit: contain; }
 .card-icon-fallback { color: var(--color-text-muted); }
 
 /* 名称 */
-.card-name { font-size: var(--text-sm); font-weight: 500; color: var(--color-text-primary); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.card-meta { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; justify-content: center; }
+.card-name { grid-column: 2; grid-row: 1; font-size: var(--text-sm); font-weight: 500; color: var(--color-text-primary); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.card-meta { grid-column: 2 / -1; display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .card-version { font-size: var(--text-2xs); color: var(--color-text-muted); }
 
 /* 状态 */
-.status-badge { font-size: var(--text-2xs); padding: 0 var(--space-3); border-radius: var(--radius-md); font-weight: 500; line-height: 16px; }
+.status-badge { grid-column: 3; grid-row: 1; justify-self: end; font-size: var(--text-2xs); padding: 0 var(--space-3); border-radius: var(--radius-md); font-weight: 500; line-height: 16px; }
 .badge-running { background: var(--color-success-bg); color: var(--color-success); }
 .badge-stopped { background: var(--color-border); color: var(--color-text-muted); }
-.badge-disabled { background: var(--color-danger-bg); color: var(--color-danger); }
+/* disabled 是中性「被关掉」，不该和 crashed 同为红色；红色只留给真正的崩溃 */
+.badge-disabled { background: var(--color-bg-tertiary); color: var(--color-text-disabled); }
 .badge-crashed { background: var(--color-danger-bg); color: var(--color-danger); }
 .badge-registered { background: var(--color-accent-bg); color: var(--color-accent); }
 .badge-starting { background: var(--color-warning-bg); color: var(--color-warning); }
@@ -1282,7 +1285,7 @@ onUnmounted(() => {
 
 /* 权限标签：与状态徽标同尺寸，但用中性底 —— 权限是"事实"不是"状态"，
    给它们上色会和运行状态抢注意力 */
-.card-perms { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; justify-content: center; }
+.card-perms { grid-column: 2 / -1; display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .perm-tag {
   font-size: var(--text-2xs);
   line-height: 15px;
@@ -1299,8 +1302,8 @@ onUnmounted(() => {
 /* 命令与热键：卡片上只露前两条，完整清单在 title 里。
    热键用 kbd 的等宽感是刻意的 —— 它是「按键」而不是「标签」。 */
 .card-cmds {
+  grid-column: 2 / -1;
   display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
-  justify-content: center;
   max-width: 100%;
 }
 .cmd-chip {
@@ -1339,16 +1342,17 @@ onUnmounted(() => {
 .usage-icon { font-size: var(--text-2xs); }
 .usage-count { font-family: var(--font-mono); font-weight: 500; }
 
-/* 描述：固定两行高度（10px × 1.3 × 2），卡片按行对齐；超出部分由
+/* 描述：固定两行高度（12px × 1.3 × 2），卡片按行对齐；超出部分由
    line-clamp 裁掉，鼠标移入时由 applyOverflowTitle 补上 title 看全文 */
 .card-desc {
-  font-size: var(--text-2xs); color: var(--color-text-muted);
+  grid-column: 2 / -1;
+  font-size: var(--text-sm); color: var(--color-text-muted);
   margin: 1px 0 0; line-height: 1.3;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden;
-  min-height: 26px;
-  /* 卡片是 flex column + align-items:center，item 宽度=内容宽而非容器宽：
-     不约束 max-width，一个超长无空格词（英文描述/URL）就会把描述撑破卡片 */
+  min-height: 32px;
+  /* 卡片是 grid，item 默认 min-width:auto(=min-content)：
+     不约束 max-width，一个超长无空格词（英文描述/URL）就会把描述撑破列宽 */
   max-width: 100%;
   /* line-clamp 的省略号只加在行尾；单词本身超过一行宽时，先得让它能断行 */
   overflow-wrap: anywhere;

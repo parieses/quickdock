@@ -78,21 +78,21 @@ async function saveConfig() {
       type: syncType.value,
       webdav: { url: webdavURL.value, username: webdavUser.value, password: webdavPass.value },
     }))
-    showMsg('✅ ' + t('saved'))
-  } catch (e) { showMsg('❌ ' + t('saveFailed2') + ': ' + getErrorMessage(e)) }
+    showMsg(t('saved'))
+  } catch (e) { showMsg(t('saveFailed2') + ': ' + getErrorMessage(e)) }
 }
 
 async function testConnection() {
   if (!webdavURL.value.trim()) {
-    showMsg('❌ ' + t('webdavUrl') + ' ' + t('cannotBeEmpty'))
+    showMsg(t('webdavUrl') + ' ' + t('cannotBeEmpty'))
     return
   }
   loading.value = true
   try {
     await saveConfig()
     unwrap(await SyncTestConnection())
-    showMsg('✅ ' + t('webdavTestSuccess'))
-  } catch (e) { showMsg('❌ ' + t('webdavTestFailed') + ': ' + getErrorMessage(e)) }
+    showMsg(t('webdavTestSuccess'))
+  } catch (e) { showMsg(t('webdavTestFailed') + ': ' + getErrorMessage(e)) }
   finally { loading.value = false }
 }
 
@@ -100,9 +100,9 @@ async function createBackup() {
   loading.value = true
   try {
     unwrap(await SyncExportBackup())
-    showMsg('✅ ' + t('backupCreated'))
+    showMsg(t('backupCreated'))
     await listBackups()
-  } catch (e) { showMsg('❌ ' + getErrorMessage(e)) }
+  } catch (e) { showMsg(getErrorMessage(e)) }
   finally { loading.value = false }
 }
 
@@ -122,9 +122,9 @@ async function restoreBackup(name: string) {
   loading.value = true
   try {
     unwrap(await SyncDownloadAndRestore(name))
-    showMsg('✅ ' + t('restoreSuccess'))
+    showMsg(t('restoreSuccess'))
     setTimeout(async () => { emit('close'); await store.initialize() }, 800)
-  } catch (e) { showMsg('❌ ' + t('snapshotRestoreFailed') + ': ' + getErrorMessage(e)) }
+  } catch (e) { showMsg(t('snapshotRestoreFailed') + ': ' + getErrorMessage(e)) }
   finally { loading.value = false }
 }
 
@@ -134,7 +134,7 @@ async function deleteBackup(name: string) {
     unwrap(await SyncDeleteBackup(name))
     showMsg(t('deleted'))
     await listBackups()
-  } catch (e) { showMsg('❌ ' + getErrorMessage(e)) }
+  } catch (e) { showMsg(getErrorMessage(e)) }
 }
 
 watch(() => props.visible, (v) => {

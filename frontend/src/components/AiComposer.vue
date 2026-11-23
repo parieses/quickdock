@@ -9,7 +9,7 @@
  */
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { GitBranch, Image as ImageIcon, Link2, ArrowUp, Plus, Square } from '@lucide/vue'
+import { Image as ImageIcon, Link2, ArrowUp, Plus, Square, X } from '@lucide/vue'
 import type { AIConnector, AIHooksInfo, AIMentionItem, AIPrompt, AISkill } from '../types/ai'
 import type { PendingImage } from '../types'
 import type { AttachedFile } from '../composables/useAiAttachedFiles'
@@ -21,6 +21,10 @@ import AiRichInput from './AiRichInput.vue'
 import AiMentionBox from './AiMentionBox.vue'
 import AiPermissionBadge from './AiPermissionBadge.vue'
 import AiWorktreeToggle from './AiWorktreeToggle.vue'
+// 发送按钮 / 分支 chip / 模型胶囊与落地页共用同一份实现（盒模型与禁用态只写一次）
+import AiSendButton from './AiSendButton.vue'
+import AiGitBranchChip from './AiGitBranchChip.vue'
+import AiModelSelect from './AiModelSelect.vue'
 
 const props = defineProps<{
   hooks: AIHooksInfo | null
@@ -78,6 +82,8 @@ const emit = defineEmits<{
   (e: 'update:input', v: string): void
   (e: 'update:aiActive', v: string): void
   (e: 'approve-hooks', on: boolean): void
+  // 编辑钩子：已批准时 Banner 不显示，输入栏的常驻入口仍可触发（见下方模板）
+  (e: 'edit-hooks'): void
   (e: 'remove-attachment', i: number): void
   (e: 'remove-attached-file', i: number): void
   (e: 'pick-local-file'): void
@@ -110,12 +116,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-/** 先回写选中的档案再通知父组件落库（顺序反了父组件读到的还是旧值） */
-function onModelSelect(ev: Event) {
-  emit('update:aiActive', (ev.target as HTMLSelectElement).value)
-  emit('model-change')
-}
-
 // 从 + 面板点技能后要把焦点还给输入框，否则光标停在面板按钮上，
 // 用户得先点一下输入框才能接着打正文。
 const inputEl = ref<InstanceType<typeof AiRichInput> | null>(null)
@@ -138,6 +138,9 @@ defineExpose({
       <template v-if="props.hooks.error">
         <div class="ai-hook-banner-title">{{ t('aiHookBannerTitle') }}</div>
         <div class="ai-hook-banner-desc">{{ t('aiHookBannerBad', { path: props.hooks.path, err: props.hooks.error }) }}</div>
+        <div class="ai-hook-banner-actions">
+          <button class="ai-hook-no" @click="emit('edit-hooks')">{{ t('hooksEditEntry') }}</button>
+        </div>
       </template>
       <template v-else>
         <div class="ai-hook-banner-title">{{ t('aiHookBannerTitle') }}</div>
@@ -145,6 +148,7 @@ defineExpose({
         <div class="ai-hook-banner-actions">
           <button class="ai-hook-ok" @click="emit('approve-hooks', true)">{{ t('aiHookApprove') }}</button>
           <button class="ai-hook-no" @click="emit('approve-hooks', false)">{{ t('aiHookDecline') }}</button>
+          <button class="ai-hook-no" @click="emit('edit-hooks')">{{ t('hooksEditEntry') }}</button>
         </div>
       </template>
     </div>
@@ -153,7 +157,7 @@ defineExpose({
       <div v-for="(a, i) in props.attachments" :key="a.id" class="ai-attach-thumb">
         <img v-if="a.kind === 'file' && a.dataUrl" :src="a.dataUrl" class="ai-attach-img" />
         <img v-else-if="a.kind === 'url'" :src="a.url" class="ai-attach-img" />
-        <button class="ai-attach-del" :title="t('delete')" @click="emit('remove-attachment', i)">×</button>
+        <button class="ai-attach-del" :title="t('delete')" @click="emit('remove-attachment', i)"><X :size="11" /></button>
       </div>
     </div>
     <!-- 图片链接输入框（点击「图片链接」后展开） -->
@@ -215,19 +219,24 @@ defineExpose({
         </button>
         <!-- 这条任务用哪个模型：落地页输入框同款胶囊。没配档案时不给一个空下拉，
              那只会让人以为点它就能选（此时该走「去设置」）。 -->
-        <select
+        <AiModelSelect
           v-if="props.aiProfiles.length"
-          :value="props.aiActive"
-          class="ai-composer-model"
+          variant="solid"
+          :profiles="props.aiProfiles"
+          :active="props.aiActive"
           :title="t('aiSwitchModel')"
-          @change="onModelSelect($event)"
-        >
-          <option v-for="p in props.aiProfiles" :key="p.id" :value="p.id">{{ p.name || p.model }}</option>
-        </select>
-        <span v-if="props.gitRepo" class="ai-git-branch" :title="t('aiGitBranchTip')">
-          <GitBranch :size="12" />
-          <span class="ai-git-branch-name">{{ props.gitBranch }}</span>
-        </span>
+          @update:active="emit('update:aiActive', $event)"
+          @model-change="emit('model-change')"
+        />
+        <AiGitBranchChip v-if="props.gitRepo" :branch="props.gitBranch" :tip="t('aiGitBranchTip')" />
+        <!-- 钩子编辑入口：Banner 只在「配置了但未批准」时出现，已批准时也要能改命令，
+             所以这里放一枚常驻的小按钮，只要当前目录存在 hooks.json 就显示。 -->
+        <button
+          v-if="props.hooks?.found"
+          class="ai-hooks-edit-btn"
+          :title="t('hooksEditEntry')"
+          @click="emit('edit-hooks')"
+        >{{ t('hooksEditEntry') }}</button>
         <!-- 隔离工作区：勾上后这条任务在独立 git worktree 里干活，原目录不动 -->
         <AiWorktreeToggle
           :git-repo="props.gitRepo"
@@ -262,27 +271,25 @@ defineExpose({
              两个按钮并排而不是把发送换成停止：以前只有停止，用户想补一句就得先
              打断这一轮再说——而他往往并不想打断，只是想让它知道。 -->
         <template v-if="props.streaming">
-          <button
+          <AiSendButton
             v-if="props.canSend"
-            class="ai-send ai-send-inject"
             :title="t('aiInjectTip')"
             @click="emit('send')"
           >
             <ArrowUp :size="16" />
-          </button>
-          <button class="ai-send ai-send-stop" :title="t('aiStop')" @click="emit('stop')">
+          </AiSendButton>
+          <AiSendButton variant="stop" :title="t('aiStop')" @click="emit('stop')">
             <Square :size="15" />
-          </button>
+          </AiSendButton>
         </template>
-        <button
+        <AiSendButton
           v-else
-          class="ai-send"
           :disabled="!props.hasKey || (!props.canSend && !props.attachments.length && !props.attachedFiles.length)"
           :title="t('send')"
           @click="emit('send')"
         >
           <ArrowUp :size="16" />
-        </button>
+        </AiSendButton>
       </div>
     </div>
     <!-- 「技能和连接器」面板：内容与「新建任务」那个输入框共用一份组件。 -->
@@ -375,65 +382,6 @@ defineExpose({
 
 .ai-input-bar-right { display: flex; align-items: center; gap: var(--space-3); margin-left: auto; flex-shrink: 0; }
 
-/* 模型胶囊：与落地页输入框底栏、以及本排的 git 分支 / 权限徽标同一套尺寸
-   （22px 全圆角）。做成实心边而不是纯文字，是因为它挨着同样有底的分支 chip，
-   光秃秃一个下拉会像标签而不是能点的控件。
-   max-width + min-width:0 必须留：模型名动辄二三十字符，默认 min-width:auto
-   会把右侧整组（含发送按钮）挤到下一行。 */
-.ai-composer-model {
-  box-sizing: border-box;
-  height: 22px;
-  max-width: 150px;
-  min-width: 0;
-  flex: 0 1 auto;
-  padding: 0 var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  background: var(--color-bg-secondary);
-  color: var(--color-text-secondary);
-  font-size: var(--text-xs);
-  font-family: inherit;
-  cursor: pointer;
-  text-overflow: ellipsis;
-  transition: color var(--transition-fast), border-color var(--transition-fast),
-    background-color var(--transition-fast);
-}
-
-.ai-composer-model:hover {
-  color: var(--color-text-primary);
-  border-color: var(--color-border-light);
-  background: var(--color-bg-active);
-}
-
-.ai-composer-model:focus-visible {
-  outline: none;
-  border-color: var(--color-border-focus-soft);
-}
-
-/* 当前目录的 git 分支：在仓库里才出现的轻量提示 chip，放在底部工具条左上角。
-   高度与 Worktree chip、权限徽标对齐（都是 22px）——按 padding 撑开的话，字号
-   一变高度就跟着变，一排控件的上沿就开始参差。 */
-.ai-git-branch {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  height: 22px;
-  max-width: 100%;
-  padding: 0 var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  background: var(--color-bg-secondary);
-  color: var(--color-text-secondary);
-  font-size: var(--text-xs);
-  font-family: var(--font-mono);
-}
-
-.ai-git-branch-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .ai-hook-banner {
   margin: 0;
   padding: var(--space-4) var(--space-5);
@@ -460,33 +408,23 @@ defineExpose({
 
 .ai-hook-no:hover { color: var(--color-text-primary); }
 
-/* 发送 / 停止按钮：与「新建任务」同款的圆形图标按钮（只显示图标，不显示文字）。
-   32px 正圆、accent 填充、白色图标；禁用态沿用 AiHero 的灰底淡字。 */
-.ai-send {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: 50%;
-  background: var(--color-accent);
-  color: var(--color-accent-text);
-  cursor: pointer;
+/* 已批准时也要有编辑入口：贴着 git 分支 chip 的一枚低调文字按钮。 */
+.ai-hooks-edit-btn {
+  padding: 0 var(--space-2);
+  height: 22px;
   flex-shrink: 0;
-  transition: opacity var(--transition-fast), background-color var(--transition-fast);
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
 }
+.ai-hooks-edit-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 
-.ai-send:disabled { background: var(--color-bg-active); color: var(--color-text-disabled); cursor: default; }
-
-/* 插入按钮：与发送同色同形，靠颜色与右边的红色停止按钮区分（蓝=继续说，红=停）。
-   不要再描一圈「底色」环来分隔：环的颜色必须等于输入区的底色，而输入区底色
-   换主题会变，写死的环在另一套主题下就是一圈错色的光晕。 */
-
+/* 发送 / 插入 / 停止按钮的盒模型已抽到 AiSendButton（落地页共用）。
+   这里只保留 + 按钮运行中的禁用态。 */
 .ai-plus-btn:disabled { opacity: 0.4; cursor: default; }
 .ai-plus-btn:disabled:hover { background: transparent; color: var(--color-text-muted); }
-
-/* 生成中：圆形发送按钮原地翻成红色停止按钮，承载「中止」语义，一眼可辨。 */
-.ai-send-stop { background: var(--color-danger); color: var(--color-danger-text); }
-.ai-send-stop:hover { background: var(--color-danger-hover); }
 </style>

@@ -120,7 +120,7 @@ function onDragStart(e: DragEvent) {
       @dragleave="onDragLeave"
       @drop="onDrop"
     >
-      <span v-key-click v-if="selectMode" class="tn-check" role="checkbox" :aria-checked="isChecked" :class="{ on: isChecked }" @click.stop="emit('toggle-select', node.id)"></span>
+      <input v-key-click v-if="selectMode" type="checkbox" class="tn-check" :checked="isChecked" @change="emit('toggle-select', node.id)" @click.stop />
       <button v-else-if="isFolder" class="tn-caret" @click.stop="emit('toggle', node.id)">
         <ChevronRight v-if="!isOpen" :size="12" /><ChevronDown v-else :size="12" />
       </button>
@@ -176,8 +176,8 @@ function onDragStart(e: DragEvent) {
    3px accent 竖条 + 图标不变色。11-08 全站统一选中范式时漏了笔记页，
    这里曾经另写 bg-tertiary + 文档文字变蓝，于是跟其它页面越走越远。 */
 .tn-row {
-  display: flex; align-items: center; gap: 5px;
-  padding: 5px var(--space-3); border-radius: var(--radius-sm); cursor: pointer;
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3); border-radius: var(--radius-sm); cursor: pointer;
   font-size: var(--text-sm); min-height: 26px; box-sizing: border-box;
   margin-bottom: 0; /* 抵消 .qd-row 的 2px 行距，树要更密 */
   transition: background-color var(--transition-fast), color var(--transition-fast);
@@ -192,21 +192,21 @@ function onDragStart(e: DragEvent) {
 
 .tn-caret { border: none; background: none; color: var(--color-text-disabled); cursor: pointer; width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .tn-spacer { width: 14px; flex-shrink: 0; }
-/* 多选 checkbox：自绘，避免引入原生 checkbox 在暗色下的样式漂移 */
-.tn-check {
-  width: 14px; height: 14px; flex-shrink: 0; border-radius: var(--radius-xs);
-  border: 1px solid var(--color-border-focus); background: var(--color-bg-primary);
-  cursor: pointer; position: relative; transition: background-color var(--transition-fast), border-color var(--transition-fast);
-}
-.tn-check.on { background: var(--color-accent); border-color: var(--color-accent); }
-.tn-check.on::after {
-  content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px;
-  border: solid var(--color-accent-text); border-width: 0 2px 2px 0; transform: rotate(45deg);
-}
-/* 多选勾选：与单选同底（--color-select-bg），但不画竖条 —— 竖条只表示
-   「当前打开的文档」，勾选由左侧实心 checkbox 表达，两个信号不打架。
-   同一条规则在 NoteManagerPage.vue 里给 recent-row / sr-row 也有一份，改值需同步。 */
+/* 勾选框统一走全局 input[type='checkbox']，组件只留布局 */
+.tn-check { flex: none; margin-top: 0; }
+/* 选中态与 NoteManagerPage 的 .sel-on 完全一致：select-bg + 3px 竖条 */
 .tn-row.sel-on { background: var(--color-select-bg); color: var(--color-text-primary); }
+.tn-row.sel-on::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+}
 .tn-row.sel-on:hover, .tn-row.active:hover { background: var(--color-select-bg); }
 .tn-icon { flex-shrink: 0; color: var(--color-accent); }
 .tn-doc .tn-icon { color: var(--color-warning); }

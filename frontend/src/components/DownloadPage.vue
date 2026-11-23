@@ -17,7 +17,7 @@ import {
   ClipboardPaste, Info, Folder, Clock, RotateCcw, Plus, AlertCircle,
   ChevronDown, ChevronUp, Gauge, Activity, Link, Timer,
   ArrowUp, ArrowDown, Magnet, FileArchive, Users,
-  Shield, Zap, ExternalLink, Hash, Cpu, Radio, Check, FolderInput,
+  Shield, Zap, ExternalLink, Hash, Cpu, Radio, Check, FolderInput, Save,
 } from '@lucide/vue'
 import {
   useDownloadTasks, formatBytes, formatSpeed, formatEta, formatTime, formatRatio,
@@ -27,6 +27,7 @@ import type {
   DlImportItem, DlImportPreview, DlImportResult,
 } from '../composables/useDownloadTasks'
 import { useToast } from '../composables/useToast'
+import { useSaveAs } from '../composables/useSaveAs'
 import { navigateTo } from '../composables/bridge'
 import { copyToClipboard } from '../utils/clipboard'
 import { unwrap } from '../utils/api'
@@ -36,6 +37,7 @@ import { ReadText } from '../../bindings/quickdock/services/clipboard/clipboards
 
 const { t } = useI18n()
 const toast = useToast()
+const sa = useSaveAs()
 const {
   status, statusReady, options, tasks, busy, error, speedHistory, uploadHistory, global,
   refreshStatus, refreshOptions, refreshTasks, refreshGlobal, enable, disable, add, addBatch, addTorrent, addMetalink, pickFile,
@@ -444,7 +446,7 @@ const sortDesc = ref(true)
 const selectedIds = ref<Set<string>>(new Set())
 const selectedId = ref('')
 const selectAllEl = ref<HTMLInputElement | null>(null)
-const ctx = ref<{ gid: string; x: number; y: number } | null>(null)
+const ctx = ref<{ gid: string; x: number; y: number; cx: number; cy: number } | null>(null)
 
 const counts = computed<Record<FilterKey, number>>(() => {
   const c = { all: tasks.value.length, active: 0, waiting: 0, paused: 0, complete: 0, stopped: 0 }
@@ -990,6 +992,8 @@ function openCtx(e: MouseEvent, task: DlTask) {
     gid: task.gid,
     x: Math.min(x, Math.max(0, (rect?.width ?? 0) - 190)),
     y: Math.min(y, Math.max(0, (rect?.height ?? 0) - 370)),
+    cx: e.clientX,
+    cy: e.clientY,
   }
 }
 
@@ -1050,6 +1054,23 @@ function ctxReveal() {
   const task = ctxTask.value
   if (task) void openFolder(task)
   closeCtx()
+}
+// 另存为：落盘文件路径优先（走 AddKBFiles 可溯源），没明确路径时用任务名/链接做正文。
+function ctxSaveAs() {
+  const task = ctxTask.value
+  const c = ctx.value
+  closeCtx()
+  if (!task || !c) return
+  const path = (task.path || '').trim()
+  const text = [task.name, task.url].filter(Boolean).join('\n')
+  sa.open(
+    {
+      text: path || text,
+      source: 'download',
+      sourceMeta: { paths: path ? [path] : undefined, label: task.name || undefined },
+    },
+    { x: c.cx, y: c.cy },
+  )
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -1275,6 +1296,7 @@ onUnmounted(() => {
       <button class="dl-ctx-item" @click="ctxCopy(false)"><Link :size="14" />{{ t('dlCtxCopyLink') }}</button>
       <button class="dl-ctx-item" @click="ctxCopy(true)"><Folder :size="14" />{{ t('dlCtxCopyPath') }}</button>
       <button class="dl-ctx-item" @click="ctxReveal"><ExternalLink :size="14" />{{ t('dlOpenFolder') }}</button>
+      <button class="dl-ctx-item" @click="ctxSaveAs"><Save :size="14" />{{ t('saveAsTitle') }}</button>
       <button v-if="ctxTask?.infoHash" class="dl-ctx-item" @click="ctxCopyHash"><Hash :size="14" />{{ t('dlCopyInfoHash') }}</button>
       <div class="dl-ctx-sep"></div>
       <button v-if="!ctxTask?.stale && (ctxTask?.status === 'active' || ctxTask?.status === 'waiting')" class="dl-ctx-item" @click="ctxPause(false)"><Pause :size="14" />{{ t('dlPause') }}</button>
@@ -2021,7 +2043,7 @@ onUnmounted(() => {
 .dl-list { display: flex; flex-direction: column; gap: var(--space-3); }
 .dl-item { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4) var(--space-5); cursor: pointer; }
 .dl-item:hover { background: var(--color-bg-hover); }
-.dl-item.is-checked { background: var(--color-bg-hover); }
+/* 勾选只由复选框表达，不铺底色；当前选中才是 select-bg + 3px 竖条（grid 用 inset） */
 .dl-item.is-current { background: var(--color-select-bg); box-shadow: inset 3px 0 0 var(--color-accent); }
 .dl-item-head { display: flex; align-items: center; gap: var(--space-3); }
 .dl-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-md); color: var(--color-text-primary); }
@@ -2106,7 +2128,7 @@ onUnmounted(() => {
 
 /* 浮层：必须比卡片亮 */
 .dl-ctx {
-  position: absolute; z-index: 50; min-width: 190px; padding: var(--space-2);
+  position: absolute; z-index: var(--z-context); min-width: 190px; padding: var(--space-2);
   display: flex; flex-direction: column; gap: var(--space-1);
   border-radius: var(--radius-md); background: var(--color-popover-bg);
   border: 1px solid var(--popover-border-color); box-shadow: var(--shadow-pop);

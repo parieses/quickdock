@@ -2,7 +2,7 @@
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, toRef, watch, inject, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X, Palette, Keyboard, Database, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, RotateCcw, Bot, Wrench, ExternalLink, ScrollText, History, ListOrdered, Search, Clipboard, Bell, ShieldCheck } from '@lucide/vue'
+import { X, Palette, Keyboard, Database, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, RotateCcw, Bot, Wrench, ExternalLink, ScrollText, History, ListOrdered, Search, Clipboard, Bell, ShieldCheck, Settings } from '@lucide/vue'
 import { useFocusTrap } from '../utils/focusTrap'
 import { useTheme } from '../composables/useTheme'
 import { unwrap } from '../utils/api'
@@ -960,6 +960,20 @@ async function setLocale(newLocale: string) {
   } catch (e) { logErr('SettingsModal', e) }
 }
 
+// 三处分段切换统一走 QdTabs：语言名是语言自名（两种语言下写法相同、无需翻译的专有名词），
+// 缩放值后端用 number，这里映射成字符串 id 交给 QdTabs，回来再转回 number。
+const localeTabs = [
+  { id: 'zh-CN', label: '简体中文' },
+  { id: 'en-US', label: 'English' },
+]
+const uiZoomTabs = computed(() => uiZoomLevels.value.map((lv) => ({
+  id: String(lv.value), label: lv.label, disabled: uiZoomBusy.value,
+})))
+const backdropTabs = computed(() => backdropLevels.value.map((lv) => ({
+  id: lv.value, label: lv.label, disabled: backdropBusy.value,
+})))
+function onUiZoomTab(v: string) { selectUiZoom(Number(v)) }
+
 // 打开设置页时如有初始页面则导航，不再全局挂起热键
 watch(() => props.visible, async (val) => {
     if (val) {
@@ -1273,29 +1287,24 @@ async function toggleAutoStart() {
             <div class="section">
               <h3 class="section-title">{{ t('language') }}</h3>
               <p class="section-desc">{{ t('languageDesc') }}</p>
-              <div class="locale-selector">
-                <button
-                  :class="['locale-btn', { active: currentLocale === 'zh-CN' }]"
-                  @click="setLocale('zh-CN')"
-                >简体中文</button>
-                <button
-                  :class="['locale-btn', { active: currentLocale === 'en-US' }]"
-                  @click="setLocale('en-US')"
-                >English</button>
-              </div>
+              <QdTabs
+                :model-value="currentLocale"
+                :tabs="localeTabs"
+                variant="segmented"
+                :aria-label="t('language')"
+                @update:model-value="setLocale"
+              />
             </div>
             <div class="section">
               <h3 class="section-title">{{ t('uiZoom') }}</h3>
               <p class="section-desc">{{ t('uiZoomDesc') }}</p>
-              <div class="locale-selector">
-                <button
-                  v-for="lv in uiZoomLevels"
-                  :key="lv.value"
-                  :class="['locale-btn', { active: uiZoomValue === lv.value }]"
-                  :disabled="uiZoomBusy"
-                  @click="selectUiZoom(lv.value)"
-                >{{ lv.label }}</button>
-              </div>
+              <QdTabs
+                :model-value="String(uiZoomValue)"
+                :tabs="uiZoomTabs"
+                variant="segmented"
+                :aria-label="t('uiZoom')"
+                @update:model-value="onUiZoomTab"
+              />
               <!-- 「立即重启」只在改完出现：缩放是窗口创建时固定的，不重启等于没改 -->
               <div v-if="uiZoomMsg" class="action-row">
                 <p class="result-hint">{{ uiZoomMsg }}</p>
@@ -1307,15 +1316,13 @@ async function toggleAutoStart() {
             <div v-if="backdropSupported" class="section">
               <h3 class="section-title">{{ t('windowBackdrop') }}</h3>
               <p class="section-desc">{{ t('windowBackdropDesc') }}</p>
-              <div class="locale-selector">
-                <button
-                  v-for="lv in backdropLevels"
-                  :key="lv.value"
-                  :class="['locale-btn', { active: backdropValue === lv.value }]"
-                  :disabled="backdropBusy"
-                  @click="selectWindowBackdrop(lv.value)"
-                >{{ lv.label }}</button>
-              </div>
+              <QdTabs
+                :model-value="backdropValue"
+                :tabs="backdropTabs"
+                variant="segmented"
+                :aria-label="t('windowBackdrop')"
+                @update:model-value="selectWindowBackdrop"
+              />
               <p class="field-hint">{{ t('windowBackdropHint') }}</p>
               <!-- 材质在窗口创建时固定，改完必须重启（复用与缩放相同的真重启路径） -->
               <div v-if="backdropMsg" class="action-row">
@@ -1532,17 +1539,10 @@ async function toggleAutoStart() {
             <LogViewer :new-crash-count="entryCrashCount" @crash-cleared="entryCrashCount = 0" />
           </div>
 
-          <!-- 最近动态（从导航栏迁入：属于「偶尔回头看一眼」的信息，不值得占一级导航） -->
-
-          <!-- 其他设置页占位（旧路由兼容） -->
-          <div v-else-if="activePage && activePage !== 'about' && activePage !== 'hotkeys'" class="content-page">
-            <p class="placeholder-title">{{ menuItems.find(m => m.key === activePage)?.label }}</p>
-            <p class="placeholder-hint">{{ t('comingSoon') }}</p>
-          </div>
-
-          <!-- 空状态 -->
+          <!-- 空状态：无 activePage（或落到未知路由）时回落到统一的「选菜单」提示，
+               不再显示 comingSoon 那种没有下一步的空话占位 -->
           <div v-else class="content-page content-empty">
-            <p class="empty-icon">⚙</p>
+            <p class="empty-icon"><Settings :size="40" :stroke-width="1.5" /></p>
             <p class="empty-text">{{ t('selectMenuHint') }}</p>
           </div>
         </div>
@@ -1565,7 +1565,7 @@ async function toggleAutoStart() {
 .skip-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-4);
   flex-wrap: wrap;
   margin-top: var(--space-5);
 }
@@ -1596,7 +1596,7 @@ async function toggleAutoStart() {
   flex-shrink: 0;
   min-width: 18px;
   height: 18px;
-  padding: 0 5px;
+  padding: 0 var(--space-2);
   border-radius: var(--radius-full);
   display: inline-flex;
   align-items: center;

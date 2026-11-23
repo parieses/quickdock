@@ -27,6 +27,32 @@ func (a *AIService) AIListConversations() *services.ApiResult {
 	return services.Ok(list)
 }
 
+// AIListConversationsPage 分页列会话（bound），给侧栏"加载更多"用。
+func (a *AIService) AIListConversationsPage(limit, offset int) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	list, err := a.App.DB.ListAIConversationsPage(limit, offset)
+	if err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(list)
+}
+
+// AIGetMessagesPage 分页读某会话消息（bound）：取较早的一页。
+// beforeRow<=0 表示取最新一页；>0 时只取 rowid 更早的消息（"加载更早"）。
+// 返回正序，与全量接口一致，前端可直接 prepend。
+func (a *AIService) AIGetMessagesPage(convID string, limit, beforeRow int) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	msgs, err := a.App.DB.ListAIMessagesPage(convID, limit, beforeRow)
+	if err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(msgs)
+}
+
 // ---- 空间 ----
 
 // AIListSpaces 列出全部空间

@@ -5,9 +5,7 @@ import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, inje
 import { useI18n } from 'vue-i18n'
 import { KEEP_ALIVE } from '../pages/keepAlive'
 defineOptions({ name: KEEP_ALIVE.clipboard })
-import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight, ListTodo, FilePlus, Sparkles, FolderSearch, ImageDown, ClipboardPaste, AlignLeft, ListPlus, Layers, Play, SkipForward, CheckSquare, Ban } from '@lucide/vue'
-import { CreateNoteDoc } from '../../bindings/quickdock/services/note/noteservice'
-import { CreateTodo } from '../../bindings/quickdock/services/todo/todoservice'
+import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight, ListTodo, FilePlus, Sparkles, FolderSearch, ImageDown, ClipboardPaste, AlignLeft, ListPlus, Layers, Play, SkipForward, CheckSquare, Ban, Loader2, AlertCircle, MoreHorizontal, BookMarked } from '@lucide/vue'
 import ClipboardAiPanel from './ClipboardAiPanel.vue'
 import {
   ListClipboardEntries,
@@ -37,14 +35,14 @@ import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import { isAppLocked } from '../utils/appLock'
 import { useAIAvailability } from '../composables/useAIAvailability'
-// 剪贴板里「存为待办」也是一条新建入口，角标要跟着涨
-import { navBadges } from '../composables/useNavBadges'
+import { useSaveAs } from '../composables/useSaveAs'
 import { pinyinOf } from '../utils/pinyin'
 import { filterByTag, queryPushForTag, tagPushSignature } from '../utils/clipboardFilter'
 import type { ToastAPI } from '../types'
 
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
+const sa = useSaveAs()
 
 const props = withDefaults(defineProps<{
   compact?: boolean
@@ -500,14 +498,10 @@ async function handleCopy(entry: ClipboardEntry) {
 // 条目正文本来就在内存里，JSON / Markdown 这类变换用 JS 最省事，Go 侧只负责
 // 「写剪贴板 + 让出焦点 + 模拟粘贴」，不重复实现一遍文本处理。
 type PasteFormat = 'plain' | 'markdown' | 'json'
-const pasteAsMenuId = ref('')
 
-function togglePasteAsMenu(entry: ClipboardEntry) {
-  // 两个菜单互斥：同一条记录上不该叠出两层下拉。
-  saveMenuId.value = ''
-  pasteAsMenuId.value = pasteAsMenuId.value === entry.id ? '' : entry.id
-}
-function closePasteAsMenu() { pasteAsMenuId.value = '' }
+// 单条目右侧低频操作统一收进「更多」菜单；置顶 / 删除常驻。
+const moreMenuId = ref('')
+
 
 // 纯文本：网页复制常夹带富文本残留标签；历史里存的是纯文本，但标签、CRLF、
 // 控制字符粘到编辑器里就是一堆源码，先清一遍。
@@ -544,7 +538,7 @@ async function ensurePasteTarget() {
 }
 
 async function pasteAs(entry: ClipboardEntry, fmt: PasteFormat) {
-  closePasteAsMenu()
+  closeMoreMenu()
   if (entry.contentType !== 'text' || !entry.textContent) return
   let out = entry.textContent
   if (fmt === 'plain') out = toPlainText(out)
@@ -808,50 +802,29 @@ function closeAi() {
 
 // ---- 一键转存：剪贴板条目 → 待办 / 笔记 ----
 
-const saveMenuId = ref('')
-
-function toggleSaveMenu(entry: ClipboardEntry) {
-  pasteAsMenuId.value = ''
-  saveMenuId.value = saveMenuId.value === entry.id ? '' : entry.id
+function toggleMoreMenu(entry: ClipboardEntry) {
+  moreMenuId.value = moreMenuId.value === entry.id ? '' : entry.id
 }
+function closeMoreMenu() { moreMenuId.value = '' }
 
-function closeSaveMenu() { saveMenuId.value = '' }
-
-// 用首行非空内容做标题，避免把整段长文本塞进待办/笔记标题
-function firstLineAsTitle(text: string, max = 40): string {
-  const line = (text || '').split('\n').map(s => s.trim()).find(Boolean) || ''
-  return line.length > max ? line.slice(0, max) + '…' : line
-}
-
-function feedback(res: any, fallbackMsg: string) {
-  // ApiResult 的失败原因是 msg（不是 message）：直接喂 getErrorMessage 会走
-  // String(obj) 分支，toast 上显示的是 "[object Object]"。
-  if (res && res.code === 0) toast?.success?.(res.msg || fallbackMsg)
-  else if (res) toast?.error?.(res.msg || fallbackMsg)
-}
-
-async function saveAsTodo(entry: ClipboardEntry) {
-  closeSaveMenu()
+// 存为待办/笔记/知识库统一收敛到共享沉淀层 useSaveAs（标题提取、toast、徽标刷新
+// 都收在一处），这里只负责「从剪贴板条目取正文」并保留现有更多菜单结构。
+function saveAsTodo(entry: ClipboardEntry) {
+  closeMoreMenu()
   if (entry.contentType !== 'text' || !entry.textContent) return
-  const content = entry.textContent.trim()
-  try {
-    // 标题取首行，全文放备注，避免标题栏塞满长文本
-    feedback(await CreateTodo(firstLineAsTitle(content), 'medium', '', content, '', '', '', '', ''), t('clipboardSavedTodo'))
-    navBadges().refreshNow()
-  } catch (e) {
-    toast?.error?.(getErrorMessage(e))
-  }
+  void sa.saveToTodo({ content: entry.textContent })
 }
 
-async function saveAsNote(entry: ClipboardEntry) {
-  closeSaveMenu()
+function saveAsNote(entry: ClipboardEntry) {
+  closeMoreMenu()
   if (entry.contentType !== 'text' || !entry.textContent) return
-  const content = entry.textContent.trim()
-  try {
-    feedback(await CreateNoteDoc('', firstLineAsTitle(content, 30), content, 'markdown'), t('clipboardSavedNote'))
-  } catch (e) {
-    toast?.error?.(getErrorMessage(e))
-  }
+  void sa.saveToNote({ content: entry.textContent })
+}
+
+function saveAsKB(entry: ClipboardEntry) {
+  closeMoreMenu()
+  if (entry.contentType !== 'text' || !entry.textContent) return
+  void sa.addToKB({ text: entry.textContent, name: entry.textContent.split('\n')[0]?.trim().slice(0, 40) })
 }
 
 function timeAgo(ts: number): string {
@@ -981,8 +954,8 @@ function onPanelKeydown(e: KeyboardEvent) {
 // 项目里 App.vue 的 quickdock:dsh:progress 已有同样一处教训，口径保持一致。
 const clipboardEventOffs: Array<() => void> = []
 
-// 转存 / 粘贴为菜单：点击面板任意位置即收起（按钮自身用 @click.stop 拦截）。
-function closeMenus() { closeSaveMenu(); closePasteAsMenu() }
+// 条目「更多」菜单：点击面板任意位置即收起（按钮自身用 @click.stop 拦截）。
+function closeMenus() { closeMoreMenu() }
 
 // 本页既在 KeepAlive 白名单里（主窗口内容页），也被独立剪贴板窗口单独渲染
 // （那边没有 KeepAlive）。所以所有全局监听必须跟着激活态挂/摘，且启停要幂等：
@@ -1224,82 +1197,57 @@ onUnmounted(() => {
             <span v-if="entry.copyCount > 1" class="item-count">{{ entry.copyCount }} {{ t('count') }}</span>
           </div>
           <div v-if="entry.note" class="item-note">
-            <svg class="item-note-icon" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            <StickyNote :size="12" class="item-note-icon" />
             <span>{{ entry.note }}</span>
           </div>
         </div>
-        <button
-          v-if="entry.contentType === 'image'"
-          class="note-btn"
-          :title="t('clipboardSaveImage')"
-          @click.stop="saveImageAs(entry)"
-        >
-          <ImageDown :size="13" />
-        </button>
+        <!-- 低频操作收进「更多」；置顶 / 删除常驻。复用现有 save-menu 浮层。 -->
         <div class="save-wrap">
           <button
-            v-if="entry.contentType === 'text'"
             class="note-btn"
-            :class="{ active: saveMenuId === entry.id }"
-            :title="t('clipboardSaveAs')"
-            @click.stop="toggleSaveMenu(entry)"
+            :class="{ active: moreMenuId === entry.id }"
+            :title="[t('clipboardSaveAs'), t('cbPasteAs'), t('cbQueueAdd'), t('clipboardAskAI'), t('clipboardEditNote')].join(' / ')"
+            @click.stop="toggleMoreMenu(entry)"
           >
-            <Download :size="13" />
+            <MoreHorizontal :size="13" />
           </button>
-          <div v-key-click v-if="saveMenuId === entry.id" class="save-menu" @click.stop>
-            <button class="save-menu-item" @click="saveAsTodo(entry)">
-              <ListTodo :size="13" /><span>{{ t('clipboardSaveTodo') }}</span>
+          <div v-key-click v-if="moreMenuId === entry.id" class="save-menu item-more-menu" @click.stop>
+            <button
+              v-if="entry.contentType === 'image'"
+              class="save-menu-item"
+              @click="saveImageAs(entry); closeMoreMenu()"
+            ><ImageDown :size="13" /><span>{{ t('clipboardSaveImage') }}</span></button>
+            <template v-if="entry.contentType === 'text'">
+              <button class="save-menu-item" @click="saveAsTodo(entry); closeMoreMenu()">
+                <ListTodo :size="13" /><span>{{ t('clipboardSaveTodo') }}</span>
+              </button>
+              <button class="save-menu-item" @click="saveAsNote(entry); closeMoreMenu()">
+                <FilePlus :size="13" /><span>{{ t('clipboardSaveNote') }}</span>
+              </button>
+              <button class="save-menu-item" @click="saveAsKB(entry); closeMoreMenu()">
+                <BookMarked :size="13" /><span>{{ t('saveAsKB') }}</span>
+              </button>
+              <button class="save-menu-item" @click="pasteAs(entry, 'plain'); closeMoreMenu()">
+                <AlignLeft :size="13" /><span>{{ t('cbPastePlain') }}</span>
+              </button>
+              <button class="save-menu-item" @click="pasteAs(entry, 'markdown'); closeMoreMenu()">
+                <Code :size="13" /><span>{{ t('cbPasteMarkdown') }}</span>
+              </button>
+              <button class="save-menu-item" @click="pasteAs(entry, 'json'); closeMoreMenu()">
+                <Braces :size="13" /><span>{{ t('cbPasteJson') }}</span>
+              </button>
+              <button class="save-menu-item" @click="openAi(entry); closeMoreMenu()">
+                <Sparkles :size="13" /><span>{{ t('clipboardAskAI') }}</span>
+              </button>
+            </template>
+            <button class="save-menu-item" @click="enqueue([entry]); closeMoreMenu()">
+              <ListPlus :size="13" /><span>{{ t('cbQueueAdd') }}</span>
             </button>
-            <button class="save-menu-item" @click="saveAsNote(entry)">
-              <FilePlus :size="13" /><span>{{ t('clipboardSaveNote') }}</span>
+            <button class="save-menu-item" @click="openNoteEditor(entry); closeMoreMenu()">
+              <StickyNote :size="13" /><span>{{ t('clipboardEditNote') }}</span>
             </button>
           </div>
         </div>
-        <!--
-          粘贴为…：与「转存」同款下拉，样式直接共用 save-* 那套（都是
-          "对这条文本做点什么"的动作；纯文本 / Markdown 格式化 / JSON 美化）。
-        -->
-        <div v-if="entry.contentType === 'text'" class="save-wrap">
-          <button
-            class="note-btn"
-            :class="{ active: pasteAsMenuId === entry.id }"
-            :title="t('cbPasteAs')"
-            @click.stop="togglePasteAsMenu(entry)"
-          >
-            <ClipboardPaste :size="13" />
-          </button>
-          <div v-key-click v-if="pasteAsMenuId === entry.id" class="save-menu" @click.stop>
-            <button class="save-menu-item" @click="pasteAs(entry, 'plain')">
-              <AlignLeft :size="13" /><span>{{ t('cbPastePlain') }}</span>
-            </button>
-            <button class="save-menu-item" @click="pasteAs(entry, 'markdown')">
-              <Code :size="13" /><span>{{ t('cbPasteMarkdown') }}</span>
-            </button>
-            <button class="save-menu-item" @click="pasteAs(entry, 'json')">
-              <Braces :size="13" /><span>{{ t('cbPasteJson') }}</span>
-            </button>
-          </div>
-        </div>
-        <button
-          class="note-btn"
-          :title="t('cbQueueAdd')"
-          @click.stop="enqueue([entry])"
-        >
-          <ListPlus :size="13" />
-        </button>
-        <!--
-          问 AI：翻译 / 摘要 / 格式化这条文本。
-          与「转存」并排放在同一位置组——两个都是"对这条文本做点什么"，
-          分开放会让用户在四个图标里找。
-        -->
-        <button
-          v-if="entry.contentType === 'text'"
-          class="ai-btn"
-          :title="t('clipboardAskAI')"
-          @click.stop="openAi(entry)"
-        >
-          <Sparkles :size="13" />
-        </button>
         <button
           class="pin-btn"
           :class="{ pinned: entry.isPinned === 1 }"
@@ -1307,14 +1255,6 @@ onUnmounted(() => {
           @click.stop="handleTogglePin(entry)"
         >
           <Star :size="13" />
-        </button>
-        <button
-          class="note-btn"
-          :class="{ 'note-editing': noteEditingId === entry.id }"
-          :title="t('clipboardEditNote')"
-          @click.stop="openNoteEditor(entry)"
-        >
-          <StickyNote :size="13" />
         </button>
         <button
           class="delete-btn"
@@ -1366,11 +1306,13 @@ onUnmounted(() => {
     </div>
 
     <div v-if="loading && !entries.length" class="clipboard-loading">
+      <Loader2 :size="22" class="clipboard-spin" />
       <p>{{ t('loading') }}</p>
     </div>
     <div v-else-if="loadError && !entries.length" class="clipboard-loading clipboard-load-error">
+      <AlertCircle :size="24" />
       <p>{{ t('loadFailed') }}：{{ loadError }}</p>
-      <button class="qd-btn qd-btn-sm" @click="retryLoad">{{ t('retry') }}</button>
+      <button class="qd-btn qd-btn-sm" @click="retryLoad"><RefreshCw :size="13" />{{ t('retry') }}</button>
     </div>
 
     <!--
@@ -1468,7 +1410,7 @@ onUnmounted(() => {
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
-  transition: background-color 0.12s, color 0.12s, border-color 0.12s;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 .time-btn:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .time-btn.active {
@@ -1490,7 +1432,7 @@ onUnmounted(() => {
   font-family: inherit;
   cursor: pointer;
   white-space: nowrap;
-  transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
   flex-shrink: 0;
 }
 
@@ -1558,7 +1500,7 @@ onUnmounted(() => {
   background: none; border: none; cursor: pointer;
   padding: var(--space-1); border-radius: var(--radius-sm);
   color: var(--color-text-disabled); opacity: 0;
-  transition: opacity 0.15s, color 0.15s;
+  transition: opacity var(--transition-fast), color var(--transition-fast);
   display: flex; align-items: center; justify-content: center;
 }
 .clipboard-item:hover .pin-btn,
@@ -1571,7 +1513,7 @@ onUnmounted(() => {
 
 .save-wrap { position: relative; display: inline-flex; }
 .save-menu {
-  position: absolute; top: calc(100% + 4px); right: 0; z-index: 40;
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: var(--z-dropdown);
   min-width: 132px; padding: var(--space-2);
   background: var(--color-popover-bg);
   border: 1px solid var(--popover-border-color);
@@ -1585,43 +1527,17 @@ onUnmounted(() => {
   color: var(--color-text-secondary); text-align: left;
 }
 .save-menu-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.note-btn {
-  flex-shrink: 0; margin-top: 3px;
-  background: none; border: none; cursor: pointer;
-  padding: var(--space-1); border-radius: var(--radius-sm);
-  color: var(--color-text-disabled); opacity: 0;
-  transition: opacity 0.15s, color 0.15s;
-  display: flex; align-items: center; justify-content: center;
-}
-.clipboard-item:hover .note-btn,
-.clipboard-item.selected .note-btn { opacity: 0.4; }
-.note-btn:hover { opacity: 0.8 !important; color: var(--color-accent); }
-
 .delete-btn {
   flex-shrink: 0; margin-top: 3px;
   background: none; border: none; cursor: pointer;
   padding: var(--space-1); border-radius: var(--radius-sm);
   color: var(--color-text-disabled); opacity: 0;
-  transition: opacity 0.15s, color 0.15s;
+  transition: opacity var(--transition-fast), color var(--transition-fast);
   display: flex; align-items: center; justify-content: center;
 }
 .clipboard-item:hover .delete-btn,
 .clipboard-item.selected .delete-btn { opacity: 0.4; }
 .delete-btn:hover { opacity: 0.8 !important; color: var(--color-danger); }
-
-/* 问 AI 按钮：与固定/删除同一组（悬停才显形），
-   但用 accent 色区分——它是"对内容做处理"，与"管理条目"不是一类动作。 */
-.ai-btn {
-  flex-shrink: 0; margin-top: 3px;
-  background: none; border: none; cursor: pointer;
-  padding: var(--space-1); border-radius: var(--radius-sm);
-  color: var(--color-text-disabled); opacity: 0;
-  transition: opacity 0.15s, color 0.15s;
-  display: flex; align-items: center; justify-content: center;
-}
-.clipboard-item:hover .ai-btn,
-.clipboard-item.selected .ai-btn { opacity: 0.4; }
-.ai-btn:hover { opacity: 0.9 !important; color: var(--color-accent); }
 
 .item-content { flex: 1; min-width: 0; }
 .item-text {
@@ -1631,7 +1547,7 @@ onUnmounted(() => {
 .item-meta { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
 .item-time { font-size: var(--text-xs); color: var(--color-text-disabled); }
 .item-source { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-xs); color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px var(--space-3); border-radius: var(--radius-xs); }
-.item-source-block { display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: var(--color-text-muted); cursor: pointer; opacity: 0; transition: opacity 0.12s, color 0.12s; }
+.item-source-block { display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: var(--color-text-muted); cursor: pointer; opacity: 0; transition: opacity var(--transition-fast), color var(--transition-fast); }
 .clipboard-item:hover .item-source-block, .item-source-block:focus-visible { opacity: 1; }
 .item-source-block:hover { color: var(--color-danger); }
 
@@ -1703,9 +1619,12 @@ onUnmounted(() => {
 
 .clipboard-loading {
   display: flex; align-items: center; justify-content: center;
-  height: 100%; color: var(--color-text-disabled); font-size: var(--text-md);
+  height: 100%; color: var(--color-text-muted); font-size: var(--text-md);
+  gap: var(--space-3);
 }
 .clipboard-load-error { flex-direction: column; gap: var(--space-3); }
+.clipboard-spin { animation: clipboard-rotate 0.9s linear infinite; }
+@keyframes clipboard-rotate { to { transform: rotate(360deg); } }
 
 /* 剪贴板分页 */
 .clipboard-pagination {
@@ -1733,7 +1652,7 @@ onUnmounted(() => {
   background: none; border: none; cursor: pointer;
   padding: var(--space-1); border-radius: var(--radius-sm);
   color: var(--color-text-disabled); opacity: 0;
-  transition: opacity 0.15s, color 0.15s;
+  transition: opacity var(--transition-fast), color var(--transition-fast);
   display: flex; align-items: center; justify-content: center;
 }
 .clipboard-item:hover .note-btn,
@@ -1743,7 +1662,7 @@ onUnmounted(() => {
 
 /* 备注编辑弹窗 */
 .note-editor-mask {
-  position: absolute; inset: 0; z-index: 100;
+  position: absolute; inset: 0; z-index: var(--z-modal);
   display: flex; align-items: center; justify-content: center;
   background: var(--color-bg-overlay);
   animation: fadeIn 0.12s ease;
@@ -1786,7 +1705,7 @@ onUnmounted(() => {
   display: inline-flex; align-items: center; justify-content: center;
   height: 28px; padding: 0 11px; border-radius: var(--radius-sm);
   font-size: var(--text-sm); font-family: inherit; font-weight: 500;
-  cursor: pointer; transition: background-color 0.12s, color 0.12s, border-color 0.12s;
+  cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
   border: 1px solid var(--color-border);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
 }

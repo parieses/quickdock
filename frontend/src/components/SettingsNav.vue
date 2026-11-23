@@ -87,10 +87,10 @@ function restoreAll() {
     <p class="snv-hint">{{ t('navDragHint') }}</p>
 
     <div class="snv-actions">
-      <button class="snv-btn" :disabled="hiddenCount === 0" @click="restoreAll()">
+      <button class="btn btn-secondary" :disabled="hiddenCount === 0" @click="restoreAll()">
         <RotateCcw :size="13" />{{ t('navRestoreAll') }}
       </button>
-      <button class="snv-btn" @click="resetAll()">{{ t('navResetOrder') }}</button>
+      <button class="btn btn-secondary" @click="resetAll()">{{ t('navResetOrder') }}</button>
     </div>
 
     <p class="snv-foot">{{ t('navSettingsFallback') }}</p>
@@ -98,8 +98,8 @@ function restoreAll() {
 </template>
 
 <style scoped>
-.snv { display: flex; flex-direction: column; gap: 14px; }
-.snv-head { display: flex; align-items: flex-start; gap: 10px; color: var(--color-accent); }
+.snv { display: flex; flex-direction: column; gap: var(--space-5); }
+.snv-head { display: flex; align-items: flex-start; gap: var(--space-4); color: var(--color-accent); }
 .snv-title { margin: 0; font-size: var(--text-md); font-weight: 500; color: var(--color-text-primary); }
 .snv-sub { margin: var(--space-1) 0 0; font-size: var(--text-sm); color: var(--color-text-secondary); }
 
@@ -107,8 +107,8 @@ function restoreAll() {
 .snv-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px var(--space-4);
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
   cursor: grab;
@@ -143,22 +143,6 @@ function restoreAll() {
 
 .snv-hint { margin: 0; font-size: var(--text-sm); color: var(--color-text-disabled); }
 .snv-actions { display: flex; gap: var(--space-4); }
-.snv-btn {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  height: 28px; padding: 0 11px;
-  border: 1px solid var(--color-border);
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: var(--text-sm);
-  font-family: inherit;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  transition: background-color var(--transition-fast), color var(--transition-fast);
-}
-.snv-btn:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-hover); }
-.snv-btn:disabled { opacity: 0.45; cursor: default; }
 .snv-foot { margin: 0; font-size: var(--text-sm); color: var(--color-text-disabled); }
 .snv-link {
   border: none;

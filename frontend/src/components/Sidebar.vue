@@ -546,10 +546,10 @@ async function handleDeleteWorkspace(wsId: string) {
 .nav-item {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-3);
   position: relative;
   width: 100%;
-  min-height: 32px;
+  min-height: 28px;
   padding: 0 10px;
   border: none;
   background: transparent;
@@ -639,7 +639,11 @@ async function handleDeleteWorkspace(wsId: string) {
 
 /* 已隐藏项折叠组：虚线框 + 就地恢复列表 */
 .hidden-group { margin-top: var(--space-3); }
-.hidden-toggle { color: var(--color-text-disabled); }
+/* 可点击的按钮，不是禁用项：默认就用 secondary（disabled 在深底上对比度不足），
+   hover 再提到 primary。收起态那条更高权重的规则也一并覆盖，避免展开箭头
+   在收起态永远不会提亮。 */
+.hidden-toggle { color: var(--color-text-secondary); }
+.hidden-toggle:hover, .sidebar.collapsed .hidden-toggle:hover { color: var(--color-text-primary); }
 .hidden-caret { margin-left: auto; color: var(--color-text-disabled); transition: transform var(--transition-base); }
 .hidden-caret.open { transform: rotate(180deg); }
 .hidden-list { display: flex; flex-direction: column; gap: 1px; padding-left: var(--space-4); border-left: 1px dashed var(--color-border); margin: var(--space-1) 0 0 10px; }

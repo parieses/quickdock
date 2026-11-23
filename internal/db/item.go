@@ -589,9 +589,10 @@ func (d *Database) OpenItem(id, query string) (*CollectionItem, error) {
 	return &item, nil
 }
 
-// OpenAllInCollection 批量打开集合内全部项目。
+// OpenAllInCollection 批量打开集合内全部项目。query 非空时替换 Value 里的 {query}
+// 占位符，与单项 OpenItem(id, query) 同口径——否则批量打开会把模板原样送进工具。
 // 优化点：默认工具只查一次 + usage_count 单条批量累加（原实现 N 项 = 3N 次串行查库）。
-func (d *Database) OpenAllInCollection(collectionID string) error {
+func (d *Database) OpenAllInCollection(collectionID, query string) error {
 	// 一次性查询默认工具，循环内复用
 	var defaultTool OpenTool
 	if row, err := d.QueryOne("SELECT * FROM tools WHERE is_default = 1 LIMIT 1"); err == nil {
@@ -607,6 +608,9 @@ func (d *Database) OpenAllInCollection(collectionID string) error {
 	opened := make([]string, 0, len(rows))
 	for _, row := range rows {
 		item := mapToItem(row)
+		if query != "" {
+			item.Value = strings.ReplaceAll(item.Value, "{query}", query)
+		}
 		// 仅当 item 指定自定义工具时才查库（命中），否则直接用默认工具
 		tool := defaultTool
 		if item.ToolID != "" {

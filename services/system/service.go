@@ -41,6 +41,19 @@ func (s *SystemService) ExecuteSystemCommand(cmd string) *services.ApiResult {
 	return services.Ok(nil)
 }
 
+// CreateDirectory 递归创建本地目录（bound），供建站向导等"先建目录再配置"的流程用。
+// 已存在的目录视为成功（幂等），避免向导重跑时报错。
+func (s *SystemService) CreateDirectory(path string) *services.ApiResult {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return services.FailMsg("目录路径不能为空")
+	}
+	if err := os.MkdirAll(path, 0755); err != nil {
+		return services.Fail(fmt.Errorf("CreateDirectory: %v", err))
+	}
+	return services.Ok(path)
+}
+
 // RevealInExplorer 在文件资源管理器中定位目标路径（目录直接打开，文件高亮选中）
 func (s *SystemService) RevealInExplorer(path string) *services.ApiResult {
 	if err := platform.RevealInExplorer(path); err != nil {

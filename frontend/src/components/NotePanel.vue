@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { StickyNote, Check, Loader2, MessageCircleQuestion } from '@lucide/vue'
+import { StickyNote, Check, Loader2, MessageCircleQuestion, ListTodo, Save } from '@lucide/vue'
 import { GetNote, SaveNote } from '../../bindings/quickdock/services/note/noteservice'
 import { unwrap } from '../utils/api'
 import { useAIAvailability } from '../composables/useAIAvailability'
+import { useSaveAs } from '../composables/useSaveAs'
 import { createCodeEditor, type CodeEditorHandle } from '../utils/aiCodeEditor'
 import { logErr } from '../utils/logger'
 import NoteAiPanel from './NoteAiPanel.vue'
 
 const { t } = useI18n()
+const sa = useSaveAs()
 
 const note = ref('')
 const loaded = ref(false)
@@ -118,6 +120,24 @@ async function askAI() {
   aiText.value = text
   aiOpen.value = true
 }
+
+// 选中段落 → 待办 / 另存为。与问 AI 同一套取选区逻辑（CM 选区不随失焦丢失）。
+function selectedText(): string {
+  return (editor?.getSelection()?.text || '').trim()
+}
+function selToTodo() {
+  const text = selectedText()
+  if (!text) return
+  void sa.saveToTodo({ content: text })
+}
+function selSaveAs(e: MouseEvent) {
+  const text = selectedText()
+  if (!text) return
+  sa.open(
+    { text, source: 'note', sourceMeta: { label: text.split('\n')[0]?.slice(0, 40) } },
+    { x: e.clientX, y: e.clientY },
+  )
+}
 </script>
 
 <template>
@@ -128,6 +148,14 @@ async function askAI() {
         {{ t('noteTitle') }}
       </span>
       <div class="note-actions">
+        <button class="note-ask" :title="t('noteSelToTodo')" @click="selToTodo">
+          <ListTodo :size="13" />
+          {{ t('noteSelToTodo') }}
+        </button>
+        <button class="note-ask" :title="t('saveAsTitle')" @click="selSaveAs">
+          <Save :size="13" />
+          {{ t('saveAsTitle') }}
+        </button>
         <button class="note-ask" :disabled="!note.trim()" :title="t('noteAskAI')" @click="askAI">
           <MessageCircleQuestion :size="13" />
           {{ t('noteAskAI') }}
@@ -157,24 +185,24 @@ async function askAI() {
 }
 .note-head {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 14px; border-bottom: 1px solid var(--color-border);
+  padding: var(--space-5) var(--space-6); border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
 .note-title { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
-.note-actions { display: flex; align-items: center; gap: 10px; }
+.note-actions { display: flex; align-items: center; gap: var(--space-4); }
 .note-ask {
   display: flex; align-items: center; gap: var(--space-2);
   font-size: var(--text-sm); padding: 3px var(--space-4); border-radius: var(--radius-sm); cursor: pointer;
   background: var(--color-accent); color: var(--color-accent-text); border: none;
 }
 .note-ask:disabled { opacity: 0.4; cursor: not-allowed; }
-.note-status { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--color-text-disabled); }
+.note-status { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--color-text-muted); }
 .note-status.saved { color: var(--color-success); }
 .spin { animation: note-spin 1s linear infinite; }
 @keyframes note-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 /* 编辑区：CodeMirror 撑满剩余高度。内边距落在 .cm-content 上，
-   与原来 textarea 的 14px 观感一致 */
+   与原 textarea 的留白观感一致 */
 .note-editor { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--color-bg-primary); }
 .note-editor :deep(.cm-editor) { flex: 1; min-height: 0; }
-.note-editor :deep(.cm-content) { padding: 14px; }
+.note-editor :deep(.cm-content) { padding: var(--space-6); }
 </style>

@@ -9,7 +9,7 @@ import { ListWorkspaces, CreateWorkspace, DeleteWorkspace, UpdateWorkspace, GetW
 import { ListScenes, CreateScene, UpdateScene, DeleteScene, ReorderScenes } from '../../bindings/quickdock/services/scene/sceneservice'
 import { ListCollections, CreateCollection, UpdateCollection, DeleteCollection, ReorderCollections, OpenItem, OpenAllInCollection } from '../../bindings/quickdock/services/collection/collectionservice'
 import { ListItems, CreateItem, UpdateItem, DeleteItem, ReorderItems } from '../../bindings/quickdock/services/item/itemservice'
-import { ListTools, GetValue, SetValue, SearchAll } from '../../bindings/quickdock/services/appservice'
+import { ListTools, GetValue, SetValue, SearchPalette } from '../../bindings/quickdock/services/appservice'
 import type { Workspace, Scene, Collection, CollectionItem, OpenTool } from '../types'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
@@ -123,7 +123,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const local = items.value.filter((i) => matchesTextOrPinyin([i.name, i.value], q, 'i:' + i.id))
     if (!wsId) return local
     try {
-      const remote = (unwrap(await SearchAll(q)) || []) as CollectionItem[]
+      // 后端 FTS 收口到 SearchPalette：只取 items，笔记/待办不属于工作区条目。
+      // runSearch 已对空词提前 return（见下方），所以这里不会拿到空查询的空载荷。
+      const payload = unwrap<{ items?: CollectionItem[] }>(await SearchPalette(q))
+      const remote = (payload?.items || []) as CollectionItem[]
       const seen = new Set(local.map((i) => i.id))
       const extra = remote.filter((i) => i.workspaceId === wsId && !seen.has(i.id))
       return [...local, ...extra]
@@ -649,8 +652,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     unwrap(await OpenItem(item.id))
   }
 
-  async function openAllInCollection(collectionId: string) {
-    unwrap(await OpenAllInCollection(collectionId))
+  async function openAllInCollection(collectionId: string, query = '') {
+    // query 为空时后端不替换 {query}，含占位符的项会保持模板原样（与单项打开一致）。
+    unwrap(await OpenAllInCollection(collectionId, query))
   }
 
   // ---- 集合的「打开策略」 ----

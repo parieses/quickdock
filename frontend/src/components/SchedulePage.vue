@@ -22,6 +22,7 @@ import type { ScheduledTask } from '../../bindings/quickdock/internal/db/models'
 import type { CollectionItem } from '../types'
 import { ITEM_TYPE } from '../constants/itemTypes'
 import SceneItemPicker from './SceneItemPicker.vue'
+import UnifiedCalendar from './UnifiedCalendar.vue'
 
 import { Events } from '@wailsio/runtime'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -32,10 +33,13 @@ import QdBarChart from './charts/QdBarChart.vue'
 import {
   Plus, Play, Pause, Pencil, Trash2, AlarmClock, AppWindow, FolderOpen,
   Globe, TerminalSquare, Zap, CheckCircle2, XCircle, History,
-  Search, LoaderCircle, GripVertical, Bell, BarChart3, FolderSearch, Bot, MessagesSquare,
+  Search, LoaderCircle, GripVertical, Bell, BarChart3, FolderSearch, Bot, MessagesSquare, CalendarDays,
 } from '@lucide/vue'
 
 const { t, locale } = useI18n()
+
+// 视图 tab：列表 / 统一日历。日历作为本页的一个 tab，不占侧栏导航项（铁律 6）。
+const viewMode = ref<'list' | 'calendar'>('list')
 
 const tasks = ref<ScheduledTask[]>([])
 const loading = ref(false)
@@ -755,20 +759,30 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
         <span class="qd-page-sub">{{ t('sched_subtitle') }}</span>
       </template>
       <div class="qd-page-actions">
-        <!-- 临时全停（会议投屏等）不该一条条点：全启用时显示「暂停所有」，否则「恢复所有」 -->
-        <button class="qd-btn" :disabled="bulkBusy || tasks.length === 0" @click="toggleAllEnabled"
-                :title="allOn ? t('sched_pause_all') : t('sched_resume_all')">
-          <Pause v-if="allOn" :size="14" />
-          <Play v-else :size="14" />
-          {{ allOn ? t('sched_pause_all') : t('sched_resume_all') }}
-        </button>
-        <!-- 机器人地址是全局一份，配置入口统一收在设置里；这里只做跳转，避免两个入口改同一份数据 -->
-        <button class="qd-btn" :title="t('notifyGoSettings')" @click="openNotifySettings">
-          <Bell :size="14" /> {{ t('sched_nf_title') }}
-        </button>
+        <div class="qd-action-group">
+          <!-- 临时全停（会议投屏等）不该一条条点：全启用时显示「暂停所有」，否则「恢复所有」 -->
+          <button class="qd-btn" :disabled="bulkBusy || tasks.length === 0" @click="toggleAllEnabled"
+                  :title="allOn ? t('sched_pause_all') : t('sched_resume_all')">
+            <Pause v-if="allOn" :size="14" />
+            <Play v-else :size="14" />
+            {{ allOn ? t('sched_pause_all') : t('sched_resume_all') }}
+          </button>
+          <!-- 机器人地址是全局一份，配置入口统一收在设置里；这里只做跳转，避免两个入口改同一份数据 -->
+          <button class="qd-btn" :title="t('notifyGoSettings')" @click="openNotifySettings">
+            <Bell :size="14" /> {{ t('sched_nf_title') }}
+          </button>
+        </div>
+        <span class="qd-action-sep"></span>
         <button class="qd-btn qd-btn-primary" @click="openCreate"><Plus :size="14" /> {{ t('sched_add') }}</button>
       </div>
     </PageHeader>
+
+    <!-- 视图 tab：列表 / 日历。覆盖层写法参考 NoteManagerPage 的 .ne-viewtabs，
+         日历铺满内容区但不改侧栏结构。 -->
+    <div class="sched-viewtabs">
+      <button :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">{{ t('schedViewList') }}</button>
+      <button :class="{ active: viewMode === 'calendar' }" @click="viewMode = 'calendar'"><CalendarDays :size="13" />{{ t('schedViewCalendar') }}</button>
+    </div>
 
     <div v-if="error" class="sched-error">{{ error }}</div>
     <div v-if="runNotice" class="sched-run-notice" role="status">
@@ -776,7 +790,7 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
     </div>
 
     <!-- 搜索 / 状态筛选 -->
-    <div v-if="tasks.length" class="sched-toolbar">
+    <div v-if="tasks.length && viewMode === 'list'" class="sched-toolbar">
       <div class="sched-search">
         <Search :size="13" class="sched-search-icon" />
         <input v-model="query" class="sched-search-input" :placeholder="t('sched_search_ph')" />
@@ -790,7 +804,7 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
     </div>
 
     <!-- 运行统计（近 7 天）：失败次数与失败率一眼可见，不用逐条点历史 -->
-    <div v-if="tasks.length" class="sched-stats">
+    <div v-if="tasks.length && viewMode === 'list'" class="sched-stats">
       <div v-if="runsFailed" class="stat-unavailable">
         <BarChart3 :size="13" class="stat-ico" />
         <span>{{ t('sched_stats_unavailable') }}</span>
@@ -819,7 +833,7 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
     </div>
 
     <!-- 列表 -->
-    <div class="sched-list">
+    <div v-if="viewMode === 'list'" class="sched-list">
       <div v-if="!loading && tasks.length === 0" class="sched-empty">
         <AlarmClock :size="30" class="empty-icon" />
         <p>{{ t('sched_empty') }}</p>
@@ -894,6 +908,8 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
         </div>
       </div>
     </div>
+    <!-- 统一日历：与列表互斥的视图，数据源与列表无关（组件内部自己拉两个 binding） -->
+    <UnifiedCalendar v-else />
 
     <!-- 新增/编辑弹窗 -->
     <QdModal v-model="showModal" :title="modalTitle" width="440px">
@@ -1124,6 +1140,11 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
   overflow: hidden; background: var(--color-bg-primary);
 }
 /* 页头已统一为 .qd-page-header（通栏），内边距下放到内容块 */
+/* 视图 tab（列表 / 日历）：参考 NoteManagerPage 的 .ne-viewtabs，安静的一行切换 */
+.sched-viewtabs { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-7); flex-shrink: 0; border-bottom: 1px solid var(--color-border); }
+.sched-viewtabs button { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted); font-size: var(--text-sm); cursor: pointer; font-family: inherit; }
+.sched-viewtabs button:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.sched-viewtabs button.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
 .sched-pick-btn { margin-top: var(--space-2); }
 .interval-row { display: flex; align-items: center; gap: var(--space-2); }
 .interval-num { flex: 1 1 auto; min-width: 0; }
@@ -1272,7 +1293,7 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
   font-size: var(--text-sm); color: var(--color-text-secondary); margin-top: var(--space-1);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
-.item-meta { font-size: var(--text-xs); color: var(--color-text-disabled); margin-top: var(--space-2); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.item-meta { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: var(--space-2); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .meta-next { color: var(--color-accent); }
 .meta-left { color: var(--color-text-muted); }
 .meta-last { display: inline-flex; align-items: center; gap: 3px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

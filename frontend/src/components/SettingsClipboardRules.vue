@@ -383,7 +383,7 @@ function matchLabel(r: ClipboardRule): string {
           </span>
         </div>
         <span v-if="r.writeBack" class="cr-tag">{{ t('crTagWriteBack') }}</span>
-        <button class="cr-act" :class="{ on: r.enabled }" @click="toggleRule(r)">
+        <button class="btn btn-chip" :class="{ 'is-on': r.enabled }" @click="toggleRule(r)">
           {{ r.enabled ? t('crEnabled') : t('crDisabled') }}
         </button>
         <button class="cr-icon-btn" :title="t('edit')" @click="startEdit(r)"><Pencil :size="13" /></button>
@@ -445,7 +445,7 @@ function matchLabel(r: ClipboardRule): string {
 
 <style scoped>
 /* 与 settings.css 的 .section 对齐（同宽、同段间距），合并进「剪贴板」页后视觉连续 */
-.cr-page { width: 100%; max-width: var(--settings-max); margin-top: 28px; }
+.cr-page { width: 100%; max-width: var(--settings-max); }
 .page-title { margin: 0 0 var(--space-2); font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
 .cr-desc { margin: 0 0 var(--space-6); font-size: var(--text-sm); color: var(--color-text-disabled); line-height: 1.6; }
 
@@ -454,8 +454,8 @@ function matchLabel(r: ClipboardRule): string {
   display: flex;
   align-items: center;
   gap: var(--space-5);
-  padding: var(--space-5) 14px;
-  margin-bottom: 14px;
+  padding: var(--space-5);
+  margin-bottom: var(--space-5);
   background: var(--color-card-bg);
   border: 1px solid var(--card-border-color);
   border-radius: var(--radius-lg);
@@ -463,11 +463,11 @@ function matchLabel(r: ClipboardRule): string {
 .cr-global.on { border-color: var(--color-accent-border); background: var(--color-accent-bg); }
 .cr-global-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
 .cr-global-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
-.cr-global-hint { font-size: var(--text-xs); color: var(--color-text-disabled); line-height: 1.5; }
+.cr-global-hint { font-size: var(--text-sm); color: var(--color-text-muted); line-height: 1.5; }
 
 .cr-form {
-  padding: 14px;
-  margin-bottom: 14px;
+  padding: var(--space-5);
+  margin-bottom: var(--space-5);
   background: var(--color-card-bg);
   border: 1px solid var(--card-border-color);
   border-radius: var(--radius-lg);
@@ -477,17 +477,17 @@ function matchLabel(r: ClipboardRule): string {
 /* 两列栅格：匹配方式 + 表达式、动作 + 参数各占一半，字段少时不会拉成一条长线 */
 .cr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5); margin-top: var(--space-5); }
 
-.cr-check { display: flex; align-items: flex-start; gap: var(--space-4); margin-top: 14px; cursor: pointer; }
+.cr-check { display: flex; align-items: flex-start; gap: var(--space-4); margin-top: var(--space-5); cursor: pointer; }
 .cr-check input { margin-top: var(--space-1); }
 .cr-check span { display: flex; flex-direction: column; gap: var(--space-1); }
 .cr-check-title { font-size: var(--text-md); color: var(--color-text-secondary); }
 .cr-check-hint { font-size: var(--text-xs); color: var(--color-text-disabled); }
 
-.cr-test { margin-top: 14px; }
+.cr-test { margin-top: var(--space-5); }
 .cr-test-input {
   width: 100%;
-  padding: var(--space-4) 10px;
-  font-family: 'Consolas', ui-monospace, SFMono-Regular, monospace;
+  padding: var(--space-4);
+  font-family: var(--font-mono);
   font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--color-text-primary);
@@ -497,16 +497,16 @@ function matchLabel(r: ClipboardRule): string {
   resize: vertical;
 }
 .cr-test-input:focus { outline: none; border-color: var(--color-border-focus-soft); }
-.cr-test-actions { display: flex; align-items: center; gap: 10px; margin-top: var(--space-4); }
+.cr-test-actions { display: flex; align-items: center; gap: var(--space-4); margin-top: var(--space-4); }
 .cr-test-state { font-size: var(--text-sm); color: var(--color-text-disabled); }
 .cr-test-state.matched { color: var(--color-success); }
 .cr-test-state.nomatch { color: var(--color-warning); }
 .cr-test-out {
   margin: var(--space-4) 0 0;
-  padding: var(--space-4) 10px;
+  padding: var(--space-4);
   max-height: 160px;
   overflow: auto;
-  font-family: 'Consolas', ui-monospace, SFMono-Regular, monospace;
+  font-family: var(--font-mono);
   font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--color-text-secondary);
@@ -516,7 +516,7 @@ function matchLabel(r: ClipboardRule): string {
   white-space: pre-wrap;
   word-break: break-all;
 }
-.cr-form-actions { display: flex; gap: var(--space-4); margin-top: 14px; }
+.cr-form-actions { display: flex; gap: var(--space-4); margin-top: var(--space-5); }
 
 .cr-list {
   border: 1px solid var(--card-border-color);
@@ -527,8 +527,8 @@ function matchLabel(r: ClipboardRule): string {
 .cr-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px var(--space-5);
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-5);
   transition: background-color var(--transition-fast);
 }
 .cr-row + .cr-row { border-top: 1px solid var(--color-border); }
@@ -542,17 +542,17 @@ function matchLabel(r: ClipboardRule): string {
   display: inline-block;
   min-width: 18px;
   margin-right: var(--space-2);
-  padding: 0 3px;
+  padding: 0 var(--space-1);
   border-radius: var(--radius-xs);
   background: var(--color-bg-tertiary);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   font-size: var(--text-2xs);
   font-weight: 400;
   text-align: center;
 }
 .cr-row-meta {
-  font-size: var(--text-xs);
-  color: var(--color-text-disabled);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -565,19 +565,6 @@ function matchLabel(r: ClipboardRule): string {
   color: var(--color-warning);
   background: var(--color-warning-bg);
 }
-.cr-act {
-  flex-shrink: 0;
-  height: 22px;
-  padding: 0 var(--space-4);
-  font-size: var(--text-xs);
-  font-family: inherit;
-  color: var(--color-text-disabled);
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-.cr-act.on { color: var(--color-accent); border-color: var(--color-accent-border); }
 .cr-icon-btn {
   flex-shrink: 0;
   display: inline-flex;
@@ -594,21 +581,21 @@ function matchLabel(r: ClipboardRule): string {
 }
 .cr-icon-btn:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
 .cr-icon-btn.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
-.cr-empty { margin: 0; padding: 18px var(--space-5); text-align: center; font-size: var(--text-sm); color: var(--color-text-disabled); }
+.cr-empty { margin: 0; padding: var(--space-5) var(--space-5); text-align: center; font-size: var(--text-sm); color: var(--color-text-muted); }
 .cr-add { display: inline-flex; align-items: center; gap: var(--space-3); margin-top: var(--space-5); }
 
 /* 捕获设置：与规则区用一条分隔线隔开，宽度仍受 .cr-page 的 720px 约束。 */
 .cr-capture {
-  margin-top: var(--space-8); padding-top: 18px;
+  margin-top: var(--space-8); padding-top: var(--space-5);
   border-top: 1px solid var(--color-border);
 }
 .cr-capture-hint { margin: 0 0 var(--space-5); font-size: var(--text-xs); color: var(--color-text-disabled); line-height: 1.6; }
 .cr-ignore-add { display: flex; gap: var(--space-4); }
 .cr-ignore-add .field-input { flex: 1; min-width: 0; }
-.cr-ignore-list { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: 10px; }
+.cr-ignore-list { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-4); }
 .cr-ignore-chip {
   display: inline-flex; align-items: center; gap: var(--space-2);
-  padding: 3px 5px 3px 9px; font-size: var(--text-xs);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3); font-size: var(--text-xs);
   color: var(--color-text-secondary); background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border); border-radius: var(--radius-lg);
 }

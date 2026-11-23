@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { History, Trash2 } from '@lucide/vue'
 import ActivityPage from './ActivityPage.vue'
 import RecycleBinPage from './RecycleBinPage.vue'
+import QdTabs from './QdTabs.vue'
 
 // 「历史」= 最近动态 + 回收站，页内分段切换。
 //
@@ -23,9 +24,11 @@ const props = defineProps<{ initialTab?: string }>()
 const tab = ref<'activity' | 'recycle'>(props.initialTab === 'recycle' ? 'recycle' : 'activity')
 
 const tabs = computed(() => [
-  { value: 'activity' as const, label: t('navActivity'), icon: History },
-  { value: 'recycle' as const, label: t('recycleBin'), icon: Trash2 },
+  { id: 'activity' as const, label: t('navActivity') },
+  { id: 'recycle' as const, label: t('recycleBin') },
 ])
+// 图标是内容不是皮肤：QdTabs 的 tabs 数据只认 {id,label}，图标走 #tab 插槽按 id 取。
+const tabIcon = (id: string) => (id === 'activity' ? History : Trash2)
 
 const current = computed(() => (tab.value === 'activity' ? ActivityPage : RecycleBinPage))
 </script>
@@ -36,15 +39,12 @@ const current = computed(() => (tab.value === 'activity' ? ActivityPage : Recycl
     <component :is="current" :embedded="true">
       <template #titles>
         <div class="hist-tabs">
-          <button
-            v-for="o in tabs"
-            :key="o.value"
-            :class="['qd-btn', 'qd-btn-sm', { 'is-on': tab === o.value }]"
-            @click="tab = o.value"
-          >
-            <component :is="o.icon" :size="13" />
-            <span>{{ o.label }}</span>
-          </button>
+          <QdTabs v-model="tab" :tabs="tabs" variant="segmented" :aria-label="t('setHistory')">
+            <template #tab="{ tab: item }">
+              <component :is="tabIcon(item.id)" :size="13" />
+              <span>{{ item.label }}</span>
+            </template>
+          </QdTabs>
         </div>
       </template>
     </component>

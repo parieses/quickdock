@@ -109,12 +109,12 @@ func (s *CollectionService) open(id, query string) *services.ApiResult {
 	return services.Ok(nil)
 }
 
-// OpenAllInCollection 打开集合内全部项。
-func (s *CollectionService) OpenAllInCollection(collectionID string) *services.ApiResult {
+// OpenAllInCollection 打开集合内全部项。query 非空时替换 {query} 占位符。
+func (s *CollectionService) OpenAllInCollection(collectionID, query string) *services.ApiResult {
 	if r := s.dbOK(); r != nil {
 		return r
 	}
-	if err := s.App.DB.OpenAllInCollection(collectionID); err != nil {
+	if err := s.App.DB.OpenAllInCollection(collectionID, query); err != nil {
 		logger.W("批量打开集合失败 collection=%s: %v", collectionID, err)
 		return services.Fail(err)
 	}

@@ -19,6 +19,7 @@ import { installExternalLinkGuard } from './utils/externalLinks';
 import { navigate, navigateTo, pendingOpenNoteId, pendingOpenTodoId, setNavigator } from './composables/bridge';
 import Sidebar from './components/Sidebar.vue';
 import Toast from './components/Toast.vue';
+import QdSaveAsMenu from './components/QdSaveAsMenu.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 // 密码索取弹层：与 ConfirmDialog 同款「全局唯一实例 + 幂等挂载」。
 // 挂在这里而不是各页面，是因为调用方遍布全应用（SSH 连接、Git 推送、设置页……），
@@ -632,6 +633,7 @@ const activeConfirm = computed(() =>
   </div>
 
   <!-- 全局浮层：主窗口 / 独立剪贴板窗口 / 命令面板窗口 共用 -->
+  <QdSaveAsMenu />
   <Toast :messages="items" @remove="remove" />
   <ConfirmDialog
     v-if="activeConfirm"

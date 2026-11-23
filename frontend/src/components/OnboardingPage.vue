@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { inject, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Globe2, Play } from '@lucide/vue'
 import { useWorkspaceStore } from '../stores/workspace'
 import { getErrorMessage } from '../utils/error'
 import type { ToastAPI } from '../types'
@@ -48,32 +49,36 @@ function openSettings() {
 
       <!-- 开始按钮 -->
       <button class="ob-start-btn" :class="{ disabled: isCreating }" :disabled="isCreating" @click="handleGetStarted">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <polygon points="5 3 19 12 5 21 5 3"/>
-        </svg>
+        <Play :size="18" />
         <span>{{ t('getStarted') }}</span>
       </button>
 
-      <!-- 三步引导 -->
+      <!-- 三步引导：本组件只有「创建工作空间 / 打开设置」两个动作，
+           所以只把第 1 步接到创建动作；第 2、3 步没有可落地入口，
+           去掉数字与连线，保留为纯说明，不伪造可点的假按钮。 -->
       <div class="ob-steps">
-        <div class="ob-step">
+        <div
+          class="ob-step is-action"
+          role="button"
+          tabindex="0"
+          :aria-disabled="isCreating"
+          @click="handleGetStarted"
+          @keydown.enter.prevent="handleGetStarted"
+          @keydown.space.prevent="handleGetStarted"
+        >
           <div class="step-number">1</div>
           <div class="step-body">
             <span class="step-label">{{ t('step1') }}</span>
             <span class="step-desc">{{ t('step1Desc') }}</span>
           </div>
         </div>
-        <div class="ob-step-connector" />
         <div class="ob-step">
-          <div class="step-number">2</div>
           <div class="step-body">
             <span class="step-label">{{ t('step2') }}</span>
             <span class="step-desc">{{ t('step2Desc') }}</span>
           </div>
         </div>
-        <div class="ob-step-connector" />
         <div class="ob-step">
-          <div class="step-number">3</div>
           <div class="step-body">
             <span class="step-label">{{ t('step3') }}</span>
             <span class="step-desc">{{ t('step3Desc') }}</span>
@@ -84,9 +89,7 @@ function openSettings() {
       <!-- 底部操作 -->
       <div class="ob-footer">
         <button class="ob-link-btn" @click="openSettings">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 12a9 9 0 1 1-9-9"/><path d="M3 12h18"/><path d="M12 3a9 9 0 0 1 9 9"/>
-          </svg>
+          <Globe2 :size="14" />
           {{ t('importFromSnapshot') }}
         </button>
       </div>
@@ -182,6 +185,11 @@ function openSettings() {
   border: 1px solid var(--color-border);
   text-align: left;
 }
+/* 第 1 步是可点击入口：与主按钮同源（创建工作空间），要有明确的可点反馈 */
+.ob-step.is-action { cursor: pointer; transition: border-color var(--transition-fast), background-color var(--transition-fast); }
+.ob-step.is-action:hover { border-color: var(--color-accent-border); background: var(--color-bg-hover); }
+/* 第 2、3 步没有落地动作，去掉数字圆圈后正文对齐第 1 步标题的起始位置 */
+.ob-step:not(.is-action) { padding-left: calc(32px + var(--space-6)); }
 
 .step-number {
   width: 32px;
@@ -213,13 +221,6 @@ function openSettings() {
 .step-desc {
   font-size: var(--text-sm);
   color: var(--color-text-muted);
-}
-
-.ob-step-connector {
-  width: 2px;
-  height: 16px;
-  background: var(--color-border);
-  margin-left: 23px;
 }
 
 /* 底部 */

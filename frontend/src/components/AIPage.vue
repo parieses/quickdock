@@ -19,6 +19,7 @@ import AiDigestPanel from './AiDigestPanel.vue'
 import AiJobsPanel from './AiJobsPanel.vue'
 import AiHero from './AiHero.vue'
 import AiComposer from './AiComposer.vue'
+import HooksEditorDialog from './HooksEditorDialog.vue'
 import AiMessageList from './AiMessageList.vue'
 import AiRoundBar from './AiRoundBar.vue'
 import AiSchedRunBar from './AiSchedRunBar.vue'
@@ -55,12 +56,12 @@ import hljs from 'highlight.js/lib/common'
 import '../styles/hljs-theme.css'
 import { logErr } from '../utils/logger'
 import { useFloatMenu } from '../composables/useFloatMenu'
+import { useSaveAs } from '../composables/useSaveAs'
 import { aiGenerating, aiFinishedUnread, pendingTarget } from '../composables/bridge'
 import { resolveConvDir } from '../utils/aiConvDir'
 import { profileNeedsKey } from '../utils/aiKey'
 import { pickActiveRun } from '../utils/aiRuns'
 import type { AIRun } from '../utils/aiRuns'
-import { CreateNoteDoc } from '../../bindings/quickdock/services/note/noteservice'
 import type { PendingImage, ToastAPI } from '../types'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { AIConvHit, AIHooksInfo, AIProfilesResult } from '../types/ai'
@@ -81,9 +82,10 @@ import {
   AIMarkConversationRead,
   AISummarizeConversation,
   AIRenameConversation,
-  AIListConversations,
+  AIListConversationsPage,
   AIDeleteConversation,
   AIGetMessages,
+  AIGetMessagesPage,
   AILoadImage,
   AIListSpaces,
   AICreateSpace,
@@ -124,11 +126,24 @@ defineOptions({ name: KEEP_ALIVE.ai })
 
 const { t, locale } = useI18n()
 const toast = inject<ToastAPI>('toast')!
-
+const sa = useSaveAs()
 
 const emit = defineEmits<{ (e: 'open-settings', page?: string): void }>()
 
 const conversations = ref<AIConversation[]>([])
+// 会话分页：每页 50 条，按更新时间倒序（与全量版同排序，翻页不会跳位）。
+// loadConversations 总是从 offset=0 重取第一页并重置这两个值；
+// 「加载更多」才往后翻。hasMoreConv 用「取满一页」推断，末页不足 50 即停。
+const CONV_PAGE_SIZE = 50
+const convOffset = ref(0)
+const hasMoreConv = ref(false)
+const loadingMoreConv = ref(false)
+// 消息首屏只取最新 50 条。加载更早用「扩大窗口重取」的降级方案（缺 rowid，
+// 无法按 beforeRow 精确向前翻页，理由见 loadEarlierMessages），因此这里记的是窗口大小。
+const MSG_PAGE_SIZE = 50
+const msgWindow = ref(MSG_PAGE_SIZE)
+const hasMoreEarlier = ref(false)
+const loadingEarlier = ref(false)
 const spaces = ref<AISpace[]>([])
 const activeId = ref('')
 const messages = ref<AIMessage[]>([])
@@ -287,6 +302,7 @@ const cwdLabel = computed(() => {
 // 换机器批准状态都不一样。只在 found 且未批准时出提示条：已批准的钩子不吭声
 // ——它的产出已经挂在工具卡片里了，批准状态不是用户每次都要再确认一遍的事。
 const aiHooks = ref<AIHooksInfo | null>(null)
+const hooksEditorOpen = ref(false)
 let aiHooksSeq = 0
 async function loadAIHooks() {
   const dir = convCwd.value.trim()
@@ -296,7 +312,14 @@ async function loadAIHooks() {
     const r = unwrap(await AIGetHooks(dir))
     // 后发的请求可能先回：列表停在上一个目录的钩子上比没有钩子更糟。
     if (seq === aiHooksSeq) aiHooks.value = r as AIHooksInfo
-  } catch { aiHooks.value = null }
+  } catch (e) {
+    logErr('ai.loadAIHooks', e)
+    aiHooks.value = null
+  }
+}
+// 钩子编辑弹窗保存后只负责重读：批准仍由 approveHooks 走 AISaveHooks 之外的独立入口。
+async function onHooksSaved() {
+  await loadAIHooks()
 }
 async function approveHooks(on: boolean) {
   const dir = convCwd.value.trim()
@@ -530,6 +553,21 @@ async function runPlan(m: AIMessage) {
   // 前缀与计划之间空两行：模型对「指令」和「材料」的边界靠空行判断，
   // 挤在一起容易把计划里的第一句当成指令的一部分。
   input.value = `${t('aiPlanRunPrefix')}\n\n${m.content}`
+  await send()
+}
+
+// 被中断/停止的回复旁「继续生成」：把「继续」当作一条新 user 消息发下去。
+// 后端 ai_resume.go 的 isResumeCommand 认识中文「继续」，会接着上一段回答续写，
+// 不需要任何新 binding。沿用 send() 本身：它已经处理了「同会话正在跑就插话」、
+// 附件/技能快照、以及新会话首次发言时要先建会话这些路径。
+async function continueGeneration() {
+  if (runOf(activeId.value)) {
+    toast.error(t('aiSameConvRunning'))
+    return
+  }
+  // 这是发给后端的续写触发词，不是 UI 展示文案（后端 isResumeCommand 同时识别中英文）。
+  // 用中文固定值而非 t()：确保任何界面语言下都能命中同一条 resume 路径。
+  input.value = '继续'
   await send()
 }
 
@@ -1000,8 +1038,12 @@ async function loadSpaces() {
 
 async function loadConversations() {
   try {
-    const list = unwrap<AIConversation[]>(await AIListConversations())
-    conversations.value = list ?? []
+    // 分页版只取第一页；侧栏「加载更多」走 loadMoreConversations 往后翻。
+    // 长会话库上全量 ListAIConversations 要扫整张表，这正是分页要消掉的开销。
+    const list = unwrap<AIConversation[]>(await AIListConversationsPage(CONV_PAGE_SIZE, 0)) ?? []
+    convOffset.value = list.length
+    hasMoreConv.value = list.length === CONV_PAGE_SIZE
+    conversations.value = list
     // 列表里带回来的清单一次性补进内存：刷新后停在某条会话、或点了「新建任务」
     // 再切回来时，清单不必等一次点击才出现。
     for (const c of conversations.value) hydratePlanOf(c)
@@ -1011,12 +1053,46 @@ async function loadConversations() {
   }
 }
 
-let messagesGen = 0
-async function loadMessages(convID: string) {
-  const gen = ++messagesGen
+// 侧栏「加载更多」：往后翻一页并 append，按 id 去重（后端翻页期间可能有新会话插入，
+// offset 会漂移，去重能避免同一条在列表里出现两次）。
+async function loadMoreConversations() {
+  if (loadingMoreConv.value || !hasMoreConv.value) return
+  loadingMoreConv.value = true
   try {
-    const msgs = unwrap<AIMessage[]>(await AIGetMessages(convID))
+    const next = unwrap<AIConversation[]>(await AIListConversationsPage(CONV_PAGE_SIZE, convOffset.value)) ?? []
+    const seen = new Set(conversations.value.map((c) => c.id))
+    for (const c of next) {
+      if (seen.has(c.id)) continue
+      seen.add(c.id)
+      conversations.value.push(c)
+      hydratePlanOf(c)
+    }
+    convOffset.value += next.length
+    // 取满一页才可能有下一页；不足即已到末尾，把「加载更多」收掉。
+    hasMoreConv.value = next.length === CONV_PAGE_SIZE
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  } finally {
+    loadingMoreConv.value = false
+  }
+}
+
+let messagesGen = 0
+async function loadMessages(convID: string, full = false) {
+  const gen = ++messagesGen
+  // 每次进入会话都从首屏窗口重新算起（否则上一条会话把窗口顶大后，
+  // 切到新会话又白拉一次更大的窗口）。搜索命中跳转要传 full：目标消息
+  // 可能比首屏 50 条更早，不整段取回来 ensureRendered 就找不到它。
+  msgWindow.value = MSG_PAGE_SIZE
+  hasMoreEarlier.value = false
+  try {
+    const msgs = full
+      ? unwrap<AIMessage[]>(await AIGetMessages(convID))
+      : unwrap<AIMessage[]>(await AIGetMessagesPage(convID, MSG_PAGE_SIZE, 0))
     if (gen !== messagesGen) return // 已有更新的会话选择，丢弃过期响应
+    // 首屏取满一页才认为「还有更早的」；取不满说明这就是整段会话。
+    // full=true（搜索命中跳转）已经取了整段，不需要再显示这个入口。
+    hasMoreEarlier.value = !full && !!msgs && msgs.length >= MSG_PAGE_SIZE
     // 解析历史消息图片：file 类从盘上读回 dataUrl（异步），url 类直发链接。
     // 在赋值 messages.value 之前完成，避免先渲染无图再补图导致的重渲染与闪烁。
     const list = msgs ?? []
@@ -1049,6 +1125,41 @@ async function loadMessages(convID: string) {
   scrollToBottom()
   // 历史消息里可能有 ```mermaid（图不是同步渲染的，得在 DOM 挂上后补扫一遍）
   scheduleMermaidScan()
+}
+
+// 「加载更早」——降级方案的说明（重要）：
+// AIGetMessagesPage 的 beforeRow 是 SQLite 的 rowid，但 binding 返回的 AIMessage
+// 没有 rowid 字段（只有 UUID 形式的 id），前端拿不到「当前最旧那条」的 rowid，
+// 无法按 spec 原意精确向前翻一页。这里的替代做法是把窗口从 50 逐步扩大
+// （50→100→150…），每次重取「最新 N 条」，只把不在现有列表里的更旧消息 prepend
+// 进来。效果是能一路翻到最早，代价是传输量随窗口线性增长——这是缺 rowid 的
+// 纯前端兜底，不是真正的游标分页；等 binding 补出 rowid 后可换成 beforeRow 版。
+async function loadEarlierMessages() {
+  const convID = activeId.value
+  if (!convID || loadingEarlier.value || !hasMoreEarlier.value) return
+  loadingEarlier.value = true
+  const gen = messagesGen
+  try {
+    const nextWindow = msgWindow.value + MSG_PAGE_SIZE
+    const fresh = unwrap<AIMessage[]>(await AIGetMessagesPage(convID, nextWindow, 0)) ?? []
+    if (gen !== messagesGen || activeId.value !== convID) return // 期间切了会话，丢弃
+    // 只取「还没在列表里」的更旧消息：fresh 是正序（旧→新），新出现的必在头部。
+    // 用 existing id 去重而不是整段替换，是为了保住窗口外由流式刚 append 的消息。
+    const existing = new Set(messages.value.map((m) => m.id))
+    const older = fresh.filter((m) => !existing.has(m.id))
+    if (older.length) {
+      await resolveMessageImages(older)
+      if (gen !== messagesGen || activeId.value !== convID) return
+      messages.value = [...older, ...messages.value]
+    }
+    msgWindow.value = nextWindow
+    // 取满整个窗口才可能还有更早；不足即到头。
+    hasMoreEarlier.value = fresh.length >= nextWindow
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  } finally {
+    loadingEarlier.value = false
+  }
 }
 
 async function selectConv(id: string, msgId?: string) {
@@ -1103,7 +1214,8 @@ async function selectConv(id: string, msgId?: string) {
   // 待发送的 @ 引用必须清：切会话之后 cwd 可能变了，旧路径带过去只会被后端一堆拒。
   resetComposerState()
   pageError.value = ''
-  await loadMessages(id)
+  // 从搜索命中点进来时取整段历史：目标消息可能不在首屏 50 条里。
+  await loadMessages(id, !!msgId)
   // 切回一条「还在跑」的会话时补一次流式渲染。
   //
   // 后台那条 run 的 flush 刻意不画（见 flushStream：只画用户正看着的那条），
@@ -3093,14 +3205,11 @@ function noteTitleOf(text: string, max = 30): string {
   return line.length > max ? line.slice(0, max) + '…' : (line || t('aiSaveToNote'))
 }
 
-async function saveAsNote(content: string) {
+// 委托共享沉淀层：标题仍用 noteTitleOf 提取，写入/toast/徽标刷新统一由 useSaveAs 负责。
+// 消息列表里的「另存为」按钮已经直接调 sa.open（含 convId/messageId），这里是兼容入口。
+function saveAsNote(content: string) {
   if (!content || !content.trim()) return
-  try {
-    unwrap(await CreateNoteDoc('', noteTitleOf(content), content.trim(), 'markdown'))
-    toast.success(t('aiSavedToNote'))
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-  }
+  void sa.saveToNote({ content: content.trim(), title: noteTitleOf(content) })
 }
 
 function onDocMouseDown(e: MouseEvent) {
@@ -3192,9 +3301,14 @@ function consumePendingTarget() {
   // 取走即清空：AI 页被 KeepAlive 保活，留着会在切走再回来时重复切到旧会话
   pendingTarget.value = null
   // `task:<id>` = 打开某个定时任务的空间（见 App.vue 的 ai:open-space）；
-  // 其余都是会话 id。前缀由 App.vue 拼，这里只负责拆。
+  // `new:...` = 命令面板「AI 新会话」，清出空白任务等用户发第一条消息时才建会话；
+  // 其余都是会话 id。前缀由 App.vue / 命令面板拼，这里只负责拆。
   if (raw.startsWith('task:')) {
     void focusTaskSpace(raw.slice(5))
+    return
+  }
+  if (raw.startsWith('new:')) {
+    beginBlankTask()
     return
   }
   void focusConv(raw)
@@ -3393,6 +3507,9 @@ onUnmounted(() => {
       :toggle-space-tasks="toggleSpaceTasks"
       :on-enter-send="onEnterSend"
       :fmt-tokens="fmtTokens"
+      :has-more="hasMoreConv"
+      :loading-more="loadingMoreConv"
+      :load-more="loadMoreConversations"
     />
 
     <!-- 右侧聊天区 -->
@@ -3580,6 +3697,10 @@ onUnmounted(() => {
         :job-rows="jobRows"
         :job-seq="jobSeq"
         :sched-times="activeIsScheduled"
+        :can-load-earlier="hasMoreEarlier"
+        :loading-earlier="loadingEarlier"
+        :load-earlier="loadEarlierMessages"
+        @continue="continueGeneration"
         @open-settings="emit('open-settings', 'ai:model')"
         @open-artifact="openArtifactInPanel"
         @open-img="openImgViewer"
@@ -3756,6 +3877,7 @@ onUnmounted(() => {
         @change-permission="onChangePermission"
         @model-change="onModelChange"
         @approve-hooks="approveHooks"
+        @edit-hooks="hooksEditorOpen = true"
         @remove-attachment="removeAttachment"
         @remove-attached-file="removeAttachedFile"
         @confirm-url="confirmUrlImage"
@@ -3778,6 +3900,16 @@ onUnmounted(() => {
         @toggle-connector="toggleConnector"
         @install-skill="installSkill"
         @manage-connectors="manageConnectors"
+        />
+
+        <!-- 钩子编辑：由 Composer 的批准条 / 常驻小按钮触发；保存后重读 AIGetHooks -->
+        <HooksEditorDialog
+          v-if="hooksEditorOpen"
+          :model-value="true"
+          :cwd="convCwd"
+          :hooks="aiHooks"
+          @update:model-value="hooksEditorOpen = false"
+          @saved="onHooksSaved"
         />
 
         <!-- 固定免责声明：贴在整个输入停靠区的最下方，不随消息滚动。

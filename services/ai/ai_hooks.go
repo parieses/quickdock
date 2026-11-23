@@ -33,6 +33,20 @@ func (a *AIService) AIGetHooks(cwd string) *services.ApiResult {
 	return services.Ok(info)
 }
 
+// AISaveHooks 保存一个目录的钩子配置（bound）。
+//
+// 保存不碰批准状态：改完命令后用户仍需重新确认批准，避免「编辑命令」被当成
+// 「顺便获得执行授权」——那会让恶意 hooks.json 通过一次编辑绕过安全闸门。
+func (a *AIService) AISaveHooks(cwd string, afterEdit, beforeCommand []string) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	if err := aitools.SaveHooks(cwd, afterEdit, beforeCommand); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
+}
+
 // AISetHooksApproved 批准 / 撤销一个目录的钩子（bound）。
 //
 // 批准没有批量入口是刻意的：hooks.json 是随仓库走的文件，clone 下来就带着，

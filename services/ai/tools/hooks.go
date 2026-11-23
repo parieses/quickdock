@@ -104,6 +104,35 @@ func HooksFor(database *db.Database, cwd string) HooksInfo {
 	return info
 }
 
+// SaveHooks 写一个目录的 hooks.json（供设置界面编辑钩子用）。
+//
+// 与 SetHooksApproved 刻意分开：写配置只是改文件，批准是安全闸门——
+// 保存配置不会让一个未批准的目录开始执行钩子，用户仍要在看清命令后显式批准。
+// 只写 aiHookConfig 认识的两个键，写坏了的旧文件会被覆盖成合法结构——
+// 这正是编辑界面期望的修复行为。
+func SaveHooks(cwd string, afterEdit, beforeCommand []string) error {
+	abs, err := filepath.Abs(strings.TrimSpace(cwd))
+	if err != nil || strings.TrimSpace(cwd) == "" {
+		return errors.New("工作目录无效")
+	}
+	if afterEdit == nil {
+		afterEdit = []string{}
+	}
+	if beforeCommand == nil {
+		beforeCommand = []string{}
+	}
+	cfg := aiHookConfig{AfterEdit: afterEdit, BeforeCommand: beforeCommand}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := hooksPath(abs)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0644)
+}
+
 // SetHooksApproved 批准/取消批准一个目录的钩子。
 func SetHooksApproved(database *db.Database, cwd string, on bool) error {
 	if database == nil {

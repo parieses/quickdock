@@ -14,6 +14,7 @@ package kb
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	"quickdock/internal/db"
 	ikb "quickdock/internal/kb"
 	"quickdock/internal/logger"
+	"quickdock/internal/platform"
 	"quickdock/services"
 )
 
@@ -408,6 +410,50 @@ func (s *KBService) AddKBFiles(libraryID string, paths []string) *services.ApiRe
 
 	s.resume()
 	return services.Ok(res)
+}
+
+// AddKBText 把一段纯文本沉淀成知识库文档（bound）。
+//
+// 「加入知识库」的调用方不只有磁盘文件——AI 回答、SSH 输出、监控日志、剪贴板
+// 条目都是纯文本，没有可登记的路径。索引管线（ParseFile）以磁盘文件为输入，
+// 且靠 size+mtime/hash 判变化，所以这里把文本写成 dataDir/kb-clips/ 下的 .md
+// 文件再走 AddKBFiles：文件真实存在、可溯源、名字带来源，重复添加同一份内容
+// 会因内容 hash 相同被跳过，不会无限堆积索引。
+//
+// name 是展示名（会自动加 .md 后缀并做安全化处理），content 是正文。
+func (s *KBService) AddKBText(libraryID, name, content string) *services.ApiResult {
+	if r := s.dbOK(); r != nil {
+		return r
+	}
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return services.FailMsg("内容为空")
+	}
+	// 文件名安全化：只留路径安全字符，去掉扩展名二次拼接，长度截断。
+	base := strings.TrimSpace(name)
+	if base == "" {
+		base = "剪藏"
+	}
+	base = strings.NewReplacer("/", "-", "\\", "-", ":", "-", "*", "-",
+		"?", "-", "\"", "-", "<", "-", ">", "-", "|", "-").Replace(base)
+	if len([]rune(base)) > 60 {
+		base = string([]rune(base)[:60])
+	}
+	// 同名不同内容要能共存：加一层按内容 hash 的短后缀，避免覆盖上一次剪藏。
+	h := fmt.Sprintf("%x", sha256.Sum256([]byte(content)))[:8]
+	dir := filepath.Join(platform.DefaultDataDir(), "kb-clips")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return services.Fail(err)
+	}
+	path := filepath.Join(dir, base+"-"+h+".md")
+	body := content
+	if !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+		return services.Fail(err)
+	}
+	return s.AddKBFiles(libraryID, []string{path})
 }
 
 // AddKBFolder 导入一个目录（递归）。

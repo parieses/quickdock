@@ -561,7 +561,7 @@ function exportSnapshot() {
 .st-state-hint { margin: 0; font-size: var(--text-sm); color: var(--color-text-disabled); }
 
 .st-banner {
-  padding: var(--space-6); border-radius: var(--radius-lg);
+  padding: var(--space-6); border-radius: var(--radius-md);
   border: 1px solid var(--color-success-border); background: var(--color-success-bg);
 }
 .st-banner.statusPartial { border-color: var(--color-warning-border); background: var(--color-warning-bg); }

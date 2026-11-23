@@ -6,6 +6,7 @@ import { KEEP_ALIVE } from '../pages/keepAlive'
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onBeforeUnmount, onActivated, inject, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useSaveAs } from '../composables/useSaveAs'
 import { pendingOpenNoteId, pendingOpenTodoId, navigate, navigateTo } from '../composables/bridge'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -51,6 +52,7 @@ import {
   Copy as CopyIcon, PanelLeft, PanelLeftClose, ChevronDown, Sparkles, FileDown, List,
   FileSearch, Square, CheckSquare, Clock, Code2, Columns2, Eye, Link2, Network, PanelRight,
   Download, Upload, History, FilePlus2, Loader2, Check, AlertTriangle, RefreshCw, CircleHelp,
+  MoreHorizontal, ListTodo, Save,
 } from '@lucide/vue'
 import type { ToastAPI, Note, WikiTarget, LinkTargetGroups, EntityType } from '../types'
 
@@ -58,6 +60,7 @@ marked.setOptions({ breaks: true, gfm: true })
 
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
+const sa = useSaveAs()
 
 // ---- 数据 ----
 const nodes = ref<Note[]>([])
@@ -1248,6 +1251,25 @@ function openAi() {
 // 在笔记内查找：复用编辑器自带的查找栏（Ctrl+F 同款），给一个可见按钮入口。
 function findInDoc() { docEditor?.openFind() }
 
+// 选中段落 → 待办 / 另存为。CM 的选区存在 state 里，点工具条按钮丢了焦点也能取到
+// （见 openAi 的注释）；共享层自己按首行生成标题，这里只取正文。
+function currentSelection(): string {
+  return (docEditor?.getSelection()?.text || '').trim()
+}
+function selToTodo() {
+  const text = currentSelection()
+  if (!text) return
+  void sa.saveToTodo({ content: text })
+}
+function selSaveAs(e: MouseEvent) {
+  const text = currentSelection()
+  if (!text) return
+  sa.open(
+    { text, source: 'note', sourceMeta: { label: text.split('\n')[0]?.slice(0, 40) } },
+    { x: e.clientX, y: e.clientY },
+  )
+}
+
 function onAiWriteBack(text: string, mode: 'insert' | 'replace' | 'append') {
   if (mode === 'replace') {
     docContent.value = text
@@ -1441,6 +1463,10 @@ const mdHelpOpen = ref(false)
 const mdHelpPinned = ref(false)
 let mdHelpTimer: ReturnType<typeof setTimeout> | null = null
 const mdHelpWrapEl = ref<HTMLElement | null>(null)
+// 编辑器头部低频操作（导出 / wiki / 语法速查）收进「更多」溢出菜单；
+// 没有现成的「更多操作」文案 key，标题用已有 key 拼出具体条目，不新增字典。
+const moreWrapEl = ref<HTMLElement | null>(null)
+const moreMenuTitle = computed(() => [t('notesExportMd'), t('wikiInsertLink'), t('mdHelpTitle')].join(' / '))
 
 function cancelMdHelpClose() {
   if (mdHelpTimer) { clearTimeout(mdHelpTimer); mdHelpTimer = null }
@@ -1474,7 +1500,7 @@ function closeMdHelp() {
 function onMdHelpDocDown(e: MouseEvent) {
   if (!mdHelpOpen.value) return
   const target = e.target as Node | null
-  if (target && mdHelpWrapEl.value?.contains(target)) return
+  if (target && (mdHelpWrapEl.value?.contains(target) || moreWrapEl.value?.contains(target))) return
   closeMdHelp()
 }
 function onMdHelpKeydown(e: KeyboardEvent) {
@@ -1632,7 +1658,7 @@ watch(pendingOpenNoteId, (id) => {
                 :class="{ active: !selectMode && selectedDocId === n.id, 'sel-on': selectMode && selectedIds.has(n.id) }"
                 @click="selectMode ? toggleSelect(n.id) : onDoc(n)"
               >
-                <span v-key-click v-if="selectMode" class="tn-check" role="checkbox" :aria-checked="selectedIds.has(n.id)" :class="{ on: selectedIds.has(n.id) }" @click.stop="toggleSelect(n.id)"></span>
+                <input v-key-click v-if="selectMode" type="checkbox" class="tn-check" :checked="selectedIds.has(n.id)" @change="toggleSelect(n.id)" @click.stop />
                 <FileText :size="13" class="tn-icon" />
                 <div class="rn-text">
                   <div class="rn-line1">
@@ -1665,7 +1691,7 @@ watch(pendingOpenNoteId, (id) => {
           <!-- 搜索/标签结果：扁平展示 -->
           <template v-else>
             <div v-key-click v-for="n in flatResults" :key="'res-'+n.id" class="qd-row sr-row" :class="{ active: !selectMode && selectedDocId === n.id, 'sel-on': selectMode && selectedIds.has(n.id) }" @click="selectMode ? toggleSelect(n.id) : (n.isFolder ? revealSearchFolder(n) : onDoc(n))">
-              <span v-key-click v-if="selectMode" class="tn-check" role="checkbox" :aria-checked="selectedIds.has(n.id)" :class="{ on: selectedIds.has(n.id) }" @click.stop="toggleSelect(n.id)"></span>
+              <input v-key-click v-if="selectMode" type="checkbox" class="tn-check" :checked="selectedIds.has(n.id)" @change="toggleSelect(n.id)" @click.stop />
               <component :is="n.isFolder ? Folder : FileText" :size="13" class="tn-icon" />
               <div class="sr-text">
                 <div class="sr-title"><template v-for="(p, i) in rowHighlight(n)" :key="i"><mark v-if="p.hit" class="tn-hl">{{ p.s }}</mark><template v-else>{{ p.s }}</template></template></div>
@@ -1767,18 +1793,23 @@ watch(pendingOpenNoteId, (id) => {
             </div>
             <button class="ne-copy" :title="t('notesFindInDoc')" @click="findInDoc()"><FileSearch :size="13" /></button>
             <button class="ne-copy" :title="t('noteAiTitle')" @click="openAi"><Sparkles :size="13" /></button>
-            <button class="ne-copy" :title="t('notesExportMd')" @click="exportDoc"><FileDown :size="13" /></button>
             <button class="ne-copy" :title="t('copy')" @click="copyDoc"><CopyIcon :size="13" /></button>
             <button v-if="tocItems.length" class="ne-copy" :class="{ active: tocOpen }" :title="t('notesToc')" @click="tocOpen = !tocOpen"><List :size="13" /></button>
-            <button ref="wikiBtnEl" class="ne-copy" :title="t('wikiInsertLink')" @click="openWikiPicker"><Link2 :size="13" /></button>
-            <!-- Markdown 语法速查：hover 显示、点击固定（兼顾键盘/触屏），Esc 或点外部关闭。
-                 仅 markdown 格式出现；浮层与按钮同包在 md-help-wrap 内，点浮层不会被判成「外部」。 -->
+            <!-- 低频操作收进「更多」溢出菜单：hover / 键盘聚焦展开，复用浮层 token，不造新弹窗外壳。 -->
+            <span ref="moreWrapEl" class="ne-more-wrap">
+              <button class="ne-copy" :title="moreMenuTitle" :aria-label="moreMenuTitle"><MoreHorizontal :size="13" /></button>
+              <div class="ne-more-pop">
+                <button class="ne-more-item" @click="selToTodo"><ListTodo :size="13" />{{ t('noteSelToTodo') }}</button>
+                <button class="ne-more-item" @click="selSaveAs"><Save :size="13" />{{ t('saveAsTitle') }}</button>
+                <button class="ne-more-item" @click="exportDoc"><FileDown :size="13" />{{ t('notesExportMd') }}</button>
+                <button ref="wikiBtnEl" class="ne-more-item" @click="openWikiPicker"><Link2 :size="13" />{{ t('wikiInsertLink') }}</button>
+                <button v-if="selectedDoc.format !== 'text'" class="ne-more-item" :class="{ active: mdHelpOpen }" @click="clickMdHelp"><CircleHelp :size="13" />{{ t('mdHelpTitle') }}</button>
+              </div>
+            </span>
+            <!-- Markdown 语法速查浮层：由「更多」里的语法速查项打开，沿用原 hover 浮层。 -->
             <span v-if="selectedDoc.format !== 'text'"
                   ref="mdHelpWrapEl" class="md-help-wrap"
                   @pointerenter="openMdHelp" @pointerleave="scheduleMdHelpClose">
-              <button class="ne-copy" :class="{ active: mdHelpOpen }" :title="t('mdHelpTitle')"
-                      :aria-label="t('mdHelpTitle')" :aria-expanded="mdHelpOpen"
-                      @click="clickMdHelp" @focus="openMdHelp" @blur="scheduleMdHelpClose"><CircleHelp :size="13" /></button>
               <div v-if="mdHelpOpen" class="md-help-pop" role="dialog" :aria-label="t('mdHelpTitle')"
                    @pointerenter="cancelMdHelpClose" @pointerleave="scheduleMdHelpClose">
                 <div class="md-help-head">
@@ -1938,7 +1969,7 @@ watch(pendingOpenNoteId, (id) => {
    否则一根细线图标浮在大片深底上，像还没渲染完。 */
 .ne-empty {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  color: var(--color-text-muted); gap: 10px;
+  color: var(--color-text-muted); gap: var(--space-4);
 }
 .ne-empty :deep(svg) {
   padding: var(--space-5);
@@ -1950,10 +1981,10 @@ watch(pendingOpenNoteId, (id) => {
 }
 .ne-empty p { margin: 0; font-size: var(--text-md); color: var(--color-text-secondary); }
 .ne-head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--color-border); position: relative; }
-.ne-name { flex: 1; padding: var(--space-3) 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: var(--text-base); font-weight: 600; outline: none; font-family: inherit; }
+.ne-name { flex: 1; padding: var(--space-3) var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: var(--text-base); font-weight: 600; outline: none; font-family: inherit; }
 .ne-name:focus { border-color: var(--color-border-focus-soft); }
 .ne-format { display: flex; gap: var(--space-1); flex-shrink: 0; }
-.ne-format button { padding: var(--space-2) 10px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-muted); font-size: var(--text-sm); cursor: pointer; font-family: inherit; }
+.ne-format button { padding: var(--space-2) var(--space-4); border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-muted); font-size: var(--text-sm); cursor: pointer; font-family: inherit; }
 .ne-format button:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
 .ne-format button:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-left: -1px; }
 .ne-format button.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
@@ -1974,13 +2005,33 @@ watch(pendingOpenNoteId, (id) => {
 /* 大纲按钮的开启态。此前只有 :class="{ active: tocOpen }" 而没有任何 .active 规则，
    点了完全没反馈（11-12 补）。 */
 .ne-copy.active { background: var(--color-accent-bg); color: var(--color-accent); }
+/* 低频操作溢出菜单：hover / focus-within 展开，沿用浮层 token */
+.ne-more-wrap { position: relative; display: inline-flex; }
+.ne-more-pop {
+  display: none;
+  position: absolute; top: 100%; right: 0; z-index: var(--z-dropdown);
+  min-width: 168px; margin-top: var(--space-1); padding: var(--space-1);
+  flex-direction: column; gap: var(--space-1);
+  border: 1px solid var(--popover-border-color); border-radius: var(--radius-sm);
+  background: var(--color-popover-bg); box-shadow: var(--shadow-md);
+}
+.ne-more-wrap:hover .ne-more-pop, .ne-more-wrap:focus-within .ne-more-pop { display: flex; }
+.ne-more-item {
+  display: flex; align-items: center; gap: var(--space-3);
+  width: 100%; padding: var(--space-2) var(--space-3); border: none;
+  border-radius: var(--radius-xs); background: transparent;
+  color: var(--color-text-primary); text-align: left; white-space: nowrap;
+  font-family: inherit; font-size: var(--text-sm); cursor: pointer;
+}
+.ne-more-item:hover { background: var(--color-bg-hover); }
+.ne-more-item.active { color: var(--color-accent); }
 /* 插入 wiki 链接的候选浮层：挂在 .ne-head 上，absolute 不占布局高度 */
-.ne-wiki-pop { position: absolute; top: 100%; right: 12px; z-index: 20; width: 260px; margin-top: var(--space-2); padding: var(--space-3); border: 1px solid var(--popover-border-color); border-radius: var(--radius-sm); background: var(--color-popover-bg); box-shadow: var(--shadow-sm); }
+.ne-wiki-pop { position: absolute; top: 100%; right: 12px; z-index: var(--z-dropdown); width: 260px; margin-top: var(--space-2); padding: var(--space-3); border: 1px solid var(--popover-border-color); border-radius: var(--radius-sm); background: var(--color-popover-bg); box-shadow: var(--shadow-sm); }
 /* Markdown 语法速查浮层：锚在 ? 按钮所在 span（ne-head 内）。宽度按说明文字排布，
    高度上限 + 内部滚动，避免长语法表在小窗口里顶穿编辑区。 */
 .md-help-wrap { position: relative; display: inline-flex; }
 .md-help-pop {
-  position: absolute; top: 100%; right: 0; z-index: 22;
+  position: absolute; top: 100%; right: 0; z-index: var(--z-dropdown);
   width: 340px; max-width: calc(100vw - 32px); max-height: 420px;
   display: flex; flex-direction: column;
   margin-top: var(--space-2);
@@ -1997,7 +2048,7 @@ watch(pendingOpenNoteId, (id) => {
 .md-help-row { display: flex; align-items: baseline; gap: var(--space-3); width: 100%; padding: 3px var(--space-2); margin: 0; border: none; border-radius: var(--radius-sm); background: none; text-align: left; cursor: pointer; font-family: inherit; }
 .md-help-row:hover { background: var(--color-bg-hover); }
 .md-help-row:hover .md-help-sample { color: var(--color-text-primary); }
-.md-help-sample { flex-shrink: 0; min-width: 108px; padding: 1px var(--space-2); border-radius: var(--radius-xs); background: var(--color-bg-tertiary); color: var(--color-accent); font-family: 'Consolas', 'Monaco', monospace; font-size: var(--text-sm); white-space: nowrap; }
+.md-help-sample { flex-shrink: 0; min-width: 108px; padding: 1px var(--space-2); border-radius: var(--radius-xs); background: var(--color-bg-tertiary); color: var(--color-accent); font-family: var(--font-mono); font-size: var(--text-sm); white-space: nowrap; }
 .md-help-desc { font-size: var(--text-sm); color: var(--color-text-secondary); }
 .md-help-foot { padding: var(--space-2) var(--space-4); border-top: 1px solid var(--color-border); font-size: var(--text-xs); color: var(--color-text-muted); }
 .md-help-wiki { padding: 0 var(--space-4) var(--space-3); font-size: var(--text-xs); color: var(--color-text-disabled); }
@@ -2007,7 +2058,7 @@ watch(pendingOpenNoteId, (id) => {
 .ne-wiki-list { max-height: 180px; overflow-y: auto; margin-top: var(--space-3); }
 /* 一级类型档位：pop 只有 260px 宽，四档要允许换行 */
 .ne-wiki-tabs { display: flex; flex-wrap: wrap; gap: 2px; margin-top: var(--space-2); }
-.ne-wiki-tab { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: none; border-radius: var(--radius-xs); background: transparent; color: var(--color-text-muted); font-family: inherit; font-size: var(--text-xs); cursor: pointer; }
+.ne-wiki-tab { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-4); border: none; border-radius: var(--radius-xs); background: transparent; color: var(--color-text-muted); font-family: inherit; font-size: var(--text-xs); cursor: pointer; }
 .ne-wiki-tab:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .ne-wiki-tab.on { background: var(--color-accent-bg); color: var(--color-accent); }
 .ne-wiki-tab-n { color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
@@ -2040,12 +2091,12 @@ watch(pendingOpenNoteId, (id) => {
 /* 搜索命中高亮：只覆盖文字底色，不用 <mark> 的默认黄底（深色主题下会刺眼） */
 .tn-hl { background: var(--color-accent-bg); color: var(--color-accent); border-radius: var(--radius-2xs); padding: 0 1px; }
 /* 视图 tab：文档 / 图谱。图谱是覆盖层，tab 必须压在它上面（z-index 更高）。 */
-.ne-viewtabs { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-4); flex-shrink: 0; border-bottom: 1px solid var(--color-border); background: var(--color-bg-secondary); position: relative; z-index: 11; }
-.ne-viewtabs button { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 10px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted); font-size: var(--text-sm); cursor: pointer; font-family: inherit; }
+.ne-viewtabs { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-4); flex-shrink: 0; border-bottom: 1px solid var(--color-border); background: var(--color-bg-secondary); position: relative; z-index: calc(var(--z-dropdown) + 1); }
+.ne-viewtabs button { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted); font-size: var(--text-sm); cursor: pointer; font-family: inherit; }
 .ne-viewtabs button:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .ne-viewtabs button.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
 .ne-viewtabs-spacer { flex: 1; }
-.ne-graph-overlay { position: absolute; inset: 0; z-index: 10; background: var(--color-bg-primary); }
+.ne-graph-overlay { position: absolute; inset: 0; z-index: var(--z-dropdown); background: var(--color-bg-primary); }
 /* 大纲侧栏：作为 ne-split 的第三个 flex 栏，与源码/预览并排，不遮挡内容。 */
 .ne-outline-dock { flex: 0 0 240px; min-width: 0; border-left: 1px solid var(--color-border); }
 
@@ -2056,14 +2107,14 @@ watch(pendingOpenNoteId, (id) => {
 .ne-editor { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--color-bg-secondary); border-right: 1px solid var(--color-border); }
 .ne-editor.ne-editor-only { border-right: none; }
 .ne-editor :deep(.cm-editor) { flex: 1; min-height: 0; }
-.ne-editor :deep(.cm-content) { padding: 10px 14px var(--space-8) var(--space-2); }
+.ne-editor :deep(.cm-content) { padding: var(--space-4) var(--space-6) var(--space-8) var(--space-2); }
 /* 预览区必须显式放开划选：全局 body/html 是 user-select:none，继承下来后
    选区根本建立不起来（程序化 addRange 也会被立刻清空），
    表现为「预览没办法复制」。 */
 .ne-preview { flex: 1; min-width: 0; overflow: auto; padding: var(--space-5) var(--space-6); background: var(--color-bg-primary); user-select: text; }
 .ne-load-error {
-  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 12;
-  display: flex; align-items: center; gap: 10px; padding: var(--space-5) 14px;
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: var(--z-modal);
+  display: flex; align-items: center; gap: var(--space-4); padding: var(--space-5) var(--space-6);
   border: 1px solid var(--popover-border-color); border-radius: var(--radius-md);
   background: var(--color-popover-bg); box-shadow: var(--shadow-md);
   color: var(--color-text-primary); font-size: var(--text-md);
@@ -2072,25 +2123,21 @@ watch(pendingOpenNoteId, (id) => {
 /* 工具栏按钮高亮态（多选/激活） */
 .tt-btn.on { background: var(--color-accent-bg); color: var(--color-accent); }
 
-/* 多选 checkbox（与 NoteTreeNode 内自绘一致，因 scoped 不跨组件，这里再定义一份） */
-/* 未勾选时不该是蓝框：14px 的小方块描一圈强调色，整棵树看起来都是"待办高亮"。
-   未选中用常规边框，选中才转强调色。 */
-.tn-check {
-  width: 14px; height: 14px; flex-shrink: 0; border-radius: var(--radius-xs);
-  border: 1px solid var(--color-border-light); background: var(--color-bg-primary);
-  cursor: pointer; position: relative; transition: background-color var(--transition-fast), border-color var(--transition-fast);
-}
-.tn-check:hover { border-color: var(--color-text-muted); }
-.tn-check.on { background: var(--color-accent); border-color: var(--color-accent); }
-.tn-check.on::after {
-  content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px;
-  border: solid var(--color-accent-text); border-width: 0 2px 2px 0; transform: rotate(45deg);
-}
-/* 单选高亮走 panels.css 的全局 .qd-row.active（select-bg 实底 + 3px accent 竖条），
-   树行 / 最近打开 / 搜索结果三处共用，不再各写一份必然漂移的样式。
-   多选只铺同一层底色，竖条留给「当前打开的文档」，勾选由实心 checkbox 表达。
-   注意：NoteTreeNode.vue 里有一条等价的 .tn-row.sel-on，改值要两边同步。 */
+/* 勾选框统一走全局 input[type='checkbox']，这里只留布局属性（另见 .recent-row .tn-check） */
+/* 选中态全页唯一画法：select-bg 实底 + 3px accent 竖条，文字不变蓝。
+   单选走全局 .qd-row.active；多选 .sel-on 与树节点保持同一套（同 NoteTreeNode.vue）。 */
 .sel-on { background: var(--color-select-bg); color: var(--color-text-primary); }
+.sel-on::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+}
 .sel-on:hover { background: var(--color-select-bg); }
 /* 本组件 scoped 的 .recent-row:hover / .sr-row:hover 特异性会压过上面那条，
    补一条更高特异性的，让选中/勾选行在 hover 时不闪回普通 hover 底色。 */
@@ -2126,8 +2173,8 @@ watch(pendingOpenNoteId, (id) => {
 .recent-row {
   display: flex;
   align-items: flex-start;
-  gap: 7px;
-  padding: 5px var(--space-3);
+  gap: var(--space-4);
+  padding: var(--space-3);
   margin-bottom: 0; /* 抵消全局 .qd-row 的 2px 行距 */
   min-height: 0;    /* 抵消全局 .qd-row 的 34px 行高，保持双行文字自然高度 */
   border-radius: var(--radius-sm);
@@ -2174,8 +2221,8 @@ watch(pendingOpenNoteId, (id) => {
 .markdown-body :deep(a) { color: var(--color-accent); }
 /* wiki 链接没有 href（避免 DOMPurify 过滤伪协议），补手型与虚下划线让它可点 */
 .markdown-body :deep(a.qd-wiki) { cursor: pointer; border-bottom: 1px dashed var(--color-accent); }
-.markdown-body :deep(code) { background: var(--color-bg-tertiary); padding: 1px 5px; border-radius: var(--radius-xs); font-family: 'Consolas','Monaco',monospace; font-size: var(--text-md); }
-.markdown-body :deep(pre) { background: var(--color-bg-tertiary); padding: 10px var(--space-5); border-radius: var(--radius-sm); overflow: auto; }
+.markdown-body :deep(code) { background: var(--color-bg-tertiary); padding: 1px var(--space-2); border-radius: var(--radius-xs); font-family: var(--font-mono); font-size: var(--text-md); }
+.markdown-body :deep(pre) { background: var(--color-bg-tertiary); padding: var(--space-4) var(--space-5); border-radius: var(--radius-sm); overflow: auto; }
 .markdown-body :deep(pre code) { background: none; padding: 0; }
 .markdown-body :deep(blockquote) { border-left: 3px solid var(--color-border-focus); margin: var(--space-4) 0; padding: var(--space-1) var(--space-5); color: var(--color-text-muted); }
 .markdown-body :deep(ul), .markdown-body :deep(ol) { padding-left: 22px; margin: var(--space-4) 0; }
@@ -2184,10 +2231,10 @@ watch(pendingOpenNoteId, (id) => {
 .markdown-body :deep(img) { max-width: 100%; }
 /* 数学公式：与 AI 对话页同一套容器规则（见 utils/mathMarkdown.ts） */
 .markdown-body :deep(.md-math-inline) { display: inline; }
-.markdown-body :deep(.md-math-block) { display: block; margin: 10px 0; overflow-x: auto; overflow-y: hidden; }
+.markdown-body :deep(.md-math-block) { display: block; margin: var(--space-4) 0; overflow-x: auto; overflow-y: hidden; }
 .markdown-body :deep(.md-math-block .katex-display) { margin: 0; }
 .markdown-body :deep(.md-math-raw) {
-  font-family: 'Consolas','Monaco',monospace; font-size: var(--text-sm);
+  font-family: var(--font-mono); font-size: var(--text-sm);
   white-space: pre-wrap; word-break: break-word; color: var(--color-text-secondary);
 }
 
@@ -2213,7 +2260,7 @@ watch(pendingOpenNoteId, (id) => {
 /* 新建模板下拉：复用浮层那套 token（popover 底 + 边框 + 阴影），不另造色彩 */
 .tt-menu-anchor { position: relative; flex-shrink: 0; }
 .tt-pop {
-  position: absolute; top: 100%; left: 0; z-index: 30; min-width: 160px;
+  position: absolute; top: 100%; left: 0; z-index: var(--z-dropdown); min-width: 160px;
   margin-top: var(--space-1); padding: var(--space-1);
   display: flex; flex-direction: column; gap: var(--space-1);
   border: 1px solid var(--popover-border-color); border-radius: var(--radius-sm);
@@ -2229,7 +2276,7 @@ watch(pendingOpenNoteId, (id) => {
 /* 修订历史覆盖层：与 ne-graph-overlay 同款，铺满编辑区、z-index 10 压在内容上；
    顶部留一条 tab 高度，tab 栏（z-index 11）浮在最上面仍可点。 */
 .ne-history-overlay {
-  position: absolute; inset: 0; z-index: 10; padding-top: var(--space-9);
+  position: absolute; inset: 0; z-index: var(--z-dropdown); padding-top: var(--space-9);
   display: flex; flex-direction: column; background: var(--color-bg-primary);
 }
 .nh-head {
@@ -2261,13 +2308,25 @@ watch(pendingOpenNoteId, (id) => {
   animation: ne-save-rotate 0.9s linear infinite;
 }
 .nh-item {
+  position: relative;
   display: block; width: 100%; text-align: left; margin-bottom: var(--space-1);
   padding: var(--space-2) var(--space-3);
   border: 1px solid transparent; border-radius: var(--radius-sm);
   background: transparent; color: var(--color-text-primary); cursor: pointer; font-family: inherit;
 }
 .nh-item:hover { background: var(--color-bg-hover); }
-.nh-item.active { background: var(--color-select-bg); border-color: var(--color-accent-border); }
+.nh-item.active { background: var(--color-select-bg); }
+.nh-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+}
 .nh-item-top { display: flex; align-items: baseline; gap: var(--space-2); }
 .nh-time { font-size: var(--text-xs); color: var(--color-text-secondary); flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .nh-reason {

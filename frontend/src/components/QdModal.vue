@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import { X } from '@lucide/vue'
 
 /**
  * 全应用唯一的模态容器。
@@ -62,7 +63,7 @@ function onMask() {
             :aria-label="t('close')"
             :title="t('close')"
             @click="close"
-          >✕</button>
+          ><X :size="16" /></button>
         </header>
         <div class="qd-modal-body"><slot /></div>
         <footer v-if="$slots.footer" class="qd-modal-foot"><slot name="footer" /></footer>

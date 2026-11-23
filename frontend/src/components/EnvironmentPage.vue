@@ -7,6 +7,7 @@ import QdSwitch from './QdSwitch.vue'
 import { ref, reactive, computed, onMounted, onUnmounted, watch, inject, nextTick } from 'vue'
 import { matchesTextOrPinyin } from '../utils/pinyin'
 import { useI18n } from 'vue-i18n'
+import { Inbox, AlertCircle, AlertTriangle, ChevronDown, ChevronUp, CornerUpRight, Check } from '@lucide/vue'
 import { Events } from '@wailsio/runtime'
 import ConfigEditor from './ConfigEditor.vue'
 import RuntimeLogView from './RuntimeLogView.vue'
@@ -62,6 +63,7 @@ import SettingsDSH from './SettingsDSH.vue'
 import { DSHStatus, DSHSetAutoStart } from '../../bindings/quickdock/services/dsh/dshservice'
 import PortPage from './PortPage.vue'
 import SitesPanel from './SitesPanel.vue'
+import SiteWizardDialog from './SiteWizardDialog.vue'
 import { unwrap } from '../utils/api'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
@@ -86,6 +88,13 @@ const HARNESS_KEY = 'harness'
 const HTTP_KEY = 'httpserve'
 const PORTS_KEY = 'ports'
 const SITES_KEY = 'sites'
+// 内置工具入口头像：走 EnvSidebar 的 v-html（与 RUNTIME_ICONS 同一套内联 SVG），
+// 用 Lucide 的 Server / Globe2 / Activity 图形替换原先的 ⬡ / ⌂ / ⇄ 字符。
+const SPECIAL_ICONS: Record<string, string> = {
+  http: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>',
+  sites: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+  ports: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
+}
 const isHarness = computed(() => selectedId.value === HARNESS_KEY)
 const isHttp = computed(() => selectedId.value === HTTP_KEY)
 const isPorts = computed(() => selectedId.value === PORTS_KEY)
@@ -201,9 +210,9 @@ const sidebarGroups = computed(() => {
       items.push({ kind: 'special', id: HARNESS_KEY, name: t('navDsh'), avatar: 'DS', color: 'var(--color-accent)', active: isHarness.value, running: dshRunning.value })
     }
     if (g === 'special') {
-      if (hit(t('httpServe'), HTTP_KEY)) items.push({ kind: 'special', id: HTTP_KEY, name: t('httpServe'), avatar: '⬡', color: SPECIAL_ITEM_COLORS.http, active: isHttp.value, running: httpAnyRunning.value })
-      if (hit(t('sitesTitle'), SITES_KEY)) items.push({ kind: 'special', id: SITES_KEY, name: t('sitesTitle'), avatar: '⌂', color: SPECIAL_ITEM_COLORS.sites, active: isSites.value })
-      if (hit(t('portsTitle'), PORTS_KEY)) items.push({ kind: 'special', id: PORTS_KEY, name: t('portsTitle'), avatar: '⇄', color: SPECIAL_ITEM_COLORS.ports, active: isPorts.value })
+      if (hit(t('httpServe'), HTTP_KEY)) items.push({ kind: 'special', id: HTTP_KEY, name: t('httpServe'), avatar: SPECIAL_ICONS.http, color: SPECIAL_ITEM_COLORS.http, active: isHttp.value, running: httpAnyRunning.value })
+      if (hit(t('sitesTitle'), SITES_KEY)) items.push({ kind: 'special', id: SITES_KEY, name: t('sitesTitle'), avatar: SPECIAL_ICONS.sites, color: SPECIAL_ITEM_COLORS.sites, active: isSites.value })
+      if (hit(t('portsTitle'), PORTS_KEY)) items.push({ kind: 'special', id: PORTS_KEY, name: t('portsTitle'), avatar: SPECIAL_ICONS.ports, color: SPECIAL_ITEM_COLORS.ports, active: isPorts.value })
     }
     if (items.length) out.push({ key: g, labelKey: GROUP_LABEL[g], items, collapsed: false, running: groupRunning(g) })
   }
@@ -1091,6 +1100,8 @@ const httpServers = ref<HTTPServerItem[]>([])
 // 端口留空/0 = 自动分配空闲端口（写死端口必然在多服务间互撞）
 const httpForm = reactive<{ name: string; dir: string; port: number }>({ name: '', dir: '', port: 0 })
 const httpRunning = reactive<Record<string, boolean>>({})
+// 建站向导：挂在 HTTP 服务 section 的「新增服务」旁，不占侧栏导航。
+const siteWizardOpen = ref(false)
 // 是否存在运行中的 HTTP 服务：侧栏入口此前没带 running，导致服务跑着也不显示小绿点。
 const httpAnyRunning = computed(() => Object.values(httpRunning).some(Boolean))
 
@@ -2219,7 +2230,7 @@ const dialogCtx = reactive({
         <!-- HTTP 服务区块：目录 → 可访问的静态服务 -->
         <template v-else-if="isHttp">
           <header class="detail-head">
-            <span class="detail-avatar" :style="{ background: SPECIAL_ITEM_COLORS.http }">⬡</span>
+            <span class="detail-avatar" :style="{ background: SPECIAL_ITEM_COLORS.http }" v-html="SPECIAL_ICONS.http"></span>
             <div class="detail-titles">
               <div class="detail-title-row">
                 <span class="detail-name">{{ t('httpServe') }}</span>
@@ -2265,7 +2276,7 @@ const dialogCtx = reactive({
               </div>
             </div>
             <div v-else class="empty-state">
-              <div class="empty-icon">∅</div>
+              <div class="empty-icon"><Inbox :size="30" /></div>
               <div class="empty-text">{{ t('httpNoServer') }}</div>
             </div>
           </section>
@@ -2278,8 +2289,16 @@ const dialogCtx = reactive({
               <input v-model="httpForm.dir" class="env-input" :placeholder="t('httpDirPlaceholder')" readonly />
               <input v-model.number="httpForm.port" type="number" min="1" max="65535" class="env-input env-input--narrow" :placeholder="t('httpPortAuto')" />
               <button class="env-install-btn" @click="createHTTPServer">{{ t('httpCreate') }}</button>
+              <button class="link-btn" @click="siteWizardOpen = true">{{ t('siteWizardOpenEntry') }}</button>
             </div>
           </section>
+
+          <SiteWizardDialog
+            v-if="siteWizardOpen"
+            :model-value="true"
+            @update:model-value="siteWizardOpen = false"
+            @created="loadHTTPServers"
+          />
         </template>
 
         <!-- 端口占用区块：复用 PortPage 组件（从独立导航页迁入环境管理） -->
@@ -2550,7 +2569,7 @@ const dialogCtx = reactive({
             v-if="selected.hasService && selectedConflict && selectedConflict.occupied && !selectedConflict.ours"
             class="port-conflict-banner"
           >
-            <span class="pc-icon">⚠</span>
+            <span class="pc-icon"><AlertTriangle :size="14" /></span>
             <span>{{ t('portConflict', { port: selectedConflict.port, pid: selectedConflict.pid }) }}</span>
           </div>
 
@@ -2559,8 +2578,9 @@ const dialogCtx = reactive({
               <span class="col-ver">{{ t('version') }}</span>
               <span class="col-path">{{ t('installPath') }}</span>
               <span class="col-note">{{ t('envNote') }}</span>
-              <span class="col-env">{{ t('envVar') }}</span>
-              <span class="col-svc" v-if="selected.hasService">{{ t('svcStatus') }}</span>
+              <!-- 「环境变量」与「服务状态」合并成一列：窄窗下六列挤成一片淡字，
+                   两列各占不到 1fr，不如共用一列按运行时是否有服务切换标题。 -->
+              <span class="col-svc">{{ selected.hasService ? t('svcStatus') : t('envVar') }}</span>
               <span class="col-ops">{{ t('operations') }}</span>
             </div>
             <div
@@ -2580,11 +2600,10 @@ const dialogCtx = reactive({
               </div>
               <div v-key-click class="col-path clickable" :title="t('openInExplorer') + ': ' + ins.path" @click="reveal(ins.path)">{{ ins.path }}</div>
               <div class="col-note" :title="ins.note">{{ ins.note || '—' }}</div>
-              <div class="col-env">
+              <div class="col-svc">
                 <span v-if="ins.inSystemPath" class="env-badge on" :title="t('envVarSetTitle')">{{ t('envVarSet') }}</span>
                 <span v-else class="env-badge off" :title="t('envVarUnsetTitle')">{{ t('envVarUnset') }}</span>
-              </div>
-              <div class="col-svc" v-if="selected.hasService && (ins.scope !== 'linked' || selected.id === 'php')">
+                <template v-if="selected.hasService && (ins.scope !== 'linked' || selected.id === 'php')">
                 <span
                   class="status"
                   :class="{
@@ -2636,10 +2655,11 @@ const dialogCtx = reactive({
                   class="svc-usage"
                   :title="svcUsageTitle(selected, ins.version)"
                 >{{ svcUsage(selected, ins.version) }}</span>
+                </template>
               </div>
               <div class="col-ops">
                 <button class="op-btn menu-trigger" @click.stop="toggleMenu(ins.version)">
-                  {{ t('operations') }}<span class="caret">▾</span>
+                  {{ t('operations') }}<ChevronDown :size="12" class="caret" />
                 </button>
                 <div v-if="openMenu === ins.version" class="op-menu">
                   <button class="op-item" :class="{ on: ins.inSystemPath }" :title="t('setEnvVarHint')" @click="toggleEnvVar(selected, ins); openMenu = null">
@@ -2715,13 +2735,13 @@ const dialogCtx = reactive({
 
           <!-- 首次 EnvList 失败：给出持久的错误说明与重试入口，别让详情区一片空白 -->
           <div v-if="loadFailed" class="empty-state env-load-error">
-            <div class="empty-icon">!</div>
+            <div class="empty-icon"><AlertCircle :size="30" /></div>
             <div class="empty-text">{{ t('envLoadFailed') }}</div>
             <button class="op-btn" @click="load()">{{ t('retry') }}</button>
           </div>
 
           <div v-else-if="loadedOnce && !selected.installed.length" class="empty-state">
-            <div class="empty-icon">∅</div>
+            <div class="empty-icon"><Inbox :size="30" /></div>
             <div class="empty-text">{{ t('noInstalledVersion') }}</div>
             <div class="empty-hint">{{ t('installHint') }}</div>
           </div>
@@ -3090,7 +3110,7 @@ const dialogCtx = reactive({
                 :disabled="s.installing"
                 @click="s.listExpanded = !s.listExpanded; s.fetching || s.available.length || loadAvailable(selected.id)"
                 :title="t('selectVersion')"
-              >{{ s.fetching ? '…' : (s.listExpanded ? '▴' : '▾') }}</button>
+              ><span v-if="s.fetching">…</span><ChevronUp v-else-if="s.listExpanded" :size="12" /><ChevronDown v-else :size="12" /></button>
               <!-- 展开的版本列表 -->
               <div v-if="s.listExpanded" class="version-list-panel">
                 <div v-if="s.fetching" class="version-list-loading">{{ t('loading') }}…</div>
@@ -3156,7 +3176,7 @@ const dialogCtx = reactive({
                 :disabled="s.installing"
                 @click="applyUpdate(newestUpdate.to)"
               >{{ s.installing ? t('installing') : t('installNewVersion', { to: newestUpdate.to }) }}</button>
-              <span v-else-if="s.available.length" class="up-to-date">{{ t('upToDate') }}</span>
+              <span v-else-if="s.available.length" class="up-to-date"><Check :size="13" />{{ t('upToDate') }}</span>
               <button v-else class="link-btn" :disabled="s.fetching" @click="loadAvailable(selected.id)">
                 {{ s.fetching ? t('loading') : t('retryLoadVersions') }}
               </button>
@@ -3201,7 +3221,7 @@ const dialogCtx = reactive({
         </template>
 
         <div v-else class="empty-state">
-          <div class="empty-icon">∅</div>
+          <div class="empty-icon"><Inbox :size="30" /></div>
           <div class="empty-text">{{ t('noInstalledVersion') }}</div>
         </div>
         </template>
@@ -3247,9 +3267,9 @@ const dialogCtx = reactive({
           </div>
 
           <div class="doc-pop-actions">
-            <button class="doc-link" @click="openDoc(docRuntime.home)">{{ t('envDocHome') }} ↗</button>
-            <button v-if="docRuntime.docs" class="doc-link" @click="openDoc(docRuntime.docs)">{{ t('envDocDocs') }} ↗</button>
-            <button v-if="docRuntime.repo" class="doc-link" @click="openDoc(docRuntime.repo)">{{ t('envDocRepo') }} ↗</button>
+            <button class="doc-link" @click="openDoc(docRuntime.home)">{{ t('envDocHome') }}<CornerUpRight :size="12" /></button>
+            <button v-if="docRuntime.docs" class="doc-link" @click="openDoc(docRuntime.docs)">{{ t('envDocDocs') }}<CornerUpRight :size="12" /></button>
+            <button v-if="docRuntime.repo" class="doc-link" @click="openDoc(docRuntime.repo)">{{ t('envDocRepo') }}<CornerUpRight :size="12" /></button>
           </div>
         </div>
       </Teleport>
@@ -3409,7 +3429,7 @@ const dialogCtx = reactive({
 .svc-switch { display: inline-flex; align-items: center; gap: var(--space-3); margin-left: var(--space-2); cursor: pointer; user-select: none; -webkit-user-select: none; }
 /* 开关本体已换成 QdSwitch（34×18 几何完全一致），这里只留行内布局与文案。 */
 .svc-switch-label { font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap; }
-.svc-switch.on .svc-switch-label { color: var(--color-accent, var(--color-success)); }
+.svc-switch.on .svc-switch-label { color: var(--color-accent); }
 .svc-switch.busy { opacity: .6; pointer-events: none; }
 
 /* 详情卡片：圆角收到与全站卡片一致（14 在这套 13px 界面里偏"圆润"），
@@ -3443,9 +3463,11 @@ const dialogCtx = reactive({
 .ver-table { display: flex; flex-direction: column; gap: var(--space-3); }
 .ver-row {
   display: grid;
-  grid-template-columns: 1.4fr 1.6fr 1.2fr 0.9fr 1.4fr auto;
-  align-items: center; gap: 10px;
-  padding: 9px var(--space-5);
+  /* 五列：版本 / 安装路径 / 备注 / 环境变量+服务状态（合并） / 操作 */
+  grid-template-columns: 1.4fr 1.6fr 1.2fr 1.4fr auto;
+  align-items: center; gap: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  font-size: var(--text-sm);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-left: 3px solid var(--color-border);
@@ -3454,7 +3476,7 @@ const dialogCtx = reactive({
 }
 .ver-row.ver-head {
   background: transparent; border: none; border-left: none;
-  padding: 0 var(--space-5) var(--space-2); font-size: var(--text-xs); color: var(--color-text-disabled);
+  padding: 0 var(--space-5) var(--space-2); font-size: var(--text-sm); color: var(--color-text-muted);
   letter-spacing: 0.4px;
 }
 .ver-row:not(.ver-head):hover { background: var(--color-bg-secondary); }
@@ -3475,7 +3497,7 @@ const dialogCtx = reactive({
   font-size: var(--text-xs);
 }
 .ollama-ver-label { color: var(--color-text-muted); }
-.ollama-ver-cur { font-family: monospace; color: var(--color-text-primary); }
+.ollama-ver-cur { font-family: var(--font-mono); color: var(--color-text-primary); }
 .ollama-ver-new { color: var(--color-warning); }
 .ollama-ver-ok { color: var(--color-text-disabled); }
 .ollama-ver-refresh { margin-left: auto; }
@@ -3521,7 +3543,7 @@ const dialogCtx = reactive({
 .usage-row { display: flex; align-items: center; gap: var(--space-4); font-size: var(--text-sm); }
 .usage-k { flex: 0 0 96px; color: var(--color-text-muted); }
 .usage-v {
-  font-family: ui-monospace, Consolas, monospace; font-size: var(--text-sm);
+  font-family: var(--font-mono); font-size: var(--text-sm);
   color: var(--color-text-primary); background: var(--color-bg-primary);
   padding: var(--space-1) 7px; border-radius: var(--radius-xs); border: 1px solid var(--color-border);
 }
@@ -3568,7 +3590,7 @@ const dialogCtx = reactive({
 .g-cmd code { font-size: var(--text-xs); color: var(--color-text-secondary); background: var(--color-bg-primary); padding: var(--space-1) var(--space-3); border-radius: var(--radius-xs); }
 .g-path, .g-result {
   font-size: var(--text-xs); color: var(--color-text-disabled);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: monospace;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono);
 }
 .g-result { font-family: inherit; }
 .col-path.clickable, .g-path.clickable {
@@ -3581,13 +3603,13 @@ const dialogCtx = reactive({
 .col-ver { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .ver-name { display: flex; align-items: baseline; gap: var(--space-3); min-width: 0; }
 .ver-alias { font-size: var(--text-md); font-weight: 600; color: var(--color-accent); white-space: nowrap; }
-.ver-ver { font-size: var(--text-sm); color: var(--color-text-secondary); font-family: monospace; }
+.ver-ver { font-size: var(--text-sm); color: var(--color-text-secondary); font-family: var(--font-mono); }
 .ver-scope { font-size: var(--text-2xs); padding: 1px 7px; border-radius: var(--radius-md); width: fit-content; }
 .ver-scope.portable { background: var(--color-accent-bg); color: var(--color-accent); }
 .ver-scope.system { background: var(--color-border); color: var(--color-text-secondary); }
 .col-path, .col-note {
   font-size: var(--text-xs); color: var(--color-text-disabled);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: monospace;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono);
 }
 .col-note { font-family: inherit; }
 .env-badge { font-size: var(--text-xs); padding: var(--space-1) var(--space-4); border-radius: var(--radius-md); width: fit-content; }
@@ -3599,15 +3621,15 @@ const dialogCtx = reactive({
 .status { display: inline-flex; align-items: center; gap: 5px; font-size: var(--text-xs); color: var(--color-text-muted); }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-text-disabled); }
 .status.on { color: var(--color-success); }
-.status.on .status-dot { background: var(--color-success); box-shadow: 0 0 5px var(--color-success-border); }
+.status.on .status-dot { background: var(--color-success); }
 .status.unknown { color: var(--color-warning); }
-.status.unknown .status-dot { background: var(--color-warning); box-shadow: 0 0 5px var(--color-warning-border); }
+.status.unknown .status-dot { background: var(--color-warning); }
 /* 健康探活 pending：进程在但端口没监听，用黄色区别于「运行中」的绿与「停止」的灰 */
 .status.health-pending, .status.on.health-pending { color: var(--color-warning); }
-.status.health-pending .status-dot, .status.on.health-pending .status-dot { background: var(--color-warning); box-shadow: 0 0 5px var(--color-warning-border); }
-.status-dot.ok { background: var(--color-success); box-shadow: 0 0 5px var(--color-success-border); }
-.status-dot.warn { background: var(--color-warning); box-shadow: 0 0 5px var(--color-warning-border); }
-.status-dot.fail { background: var(--color-danger); box-shadow: 0 0 5px var(--color-danger-border); }
+.status.health-pending .status-dot, .status.on.health-pending .status-dot { background: var(--color-warning); }
+.status-dot.ok { background: var(--color-success); }
+.status-dot.warn { background: var(--color-warning); }
+.status-dot.fail { background: var(--color-danger); }
 .status-dot.missing { background: var(--color-text-disabled); }
 .svc-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
   font-size: var(--text-xs); height: 24px; padding: 0 var(--space-4); border-radius: var(--radius-sm); border: none; cursor: pointer;
@@ -3770,9 +3792,8 @@ const dialogCtx = reactive({
 
 /* 安装区 */
 .install-grid { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
-.cur-ver { font-weight: 600; color: var(--color-text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.cur-ver { font-weight: 600; color: var(--color-text-primary); font-family: var(--font-mono); }
 .up-to-date { color: var(--color-success); font-size: var(--text-sm); font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
-.up-to-date::before { content: '✓'; }
 .install-input-wrap { flex: 1; min-width: 160px; }
 .env-input, .env-select {
   width: 100%; min-width: 0;
@@ -3846,7 +3867,7 @@ const dialogCtx = reactive({
 .overview-row { grid-template-columns: 1.4fr 1.1fr 1.1fr 1fr auto; }
 .ov-name { display: inline-flex; align-items: center; gap: var(--space-3); min-width: 0; color: var(--color-text-primary); font-weight: 600; }
 .ov-id { font-size: var(--text-2xs); font-weight: 400; color: var(--color-text-muted); }
-.ov-ver { font-size: var(--text-sm); color: var(--color-text-secondary); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.ov-ver { font-size: var(--text-sm); color: var(--color-text-secondary); font-family: var(--font-mono); }
 
 /* 弹窗（通用遮罩，供各类子弹窗复用） */
 
@@ -3900,7 +3921,7 @@ const dialogCtx = reactive({
 .ev-res:last-child { border-bottom: none; }
 .ev-res:hover { background: var(--color-bg-hover); }
 .ev-res-name { font-size: var(--text-sm); color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ev-res-dir { font-size: var(--text-2xs); font-family: monospace; color: var(--color-text-disabled); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev-res-dir { font-size: var(--text-2xs); font-family: var(--font-mono); color: var(--color-text-disabled); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* 项目版本要求检查弹窗 */
 .pc-row .env-input { flex: 1; }

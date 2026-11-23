@@ -255,6 +255,24 @@ func (d *Database) ListAIConversations() ([]AIConversation, error) {
 	return mapSlice(rows, mapToAIConversation), nil
 }
 
+// ListAIConversationsPage 会话列表分页（按更新时间倒序）。
+// limit<=0 时用默认 50；offset<0 归零。与全量版共用排序，分页切换不会跳位。
+func (d *Database) ListAIConversationsPage(limit, offset int) ([]AIConversation, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := d.Query(
+		"SELECT * FROM ai_conversations ORDER BY updated_at DESC, created_at DESC LIMIT ? OFFSET ?",
+		limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(rows, mapToAIConversation), nil
+}
+
 // SetAIConversationStar 设置/取消星标。
 //
 // 单独一个方法而不是复用 UpdateAIConversationMeta：后者「空串 = 不改」，
@@ -1308,6 +1326,31 @@ func (d *Database) ListAIMessages(convID string) ([]AIMessage, error) {
 		return nil, err
 	}
 	return mapSlice(rows, mapToAIMessage), nil
+}
+
+// ListAIMessagesPage 分页取消息，供聊天窗"加载更早"用。
+// beforeRow<=0 取最新一页；>0 取 rowid 更早的一页。返回正序，前端可直接 prepend。
+func (d *Database) ListAIMessagesPage(convID string, limit, beforeRow int) ([]AIMessage, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	q := "SELECT * FROM ai_messages WHERE conv_id = ?"
+	args := []interface{}{convID}
+	if beforeRow > 0 {
+		q += " AND rowid < ?"
+		args = append(args, beforeRow)
+	}
+	q += " ORDER BY rowid DESC LIMIT ?"
+	args = append(args, limit)
+	rows, err := d.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	msgs := mapSlice(rows, mapToAIMessage)
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+	return msgs, nil
 }
 
 // ListAIMessagesTail 取某会话最近 limit 条消息（按插入顺序正序返回）。

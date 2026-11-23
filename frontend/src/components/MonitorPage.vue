@@ -14,6 +14,7 @@ import { logErr } from '../utils/logger'
 import { escapeHtml } from '../utils/echarts'
 import { matchesTextOrPinyin } from '../utils/pinyin'
 import { useToast } from '../composables/useToast'
+import { useSaveAs } from '../composables/useSaveAs'
 import {
   CreateMonitor, ListMonitors, UpdateMonitor,
   SoftDeleteMonitor,
@@ -55,11 +56,12 @@ interface MonitorStat {
 import {
   Plus, Play, Pencil, Trash2, Globe, Activity, RefreshCw,
   ChevronDown, ChevronUp, CheckCircle2, XCircle, Radio, Download, Search, Power, X, Wrench,
-  Bell as BellIcon, BellOff, Network, Cpu, TerminalSquare,
+  Bell as BellIcon, BellOff, Network, Cpu, TerminalSquare, Save,
 } from '@lucide/vue'
 
 const { t } = useI18n()
 const toast = useToast()
+const sa = useSaveAs()
 
 const monitors = ref<Monitor[]>([])
 const stats = ref<Record<string, MonitorStat>>({})
@@ -295,6 +297,8 @@ function kindLabel(k: string): string {
   if (k === 'ping') return t('monitorKindPing')
   return t('mon_kind_' + k)
 }
+/** 探测类型分段控件数据源（QdTabs variant=segmented），图标走 #tab 插槽。 */
+const kindTabs = computed(() => KINDS.map(k => ({ id: k, label: kindLabel(k) })))
 
 /** 归一化探测类型：空值/未知值按 http（与后端 normalizeMonitorKind 同口径）。 */
 function kindOf(m: Monitor): string {
@@ -620,6 +624,8 @@ const LOG_RANGES = [
 function rangeLabel(r: { value: string; label: string }): string {
   return r.value === 'all' ? t('mon_range_all') : r.label
 }
+/** 日志时间范围分段控件数据源：每个展开的监控各用一个 QdTabs 实例。 */
+const rangeTabs = computed(() => LOG_RANGES.map(r => ({ id: r.value, label: rangeLabel(r) })))
 // 范围按监控各存一份。用单个全局值时，同页展开多条会出现
 // 「切了 A 的范围，B 的图也跟着变了，但 B 的数据没重载」——图和数据对不上。
 const logRanges = ref<Record<string, string>>({})
@@ -786,6 +792,18 @@ async function exportCsv(m: Monitor) {
   } catch (e) {
     error.value = getErrorMessage(e)
   }
+}
+
+// 转存日志：把当前展开面板已加载的日志拼成纯文本，交给共享沉淀层另存为笔记/待办/知识库。
+// 数据源与展示同源（logsMap），不另发请求；时间/状态/错误是排障时最需要的三段。
+function saveLogsAs(e: MouseEvent, m: Monitor) {
+  const logs = logsMap.value[m.id] || []
+  if (!logs.length) return
+  const text = logs.map(l => [l.checkedAt, l.status, l.error].filter(Boolean).join(' ')).join('\n')
+  sa.open(
+    { text, source: 'monitor', sourceMeta: { monitorId: m.id, label: m.name } },
+    { x: e.clientX, y: e.clientY },
+  )
 }
 
 // ---- 停机日历 ----
@@ -985,6 +1003,11 @@ function consumePendingTarget() {
   const id = p.target
   // 取走即清空：留着的话下次从侧栏正常进来（或切走再回来）会重复定位到旧条目
   pendingTarget.value = null
+  // 命令面板「新建监控」带 target='new'：直接打开新建弹窗，不再走定位。
+  if (id === 'new') {
+    openCreate()
+    return
+  }
   void focusMonitor(id)
 }
 // immediate 吃「navigateTo 先写好、本页还没挂载」的目标；置 null 会让 watch 再触发一次（守卫挡掉）
@@ -1015,14 +1038,17 @@ onUnmounted(() => {
             </option>
           </select>
         </div>
-        <!-- 回收站全站只有一份（设置 → 历史 → 回收站），这里只留一个跳转入口 -->
-        <button class="qd-btn" :title="t('recycleBin')" @click="openRecycleBin">
-          <Trash2 :size="14" /> {{ t('recycleBin') }}
-        </button>
-        <!-- 机器人地址是全局配置（设置 → 机器人通知），这里只跳转，不再重复弹一份表单 -->
-        <button class="qd-btn" :title="t('notifyGoSettings')" @click="openNotifySettings">
-          <BellIcon :size="14" /> {{ t('mon_nf_title') }}
-        </button>
+        <div class="qd-action-group">
+          <!-- 回收站全站只有一份（设置 → 历史 → 回收站），这里只留一个跳转入口 -->
+          <button class="qd-btn" :title="t('recycleBin')" @click="openRecycleBin">
+            <Trash2 :size="14" /> {{ t('recycleBin') }}
+          </button>
+          <!-- 机器人地址是全局配置（设置 → 机器人通知），这里只跳转，不再重复弹一份表单 -->
+          <button class="qd-btn" :title="t('notifyGoSettings')" @click="openNotifySettings">
+            <BellIcon :size="14" /> {{ t('mon_nf_title') }}
+          </button>
+        </div>
+        <span class="qd-action-sep"></span>
         <button class="qd-btn qd-btn-primary" @click="openCreate"><Plus :size="14" /> {{ t('mon_add') }}</button>
       </div>
     </PageHeader>
@@ -1201,17 +1227,19 @@ onUnmounted(() => {
           <div class="logs-head">
             <span>{{ t('mon_logs') }} ({{ logsMap[m.id]?.length || 0 }})</span>
             <div class="logs-head-right">
-              <!-- 6.3 时间范围切换 -->
-              <div class="range-tabs">
-                <button
-                  v-for="r in LOG_RANGES"
-                  :key="r.value"
-                  :class="['range-tab', { active: logRangeOf(m.id) === r.value }]"
-                  @click="setLogRange(m.id, r.value); onRangeChange(m.id)"
-                >{{ rangeLabel(r) }}</button>
-              </div>
+              <!-- 6.3 时间范围切换：收编到 QdTabs（每个监控独立一份状态） -->
+              <QdTabs
+                :model-value="logRangeOf(m.id)"
+                :tabs="rangeTabs"
+                variant="segmented"
+                :aria-label="t('mon_logs')"
+                @update:model-value="(v: string) => { setLogRange(m.id, v); onRangeChange(m.id) }"
+              />
               <button class="logs-btn" :disabled="!logsMap[m.id]?.length" @click="exportCsv(m)" :title="t('mon_export_csv')">
                 <Download :size="12" /> {{ t('mon_export_csv') }}
+              </button>
+              <button class="logs-btn" :disabled="!logsMap[m.id]?.length" @click="saveLogsAs($event, m)" :title="t('monSaveLogs')">
+                <Save :size="12" /> {{ t('monSaveLogs') }}
               </button>
               <button class="logs-btn danger" @click="clearLogs(m)">{{ t('mon_clear_logs') }}</button>
             </div>
@@ -1288,14 +1316,20 @@ onUnmounted(() => {
         <label>{{ t('mon_name') }}</label>
         <input v-model="fName" class="modal-input" :placeholder="t('mon_name_ph')" />
 
-        <!-- 探测类型：同一张表承载四类探针，切换只影响「目标」与 http 专属参数。
-             用横向按钮而不是下拉：四选一的场景下，能点到的选项比需要展开的列表快。 -->
+        <!-- 探测类型：同一张表承载六类探针，切换只影响「目标」与 http 专属参数。
+             用分段按钮而不是下拉：能点到的选项比需要展开的列表快。 -->
         <label>{{ t('mon_kind') }}</label>
-        <div class="kind-tabs">
-          <button v-for="k in KINDS" :key="k" type="button"
-            :class="['kind-tab', { active: fKind === k }]" @click="fKind = k">
-            <component :is="KIND_ICONS[k]" :size="13" /> {{ kindLabel(k) }}
-          </button>
+        <div class="kind-tab-wrap">
+          <QdTabs
+            v-model="fKind"
+            :tabs="kindTabs"
+            variant="segmented"
+            :aria-label="t('mon_kind')"
+          >
+            <template #tab="{ tab }">
+              <component :is="KIND_ICONS[tab.id]" :size="13" /> {{ tab.label }}
+            </template>
+          </QdTabs>
         </div>
 
         <template v-if="fKind === 'http'">
@@ -1620,8 +1654,9 @@ onUnmounted(() => {
 .item-head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-5) 14px; cursor: pointer; }
 
 .status-dot { flex-shrink: 0; width: 10px; height: 10px; border-radius: 50%; background: var(--color-text-disabled); }
-.status-dot.up { background: var(--color-success); box-shadow: 0 0 6px var(--color-success-border); }
-.status-dot.down { background: var(--color-danger); box-shadow: 0 0 6px var(--color-danger-border); }
+/* 与 DashboardPage .dot 同一克制画法：实色点，down 额外一圈实底环，不用发光 */
+.status-dot.up { background: var(--color-success); }
+.status-dot.down { background: var(--color-danger); box-shadow: 0 0 0 3px var(--color-danger-bg); }
 .status-dot.unknown { background: var(--color-text-disabled); }
 
 .item-main { flex: 1; min-width: 0; }
@@ -1631,7 +1666,7 @@ onUnmounted(() => {
 .status-badge.up { background: var(--color-success-bg); color: var(--color-success); }
 .status-badge.down { background: var(--color-danger-bg); color: var(--color-danger); }
 .item-url { font-size: var(--text-sm); color: var(--color-text-secondary); margin-top: var(--space-1); display: flex; align-items: center; gap: var(--space-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.item-meta { font-size: var(--text-xs); color: var(--color-text-disabled); margin-top: var(--space-2); display: flex; gap: 10px; flex-wrap: wrap; }
+.item-meta { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: var(--space-2); display: flex; gap: 10px; flex-wrap: wrap; }
 .meta-up { color: var(--color-accent); }
 .meta-lat { color: var(--color-text-muted); }
 .meta-avg { color: var(--color-text-muted); }
@@ -1679,19 +1714,6 @@ onUnmounted(() => {
 .logs-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-3); gap: var(--space-4); flex-wrap: wrap; }
 .logs-head > span { font-size: var(--text-sm); color: var(--color-text-secondary); font-weight: 500; }
 .logs-head-right { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; row-gap: var(--space-3); }
-.range-tabs { display: inline-flex; gap: var(--space-1); padding: var(--space-1); background: var(--color-bg-tertiary); border-radius: var(--radius-sm); }
-.range-tab {
-  font-size: var(--text-xs); padding: var(--space-1) 9px; border: none; background: transparent;
-  color: var(--color-text-muted); border-radius: var(--radius-xs); cursor: pointer; font-family: inherit;
-  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
-}
-.range-tab:hover { color: var(--color-text-primary); }
-/* 时间范围切换是"同一组里的一档"，实心蓝底会和主按钮抢权重 */
-.range-tab.active {
-  background: var(--color-accent-bg);
-  color: var(--color-accent);
-  font-weight: 600;
-}
 /* 导出/清空是一组并列的次要操作：做成同样大小的按钮，导出用强调色描边，
    否则和「清空」一样灰，用户会以为那只是条说明文字。 */
 .logs-btn {
@@ -1737,8 +1759,8 @@ onUnmounted(() => {
 }
 .ring-pct { font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); line-height: 1.1; font-variant-numeric: tabular-nums; }
 .ring-pct i { font-size: var(--text-2xs); font-style: normal; color: var(--color-text-disabled); margin-left: 1px; }
-.ring-lbl { font-size: var(--text-2xs); color: var(--color-text-disabled); }
-.ring-legend { display: flex; gap: var(--space-4); font-size: var(--text-2xs); font-variant-numeric: tabular-nums; }
+.ring-lbl { font-size: var(--text-xs); color: var(--color-text-disabled); }
+.ring-legend { display: flex; gap: var(--space-4); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
 .ring-legend .ok { color: var(--color-success); }
 .ring-legend .bad { color: var(--color-danger); }
 
@@ -1748,7 +1770,7 @@ onUnmounted(() => {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
   font-size: var(--text-xs); color: var(--color-text-muted); margin-bottom: var(--space-3);
 }
-.cal-legend { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-2xs); color: var(--color-text-disabled); }
+.cal-legend { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-xs); color: var(--color-text-disabled); }
 .cal-legend .cal-cell { margin-left: var(--space-1); }
 /* 一周一列（7 行），列自动流；格子 11px + 3px 间距，12 周约 190px 宽 */
 .cal-grid {
@@ -1771,21 +1793,9 @@ onUnmounted(() => {
 .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .modal-grid > * { min-width: 0; }
 
-/* 探测类型切换：四选一的分段按钮。用按钮而非 select 是因为它同时承担
-   「告诉用户有哪些探针」的职责——展开过的下拉里看不到另外三个选项。 */
-.kind-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-1); margin-bottom: var(--space-2); }
-.kind-tab {
-  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
-  padding: var(--space-2) var(--space-1); font-size: var(--text-sm); cursor: pointer;
-  color: var(--color-text-secondary); background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border); border-radius: var(--radius-md);
-  transition: background 150ms, color 150ms, border-color 150ms;
-}
-.kind-tab:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.kind-tab.active {
-  background: var(--color-accent-bg); color: var(--color-accent);
-  border-color: var(--color-accent-border);
-}
+/* 探测类型切换：收编到 QdTabs（variant=segmented）。弹窗较窄，允许折行避免溢出。 */
+.kind-tab-wrap { margin-bottom: var(--space-2); }
+.kind-tab-wrap :deep(.qd-tabs) { flex-wrap: wrap; }
 
 .interval-row { display: flex; gap: var(--space-2); align-items: center; }
 .interval-num { flex: 1; min-width: 0; }

@@ -18,10 +18,13 @@ import { computed, nextTick, onScopeDispose, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
 import {
-  BookOpen, Plus, FolderPlus, RefreshCw, Trash2, Loader2, Settings2, X,
+  BookOpen, Briefcase, FlaskConical, Home, TrendingUp, Puzzle, GraduationCap, Folder,
+  Plus, FolderPlus, RefreshCw, Trash2, Loader2, Settings2, X,
   Search, Sparkles, FileText, FileSpreadsheet, File as FileIcon, Send, Square, AlertCircle,
   Layers, Pencil, PanelRight, ChevronDown, ChevronUp, Eraser,
 } from '@lucide/vue'
+import QdModal from './QdModal.vue'
+import QdTabs from './QdTabs.vue'
 import { useToast } from '../composables/useToast'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -147,12 +150,34 @@ const chunksLoading = ref(false)
 // 默认就是全部：刚装上只有一个库时，先看全量比先教用户建库更有用。
 const libraries = ref<KBLibrary[]>([])
 const libId = ref('')
-// 建库 / 改名的弹窗。id 为空表示新建。
-const libraryModal = reactive({ open: false, id: '', name: '', icon: '📚' })
+// 建库 / 改名的弹窗。id 为空表示新建。icon 存 Lucide 图标名（字符串）。
+const libraryModal = reactive({ open: false, id: '', name: '', icon: 'BookOpen' })
 const librarySaving = ref(false)
-const LIBRARY_ICONS = ['📚', '💼', '🧪', '🏠', '📈', '🧩', '🎓', '🗂️']
+// 资料库图标：后端存图标名，渲染时按名取组件。旧库里存的是 emoji，
+// 读取时经 libraryIconName 映射成图标名，保证存量数据不丢图标。
+const LIBRARY_ICON_COMPONENTS = {
+  BookOpen, Briefcase, FlaskConical, Home, TrendingUp, Puzzle, GraduationCap, Folder,
+}
+type LibraryIconName = keyof typeof LIBRARY_ICON_COMPONENTS
+const LIBRARY_ICONS = Object.keys(LIBRARY_ICON_COMPONENTS) as LibraryIconName[]
+const LEGACY_LIBRARY_ICONS: Record<string, LibraryIconName> = {
+  '📚': 'BookOpen', '💼': 'Briefcase', '🧪': 'FlaskConical', '🏠': 'Home',
+  '📈': 'TrendingUp', '🧩': 'Puzzle', '🎓': 'GraduationCap', '🗂️': 'Folder',
+}
+function libraryIconName(icon: string | undefined): LibraryIconName {
+  if (!icon) return 'BookOpen'
+  if (icon in LIBRARY_ICON_COMPONENTS) return icon as LibraryIconName
+  return LEGACY_LIBRARY_ICONS[icon] || 'BookOpen'
+}
+function libraryIconComp(icon: string | undefined) {
+  return LIBRARY_ICON_COMPONENTS[libraryIconName(icon)]
+}
 
 const tab = ref<'search' | 'ask'>('search')
+const kbTabs = computed(() => [
+  { id: 'search' as const, label: t('kbTabSearch') },
+  { id: 'ask' as const, label: t('kbTabAsk') },
+])
 const query = ref('')
 const hits = ref<SearchHit[]>([])
 const searched = ref(false)
@@ -211,7 +236,11 @@ const progressPercent = computed(() => {
 
 async function loadLibraries() {
   try {
-    libraries.value = unwrap<KBLibrary[]>(await ListKBLibraries()) ?? []
+    // 旧库里 icon 存的是 emoji，读进来就归一成 Lucide 名，渲染与编辑共用一套值。
+    libraries.value = (unwrap<KBLibrary[]>(await ListKBLibraries()) ?? []).map(lib => ({
+      ...lib,
+      icon: libraryIconName(lib.icon),
+    }))
     // 选中的库被删掉时退回「全部」：否则列表空着，
     // 用户看到的是「文档全没了」，而其实只是站在一个已经不存在的库上。
     if (libId.value && !libraries.value.some(l => l.id === libId.value)) {
@@ -289,7 +318,7 @@ function openLibraryModal(lib: KBLibrary | null) {
   // 用原始 name 而不是显示名：默认库显示的是本地化的「默认知识库」，
   // 一旦把它填进输入框再保存，就等于把中文名写进了数据库。
   libraryModal.name = lib?.name ?? ''
-  libraryModal.icon = lib?.icon || '📚'
+  libraryModal.icon = libraryIconName(lib?.icon)
   libraryModal.open = true
 }
 
@@ -818,7 +847,7 @@ onScopeDispose(() => {
             :class="{ active: libId === lib.id }"
             @click="selectLibrary(lib.id)"
           >
-            <span class="kb-lib-icon">{{ lib.icon || '📚' }}</span>
+            <component :is="libraryIconComp(lib.icon)" :size="12" class="kb-lib-icon" />
             <span class="kb-lib-name">{{ libLabel(lib) }}</span>
             <span class="kb-lib-count">{{ lib.sourceCount }}</span>
           </button>
@@ -887,15 +916,13 @@ onScopeDispose(() => {
       </aside>
 
       <section class="kb-main">
-        <div class="kb-tabs">
-          <button class="kb-tab" :class="{ active: tab === 'search' }" @click="tab = 'search'">
-            <Search :size="13" />
-            {{ t('kbTabSearch') }}
-          </button>
-          <button class="kb-tab" :class="{ active: tab === 'ask' }" @click="tab = 'ask'">
-            <Sparkles :size="13" />
-            {{ t('kbTabAsk') }}
-          </button>
+        <div class="kb-tabbar">
+          <QdTabs v-model="tab" :tabs="kbTabs">
+            <template #tab="{ tab: item }">
+              <component :is="item.id === 'search' ? Search : Sparkles" :size="13" />
+              {{ item.label }}
+            </template>
+          </QdTabs>
           <div class="kb-tabs-right">
             <span v-if="tab === 'search' && searched" class="kb-tabs-meta">
               {{ searchMode === 'hybrid' ? t('kbSearchModeHybrid') : t('kbSearchModeFts') }} · {{ searchElapsed }}ms
@@ -941,6 +968,7 @@ onScopeDispose(() => {
               <div v-if="searched && !hits.length && !searching" class="kb-empty">
                 <Search :size="22" />
                 <p class="kb-empty-title">{{ t('kbSearchEmpty') }}</p>
+                <p class="kb-empty-desc">{{ t('kbAskNoHit') }}</p>
               </div>
               <p v-if="hits.length" class="kb-result-count">{{ t('kbHitCount', { n: hits.length }) }}</p>
               <article v-for="h in hits" :key="h.chunkId" class="kb-hit" @click="openHit(h)">
@@ -1063,89 +1091,90 @@ onScopeDispose(() => {
       </aside>
     </div>
 
-    <div v-if="settingsOpen" class="kb-overlay" @click.self="settingsOpen = false">
-      <div class="kb-modal">
-        <div class="kb-modal-head">
-          <h2 class="kb-modal-title">{{ t('kbSettingsTitle') }}</h2>
-          <button class="kb-modal-close" @click="settingsOpen = false"><X :size="14" /></button>
-        </div>
-        <div class="kb-modal-body">
-          <label class="kb-field">
-            <span class="kb-field-label">{{ t('kbSetEmbedModel') }}</span>
-            <input v-model="settings.embedModel" class="kb-input" :placeholder="t('kbSetEmbedModelPlaceholder')" spellcheck="false" />
-            <span class="kb-field-hint">{{ t('kbSetEmbedModelHint') }}</span>
-          </label>
-          <label class="kb-field">
-            <span class="kb-field-label">{{ t('kbSetEmbedEndpoint') }}</span>
-            <input v-model="settings.embedBaseURL" class="kb-input" :placeholder="t('kbSetEmbedEndpointPlaceholder')" spellcheck="false" />
-            <input v-model="settings.embedAPIKey" class="kb-input" type="password" autocomplete="off" :placeholder="t('kbSetEmbedKeyPlaceholder')" spellcheck="false" />
-            <span class="kb-field-hint">{{ t('kbSetEmbedEndpointHint') }}</span>
-          </label>
-          <label class="kb-field">
-            <span class="kb-field-label">{{ t('kbSetTopN') }}</span>
-            <input v-model.number="settings.topN" type="number" min="1" max="20" class="kb-input kb-input-sm" />
-          </label>
-          <label class="kb-check">
-            <input v-model="settings.vectorOn" type="checkbox" />
-            <span>{{ t('kbSetVector') }}</span>
-          </label>
-          <!-- 两种未就绪的原因要分开说：都没配 → 送去 AI 设置；档案有、模型名空
-               → 提示就在本弹窗里填，别把人往别处赶（否则用户会以为档案又丢了）。 -->
-          <p v-if="!status?.embedReady" class="kb-hint warn">
-            <AlertCircle :size="12" />
-            {{ status?.profileReady ? t('kbVecNoModel') : t('kbVecNotReady') }}
-            <button
-              v-if="!status?.profileReady"
-              class="kb-hint-link"
-              @click="emit('open-settings', 'ai:model')"
-            >
-              {{ t('kbGoAiSettings') }}
-            </button>
-          </p>
-        </div>
-        <div class="kb-modal-foot">
-          <button class="qd-btn" @click="settingsOpen = false">{{ t('cancel') }}</button>
-          <button class="qd-btn qd-btn-primary" :disabled="settingsSaving" @click="saveSettings">{{ t('save') }}</button>
-        </div>
+    <QdModal
+      v-if="settingsOpen"
+      :model-value="true"
+      :title="t('kbSettingsTitle')"
+      width="420px"
+      @update:model-value="settingsOpen = $event"
+    >
+      <div class="kb-modal-body">
+        <label class="kb-field">
+          <span class="kb-field-label">{{ t('kbSetEmbedModel') }}</span>
+          <input v-model="settings.embedModel" class="kb-input" :placeholder="t('kbSetEmbedModelPlaceholder')" spellcheck="false" />
+          <span class="kb-field-hint">{{ t('kbSetEmbedModelHint') }}</span>
+        </label>
+        <label class="kb-field">
+          <span class="kb-field-label">{{ t('kbSetEmbedEndpoint') }}</span>
+          <input v-model="settings.embedBaseURL" class="kb-input" :placeholder="t('kbSetEmbedEndpointPlaceholder')" spellcheck="false" />
+          <input v-model="settings.embedAPIKey" class="kb-input" type="password" autocomplete="off" :placeholder="t('kbSetEmbedKeyPlaceholder')" spellcheck="false" />
+          <span class="kb-field-hint">{{ t('kbSetEmbedEndpointHint') }}</span>
+        </label>
+        <label class="kb-field">
+          <span class="kb-field-label">{{ t('kbSetTopN') }}</span>
+          <input v-model.number="settings.topN" type="number" min="1" max="20" class="kb-input kb-input-sm" />
+        </label>
+        <label class="kb-check">
+          <input v-model="settings.vectorOn" type="checkbox" />
+          <span>{{ t('kbSetVector') }}</span>
+        </label>
+        <!-- 两种未就绪的原因要分开说：都没配 → 送去 AI 设置；档案有、模型名空
+             → 提示就在本弹窗里填，别把人往别处赶（否则用户会以为档案又丢了）。 -->
+        <p v-if="!status?.embedReady" class="kb-hint warn">
+          <AlertCircle :size="12" />
+          {{ status?.profileReady ? t('kbVecNoModel') : t('kbVecNotReady') }}
+          <button
+            v-if="!status?.profileReady"
+            class="kb-hint-link"
+            @click="emit('open-settings', 'ai:model')"
+          >
+            {{ t('kbGoAiSettings') }}
+          </button>
+        </p>
       </div>
-    </div>
+      <template #footer>
+        <button class="qd-btn" @click="settingsOpen = false">{{ t('cancel') }}</button>
+        <button class="qd-btn qd-btn-primary" :disabled="settingsSaving" @click="saveSettings">{{ t('save') }}</button>
+      </template>
+    </QdModal>
 
-    <div v-if="libraryModal.open" class="kb-overlay" @click.self="libraryModal.open = false">
-      <div class="kb-modal kb-modal-narrow">
-        <div class="kb-modal-head">
-          <h2 class="kb-modal-title">{{ libraryModal.id ? t('kbLibraryEdit') : t('kbLibraryNew') }}</h2>
-          <button class="kb-modal-close" @click="libraryModal.open = false"><X :size="14" /></button>
-        </div>
-        <div class="kb-modal-body">
-          <label class="kb-field">
-            <span class="kb-field-label">{{ t('kbLibraryName') }}</span>
-            <input
-              v-model="libraryModal.name"
-              class="kb-input"
-              :placeholder="t('kbLibraryNamePlaceholder')"
-              spellcheck="false"
-              @keydown.enter.prevent="saveLibrary"
-            />
-          </label>
-          <div class="kb-field">
-            <span class="kb-field-label">{{ t('kbLibraryIcon') }}</span>
-            <div class="kb-icon-row">
-              <button
-                v-for="ic in LIBRARY_ICONS"
-                :key="ic"
-                class="kb-icon-pick"
-                :class="{ active: libraryModal.icon === ic }"
-                @click="libraryModal.icon = ic"
-              >{{ ic }}</button>
-            </div>
+    <QdModal
+      v-if="libraryModal.open"
+      :model-value="true"
+      :title="libraryModal.id ? t('kbLibraryEdit') : t('kbLibraryNew')"
+      width="360px"
+      @update:model-value="libraryModal.open = $event"
+    >
+      <div class="kb-modal-body">
+        <label class="kb-field">
+          <span class="kb-field-label">{{ t('kbLibraryName') }}</span>
+          <input
+            v-model="libraryModal.name"
+            class="kb-input"
+            :placeholder="t('kbLibraryNamePlaceholder')"
+            spellcheck="false"
+            @keydown.enter.prevent="saveLibrary"
+          />
+        </label>
+        <div class="kb-field">
+          <span class="kb-field-label">{{ t('kbLibraryIcon') }}</span>
+          <div class="kb-icon-row">
+            <button
+              v-for="ic in LIBRARY_ICONS"
+              :key="ic"
+              class="kb-icon-pick"
+              :class="{ active: libraryModal.icon === ic }"
+              :title="ic"
+              @click="libraryModal.icon = ic"
+            ><component :is="LIBRARY_ICON_COMPONENTS[ic]" :size="15" /></button>
           </div>
         </div>
-        <div class="kb-modal-foot">
-          <button class="qd-btn" @click="libraryModal.open = false">{{ t('cancel') }}</button>
-          <button class="qd-btn qd-btn-primary" :disabled="librarySaving" @click="saveLibrary">{{ t('save') }}</button>
-        </div>
       </div>
-    </div>
+      <template #footer>
+        <button class="qd-btn" @click="libraryModal.open = false">{{ t('cancel') }}</button>
+        <button class="qd-btn qd-btn-primary" :disabled="librarySaving" @click="saveLibrary">{{ t('save') }}</button>
+      </template>
+    </QdModal>
   </div>
 </template>
 
@@ -1440,51 +1469,20 @@ onScopeDispose(() => {
   flex-direction: column;
 }
 
-.kb-tabs {
+.kb-tabbar {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
   flex-shrink: 0;
   min-height: 38px;
-  padding: 0 10px;
+  padding: 0 var(--space-4);
   border-bottom: 1px solid var(--color-hairline);
-}
-
-.kb-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 10px;
-  border: none;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-family: inherit;
-  font-size: var(--text-sm);
-  cursor: pointer;
-  transition: background-color var(--transition-fast), color var(--transition-fast);
-}
-
-.kb-tab:hover:not(:disabled) {
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
-}
-
-.kb-tab.active {
-  background: var(--color-bg-active);
-  color: var(--color-text-primary);
-  font-weight: 500;
-}
-
-.kb-tab:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 
 .kb-tabs-right {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-4);
   margin-left: auto;
   min-width: 0;
 }
@@ -2013,72 +2011,16 @@ onScopeDispose(() => {
   to { transform: rotate(360deg); }
 }
 
-/* ---- 设置浮层 ---- */
-.kb-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 40;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-bg-overlay);
-}
-
-.kb-modal {
-  width: 420px;
-  max-width: calc(100% - 48px);
-  border: 1px solid var(--popover-border-color);
-  border-radius: var(--radius-lg);
-  background: var(--color-popover-bg);
-  box-shadow: var(--shadow-pop);
-}
-
-.kb-modal-head {
-  display: flex;
-  align-items: center;
-  padding: var(--space-5) 14px var(--space-4);
-}
-
-/* 设置浮层用 absolute 定位，锚点必须是页面根容器（项目禁用 position:fixed）。 */
+/* ---- 设置 / 建库弹窗（统一走 QdModal，body 只保留内容布局） ---- */
+/* 分段抽屉窄屏时要盖在中栏上，锚点仍是页面根容器。 */
 .qd-page {
   position: relative;
-}
-
-.kb-modal-title {
-  margin: 0;
-  font-size: var(--text-md);
-  font-weight: 500;
-  color: var(--color-text-primary);
-}
-
-.kb-modal-close {
-  margin-left: auto;
-  display: inline-flex;
-  padding: 3px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-}
-
-.kb-modal-close:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
 }
 
 .kb-modal-body {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
-  padding: var(--space-2) 14px var(--space-5);
-}
-
-.kb-modal-foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-4);
-  padding: 0 14px 14px;
 }
 
 .kb-field {
@@ -2098,7 +2040,7 @@ onScopeDispose(() => {
 }
 
 .kb-input {
-  padding: var(--space-3) 9px;
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg-secondary);
@@ -2119,7 +2061,7 @@ onScopeDispose(() => {
 .kb-check {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-4);
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
 }
@@ -2158,8 +2100,9 @@ onScopeDispose(() => {
 }
 
 .kb-lib-icon {
-  font-size: var(--text-xs);
-  line-height: 1;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
 }
 
 .kb-lib-name {
@@ -2239,10 +2182,6 @@ onScopeDispose(() => {
   border-color: var(--color-border-focus);
 }
 
-.kb-modal-narrow {
-  width: 360px;
-}
-
 .kb-icon-row {
   display: flex;
   flex-wrap: wrap;
@@ -2258,8 +2197,7 @@ onScopeDispose(() => {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: transparent;
-  font-size: var(--text-base);
-  line-height: 1;
+  color: var(--color-text-secondary);
   cursor: pointer;
 }
 
@@ -2270,6 +2208,7 @@ onScopeDispose(() => {
 .kb-icon-pick.active {
   border-color: var(--color-accent);
   background: var(--color-accent-bg);
+  color: var(--color-accent);
 }
 
 /* ---- 窄窗口 ---- */
@@ -2291,7 +2230,7 @@ onScopeDispose(() => {
     right: 0;
     bottom: 0;
     width: min(360px, 84%);
-    z-index: 30;
+    z-index: var(--z-dropdown);
     box-shadow: var(--shadow-pop);
   }
   .kb-tabs-meta {

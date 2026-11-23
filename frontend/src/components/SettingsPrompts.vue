@@ -11,11 +11,11 @@
  */
 import { computed, inject, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Copy, Pencil, Plus, Trash2, X } from '@lucide/vue'
+import { Copy, Pencil, Plus, Trash2 } from '@lucide/vue'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
-import { useFocusTrap } from '../utils/focusTrap'
+import QdModal from './QdModal.vue'
 import type { AIPrompt } from '../types/ai'
 import type { ToastAPI } from '../types'
 import { AIDeletePrompt, AIGetPrompts, AISavePrompt } from '../../bindings/quickdock/services/ai/aiservice'
@@ -36,10 +36,7 @@ const editing = ref<{ id: string; name: string; category: string; content: strin
 // 弹框内的错误提示。不走 toast：设置弹框的层级本来就在 toast 之上，
 // 保存失败时弹框还开着，toast 会被压在下面看不见。
 const formError = ref('')
-const panelRef = ref<HTMLElement | null>(null)
 const contentRef = ref<HTMLTextAreaElement | null>(null)
-const editingVisible = computed(() => !!editing.value)
-const { onKeydown: onKeydownTrap } = useFocusTrap(editingVisible, panelRef)
 
 // 按分类分组展示：内置条目已经带好分类，用户自建的多半不填，归到「未分类」。
 const groups = computed(() => {
@@ -103,14 +100,6 @@ function insertVar(token: string) {
     const pos = start + token.length
     el.setSelectionRange(pos, pos)
   })
-}
-
-function onDialogKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') {
-    cancelEdit()
-    return
-  }
-  onKeydownTrap(e)
 }
 
 async function save() {
@@ -222,71 +211,63 @@ watch(() => props.visible, (v) => {
     </div>
   </div>
 
-  <!-- 编辑弹框挂到 body：设置面板自己是一个 fixed 全屏层（z-index 10001），
-       留在面板内部会被它的 overflow 裁掉，也拦不住面板自己的键盘处理。 -->
-  <Teleport to="body">
-    <Transition name="prompt-dialog">
-      <div
-        v-if="editing"
-        class="prompt-dialog-overlay"
-        @mousedown.self="cancelEdit"
-        @keydown="onDialogKeydown"
-      >
-        <div ref="panelRef" class="prompt-dialog" @mousedown.stop>
-          <header class="prompt-dialog-head">
-            <span class="prompt-dialog-title">{{ editing.id ? t('aiPromptsEdit') : t('aiPromptsNew') }}</span>
-            <button class="prompt-dialog-close" @click="cancelEdit"><X :size="16" /></button>
-          </header>
-          <div class="prompt-dialog-body">
-            <div class="field-row">
-              <label class="field field-half">
-                <span class="field-label">{{ t('aiPromptsName') }}</span>
-                <input v-model="editing.name" class="field-input" type="text" maxlength="60" :placeholder="t('aiPromptsNamePh')" />
-              </label>
-              <label class="field field-half">
-                <span class="field-label">{{ t('aiPromptsCategory') }}</span>
-                <input v-model="editing.category" class="field-input" type="text" maxlength="20" :placeholder="t('aiPromptsCategoryPh')" />
-              </label>
-            </div>
-            <label class="field">
-              <span class="field-label">{{ t('aiPromptsContent') }}</span>
-              <textarea
-                ref="contentRef"
-                v-model="editing.content"
-                class="prompt-textarea"
-                maxlength="8000"
-                :placeholder="t('aiPromptsContentPh')"
-              ></textarea>
-            </label>
-            <!-- 变量说明：新建时最容易卡住的地方（不知道占位符写什么、会不会被替换），
-                 所以每个变量都配一句「插入时变成什么」，并支持点一下插入。 -->
-            <div class="prompt-var-hint">
-              <div class="prompt-var-title">{{ t('aiPromptsVarHint') }}</div>
-              <button
-                v-for="v in promptVars"
-                :key="v.token"
-                type="button"
-                class="prompt-var"
-                :title="t('aiPromptsVarInsertTip')"
-                @click="insertVar(v.token)"
-              >
-                <code>{{ v.token }}</code>
-                <span class="prompt-var-desc">{{ t(v.descKey) }}</span>
-              </button>
-              <p class="prompt-var-note">{{ t('aiPromptsVarUnknown') }}</p>
-            </div>
-            <p v-if="formError" class="prompt-dialog-error">{{ formError }}</p>
-          </div>
-          <footer class="prompt-dialog-foot">
-            <button class="btn btn-secondary" @click="cancelEdit">{{ t('cancel') }}</button>
-            <button class="btn btn-primary" :disabled="saving" @click="save">
-              {{ saving ? t('saving') : t('save') }}
-            </button>
-          </footer>
-        </div>
+  <!-- 编辑弹框统一走 QdModal（Teleport / 层级 / focus trap / Esc 与遮罩关闭都在那一处）。 -->
+  <QdModal
+    v-if="editing"
+    :model-value="true"
+    width="560px"
+    @update:model-value="cancelEdit"
+  >
+    <template #header>
+      <h3 class="prompt-dialog-title">{{ editing.id ? t('aiPromptsEdit') : t('aiPromptsNew') }}</h3>
+    </template>
+    <div class="prompt-dialog-body">
+      <div class="field-row">
+        <label class="field field-half">
+          <span class="field-label">{{ t('aiPromptsName') }}</span>
+          <input v-model="editing.name" class="field-input" type="text" maxlength="60" :placeholder="t('aiPromptsNamePh')" />
+        </label>
+        <label class="field field-half">
+          <span class="field-label">{{ t('aiPromptsCategory') }}</span>
+          <input v-model="editing.category" class="field-input" type="text" maxlength="20" :placeholder="t('aiPromptsCategoryPh')" />
+        </label>
       </div>
-    </Transition>
-  </Teleport>
+      <label class="field">
+        <span class="field-label">{{ t('aiPromptsContent') }}</span>
+        <textarea
+          ref="contentRef"
+          v-model="editing.content"
+          class="prompt-textarea"
+          maxlength="8000"
+          :placeholder="t('aiPromptsContentPh')"
+        ></textarea>
+      </label>
+      <!-- 变量说明：新建时最容易卡住的地方（不知道占位符写什么、会不会被替换），
+           所以每个变量都配一句「插入时变成什么」，并支持点一下插入。 -->
+      <div class="prompt-var-hint">
+        <div class="prompt-var-title">{{ t('aiPromptsVarHint') }}</div>
+        <button
+          v-for="v in promptVars"
+          :key="v.token"
+          type="button"
+          class="prompt-var"
+          :title="t('aiPromptsVarInsertTip')"
+          @click="insertVar(v.token)"
+        >
+          <code>{{ v.token }}</code>
+          <span class="prompt-var-desc">{{ t(v.descKey) }}</span>
+        </button>
+        <p class="prompt-var-note">{{ t('aiPromptsVarUnknown') }}</p>
+      </div>
+      <p v-if="formError" class="prompt-dialog-error">{{ formError }}</p>
+    </div>
+    <template #footer>
+      <button class="btn btn-secondary" @click="cancelEdit">{{ t('cancel') }}</button>
+      <button class="btn btn-primary" :disabled="saving" @click="save">
+        {{ saving ? t('saving') : t('save') }}
+      </button>
+    </template>
+  </QdModal>
 </template>
 
 <style scoped>
@@ -379,60 +360,14 @@ watch(() => props.visible, (v) => {
 }
 
 /* ---- 编辑弹框 ----
- * 层级必须压过设置面板（10000/10001，见 styles/settings.css），否则整个弹框
- * 会被设置页盖住、点了没反应。面层用 popover-bg：它是「离开文档流」的那一档，
- * 比设置页的 bg-primary 高一层，浮起来才不像挖了个洞。 */
-.prompt-dialog-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: calc(var(--z-settings) + 2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-bg-overlay);
-  backdrop-filter: blur(2px);
-}
-
-.prompt-dialog {
-  display: flex;
-  flex-direction: column;
-  width: 560px;
-  max-width: 92vw;
-  max-height: 86vh;
-  overflow: hidden;
-  border: 1px solid var(--popover-border-color);
-  border-radius: var(--radius-md);
-  background: var(--color-popover-bg);
-  box-shadow: 0 16px 56px var(--color-bg-overlay-deep);
-}
-
-.prompt-dialog-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px var(--space-7);
-  border-bottom: 1px solid var(--color-border);
-}
-
+ * 外壳（Teleport / 遮罩 / z-index / focus trap / 关闭）统一由 QdModal 提供，
+ * 这里只留内容自身的排布：#body 的 padding 与 overflow 也在 QdModal 那里。 */
 .prompt-dialog-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
   font-size: var(--text-base);
   font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.prompt-dialog-close {
-  display: flex;
-  padding: 3px;
-  border: none;
-  border-radius: var(--radius-xs);
-  background: none;
-  color: var(--color-text-disabled);
-  cursor: pointer;
-  transition: background-color 0.15s, color 0.15s;
-}
-
-.prompt-dialog-close:hover {
-  background: var(--color-bg-hover);
   color: var(--color-text-primary);
 }
 
@@ -440,18 +375,16 @@ watch(() => props.visible, (v) => {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  padding: 18px var(--space-7);
-  overflow-y: auto;
 }
 
 /* 名称/分类输入框沿用全局 .field-input，但底色要落到 bg-primary：
  * 弹框本身是 popover-bg，同色会让输入框只剩一圈边框，看着像没样式。 */
-.prompt-dialog .field-input {
+.prompt-dialog-body .field-input {
   background: var(--color-bg-primary);
 }
 
 /* 弹框就是为长文本来的：正文区比原先内联时高一截，长提示词不用挤在小框里写 */
-.prompt-dialog .prompt-textarea {
+.prompt-dialog-body .prompt-textarea {
   min-height: 240px;
 }
 
@@ -459,36 +392,6 @@ watch(() => props.visible, (v) => {
   margin: 0;
   font-size: var(--text-sm);
   color: var(--color-danger);
-}
-
-.prompt-dialog-foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-3);
-  padding: var(--space-5) var(--space-7);
-  border-top: 1px solid var(--color-border);
-  background: var(--color-bg-tertiary);
-}
-
-/* 过渡与 CreateDialog 同形，但类名前缀独立：同名 transition 类会跨组件互相套用 */
-.prompt-dialog-enter-active,
-.prompt-dialog-leave-active {
-  transition: opacity 0.18s ease;
-}
-
-.prompt-dialog-enter-active .prompt-dialog,
-.prompt-dialog-leave-active .prompt-dialog {
-  transition: transform 0.18s ease;
-}
-
-.prompt-dialog-enter-from,
-.prompt-dialog-leave-to {
-  opacity: 0;
-}
-
-.prompt-dialog-enter-from .prompt-dialog,
-.prompt-dialog-leave-to .prompt-dialog {
-  transform: scale(0.96) translateY(-6px);
 }
 
 /* 模板正文按代码排版：缩进与换行本身是提示词的一部分 */

@@ -50,7 +50,7 @@ import { EnvList, EnvEverythingStatus } from '../../bindings/quickdock/services/
 import { DSHStatus } from '../../bindings/quickdock/services/dsh/dshservice'
 import { ListListeningPorts } from '../../bindings/quickdock/services/port/portservice'
 import { GetValue, GetMostUsedItems, SetValue, ListScheduledTasks, GetAllScheduleRuns } from '../../bindings/quickdock/services/appservice'
-import { OpenItem } from '../../bindings/quickdock/services/collection/collectionservice'
+import { OpenItem, OpenItemWithQuery } from '../../bindings/quickdock/services/collection/collectionservice'
 import { GitListRepos, GitRepoStatus } from '../../bindings/quickdock/services/git/gitservice'
 import {
   GetConfig, SetConfig, TestConnection, GetCodes, Refresh as RefreshMail, Dismiss, RemoveAccount,
@@ -68,7 +68,7 @@ import {
   FolderGit2, CalendarDays, Settings2, MapPin, X,
   Sun, CloudSun, Cloud, CloudFog, CloudRain, CloudSnow, CloudLightning, CloudOff,
   Mail, Layers, Copy, Trash2, Plus, File, Folder, AlertCircle, ShieldAlert,
-  Coins, ExternalLink, LayoutGrid, Eye, EyeOff, ArrowUp, ArrowDown, RotateCcw,
+  Coins, ExternalLink, LayoutGrid, Eye, EyeOff, ArrowUp, ArrowDown, RotateCcw, Link,
 } from '@lucide/vue'
 import TypeIcon from './TypeIcon.vue'
 import MailDetailDialog from './MailDetailDialog.vue'
@@ -1604,13 +1604,53 @@ async function toggleTodo(x: Todo) {
   }
 }
 
-async function openItem(it: CollectionItem) {
+// 带 {query} 的 quicklink 不能直接打开原始模板：先弹同款内联输入框收一个 q，
+// 再由后端把 {query} 替换掉。条目内容以库为准，前端只回传 id + query。
+const inlineQuicklink = ref<CollectionItem | null>(null)
+const inlineQuery = ref('')
+const inlineInputRef = ref<HTMLInputElement | null>(null)
+
+async function beginInlineQuicklink(it: CollectionItem) {
+  inlineQuicklink.value = it
+  inlineQuery.value = ''
+  await nextTick()
+  inlineInputRef.value?.focus()
+}
+
+function cancelInlineQuicklink() {
+  inlineQuicklink.value = null
+  inlineQuery.value = ''
+}
+
+async function commitInlineQuicklink() {
+  const it = inlineQuicklink.value
+  if (!it) return
+  const q = inlineQuery.value || ''
+  try {
+    unwrap(await OpenItemWithQuery(it.id, q))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+    logErr('dashboard.openItem', e)
+  }
+  inlineQuicklink.value = null
+  inlineQuery.value = ''
+}
+
+async function openItemDirect(it: CollectionItem) {
   try {
     unwrap(await OpenItem(it.id))
   } catch (e) {
     toast.error(getErrorMessage(e))
     logErr('dashboard.openItem', e)
   }
+}
+
+function openItem(it: CollectionItem) {
+  if ((it.value || '').includes('{query}')) {
+    void beginInlineQuicklink(it)
+    return
+  }
+  void openItemDirect(it)
 }
 
 // ===== PREVIEW-ONLY（截图预览用：浏览器里没有 Wails 桥，加 ?preview=1 注入假数据以便 chrome headless 截图调样式；仅 DEV 生效，保留供后续视觉迭代）=====
@@ -2302,6 +2342,25 @@ onUnmounted(() => {
                 {{ t('dash_load_failed') }} <button class="qc-link" @click="loadItems()">{{ t('retry') }}</button>
               </p>
               <p v-else-if="!items.length" class="empty">{{ t('dash_recent_empty') }}</p>
+              <!-- 命中带 {query} 的项时切到内联输入态（与命令面板同款），回车提交、Esc 取消 -->
+              <div v-else-if="inlineQuicklink" class="dash-inline-bar">
+                <span class="inline-prefix">
+                  <Link :size="14" />
+                  <span class="inline-name">{{ inlineQuicklink.name }}</span>
+                  <ChevronRight :size="12" class="inline-sep" />
+                </span>
+                <input
+                  ref="inlineInputRef"
+                  v-model="inlineQuery"
+                  class="dash-inline-input"
+                  :placeholder="t('enterQueryParam')"
+                  @keydown.enter.prevent="commitInlineQuicklink"
+                  @keydown.esc.prevent="cancelInlineQuicklink"
+                />
+                <button class="inline-cancel" :title="t('cancel')" @click="cancelInlineQuicklink">
+                  <X :size="13" />
+                </button>
+              </div>
               <div v-else class="tiles">
                 <button v-for="it in items" :key="it.id" class="tile"
                         :title="it.value" @click="openItem(it)">
@@ -2889,8 +2948,8 @@ onUnmounted(() => {
  * Teleport 到 body + fixed，与设置浮层同一套定位（placeFloating）。
  * 只有两项且都是短词，所以不做分组、不做勾选，点完即关。 */
 .db-menu {
-  position: fixed; z-index: 660; min-width: 148px; padding: var(--space-2);
-  background: var(--color-surface-elevated);
+  position: fixed; z-index: var(--z-dropdown); min-width: 148px; padding: var(--space-2);
+  background: var(--color-popover-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
@@ -3093,6 +3152,35 @@ onUnmounted(() => {
   color: var(--color-text-secondary);
 }
 .ai-model-pct { flex-shrink: 0; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+
+/* 内联 {query} 输入条：与命令面板的 quicklink 二级态同款，仅换作用域前缀 */
+.dash-inline-bar {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-4) 14px;
+}
+.inline-prefix {
+  display: flex; align-items: center; gap: var(--space-3);
+  color: var(--color-accent); font-size: var(--text-md);
+  font-weight: 500; flex-shrink: 0;
+}
+.inline-name { color: var(--color-accent); }
+.inline-sep { color: var(--color-text-muted); }
+.dash-inline-input {
+  flex: 1; min-width: 0; font: inherit;
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text-primary); background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  font-size: var(--text-base); outline: none;
+}
+.dash-inline-input:focus { border-color: var(--color-accent); }
+.inline-cancel {
+  display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border: none; border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary); color: var(--color-text-muted);
+  cursor: pointer; flex-shrink: 0;
+  transition: background 0.12s, color 0.12s;
+}
+.inline-cancel:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 
 /* ---- 最近使用磁贴 ----
  * 用等分网格而不是「按内容自宽 + 换行」：后者在宽屏下只排到左边半行，
@@ -3384,9 +3472,10 @@ onUnmounted(() => {
    而且刷新按钮 hover / focus 后那圈亮蓝边框会常驻。改为幽灵图标按钮，
    hover 才给柔和底色，键盘 focus 用 outline（不占尺寸、不常驻）。 */
 .db-actions { display: flex; align-items: center; gap: var(--space-1); flex-shrink: 0; margin-left: auto; }
+/* 尺寸与全局 .qd-icon-btn 对齐（26px），只保留本页特有的 accent hover 语气 */
 .db-icon-btn {
   display: grid; place-items: center; flex-shrink: 0;
-  width: 28px; height: 28px; padding: 0;
+  width: 26px; height: 26px; padding: 0;
   background: transparent; border: 0; border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   cursor: pointer;
@@ -3404,9 +3493,9 @@ onUnmounted(() => {
 
 /* 设置浮层：Teleport 到 body 后 fixed 锚定齿轮，不占文档流，也不被 .qd-page-body
    的滚动盒裁掉；maxHeight 由 placeDaySettings 按剩余视口高度算，超高时面板自己滚。
-   表单复用 styles/settings.css 公共类；z-index 略高于 NotificationCenter(600)。 */
+   表单复用 styles/settings.css 公共类；层级用 --z-settings，位于 --z-dropdown 之上。 */
 .db-settings {
-  position: fixed; z-index: 650;
+  position: fixed; z-index: var(--z-settings);
   display: flex; flex-direction: column; gap: var(--space-3);
   width: 340px; padding: var(--space-5);
   overflow-y: auto;

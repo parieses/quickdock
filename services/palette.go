@@ -11,8 +11,7 @@ import (
 
 // SearchAll 跨全部工作空间搜索项目（使用 FTS5）
 //
-// 命令面板已改走 SearchPalette（一次 IPC 拿三类结果）；本方法保留是因为
-// 工作空间页（stores/workspace.ts）与 MCP 的 item_search 仍在单独用它。
+// workspace 与 MCP 已迁到 SearchPalette，本方法仅为兼容外部插件保留。
 func (a *AppService) SearchAll(query string) *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r

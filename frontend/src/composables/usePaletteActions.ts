@@ -10,8 +10,9 @@
 import { computed, nextTick, ref } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import {
-  Power, Gauge, Play, FileText, ListChecks, FolderSearch, Copy, ExternalLink, Check, Save, Trash2,
+  Power, Gauge, Play, FileText, ListChecks, FolderSearch, Copy, ExternalLink, Check, Save, Trash2, BookMarked,
 } from '@lucide/vue'
+import { useSaveAs } from './useSaveAs'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { getPluginLastResult } from '../utils/pluginLastResult'
@@ -87,6 +88,7 @@ export function isLocalPath(v: string): boolean {
 
 export function usePaletteActions(deps: PaletteActionsDeps) {
   const { t, toast, items, recentCache, selectedIndex } = deps
+  const sa = useSaveAs()
 
   const actionMenuOpen = ref(false)
   const actionMenuIndex = ref(0)
@@ -191,6 +193,29 @@ export function usePaletteActions(deps: PaletteActionsDeps) {
 
     if ((r.type === 'url' || r.type === 'clipboard-action') && r.url) {
       acts.push({ id: 'save-url', label: t('cmdSaveAsItem'), icon: Save, run: () => saveUrlAndClose(r.url!) })
+    }
+
+    // 加入知识库：有本地路径走文件管线（可溯源），笔记/链接走文本管线。
+    // 写入经共享沉淀层直接落 Go binding——面板虽是独立窗口，但调用不依赖主窗口 Pinia。
+    if (r.type === 'file' && r.filePath) {
+      const path = r.filePath
+      acts.push({
+        id: 'add-to-kb', label: t('saveAsKB'), icon: BookMarked,
+        run: async () => { await sa.addToKB({ paths: [path] }); void deps.closePalette() },
+      })
+    } else if (r.type === 'note' && r.note?.content) {
+      const content = r.note.content
+      const name = r.label || undefined
+      acts.push({
+        id: 'add-to-kb', label: t('saveAsKB'), icon: BookMarked,
+        run: async () => { await sa.addToKB({ text: content, name }); void deps.closePalette() },
+      })
+    } else if ((r.type === 'url' || r.type === 'clipboard-action') && r.url) {
+      const url = r.url
+      acts.push({
+        id: 'add-to-kb', label: t('saveAsKB'), icon: BookMarked,
+        run: async () => { await sa.addToKB({ text: url, name: url }); void deps.closePalette() },
+      })
     }
 
     if ((r.type === 'item' || r.type === 'quicklink' || r.type === 'quicklink-inline') && r.item?.id) {

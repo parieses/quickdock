@@ -586,19 +586,17 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .market-header-actions { margin-left: auto; display: flex; align-items: center; gap: var(--space-3); }
 .market-count { font-size: var(--text-xs); color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px var(--space-4); border-radius: var(--radius-xs); }
 .market-updated { font-size: var(--text-2xs); color: var(--color-text-disabled); margin-left: var(--space-2); }
-.update-all-btn:hover:not(:disabled) { background: var(--color-warning-border); }
-.update-all-btn:disabled { opacity: .7; cursor: default; }
 .filter-chip {
-  display: inline-flex; align-items: center; gap: var(--space-2); height: 32px; padding: 0 10px; border-radius: var(--radius-lg);
+  display: inline-flex; align-items: center; gap: var(--space-2); height: 32px; padding: 0 10px; border-radius: var(--radius-sm);
   border: 1px solid var(--color-border); background: var(--color-bg-secondary);
   color: var(--color-text-secondary); font-size: var(--text-sm); cursor: pointer; white-space: nowrap;
 }
 .filter-chip:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
-.filter-chip.active { background: var(--color-warning-bg); border-color: var(--color-warning-border); color: var(--color-warning); }
+.filter-chip.active { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent); }
 .filter-chip:disabled { opacity: .45; cursor: default; }
 .chip-count {
-  font-size: var(--text-2xs); padding: 0 var(--space-3); border-radius: var(--radius-md); background: var(--color-warning-bg);
-  color: var(--color-warning); font-weight: 600;
+  font-size: var(--text-2xs); padding: 0 var(--space-3); border-radius: var(--radius-md); background: var(--color-accent-bg);
+  color: var(--color-accent); font-weight: 600;
 }
 .market-toolbar { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
 .market-search {
@@ -666,7 +664,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .card-title { font-size: var(--text-base); font-weight: 600; color: var(--color-text-primary); }
 /* 插件 ID 是无空格的长串（如 io.github.parieses.database），默认不可断行，
    会撑出很大的 min-content 宽度把列顶宽；anywhere 让它在窄列里也能断行。 */
-.card-id { font-size: var(--text-2xs); color: var(--color-text-disabled); font-family: var(--font-mono); width: 100%; overflow-wrap: anywhere; }
+.card-id { font-size: var(--text-xs); color: var(--color-text-muted); font-family: var(--font-mono); width: 100%; overflow-wrap: anywhere; }
 .badge { font-size: var(--text-2xs); padding: 1px 7px; border-radius: var(--radius-md); background: var(--color-accent-bg); color: var(--color-accent); }
 .badge-installed { background: var(--color-success-bg); color: var(--color-success); }
 .badge-upgrade { background: var(--color-warning-bg); color: var(--color-warning); }

@@ -843,15 +843,13 @@ watch(() => props.visible, async (v) => {
 <style scoped>
 /* 嵌入环境管理页时：放开设置页 .section 的 600px 宽度限制，让内容铺满 detail 区 */
 .section.embedded { max-width: none; }
-/* 设置页形态：描述行已去掉，由标题自己补回原来 .section-desc 占的 20px 下间距 */
-.section:not(.embedded) .section-title { margin-bottom: var(--space-7); }
 /* 嵌入时状态行改为卡片内的分区行：避免「detail-block 大卡片里再套一圈带框小卡片」 */
 .section.embedded .dsh-status { gap: 0; }
 .section.embedded .dsh-status-row {
   border: none;
   border-radius: 0;
   background: transparent;
-  padding: 9px 0;
+  padding: var(--space-3) 0;
   border-bottom: 1px solid var(--color-border);
 }
 .section.embedded .dsh-status-row:last-child { border-bottom: none; }
@@ -866,7 +864,7 @@ watch(() => props.visible, async (v) => {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-5);
-  padding: 10px var(--space-5);
+  padding: var(--space-4) var(--space-5);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
@@ -874,7 +872,7 @@ watch(() => props.visible, async (v) => {
 .dsh-status-left {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--space-2);
   min-width: 0;
 }
 .dsh-status-label {
@@ -915,7 +913,7 @@ watch(() => props.visible, async (v) => {
   color: var(--color-text-muted);
 }
 .dsh-node-hint {
-  margin-top: 10px;
+  margin-top: var(--space-4);
   font-size: var(--text-sm);
   color: var(--color-warning);
   line-height: 1.5;
@@ -932,7 +930,7 @@ watch(() => props.visible, async (v) => {
 .dsh-badge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-2);
   font-size: var(--text-sm);
   color: var(--color-text-disabled);
 }
@@ -957,7 +955,7 @@ watch(() => props.visible, async (v) => {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  margin-right: 5px;
+  margin-right: var(--space-2);
   vertical-align: 1px;
   background: var(--color-text-muted);
 }
@@ -973,7 +971,7 @@ watch(() => props.visible, async (v) => {
 .plugin-input {
   flex: 1;
   min-width: 0;
-  padding: 7px 10px;
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
@@ -988,14 +986,14 @@ watch(() => props.visible, async (v) => {
   opacity: 0.5;
 }
 .plugin-batch {
-  padding-top: 10px;
+  padding-top: var(--space-4);
   border-top: 1px dashed var(--color-border);
 }
 
 /* ---- 已装插件列表 ---- */
 .dsh-plugin-list {
   margin-top: var(--space-5);
-  padding-top: 10px;
+  padding-top: var(--space-4);
   border-top: 1px dashed var(--color-border);
 }
 .dsh-plugin-head {
@@ -1009,7 +1007,7 @@ watch(() => props.visible, async (v) => {
   font-weight: 600;
 }
 .dsh-plugin-count {
-  padding: 0 5px;
+  padding: 0 var(--space-2);
   border-radius: var(--radius-xs);
   background: var(--color-bg-tertiary);
   color: var(--color-text-muted);
@@ -1018,7 +1016,7 @@ watch(() => props.visible, async (v) => {
 .dsh-plugin-reload {
   display: flex;
   margin-left: auto;
-  padding: 3px;
+  padding: var(--space-2);
   border: none;
   border-radius: var(--radius-xs);
   background: none;
@@ -1050,7 +1048,7 @@ watch(() => props.visible, async (v) => {
   display: flex;
   align-items: center;
   gap: var(--space-4);
-  padding: 5px var(--space-4);
+  padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
 }
@@ -1079,7 +1077,7 @@ watch(() => props.visible, async (v) => {
 /* git / 本地路径依赖：能从 registry 更新的和钉死在某处的不是一回事，标出来 */
 .dsh-plugin-tag {
   flex-shrink: 0;
-  padding: 0 5px;
+  padding: 0 var(--space-2);
   border-radius: var(--radius-xs);
   background: var(--color-accent-bg);
   color: var(--color-accent);
@@ -1089,7 +1087,7 @@ watch(() => props.visible, async (v) => {
 .dsh-plugin-del {
   display: flex;
   flex-shrink: 0;
-  padding: 3px;
+  padding: var(--space-2);
   border: none;
   border-radius: var(--radius-xs);
   background: none;
@@ -1128,8 +1126,8 @@ watch(() => props.visible, async (v) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 5px var(--space-4);
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
   font-size: var(--text-sm);
@@ -1157,7 +1155,7 @@ watch(() => props.visible, async (v) => {
 .dsh-progress-fill {
   height: 100%;
   background: var(--color-accent);
-  transition: width 0.2s ease;
+  transition: width var(--transition-base);
 }
 .dsh-progress-text {
   display: block;
@@ -1191,7 +1189,7 @@ watch(() => props.visible, async (v) => {
   border-radius: var(--radius-sm);
   color: var(--color-text-primary);
   font-size: var(--text-xs);
-  padding: var(--space-1) 10px;
+  padding: var(--space-1) var(--space-4);
   cursor: pointer;
 }
 .dsh-log-copy:hover {
@@ -1200,12 +1198,12 @@ watch(() => props.visible, async (v) => {
 .dsh-log {
   max-height: 200px;
   overflow-y: auto;
-  padding: 10px var(--space-5);
+  padding: var(--space-4) var(--space-5);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-code-bg);
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
   line-height: 1.6;
   user-select: text;
   -webkit-user-select: text;

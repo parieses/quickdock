@@ -61,6 +61,7 @@ import {
   Users, X, Loader2, Tag, ChevronDown, ChevronRight, FileText, Check, CloudDownload,
   FileDiff, Sparkles, Archive, KeyRound, History, Copy, Trash2, Eye,
   Search, AlertTriangle, Link2, PanelLeft, List, ListTree, Folder, Columns2, Rows3, Boxes,
+  ArrowUp, ArrowDown,
 } from '@lucide/vue'
 
 // 返回值里的结构由后端 JSON 直接给出，Wails 绑定生成器不会为它们单独生成类型
@@ -2448,8 +2449,8 @@ const dialogCtx = reactive({
                 <Loader2 v-if="isCheckingOut(b)" :size="11" class="item-ic" />
                 <GitBranch v-else :size="11" class="item-ic" />
                 <span class="item-name">{{ b.name }}</span>
-                <span v-if="b.ahead" class="ab up">↑{{ b.ahead }}</span>
-                <span v-if="b.behind" class="ab down">↓{{ b.behind }}</span>
+                <span v-if="b.ahead" class="ab up"><ArrowUp :size="10" />{{ b.ahead }}</span>
+                <span v-if="b.behind" class="ab down"><ArrowDown :size="10" />{{ b.behind }}</span>
                 <Check v-if="b.current" :size="11" class="item-cur" />
               </li>
             </ul>
@@ -2860,8 +2861,8 @@ const dialogCtx = reactive({
     <footer class="git-status">
       <span class="st-branch">
         <GitBranch :size="11" />{{ status?.branch || '—' }}
-        <template v-if="status?.ahead"> ↑{{ status.ahead }}</template>
-        <template v-if="status?.behind"> ↓{{ status.behind }}</template>
+        <template v-if="status?.ahead"><ArrowUp :size="10" /> {{ status.ahead }}</template>
+        <template v-if="status?.behind"><ArrowDown :size="10" /> {{ status.behind }}</template>
       </span>
       <span v-if="status?.upstream" class="st-dim">{{ t('git_upstream') }} {{ status.upstream }}</span>
       <span :class="['st-dim', { 'st-warn': changeCount > 0 }]">
@@ -2950,7 +2951,7 @@ const dialogCtx = reactive({
    红条读起来像可以忽略的报错，这里必须带上安装按钮才算把话说完整。 */
 .git-warn {
   display: flex; align-items: center; gap: var(--space-4); flex-shrink: 0;
-  padding: 9px var(--space-5);
+  padding: var(--space-4) var(--space-5);
   background: var(--color-warning-bg); border-bottom: 1px solid var(--color-border);
 }
 .gw-ic { color: var(--color-warning); flex-shrink: 0; }
@@ -3011,10 +3012,9 @@ const dialogCtx = reactive({
 .item.active::before {
   content: '';
   position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-  width: 2px; height: 14px; border-radius: var(--radius-full);
+  width: 3px; height: 16px; border-radius: var(--radius-full);
   background: var(--color-accent);
 }
-.item.active .item-ic { color: var(--color-accent); }
 .item-ic { flex-shrink: 0; color: var(--color-text-muted); }
 .item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item-cur { flex-shrink: 0; color: var(--color-accent); }
@@ -3028,7 +3028,7 @@ const dialogCtx = reactive({
 }
 .item:hover .item-x { display: grid; }
 .item-x:hover { color: var(--color-danger); background: var(--color-danger-bg); }
-.ab { font-family: var(--font-mono); font-size: var(--text-2xs); flex-shrink: 0; }
+.ab { display: inline-flex; align-items: center; gap: 1px; font-family: var(--font-mono); font-size: var(--text-2xs); flex-shrink: 0; }
 .ab.up { color: var(--color-warning); }
 .ab.down { color: var(--color-accent); }
 
@@ -3038,7 +3038,7 @@ const dialogCtx = reactive({
 /* 筛选行：紧跟工作区入口条之后。做成「一条细线」而不是输入框方框，
    是因为它属于历史列表的表头区，抢视觉权重会让上面的仓库名失焦。 */
 .hist-bar {
-  display: flex; align-items: center; gap: 5px; height: 27px; flex-shrink: 0;
+  display: flex; align-items: center; gap: 5px; height: 28px; flex-shrink: 0;
   padding: 0 var(--space-5); border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-primary);
 }
@@ -3141,19 +3141,24 @@ const dialogCtx = reactive({
 
 /* ---- 工作区入口条（在提交表上方，独立于历史列表） ---- */
 .wt-bar {
+  position: relative;
   display: flex; align-items: center; gap: var(--space-3);
   height: 30px; flex-shrink: 0; padding: 0 var(--space-5);
   background: var(--color-bg-secondary); border: 0;
   border-bottom: 1px solid var(--color-border);
   font: inherit; font-size: var(--text-sm); color: var(--color-text-secondary);
   text-align: left; cursor: pointer;
-  box-shadow: inset 3px 0 0 transparent;
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 .wt-bar:hover { background: var(--color-bg-hover); }
 .wt-bar.active {
   background: var(--color-select-bg); color: var(--color-text-primary);
-  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+.wt-bar.active::before {
+  content: '';
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 16px; border-radius: var(--radius-full);
+  background: var(--color-accent);
 }
 .wt-ic { flex-shrink: 0; color: var(--color-text-muted); }
 .wt-bar.dirty .wt-ic { color: var(--color-warning); }
@@ -3214,7 +3219,7 @@ const dialogCtx = reactive({
 .cb-ai.is-on { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent); }
 .cb-input {
   width: 100%; resize: vertical; min-height: 46px; max-height: 160px;
-  padding: 7px 9px; border-radius: var(--radius-sm);
+  padding: var(--space-4); border-radius: var(--radius-sm);
   border: 1px solid var(--color-border); background: var(--color-bg-primary);
   color: var(--color-text-primary); font: inherit; font-size: var(--text-sm); line-height: 1.5;
 }
@@ -3253,6 +3258,7 @@ const dialogCtx = reactive({
 .file-state.detail-failed { display: flex; align-items: center; gap: var(--space-3); color: var(--color-danger); }
 .file-rows { list-style: none; margin: 0; padding: var(--space-1); overflow-y: auto; flex: 1; min-height: 0; }
 .file-row {
+  position: relative;
   display: flex; align-items: center; gap: var(--space-3);
   min-height: 22px; padding: 0 var(--space-3); border-radius: var(--radius-xs);
   font-size: var(--text-sm); cursor: pointer;
@@ -3268,6 +3274,14 @@ const dialogCtx = reactive({
 .td-ic { color: var(--color-text-disabled); }
 .td-name { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-row.active { background: var(--color-select-bg); }
+/* 与全局 .qd-row.active 同一画法：select-bg 实底 + 3px accent 竖条；
+   flex 行用 ::before 画竖条（不影响行内列宽），图标与文字都不变色。 */
+.file-row.active::before {
+  content: '';
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 16px; border-radius: var(--radius-full);
+  background: var(--color-accent);
+}
 .file-badge {
   width: 14px; flex-shrink: 0; text-align: center;
   font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--color-text-secondary);
@@ -3344,7 +3358,7 @@ const dialogCtx = reactive({
 
 /* ---- 多选 ---- */
 .file-row.picked { background: var(--color-select-bg); }
-.file-row.picked.active { box-shadow: inset 3px 0 0 var(--color-accent); }
+/* picked + active 同普通 active：竖条由 .file-row.active::before 统一提供，不再另画 */
 .pane-ic {
   margin-left: auto; padding: 0 var(--space-1); border: 0; background: none; cursor: pointer;
   color: var(--color-text-muted); display: inline-flex; align-items: center;
@@ -3417,7 +3431,7 @@ const dialogCtx = reactive({
   display: flex; flex-direction: column; gap: 1px;
 }
 .ctx-item {
-  display: flex; align-items: center; height: 27px; padding: 0 10px;
+  display: flex; align-items: center; height: 28px; padding: 0 var(--space-5);
   border: none; border-radius: var(--radius-sm); background: none;
   color: var(--color-text-secondary); font-size: var(--text-sm); font-family: inherit;
   text-align: left; cursor: pointer; white-space: nowrap;

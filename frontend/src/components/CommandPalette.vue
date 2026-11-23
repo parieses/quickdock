@@ -6,9 +6,10 @@ import {
   Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, X,
   MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle, ExternalLink,
   Check, Bookmark, PanelLeft, PanelRight, Volume2, VolumeX, Volume1, Wifi, WifiOff, XCircle,
-  Monitor, RefreshCw, Keyboard, ScrollText, Maximize2, ListChecks
+  Monitor, RefreshCw, Keyboard, ScrollText, Maximize2, ListChecks, BookOpen, Download, Database, Timer
 } from '@lucide/vue'
-import { HidePaletteWindow, GetLastCopiedText, CaptureSelection, CaptureFullScreen, OpenNoteFromPalette, OpenTodoFromPalette } from '../../bindings/quickdock/services/appservice'
+import { HidePaletteWindow, GetLastCopiedText, CaptureSelection, CaptureFullScreen, OpenNoteFromPalette, OpenTodoFromPalette, NavigateMainWindow } from '../../bindings/quickdock/services/appservice'
+import { CreateSnapshot } from '../../bindings/quickdock/services/snapshot/snapshotservice'
 import { ExecuteSystemCommand } from '../../bindings/quickdock/services/system/systemservice'
 import { OpenItemWithQuery } from '../../bindings/quickdock/services/collection/collectionservice'
 import {
@@ -317,7 +318,60 @@ const systemCommands = computed<SystemCmd[]>(() => [
   // 搜「tail」能直达，否则这三个字在设置菜单里很难被翻到。
   { id: 'logtail', label: t('ltCmd'), desc: t('ltCmdDesc'), keywords: ['tail', 'log', 'follow', 'logtail', '日志', '尾随', '实时', 'rizhi', 'wei sui', 'shishi', '系统'], icon: ScrollText,
     action: async () => { openSettingsPage('logs') } },
+
+  // ---- 业务写操作 / 直达 ----
+  // AI 新会话：主窗口 AIPage 的 pendingTarget 消费 'new:' 前缀后清出空白任务；
+  // 先发事件再切页，避免 HidePaletteWindow 之后 WebView 被节流丢事件。
+  { id: 'ai-new', label: t('aiNewChat'), desc: t('cmdAiNewDesc'), keywords: ['ai', 'new', 'chat', '新会话', '新对话', '新建', 'xin hui hua', 'AI'], icon: MessageCircle,
+    action: async () => {
+      emitToMain('ai:open-conversation', 'new:blank')
+      await gotoMainPage('ai')
+    } },
+  // 知识库搜索：导航到知识库页（内容检索入口在那里）。
+  { id: 'kb-search', label: t('navKnowledge'), desc: t('cmdKbSearchDesc'), keywords: ['kb', 'knowledge', '知识库', '搜索', '检索', 'zhi shi ku', 'sou suo', '数据'], icon: BookOpen,
+    action: async () => { await gotoMainPage('knowledge') } },
+  // 整机备份：CreateSnapshot 只需 label/note 两个字符串，不依赖任何 UI 上下文，
+  // 面板独立窗口里也能直接落库；成功后 toast 反馈，不关面板以外的任何东西。
+  { id: 'backup', label: t('cmdBackup'), desc: t('cmdBackupDesc'), keywords: ['backup', 'snapshot', '备份', '快照', '整机', 'bei fen', 'kuai zhao', '系统'], icon: Database,
+    action: async () => {
+      try {
+        const res = unwrap(await CreateSnapshot(t('cmdBackup'), ''))
+        if (res) toast?.success?.(res.msg || t('backupCreated'))
+        else toast?.error?.(t('cmdBackupFailed'))
+      } catch (e) {
+        logErr('[CmdPalette] CreateSnapshot:', e)
+        toast?.error?.(getErrorMessage(e))
+      }
+      closePalette()
+    } },
+  // 专注统计：palette:locate 带 target='focus-stats'，TodoPage 的 pendingTarget watch
+  // 识别后直接展开统计浮层（与 new-monitor 同一条深链机制）。
+  { id: 'focus-stats', label: t('focusStatsTitle'), desc: t('cmdFocusStatsDesc'), keywords: ['focus', 'stats', '专注', '统计', '番茄', 'zhuan zhu', 'tong ji', '待办'], icon: Timer,
+    action: async () => {
+      emitToMain('palette:locate', { page: 'todo', target: 'focus-stats', kind: 'todo', id: 'focus-stats' })
+      await gotoMainPage('todo')
+    } },
+  // 新建监控：palette:locate 带 target='new'，MonitorPage 的 consumePendingTarget 识别后开新建弹窗。
+  { id: 'new-monitor', label: t('mon_add'), desc: t('cmdNewMonitorDesc'), keywords: ['monitor', 'new', '监控', '新建', '网站', 'jian kong', 'xin jian', '数据'], icon: Activity,
+    action: async () => {
+      emitToMain('palette:locate', { page: 'monitor', target: 'new', kind: 'monitor', id: 'new' })
+      await gotoMainPage('monitor')
+    } },
+  // 添加下载：导航到下载器页（在那里填 URL / 种子）。
+  { id: 'add-download', label: t('dlAdd'), desc: t('cmdAddDownloadDesc'), keywords: ['download', 'add', '下载', '添加', 'xiazai', 'tianjia', '数据'], icon: Download,
+    action: async () => { await gotoMainPage('download') } },
 ])
+
+// 业务命令落到主窗口：面板是独立浮窗，不共享主窗口的 Pinia / bridge ref，
+// 写操作一律走后端广播（NavigateMainWindow / Events.Emit）交主窗口执行。
+async function gotoMainPage(page: string) {
+  try { await NavigateMainWindow(page) } catch (e) { logErr('[CmdPalette] NavigateMainWindow:', e) }
+  closePalette()
+}
+
+function emitToMain(event: string, payload: any) {
+  try { Events.Emit(event, payload) } catch (e) { logErr('[CmdPalette] ' + event + ':', e) }
+}
 
 // 打开设置并落到指定页。名字不叫 openHotkeySettings 是因为它现在被两条命令共用
 // （备忘单「去修改」→ hotkeys，实时尾随 → logs）。
@@ -903,7 +957,7 @@ onUnmounted(() => {
         <span class="inline-prefix">
           <component :is="inlineCreateKind === 'note' ? FileText : ListChecks" :size="14" />
           <span class="inline-name">{{ t(inlineCreateKind === 'note' ? 'cmdNewNote' : 'cmdNewTodo') }}</span>
-          <span class="inline-sep">›</span>
+          <ChevronRight :size="12" class="inline-sep" />
         </span>
         <input
           ref="inlineCreateRef"
@@ -922,7 +976,7 @@ onUnmounted(() => {
         <span class="inline-prefix">
           <Link :size="14" />
           <span class="inline-name">{{ inlineQuicklink.name }}</span>
-          <span class="inline-sep">›</span>
+          <ChevronRight :size="12" class="inline-sep" />
         </span>
         <input
           ref="inlineInputRef"
@@ -985,7 +1039,7 @@ onUnmounted(() => {
               <ArrowRight :size="12" />
             </template>
             <template v-else-if="result.type === 'quicklink-inline'">
-              <span class="meta-tag">↵ {{ result.inlineQuery }}</span>
+              <span class="meta-tag"><CornerDownLeft :size="11" /> {{ result.inlineQuery }}</span>
             </template>
             <template v-else-if="result.type === 'system'">
               <span class="meta-tag">cmd</span>
@@ -1105,8 +1159,8 @@ onUnmounted(() => {
 .palette-searchbar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 14px 18px;
+  gap: var(--space-5);
+  padding: var(--space-6) var(--space-7);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
   transition: border-color var(--transition-fast);
@@ -1223,7 +1277,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: var(--space-5);
-  padding: 9px var(--space-5);
+  padding: var(--space-4) var(--space-5);
   border-radius: var(--radius-lg);
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
@@ -1300,7 +1354,7 @@ onUnmounted(() => {
 
 .palette-footer {
   display: flex; align-items: center; gap: var(--space-7);
-  padding: var(--space-4) 18px; border-top: 1px solid var(--color-border); flex-shrink: 0;
+  padding: var(--space-4) var(--space-7); border-top: 1px solid var(--color-border); flex-shrink: 0;
 }
 .footer-hint { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--color-text-muted); }
 .footer-hint kbd {
@@ -1310,14 +1364,8 @@ onUnmounted(() => {
   font-size: var(--text-2xs); font-family: var(--font-mono); font-weight: 500;
 }
 
-.result-item.selected { background: var(--color-select-bg); }
-.result-item.selected::before {
-  content: '';
-  position: absolute;
-  left: 3px; top: 50%; transform: translateY(-50%);
-  width: 3px; height: 56%; border-radius: 0 var(--radius-2xs) var(--radius-2xs) 0;
-  background: var(--color-accent);
-}
+/* 勾选态（Ctrl 多选）与选中态（键盘焦点）必须视觉可分：
+   active 保留淡底 + 竖条，selected 只由 result-check 表达，不铺底色、不画竖条。 */
 .result-check {
   display: flex; align-items: center; justify-content: center;
   width: 18px; height: 18px; border-radius: var(--radius-sm); background: var(--color-accent); color: var(--color-accent-text); flex-shrink: 0;
@@ -1373,11 +1421,11 @@ onUnmounted(() => {
 .action-backdrop {
   position: absolute;
   inset: 0;
-  z-index: 40;
+  z-index: var(--z-dropdown);
   display: flex;
   align-items: flex-end;
   justify-content: flex-end;
-  padding: 0 10px 42px;
+  padding: 0 var(--space-5) var(--space-10);
   background: var(--color-bg-overlay);
   backdrop-filter: blur(1.5px);
 }
@@ -1432,9 +1480,9 @@ onUnmounted(() => {
 .action-menu-item {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: var(--space-4);
   width: 100%;
-  padding: 7px 9px;
+  padding: var(--space-4);
   border: none;
   border-radius: var(--radius-md);
   background: transparent;
@@ -1471,7 +1519,7 @@ onUnmounted(() => {
    分隔线用 border-bottom，不用 inset shadow（底色压深后几乎看不见）。 */
 .palette-plugin-header {
   display: flex; align-items: center; gap: var(--space-3); height: 38px; flex-shrink: 0;
-  padding: 0 10px; background: var(--color-bg-secondary);
+  padding: 0 var(--space-5); background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
   --wails-draggable: drag; user-select: none;
 }

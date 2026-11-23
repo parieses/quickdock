@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { X } from '@lucide/vue'
 import { useWorkspaceStore } from '../stores/workspace'
 import { useFloatMenu } from '../composables/useFloatMenu'
 import { useDragSort } from '../composables/useDragSort'
@@ -136,7 +137,7 @@ function onClickAway() {
           :aria-label="t('close')"
           :title="t('close')"
           @click="closeTab(tab.id, $event)"
-        >✕</button>
+        ><X :size="13" /></button>
       </div>
     </div>
 

@@ -14,6 +14,7 @@
  */
 import { computed, inject, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { BookOpen, Folder, Layers3, Plus, RotateCcw } from '@lucide/vue'
 import { useWorkspaceStore } from '../stores/workspace'
 import { useSceneFields } from '../composables/useSceneFields'
 import { useCollectionFields } from '../composables/useCollectionFields'
@@ -38,6 +39,13 @@ const emit = defineEmits<{ (e: 'open-settings', page?: string): void }>()
 
 const showDialog = ref(false)
 const isCreating = ref(false)
+
+/** 第 1 步（以及主按钮）共用同一个新建入口。第 2、3 步「加项目 / 一键打开」
+    的落点分别在集合列表与项目列表里，本组件只负责空态，没有可跳的 action，
+    所以不做成假按钮——数字与连线已去掉，只留说明。 */
+function openCreate() {
+  showDialog.value = true
+}
 
 const isScene = computed(() => props.variant === 'scene')
 
@@ -98,33 +106,32 @@ function openGuide() {
     <div class="qd-guide-inner">
       <div class="qd-guide-icon">
         <!-- scene：分层图标（一组工作内容）；collection：文件夹图标 -->
-        <svg v-if="isScene" width="26" height="26" viewBox="0 0 24 24" fill="none"
-          stroke="var(--color-accent)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z" />
-          <path d="M2 12.5l8.58 3.91a2 2 0 0 0 1.66 0L21 12.5" />
-          <path d="M2 17.5l8.58 3.91a2 2 0 0 0 1.66 0L21 17.5" />
-        </svg>
-        <svg v-else width="26" height="26" viewBox="0 0 24 24" fill="none"
-          stroke="var(--color-accent)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
-        </svg>
+        <Layers3 v-if="isScene" :size="26" :style="{ color: 'var(--color-accent)' }" />
+        <Folder v-else :size="26" :style="{ color: 'var(--color-accent)' }" />
       </div>
 
       <h2 class="qd-guide-title">{{ copy.title }}</h2>
       <p class="qd-guide-desc">{{ copy.desc }}</p>
 
-      <button class="qd-guide-cta" :disabled="isCreating" @click="showDialog = true">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-          stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 5v14" /><path d="M5 12h14" />
-        </svg>
+      <button class="qd-guide-cta" :disabled="isCreating" @click="openCreate">
+        <Plus :size="15" />
         <span>{{ copy.cta }}</span>
       </button>
 
       <div class="qd-guide-steps">
-        <div v-for="(step, i) in copy.steps" :key="step.label" class="qd-guide-step">
+        <div
+          v-for="(step, i) in copy.steps"
+          :key="step.label"
+          class="qd-guide-step"
+          :class="{ 'is-action': i === 0 }"
+          :role="i === 0 ? 'button' : undefined"
+          :tabindex="i === 0 ? 0 : undefined"
+          @click="i === 0 && openCreate()"
+          @keydown.enter.prevent="i === 0 && openCreate()"
+          @keydown.space.prevent="i === 0 && openCreate()"
+        >
           <div class="qd-guide-step-head">
-            <span class="qd-guide-step-num">{{ i + 1 }}</span>
+            <span v-if="i === 0" class="qd-guide-step-num">1</span>
             <span class="qd-guide-step-label">{{ step.label }}</span>
           </div>
           <p class="qd-guide-step-desc">{{ step.desc }}</p>
@@ -135,19 +142,12 @@ function openGuide() {
         <!-- 首次使用教程排在最前：引导页只在「什么内容都没有」时出现，
              这正是新人最需要看文档的时刻。地址与「设置 → 关于」里的同一个来源。 -->
         <button class="qd-guide-link" :title="SITE_GUIDE_URL" @click="openGuide">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-          </svg>
+          <BookOpen :size="13" />
           {{ t('firstUseGuide') }}
           <span class="qd-guide-link-url">{{ SITE_GUIDE_TEXT }}</span>
         </button>
         <button class="qd-guide-link" @click="emit('open-settings', 'backup')">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3 12a9 9 0 1 0 9-9" /><path d="M3 3v6h6" />
-          </svg>
+          <RotateCcw :size="13" />
           {{ t('importFromSnapshot') }}
         </button>
       </div>
@@ -162,3 +162,12 @@ function openGuide() {
     />
   </div>
 </template>
+
+<style scoped>
+/* 第 1 步接上本组件唯一的新建动作；第 2、3 步没有落地入口，
+   数字与连线已在模板里去掉，这里只给可点那一步加反馈。
+   guide.css 是两档引导共用的，不在本组件覆盖它的排版。 */
+.qd-guide-step.is-action { cursor: pointer; transition: border-color var(--transition-fast), background-color var(--transition-fast); }
+.qd-guide-step.is-action:hover { border-color: var(--color-accent-border); background: var(--color-bg-active); }
+.qd-guide-step.is-action:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 1px; }
+</style>

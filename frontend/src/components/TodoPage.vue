@@ -19,7 +19,7 @@ import {
 import {
   SendTestNotification, NotifyFocusComplete, NotifyFocusStart, SaveFocusSession,
 } from '../../bindings/quickdock/services/appservice'
-import { pendingOpenTodoId, pendingCreateTodo } from '../composables/bridge'
+import { pendingOpenTodoId, pendingCreateTodo, pendingTarget } from '../composables/bridge'
 // 待办的增删改都会汇流到 refresh()，在那里顺手把侧边栏角标拉齐（不用等 60s 轮询）
 import { navBadges } from '../composables/useNavBadges'
 import { matchesTextOrPinyin } from '../utils/pinyin'
@@ -109,6 +109,15 @@ function toggleFocusStats() {
   showFocusStats.value = !showFocusStats.value
   if (showFocusStats.value) showFocusHist.value = false
 }
+
+// 命令面板的「专注统计」动作经 pendingTarget 深链过来（面板是独立窗口，不共享 Pinia）。
+// 与 pendingOpenTodoId 同一口径：消费即清空，避免下次进本页又自动弹一次。
+watch(pendingTarget, (t) => {
+  if (!t || t.page !== 'todo' || t.target !== 'focus-stats') return
+  pendingTarget.value = null
+  showFocusStats.value = true
+  showFocusHist.value = false
+})
 
 // SQLite 对 ±HH:MM 时区后缀的支持早于 'Z'，后端 now() 也是这个格式；
 // 不用 toISOString()（Z 结尾在老版本 SQLite 可能解析成 NULL，julianday 比较会失效）。
@@ -455,14 +464,6 @@ function nextDueDate(due: string, f: RecurrenceForm): string {
     next.setDate(base.getDate() + 1) // daily / none 兜底：往后一天
   }
   return formatDateOnly(next)
-}
-/** 把日期（可带 ' HH:MM:SS' 时间部分）整体推后一天，保留原来的时刻。 */
-function plusOneDay(s: string): string {
-  if (!s) return ''
-  const d = parseDateOnly(s.slice(0, 10))
-  if (!d) return s
-  d.setDate(d.getDate() + 1)
-  return formatDateOnly(d) + s.slice(10)
 }
 
 // ---- 4.2 标签筛选 ----
@@ -1000,14 +1001,33 @@ async function saveEdit() {
   }
 }
 
-// 稍后提醒：把 due_date（连同起止/提醒时刻）整体推到明天，保留未完成状态、
-// 不动 recurrence。UpdateTodo 会复位 reminder_sent，正好让提醒重新响一次。
-async function snooze(todo: Todo) {
-  const due = todo.dueDate ? plusOneDay(todo.dueDate) : plusOneDay(todayStr.value)
+// 把带时间的日期字符串按「天数差」整体平移（保留原来的时刻）。
+// snooze 的「推一天」和「自定义日期」共用这套算法：自定义只是 days 由目标日算出。
+function diffDays(from: string, to: string): number {
+  const a = parseDateOnly(from.slice(0, 10))
+  const b = parseDateOnly(to.slice(0, 10))
+  if (!a || !b) return 1
+  return Math.round((b.getTime() - a.getTime()) / 86400000)
+}
+function shiftDays(s: string, days: number): string {
+  if (!s) return ''
+  const d = parseDateOnly(s.slice(0, 10))
+  if (!d) return s
+  d.setDate(d.getDate() + days)
+  return formatDateOnly(d) + s.slice(10)
+}
+
+// 稍后提醒：把 due_date（连同起止/提醒时刻）整体推后，保留未完成状态、
+// 不动 recurrence。传 targetDate 就是「自定义日期」入口；不传则沿用原来的推一天。
+// UpdateTodo 会复位 reminder_sent，正好让提醒重新响一次。
+async function snooze(todo: Todo, targetDate?: string) {
+  const base = todo.dueDate || todayStr.value
+  const days = targetDate ? diffDays(base, targetDate) : 1
+  const due = shiftDays(base, days)
   try {
     await unwrap(await UpdateTodo(
       todo.id, todo.title, todo.priority, due, todo.note,
-      plusOneDay(todo.startTime), plusOneDay(todo.endTime), plusOneDay(todo.reminderTime),
+      shiftDays(todo.startTime, days), shiftDays(todo.endTime, days), shiftDays(todo.reminderTime, days),
       todo.recurrence,
       todo.tags as unknown as string, 'todo',
     ))
@@ -1017,8 +1037,74 @@ async function snooze(todo: Todo) {
   }
 }
 
+// 自定义改期：点行内日历图标展开一个 date 输入框，选完直接调 snooze(todo, 日期)。
+const snoozeDateFor = ref('')
+const snoozeDateValue = ref('')
+function openSnoozeDate(todo: Todo) {
+  if (snoozeDateFor.value === todo.id) { snoozeDateFor.value = ''; return }
+  snoozeDateFor.value = todo.id
+  // 输入框预填「原截止日 + 一天」，与默认 snooze 行为一致；没有截止日就用今天。
+  const base = todo.dueDate || todayStr.value
+  snoozeDateValue.value = shiftDays(base, 1).slice(0, 10)
+}
+async function applySnoozeDate(todo: Todo) {
+  const date = snoozeDateValue.value
+  snoozeDateFor.value = ''
+  if (!date) return
+  await snooze(todo, date)
+}
+
 async function toggle(todo: Todo) {
   try { await unwrap(await ToggleTodo(todo.id)); await refresh() } catch (e) { error.value = getErrorMessage(e) }
+}
+
+// 重复待办「完成」的范围选择：点勾选框时先弹菜单，由用户决定这次完成应用到哪些实例。
+// 普通待办与已完成的重复待办（取消完成）保持原来的 ToggleTodo 行为，不多一层点击。
+const completeScopeFor = ref('')
+function onCompleteClick(todo: Todo) {
+  const recurring = parseRecurrence(todo.recurrence).kind !== 'none'
+  if (!todo.done && recurring) {
+    completeScopeFor.value = completeScopeFor.value === todo.id ? '' : todo.id
+    snoozeDateFor.value = ''
+    return
+  }
+  completeScopeFor.value = ''
+  void toggle(todo)
+}
+
+// 复用 saveEdit 那一套「推进模板 due_date + 必要时 CreateTodo」的单模板模型实现：
+//   all      —— 整条模板标记完成，系列到此结束（等同原 ToggleTodo）。
+//   thisOnly —— 模板推进到下一周期、保持未完成（继续生成未来实例），
+//               另建一条不带 recurrence 的独立待办，截止日为原日期、标记完成，代表「本次」。
+//   fromNext —— 模板推进到下一周期并标记完成（本次及以后都不再做），
+//               同样拆一条本次的完成记录。单模板模型无法真正生成并完成无限多个未来实例，
+//               这是前端能做到的最接近语义；完整序列需要后端按范围批量生成，见报告。
+async function completeRecurring(todo: Todo, scope: EditScope) {
+  completeScopeFor.value = ''
+  if (scope === 'all') { await toggle(todo); return }
+  try {
+    const advanced = nextDueDate(todo.dueDate || todayStr.value, parseRecurrence(todo.recurrence))
+    await unwrap(await UpdateTodo(
+      todo.id, todo.title, todo.priority, advanced, todo.note,
+      todo.startTime, todo.endTime, todo.reminderTime, todo.recurrence,
+      todo.tags as unknown as string, scope === 'thisOnly' ? (todo.status || 'todo') : 'done',
+    ))
+    // 拆出「本次」：截止日=原日期、不带 recurrence，建完再 UpdateTodo 标完成。
+    const created = unwrap<Todo>(await CreateTodo(
+      todo.title, todo.priority, todo.dueDate || todayStr.value, todo.note,
+      todo.startTime, todo.endTime, todo.reminderTime, '', todo.tags as unknown as string,
+    ))
+    if (created?.id) {
+      await unwrap(await UpdateTodo(
+        created.id, created.title, created.priority, created.dueDate, created.note,
+        created.startTime, created.endTime, created.reminderTime, '', created.tags as unknown as string, 'done',
+      ))
+      invalidateLinkTargets() // 新拆出的 occurrence 立即可当互链目标
+    }
+    await refresh()
+  } catch (e) {
+    error.value = getErrorMessage(e)
+  }
 }
 async function remove(todo: Todo) {
   delTodo.value = todo
@@ -1315,9 +1401,17 @@ onUnmounted(() => {
               @dragstart="onDragStart(todo.id, $event)"
               @dragend="onDragEnd"
             >
-              <button class="check" :class="{ checked: todo.done }" @click="toggle(todo)">
+              <button class="check" :class="{ checked: todo.done }" @click="onCompleteClick(todo)">
                 <Check v-if="todo.done" :size="13" />
               </button>
+              <!-- 重复待办完成范围：点勾选框后弹的小菜单，复用编辑弹窗那三个 scope key。
+                   绝对定位挂在行上，点选项即执行并关闭。 -->
+              <div v-if="completeScopeFor === todo.id" class="complete-scope" @click.stop>
+                <div class="complete-scope-title">{{ t('todoOccScope') }}</div>
+                <button @click="completeRecurring(todo, 'thisOnly')">{{ t('todoOccThisOnly') }}</button>
+                <button @click="completeRecurring(todo, 'fromNext')">{{ t('todoOccFromNext') }}</button>
+                <button @click="completeRecurring(todo, 'all')">{{ t('todoOccAll') }}</button>
+              </div>
               <i :class="['pri-dot', 'p-' + todo.priority]"></i>
               <div class="todo-main">
                 <span class="todo-name">{{ todo.title }}</span>
@@ -1362,8 +1456,14 @@ onUnmounted(() => {
                 </template>
                 <button class="act" @click="toggleSubInput(todo)" :title="t('todoSubtaskAdd')"><ListTree :size="13" /></button>
                 <button class="act" @click="snooze(todo)" :title="t('todoSnooze')"><Clock :size="13" /></button>
+                <button class="act" @click="openSnoozeDate(todo)" :title="t('todoSnoozeDate')"><CalendarDays :size="13" /></button>
                 <button class="act" @click="startEdit(todo)" :title="t('todoEdit')"><Pencil :size="13" /></button>
                 <button class="act danger" @click="remove(todo)" :title="t('todoDelete')"><Trash2 :size="13" /></button>
+              </div>
+
+              <!-- 自定义改期：行内日期输入框，选完即改；Esc / 再点日历图标收起 -->
+              <div v-if="snoozeDateFor === todo.id" class="snooze-date" @click.stop>
+                <input v-model="snoozeDateValue" type="date" @change="applySnoozeDate(todo)" @keyup.esc="snoozeDateFor = ''" />
               </div>
 
               <!-- 4.1 子任务（单层级 checklist）-->
@@ -1465,8 +1565,8 @@ onUnmounted(() => {
         </div>
 
         <div class="panel-foot">
-          <button class="clear-btn" @click="clearCompleted">{{ t('todoClearCompleted') }}</button>
-          <button class="test-btn" :disabled="testing" @click="testReminder">
+          <button class="qd-btn qd-btn-ghost clear-completed" @click="clearCompleted">{{ t('todoClearCompleted') }}</button>
+          <button class="qd-btn qd-btn-ghost test-reminder" :disabled="testing" @click="testReminder">
             <Bell :size="12" /> {{ t('todoTestReminder') }}
           </button>
         </div>
@@ -1679,7 +1779,7 @@ onUnmounted(() => {
 .focus-stats-btn.active { color: var(--color-accent); }
 /* 统计浮层只负责定位/滚动/投影，卡片外观由 FocusStatsPanel 自带的 .fsp 提供 */
 .focus-stats-pop {
-  position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: 320px;
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: var(--z-dropdown); width: 320px;
   max-height: 420px; overflow: auto;
   border-radius: var(--radius-md); box-shadow: var(--shadow-pop);
 }
@@ -1689,7 +1789,7 @@ onUnmounted(() => {
   color: var(--color-accent-text); font-size: var(--text-2xs); line-height: 14px; text-align: center; font-weight: 600;
 }
 .focus-hist-pop {
-  position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: 264px;
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: var(--z-dropdown); width: 264px;
   max-height: 320px; overflow: auto; padding: var(--space-3);
   background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md); box-shadow: var(--shadow-pop);
@@ -1900,10 +2000,27 @@ onUnmounted(() => {
 .empty-hint { font-size: var(--text-xs); color: var(--color-text-muted); margin-top: var(--space-2); }
 
 .todo-item {
+  position: relative;
   display: flex; align-items: center; gap: var(--space-3); padding: 10px var(--space-5);
   background: var(--color-card-bg); border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md); transition: background var(--transition-fast);
 }
+/* 重复待办完成范围小菜单：贴着勾选框弹出来，纯列表不做遮罩/浮层卡片堆叠 */
+.complete-scope {
+  position: absolute; left: var(--space-4); top: calc(100% - var(--space-1)); z-index: var(--z-dropdown);
+  display: flex; flex-direction: column; min-width: 12em; padding: var(--space-1);
+  background: var(--color-bg-primary); border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-md);
+}
+.complete-scope-title { padding: var(--space-1) var(--space-2); font-size: var(--text-2xs); color: var(--color-text-muted); }
+.complete-scope button {
+  padding: var(--space-2); text-align: left; font-size: var(--text-xs); font-family: inherit;
+  color: var(--color-text-secondary); background: none; border: none; border-radius: var(--radius-xs); cursor: pointer;
+}
+.complete-scope button:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
+/* 自定义改期的行内日期框：放在操作行下方，不额外占一行高度 */
+.snooze-date { position: absolute; right: var(--space-5); top: calc(100% - var(--space-1)); z-index: var(--z-dropdown); }
+.snooze-date input { font-size: var(--text-xs); font-family: inherit; padding: var(--space-1) var(--space-2); color: var(--color-text-primary); background: var(--color-bg-primary); border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
 .todo-item:hover { background: var(--color-bg-hover); }
 /* 深链定位后的短暂高亮：一天可能有十几条，不给个落点眼睛找不到滚到哪了 */
 .todo-item.todo-flash {
@@ -1926,7 +2043,7 @@ onUnmounted(() => {
 .pri-dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; }
 .todo-main { flex: 1; min-width: 0; }
 .todo-name { font-size: var(--text-md); color: var(--color-text-primary); }
-.todo-meta { font-size: var(--text-xs); color: var(--color-text-disabled); margin-top: 3px; display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center; }
+.todo-meta { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: 3px; display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center; }
 .overdue-text { color: var(--color-danger); }
 .meta-pill { display: inline-flex; align-items: center; gap: 3px; color: var(--color-text-muted); }
 .meta-pill.sent { color: var(--color-text-disabled); }
@@ -1952,20 +2069,11 @@ onUnmounted(() => {
 .focus-act.running { background: var(--color-accent-bg); color: var(--color-accent); }
 
 .panel-foot { margin-top: var(--space-3); flex-shrink: 0; display: flex; align-items: center; gap: var(--space-3); }
-.clear-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
-  height: 28px; padding: 0 11px; border: 1px solid var(--color-border); background: transparent;
-  color: var(--color-text-disabled); border-radius: var(--radius-sm); font-size: var(--text-sm);
-  cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
-}
-.clear-btn:hover { color: var(--color-danger); border-color: var(--color-danger-border); }
-.test-btn {
-  display: inline-flex; align-items: center; gap: 5px; margin-left: auto;
-  height: 28px; padding: 0 11px; border: 1px solid var(--color-border); background: transparent;
-  color: var(--color-text-secondary); border-radius: var(--radius-sm); font-size: var(--text-sm);
-  cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
-}
-.test-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent-border); }
-.test-btn:disabled { opacity: 0.5; cursor: default; }
+/* 两个按钮已收编到 qd-btn/qd-btn-ghost（盒模型由 app.css 统一负责），
+   这里只保留各自的语义色提示与右推布局，不再重声明尺寸/边框/padding。 */
+.clear-completed:hover { color: var(--color-danger); }
+.test-reminder { margin-left: auto; }
+.test-reminder:hover:not(:disabled) { color: var(--color-accent); }
 .reminder-hint { margin: var(--space-2) 0 0; font-size: var(--text-xs); color: var(--color-text-disabled); }
 
 /* 优先级配色 */

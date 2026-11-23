@@ -462,7 +462,7 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
 /* Teleport 到 body，scoped 的 data 属性会跟着走（Vue 会把 scope id 打在
    编译出的节点上），所以这里不需要 :deep 或全局类。 */
 .nc-panel {
-  position: fixed; z-index: 600;
+  position: fixed; z-index: var(--z-modal);
   width: 360px; max-height: 460px;
   display: flex; flex-direction: column;
   background: var(--color-popover-bg);

@@ -50,7 +50,7 @@ try {
  */
 import { ref, computed, defineAsyncComponent, watch, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { PanelLeft, PanelLeftClose } from '@lucide/vue'
+import { PanelLeft, PanelLeftClose, X } from '@lucide/vue'
 import { useWorkspaceStore } from '../stores/workspace'
 // 命令面板「点结果 → 落到具体场景/集合」：目标由 bridge 的 pendingTarget 带过来
 import { pendingTarget } from '../composables/bridge'
@@ -296,7 +296,7 @@ watch([() => store.loading, () => store.workspaces.length], () => { void tryAppl
     <template v-else>
       <div v-if="store.error" class="ws-error-bar">
         <span class="ws-error-text">{{ store.error }}</span>
-        <button class="ws-error-close" @click="store.error = ''" :title="t('close')">✕</button>
+        <button class="ws-error-close" @click="store.error = ''" :title="t('close')"><X :size="13" /></button>
       </div>
       <div class="ws-body">
         <!-- 三栏起点：场景 → 集合 → 项目，共用同一条顶部基线。

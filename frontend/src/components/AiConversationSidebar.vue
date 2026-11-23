@@ -79,6 +79,10 @@ interface Props {
   toggleSpaceTasks: (id: string) => void
   onEnterSend: (e: KeyboardEvent, fn: () => void) => void
   fmtTokens: (n: number) => string
+  /** 会话分页：还有没有下一页 / 是否正在翻页 / 翻页动作（状态都在 AIPage） */
+  hasMore: boolean
+  loadingMore: boolean
+  loadMore: () => void
 }
 
 const emit = defineEmits<{
@@ -487,6 +491,14 @@ onBeforeUnmount(() => {
       <!-- 正文命中也算「搜到了东西」，不算空：否则上面列着三条消息命中，
            下面紧跟着一句「没有匹配的会话」。 -->
       <div v-else-if="totalMatched === 0 && !msgHits.length && !msgHitsLoading" class="ai-conv-empty">{{ t('aiNoMatchConv') }}</div>
+      <!-- 会话分页入口：搜索时翻页没有意义（命中已经在本地结果里），所以只在没搜时显示。
+           复用 .ai-conv-more 的整行虚线样式，与「显示更多空间」保持一致。 -->
+      <button
+        v-if="hasMore && !convQuery"
+        class="ai-conv-more"
+        :disabled="loadingMore"
+        @click="loadMore"
+      >{{ loadingMore ? t('aiConvLoadingMore') : t('aiConvLoadMore') }}</button>
     </div>
 
     <!-- 任务行右键菜单：透明遮罩负责「点别处 / 再右键 / Esc 即关」，菜单本体 stop 掉冒泡。
@@ -577,12 +589,7 @@ onBeforeUnmount(() => {
 
 /* 类型图标：不标出来，侧栏一长串标题里看不出哪条是翻译、哪条是闲聊 */
 .ai-conv-mode { flex-shrink: 0; opacity: 0.7; }
-
-/* 类型图标：不标出来，侧栏一长串标题里看不出哪条是翻译、哪条是闲聊 */
-.ai-conv-mode { flex-shrink: 0; opacity: 0.7; }
 .ai-conv-item.active .ai-conv-mode { opacity: 1; }
-
-.ai-space { margin-bottom: var(--space-1); }
 
 .ai-space { margin-bottom: var(--space-1); }
 .ai-space-row {
@@ -770,6 +777,7 @@ onBeforeUnmount(() => {
   font-family: inherit; cursor: pointer;
 }
 .ai-conv-more:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
+.ai-conv-more:disabled { opacity: 0.6; cursor: default; }
 /* 空间内的「更多」跟着任务缩进，否则会和空间名对齐，看着像另一个空间 */
 .ai-conv-more.is-in-space { margin-left: 26px; margin-right: 0; }
 

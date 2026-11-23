@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Pen, Trash2, Plus, RefreshCw, ChevronDown, Copy, Eye, EyeOff } from '@lucide/vue'
+import { Pen, Trash2, Plus, RefreshCw, ChevronDown, ChevronRight, Copy, Eye, EyeOff } from '@lucide/vue'
 import SettingsPrompts from './SettingsPrompts.vue'
 import SettingsSkills from './SettingsSkills.vue'
 import AiToolSwitchList from './AiToolSwitchList.vue'
@@ -1699,7 +1699,10 @@ function saveAIModal() {
 
       <!-- 只读工具：恒放行，只展示。 -->
       <button class="approval-ro-toggle" @click="apShowReadOnly = !apShowReadOnly">
-        <span class="approval-ro-arrow">{{ apShowReadOnly ? '▾' : '▸' }}</span>
+        <span class="approval-ro-arrow">
+          <ChevronDown v-if="apShowReadOnly" :size="12" />
+          <ChevronRight v-else :size="12" />
+        </span>
         {{ t('aiApprovalRuleReadOnly', { n: apRulesReadOnly.length }) }}
       </button>
       <table v-if="apShowReadOnly" class="usage-table approval-rules is-readonly">
@@ -1774,10 +1777,10 @@ function saveAIModal() {
           spellcheck="false"
         ></textarea>
         <div class="ai-ext-actions">
-          <button class="ai-hook-ok" :disabled="extSaving || !extEditDraft.trim()" @click="saveExtManifestJson">
+          <button class="btn btn-primary btn-sm" :disabled="extSaving || !extEditDraft.trim()" @click="saveExtManifestJson">
             {{ t('aiExtJsonSaveDo') }}
           </button>
-          <button class="ai-hook-no" @click="extEditOpen = false">{{ t('cancel') }}</button>
+          <button class="btn btn-sm" @click="extEditOpen = false">{{ t('cancel') }}</button>
         </div>
         <span class="ai-ext-tip">{{ t('aiExtJsonHint') }}</span>
       </div>
@@ -1791,10 +1794,10 @@ function saveAIModal() {
           spellcheck="false"
         ></textarea>
         <div class="ai-ext-actions">
-          <button class="ai-hook-ok" :disabled="extSaving || !extImportDraft.trim()" @click="importExtJson">
+          <button class="btn btn-primary btn-sm" :disabled="extSaving || !extImportDraft.trim()" @click="importExtJson">
             {{ t('aiExtImportDo') }}
           </button>
-          <button class="ai-hook-no" @click="extImportOpen = false">{{ t('cancel') }}</button>
+          <button class="btn btn-sm" @click="extImportOpen = false">{{ t('cancel') }}</button>
         </div>
         <span class="ai-ext-tip">{{ t('aiExtImportHint') }}</span>
       </div>
@@ -1867,7 +1870,7 @@ function saveAIModal() {
                 spellcheck="false"
                 autocomplete="off"
               />
-              <button type="button" class="ai-hook-no" @click="extTokenVisible = !extTokenVisible">
+              <button type="button" class="btn btn-sm" @click="extTokenVisible = !extTokenVisible">
                 {{ extTokenVisible ? t('mcpTokenHide') : t('mcpTokenShow') }}
               </button>
             </div>
@@ -1887,8 +1890,8 @@ function saveAIModal() {
         </template>
 
         <div class="ai-ext-actions">
-          <button class="ai-hook-ok" :disabled="extSaving" @click="submitExtForm">{{ t('aiExtSaveReload') }}</button>
-          <button class="ai-hook-no" :disabled="extSaving" @click="extForm = null">{{ t('cancel') }}</button>
+          <button class="btn btn-primary btn-sm" :disabled="extSaving" @click="submitExtForm">{{ t('aiExtSaveReload') }}</button>
+          <button class="btn btn-sm" :disabled="extSaving" @click="extForm = null">{{ t('cancel') }}</button>
         </div>
       </div>
 
@@ -1934,7 +1937,7 @@ function saveAIModal() {
             </div>
             <div class="ai-ext-item-ops">
               <button
-                class="ai-hook-no ai-ext-expand"
+                class="btn btn-ghost btn-sm ai-ext-expand"
                 :class="{ 'is-open': extExpanded === s.name }"
                 :disabled="extSaving || s.status === 'disabled'"
                 :title="extExpanded === s.name ? t('aiExtToolsHide') : t('aiExtToolsShow')"
@@ -1949,14 +1952,14 @@ function saveAIModal() {
                 :title="s.status === 'disabled' ? t('aiExtEnable') : t('aiExtDisable')"
                 @update:model-value="() => toggleExt(s)"
               />
-              <button class="ai-hook-no" :disabled="extSaving" @click="openEditExt(s)">{{ t('aiExtEdit') }}</button>
-              <button class="ai-hook-no is-danger" :disabled="extSaving" @click="removeExt(s)">{{ t('delete') }}</button>
+              <button class="btn btn-sm" :disabled="extSaving" @click="openEditExt(s)">{{ t('aiExtEdit') }}</button>
+              <button class="btn btn-danger btn-sm" :disabled="extSaving" @click="removeExt(s)">{{ t('delete') }}</button>
             </div>
           </div>
         </div>
 
         <div class="ai-ext-actions">
-          <button class="ai-hook-no" :disabled="extLoading" @click="reloadExt">
+          <button class="btn btn-sm" :disabled="extLoading" @click="reloadExt">
             <RefreshCw :size="12" /> {{ t('aiExtReload') }}
           </button>
         </div>
@@ -2042,7 +2045,7 @@ function saveAIModal() {
               class="model-caret"
               :title="t('aiFetchModels')"
               @click.prevent="modelOptionsOpen = !modelOptionsOpen"
-            >▾</button>
+            ><ChevronDown :size="12" /></button>
             <div v-if="modelOptionsOpen && modelOptions.length" class="model-dropdown">
               <div
                 v-for="m in filteredModelOptions"
@@ -2263,7 +2266,7 @@ function saveAIModal() {
   transform: translateY(-50%);
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-1);
 }
 /* .qd-icon-btn 默认 26×26，塞进 36px 高的输入框里会顶到边框，这里缩一档 */
 .key-input-actions .qd-icon-btn {
@@ -2285,7 +2288,7 @@ function saveAIModal() {
   padding: var(--space-2);
 }
 .ai-ext-expand svg {
-  transition: transform 0.15s ease;
+  transition: transform var(--transition-base);
 }
 .ai-ext-expand.is-open svg {
   transform: rotate(180deg);
@@ -2384,9 +2387,12 @@ function saveAIModal() {
   cursor: pointer;
 }
 .model-enable-name {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}</style>
+}
+/* 字符箭头换 Lucide 后补基线对齐 */
+.approval-ro-arrow { display: inline-flex; vertical-align: -2px; }
+</style>

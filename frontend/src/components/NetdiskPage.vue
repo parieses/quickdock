@@ -777,7 +777,7 @@ function shortTime(s: string): string {
       <Cloud :size="28" class="nd-empty-icon" />
       <p class="nd-empty-title">{{ t('netdiskNotInstalled') }}</p>
       <p class="nd-empty-desc">{{ t('netdiskNotInstalledHint') }}</p>
-      <button class="btn btn-primary" :disabled="busy === 'install'" @click="installGateway">
+      <button class="qd-btn qd-btn-primary" :disabled="busy === 'install'" @click="installGateway">
         <Download :size="14" />{{ busy === 'install' ? installText || t('netdiskInstalling') : t('netdiskInstall') }}
       </button>
     </section>
@@ -787,7 +787,7 @@ function shortTime(s: string): string {
       <Cloud :size="28" class="nd-empty-icon" />
       <p class="nd-empty-title">{{ t('netdiskStopped') }}</p>
       <p class="nd-empty-desc">{{ t('netdiskStoppedHint') }}</p>
-      <button class="btn btn-primary" :disabled="busy === 'start'" @click="startGateway">
+      <button class="qd-btn qd-btn-primary" :disabled="busy === 'start'" @click="startGateway">
         {{ busy === 'start' ? t('netdiskStarting') : t('netdiskStart') }}
       </button>
     </section>
@@ -810,7 +810,7 @@ function shortTime(s: string): string {
 
     <template v-else-if="ready">
       <div class="nd-bar">
-        <button class="btn btn-secondary nd-up" :disabled="dir === '/' || loading" @click="goUp">
+        <button class="qd-btn qd-btn-sm nd-up" :disabled="dir === '/' || loading" @click="goUp">
           <ArrowUp :size="14" />{{ t('netdiskUp') }}
         </button>
         <nav class="nd-crumbs">
@@ -840,13 +840,13 @@ function shortTime(s: string): string {
               {{ searching ? '…' : t('netdiskSearchDeepShort') }}
             </button>
           </div>
-          <button class="btn btn-secondary nd-tool" :title="t('netdiskNewFolder')" @click="openMkdir">
+          <button class="qd-btn qd-btn-sm qd-btn-ghost nd-tool" :title="t('netdiskNewFolder')" @click="openMkdir">
             <FolderPlus :size="14" /><span class="nd-tool-text">{{ t('netdiskNewFolder') }}</span>
           </button>
-          <button class="btn btn-secondary nd-tool" :title="t('netdiskUpload')" @click="uploadFiles">
+          <button class="qd-btn qd-btn-sm qd-btn-ghost nd-tool" :title="t('netdiskUpload')" @click="uploadFiles">
             <Upload :size="14" /><span class="nd-tool-text">{{ t('netdiskUpload') }}</span>
           </button>
-          <button class="btn btn-secondary nd-tool" :title="t('netdiskRefresh')" :disabled="loading" @click="refreshAfterChange">
+          <button class="qd-btn qd-btn-sm qd-btn-ghost nd-tool" :title="t('netdiskRefresh')" :disabled="loading" @click="refreshAfterChange">
             <RefreshCw :size="14" />
           </button>
         </div>
@@ -862,13 +862,13 @@ function shortTime(s: string): string {
       <!-- 批量操作条：只有选中东西时才出现，避免常驻一排灰按钮 -->
       <div v-if="selected.length" class="nd-bulk">
         <span class="nd-bulk-count">{{ t('netdiskSelectedCount', { count: selected.length }) }}</span>
-        <button class="btn btn-secondary nd-tool" @click="downloadSelected">
+        <button class="qd-btn qd-btn-sm qd-btn-ghost nd-tool" @click="downloadSelected">
           <Download :size="14" />{{ t('netdiskDownloadSelected') }}
         </button>
-        <button class="btn btn-secondary nd-tool" @click="sendToDownloader(selectedEntries)">
+        <button class="qd-btn qd-btn-sm qd-btn-ghost nd-tool" @click="sendToDownloader(selectedEntries)">
           <Send :size="14" />{{ t('netdiskToDownloader') }}
         </button>
-        <button class="btn btn-secondary nd-tool is-danger" @click="openDelete(selectedEntries)">
+        <button class="qd-btn qd-btn-sm qd-btn-ghost nd-tool is-danger" @click="openDelete(selectedEntries)">
           <Trash2 :size="14" />{{ t('netdiskDelete') }}
         </button>
         <button class="nd-crumb nd-bulk-clear" @click="selected = []">{{ t('netdiskClearSelection') }}</button>
@@ -967,7 +967,7 @@ function shortTime(s: string): string {
         <header class="nd-pv-head">
           <span class="nd-pv-title" :title="preview.name">{{ preview.name }}</span>
           <span class="nd-pv-size">{{ formatBytes(preview.size) }}</span>
-          <button class="btn btn-secondary nd-dl" @click="downloadFile(preview)">
+          <button class="qd-btn qd-btn-sm nd-dl" @click="downloadFile(preview)">
             <Download :size="13" />{{ t('netdiskDownload') }}
           </button>
           <button class="nd-pv-close" :aria-label="t('netdiskClose')" :title="t('netdiskClose')" @click="closePreview">
@@ -1051,7 +1051,7 @@ function shortTime(s: string): string {
 .nd-chip {
   padding: var(--space-1) var(--space-4);
   border-radius: var(--radius-full);
-  font-size: 12px;
+  font-size: var(--text-sm);
   border: 1px solid var(--color-border);
 }
 .nd-chip.is-on {
@@ -1092,12 +1092,12 @@ function shortTime(s: string): string {
 }
 .nd-empty-title {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 .nd-empty-desc {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.7;
   color: var(--color-text-secondary);
 }
@@ -1122,7 +1122,7 @@ function shortTime(s: string): string {
   border: none;
   background: none;
   padding: 0;
-  font-size: 13px;
+  font-size: var(--text-md);
   color: var(--color-text-secondary);
   cursor: pointer;
 }
@@ -1177,7 +1177,7 @@ function shortTime(s: string): string {
   padding-left: var(--space-2);
   border-left: 1px solid var(--color-border);
   color: var(--color-accent);
-  font-size: 12px;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 .nd-search-deep:disabled {
@@ -1185,8 +1185,6 @@ function shortTime(s: string): string {
   cursor: default;
 }
 .nd-tool {
-  padding: var(--space-1) var(--space-4);
-  font-size: 12px;
   gap: var(--space-2);
 }
 .nd-tool.is-danger {
@@ -1243,10 +1241,12 @@ function shortTime(s: string): string {
   gap: var(--space-4);
   padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--color-hairline);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
+/* grid 行不能加 border-left（会顶偏列宽），用 inset 画 3px 竖条；hover 仍是 bg-hover */
 .nd-row.is-selected {
-  background: var(--color-bg-hover);
+  background: var(--color-select-bg);
+  box-shadow: inset 3px 0 0 var(--color-accent);
 }
 .nd-col-check {
   display: flex;
@@ -1255,14 +1255,13 @@ function shortTime(s: string): string {
 }
 .nd-col-check input {
   cursor: pointer;
-  accent-color: var(--color-accent);
 }
 .nd-row:last-child {
   border-bottom: none;
 }
 .nd-row-head {
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
   background: var(--color-bg-tertiary);
   position: sticky;
   top: 0;
@@ -1305,7 +1304,7 @@ function shortTime(s: string): string {
 .nd-col-size,
 .nd-col-time {
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 .nd-col-act {
   display: flex;
@@ -1329,7 +1328,7 @@ function shortTime(s: string): string {
   color: var(--color-text-primary);
 }
 .nd-sort-mark {
-  transition: opacity 0.15s, transform 0.15s;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
 }
 .nd-sort-mark.is-idle {
   opacity: 0.25;
@@ -1363,15 +1362,11 @@ function shortTime(s: string): string {
 .nd-act-btn.is-danger:hover {
   color: var(--color-danger);
 }
-.nd-dl {
-  padding: var(--space-1) var(--space-4);
-  font-size: 12px;
-}
 .nd-tip {
   padding: var(--space-9);
   text-align: center;
   color: var(--color-text-muted);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .nd-jobs {
@@ -1388,7 +1383,7 @@ function shortTime(s: string): string {
 }
 .nd-jobs-title {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
 }
 .nd-job {
@@ -1396,7 +1391,7 @@ function shortTime(s: string): string {
   grid-template-columns: 14px minmax(0, 220px) minmax(0, 1fr) 60px;
   align-items: center;
   gap: var(--space-4);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 .nd-job-dir {
   display: flex;
@@ -1427,7 +1422,7 @@ function shortTime(s: string): string {
 .nd-job-fill {
   height: 100%;
   background: var(--color-accent);
-  transition: width 0.2s linear;
+  transition: width var(--transition-base);
 }
 .nd-job-fill.is-done {
   background: var(--color-success);
@@ -1444,7 +1439,7 @@ function shortTime(s: string): string {
 .nd-pv-mask {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1475,12 +1470,12 @@ function shortTime(s: string): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
 }
 .nd-pv-size {
   flex: none;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
 }
 .nd-pv-head .nd-dl {
@@ -1540,7 +1535,7 @@ function shortTime(s: string): string {
 .nd-pv-tip {
   padding: var(--space-9);
   text-align: center;
-  font-size: 13px;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 </style>

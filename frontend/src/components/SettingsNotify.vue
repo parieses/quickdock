@@ -93,10 +93,10 @@ async function test(kind: WebhookKind) {
   msg.value = ''
   try {
     const r = await TestWebhook(kind, url)
-    msg.value = (r && r.code !== 0) ? '❌ ' + r.msg : '✅ ' + t('mon_nf_test_ok')
+    msg.value = (r && r.code !== 0) ? r.msg : t('mon_nf_test_ok')
     msgOk.value = !(r && r.code !== 0)
   } catch (e) {
-    msg.value = '❌ ' + getErrorMessage(e)
+    msg.value = getErrorMessage(e)
     msgOk.value = false
   } finally {
     testing.value = ''
@@ -231,7 +231,7 @@ async function testExtra(ch: ExtraNotifyChannel) {
         <label class="nt-label">{{ t('mon_nf_' + kind) }}</label>
         <div class="nt-row">
           <input v-model="fields[kind].ref.value" class="qd-input" :placeholder="t('mon_nf_' + kind + '_ph')" />
-          <button class="nt-test" :disabled="testing === kind" @click="test(kind)">
+          <button class="btn btn-secondary btn-sm" :disabled="testing === kind" @click="test(kind)">
             {{ testing === kind ? '…' : t('mon_nf_test') }}
           </button>
         </div>
@@ -270,7 +270,7 @@ async function testExtra(ch: ExtraNotifyChannel) {
             autocomplete="off"
             spellcheck="false"
           />
-          <button type="button" class="ntx-eye" @click="toggleUrlVisible(ch.id)">
+          <button type="button" class="btn btn-ghost btn-sm" @click="toggleUrlVisible(ch.id)">
             {{ isUrlVisible(ch.id) ? t('mcpTokenHide') : t('mcpTokenShow') }}
           </button>
         </div>
@@ -278,10 +278,10 @@ async function testExtra(ch: ExtraNotifyChannel) {
           <input v-model="ch.enabled" type="checkbox" />
           <span>{{ t('notifyExtraEnable') }}</span>
         </label>
-        <button class="ntx-op" :disabled="extraTesting === ch.id" @click="testExtra(ch)">
+        <button class="btn btn-sm" :disabled="extraTesting === ch.id" @click="testExtra(ch)">
           {{ extraTesting === ch.id ? '…' : t('mon_nf_test') }}
         </button>
-        <button class="ntx-op is-danger" @click="removeExtra(ch.id)">{{ t('delete') }}</button>
+        <button class="btn btn-danger btn-sm" @click="removeExtra(ch.id)">{{ t('delete') }}</button>
       </div>
 
       <div class="ntx-actions">
@@ -297,23 +297,15 @@ async function testExtra(ch: ExtraNotifyChannel) {
 </template>
 
 <style scoped>
-.nt-hint { font-size: var(--text-xs); color: var(--color-text-disabled); margin: 0 0 var(--space-3); line-height: 1.6; }
+.nt-hint { font-size: var(--text-sm); color: var(--color-text-muted); margin: 0 0 var(--space-3); line-height: 1.6; }
 .nt-label { display: block; font-size: var(--text-sm); color: var(--color-text-secondary); margin: var(--space-3) 0 var(--space-2); }
 .nt-row { display: flex; gap: var(--space-2); align-items: center; }
 .nt-row .qd-input { flex: 1; min-width: 0; }
-.nt-test {
-  flex-shrink: 0; height: 34px; padding: 0 14px; border: 1px solid var(--color-border);
-  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
-  border-radius: var(--radius-md); font-size: var(--text-sm); cursor: pointer; font-family: inherit;
-  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
-}
-.nt-test:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-hover); }
-.nt-test:disabled { opacity: 0.5; cursor: default; }
 .nt-msg { margin-top: var(--space-3); font-size: var(--text-sm); color: var(--color-text-secondary); word-break: break-all; line-height: 1.5; }
 .nt-msg.ok { color: var(--color-success); }
 .nt-actions { display: flex; justify-content: flex-end; margin-top: var(--space-4); }
 /* 扩展渠道行：字段较多，用 flex-wrap 让窄面板自动换行，不挤成横向滚动条 */
-.ntx-empty { font-size: var(--text-sm); color: var(--color-text-disabled); margin: var(--space-3) 0; }
+.ntx-empty { font-size: var(--text-sm); color: var(--color-text-muted); margin: var(--space-3) 0; }
 .ntx-row {
   display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center;
   padding: var(--space-3) 0; border-bottom: 1px solid var(--color-border);
@@ -322,20 +314,6 @@ async function testExtra(ch: ExtraNotifyChannel) {
 .ntx-kind { flex: 0 1 130px; min-width: 110px; }
 .ntx-url { flex: 2 1 220px; min-width: 200px; display: flex; gap: var(--space-2); align-items: center; }
 .ntx-url .qd-input { flex: 1; min-width: 0; }
-.ntx-eye {
-  flex-shrink: 0; height: 34px; padding: 0 10px; border: 1px solid var(--color-border);
-  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
-  border-radius: var(--radius-md); font-size: var(--text-sm); cursor: pointer; font-family: inherit;
-}
-.ntx-eye:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .ntx-enable { display: inline-flex; align-items: center; gap: var(--space-2); flex-shrink: 0; font-size: var(--text-sm); color: var(--color-text-secondary); }
-.ntx-op {
-  flex-shrink: 0; height: 34px; padding: 0 var(--space-5); border: 1px solid var(--color-border);
-  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
-  border-radius: var(--radius-md); font-size: var(--text-sm); cursor: pointer; font-family: inherit;
-}
-.ntx-op:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-hover); }
-.ntx-op:disabled { opacity: 0.5; cursor: default; }
-.ntx-op.is-danger:hover:not(:disabled) { color: var(--color-danger); }
 .ntx-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-4); }
 </style>
