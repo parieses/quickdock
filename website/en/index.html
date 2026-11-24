@@ -358,6 +358,23 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">Safer downloads, long-running fixes, and smoother AI chat switching</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>Downloads now verify integrity: official hashes are checked when available, executables are checked by file signature, and HTTPS-to-HTTP downgrades or suspicious redirects are blocked — a mirror can no longer quietly install a replaced binary as the official build. Ollama upgrades stop the service and wait for the port to free before an atomic directory swap, with rollback on failure. The same runtime can no longer be installed from two pages at once, installs can be cancelled, extraction limits count real bytes written, and incomplete installs are no longer treated as installed. Stopping a service now re-checks the port instead of always reporting success.</li>
+          <li>Script tasks fix several ways a run could hang: a single huge output line no longer blocks forever, cancellations and timeouts have a bounded fallback, dependency-install logs are kept separately instead of being cleared when the run starts, and import paths plus archive entry/size limits are validated. AI self-healing after failed scheduled runs is now throttled to once per 30 minutes per script. When a trigger port is taken, the toast shows the port actually used.</li>
+          <li>Long AI tasks no longer end early just because cached tokens were counted as spend — the budget now counts only genuinely new input and output. The task list settles and persists as soon as an answer finishes, so refreshing no longer brings back a spinning step. Switching chats while a task is running no longer freezes or ignores clicks, and a chat-shaped skeleton placeholder keeps the transition consistent with page navigation. Stop now always returns instead of killing the process and hanging.</li>
+          <li>AI safety boundaries are tighter: approvals use a host-generated key so duplicate call IDs cannot cross wires, secret-file detection uses the real path instead of a user-editable name, and a broken profile or knowledge-base config can no longer overwrite existing API keys with empty values. Injecting a message while running goes through an interface that reports failures properly.</li>
+          <li>Notes and knowledge base: renaming a folder no longer rewrites wiki links pointing to a document with the same name; note saving updates the search index incrementally so typing stays fast as a library grows; partial vector failures now show "partially indexed" with all actions still available instead of being stuck on "indexing"; full-width queries match, moving a file to another library actually switches it, and stopping an index takes effect immediately.</li>
+          <li>The new and refresh icons on the dashboard's script card sit on the right again instead of in the middle.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.56</span>
+          <span class="log-date">2026-11-24</span>
           <span class="log-title">Script tasks arrive: run JS, Python, Go and PHP locally — and let AI write them</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -403,20 +420,6 @@
           <li>Note links are easier to use: candidates are grouped by notes / todos / items and loaded on demand, backlinks show their source title instead of "deleted", renaming a note rewrites wiki references in other notes so links stop dangling, and newly created items become searchable immediately instead of waiting for the cache to expire.</li>
           <li>MCP gained 23 read-only tools covering knowledge-base source chunks, notes and individual history versions, full clipboard search, cloud-drive listing and search, monitor logs, mailbox verification codes and credential-vault status. todo_update now changes only the fields you pass, and note_update can clear a body with an empty string. The vault still exposes status and random password generation only — no plaintext reads or writes.</li>
           <li>Environment gained health probes and missing-version diagnostics: a process listening on no port is flagged, and a source missing one particular version is no longer mistaken for a dead source; failed steps in manifest imports now surface a warning instead of a false "success". Knowledge-base search finds single characters, plugin path fields are case-insensitive for permission checks, the downloader can explicitly clear its RPC secret, cloud-drive transfers have a stall guard, SSH SOCKS failures return standard error codes, and notification badges no longer overwrite each other under concurrency. A pass through all 18 navigation chapters fixed 75 usability defects.</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.53</span>
-          <span class="log-date">2026-11-19</span>
-          <span class="log-title">Trace and subtask status at a glance, with clearer hierarchy and error steps</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>Status colors are now consistent across the subtask tree and the trace drawer: running is blue, done green, failed red, and canceled orange — no more "running" and "canceled" both showing as gray. The branch that is still running lights up its left edge and pulses its status dot, so you can scan a list of subtasks and instantly see which one is still going or which one failed, without reading every line. These animations turn off automatically when your system requests reduced motion.</li>
-          <li>The trace node tree now has hierarchy guide lines, so besides indentation you can see exactly which node spawned which subtask. Failed steps highlight both their number and title in red, making them easy to spot in a long timeline. A subtask that has not started yet used to be mislabeled "Done" in the message bubble; it now reads "Running", matching the drawer.</li>
-          <li>The button that stops an individual subtask was only visible on mouse hover; it now also appears on keyboard focus with a visible focus ring. Arrow and button transitions in the drawer also respect the system's reduced-motion setting.</li>
         </ul>
       </details>
 
