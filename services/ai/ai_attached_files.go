@@ -108,7 +108,8 @@ func buildAttachedFilesBlock(files []AIAttachedFile, sink EventSink) string {
 			break
 		}
 		// 展示名：内容来源必须用前端给的 name（临时文件名是随机串）；路径来源
-		// 在前端漏传 name 时用路径末段兜底。私钥 / 后缀判断都用这个名字。
+		// 在前端漏传 name 时用路径末段兜底。这个 name 只用于展示与日志，
+		// 后缀 / 私钥判定要看 attachedFileText 里的 judge（有真实路径就用路径）。
 		name := strings.TrimSpace(f.Name)
 		if name == "" && path != "" {
 			name = filepath.Base(path)
@@ -144,19 +145,25 @@ func buildAttachedFilesBlock(files []AIAttachedFile, sink EventSink) string {
 
 // attachedFileText 解析单条插入文件成可读文本，按预算裁行。
 //
-// f.Path 非空走本地文件；否则把 f.Content（base64）按 name 的后缀写到临时文件。
-// name 同时用于私钥 / 后缀判断：内容来源没有真实路径，绝不能拿随机临时名去判。
+// f.Path 非空走本地文件；否则把 f.Content（base64）按 judge 的后缀写到临时文件。
+// name 只用于展示（标签 / 日志）与内容来源的后缀；有真实路径时后缀与私钥判定
+// 一律用 path——否则 {path:"…/credentials.json", name:"data.json"} 就能靠伪造
+// name 绕过私钥拦截。内容来源没有真实路径，只能用前端给的 name。
 func attachedFileText(f AIAttachedFile, name string, budget int) (string, bool) {
 	path := strings.TrimSpace(f.Path)
 	content := strings.TrimSpace(f.Content)
 
-	// 后缀和私钥都按「用户看到的那个名字」判，路径 / 内容来源一视同仁。
-	ext := strings.ToLower(filepath.Ext(name))
+	// 判定目标：有真实路径信路径，没有（纯内容插入）才退回 name。
+	judge := name
+	if path != "" {
+		judge = path
+	}
+	ext := strings.ToLower(filepath.Ext(judge))
 	if !kb.IsSupported(ext) {
 		logger.W("[ai] 插入文件格式不支持 name=%s ext=%s", name, ext)
 		return "", false
 	}
-	if fsguard.SecretFile(name) {
+	if fsguard.SecretFile(judge) {
 		logger.W("[ai] 插入文件是私钥，已拒绝 name=%s", name)
 		return "", false
 	}

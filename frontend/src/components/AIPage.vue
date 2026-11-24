@@ -147,6 +147,19 @@ const loadingEarlier = ref(false)
 const spaces = ref<AISpace[]>([])
 const activeId = ref('')
 const messages = ref<AIMessage[]>([])
+// 会话切换过渡：切走时先让消息区淡出，等新会话的数据 + 视口都就绪再淡入。
+// 长的历史会话加载要解图片、渲染上百条 markdown，这段卡顿藏在淡出期间，
+// 用户看到的是平滑换页而不是「卡一下然后啪地换内容」。
+const msgSwitching = ref(false)
+// 每次切会话自增：连点多个会话时只有最后一次有权淡入，前面的迟到回调不能
+// 抢先摘掉 is-switching，否则新会话的数据还在加载就露出来了。
+let convSwitchGen = 0
+// 骨架遮罩的范围：只盖消息区，不压工具栏和输入区。工具栏/输入区高度都不固定，
+// 写死 top/bottom 会错位。几何由 ResizeObserver 被动量好后缓存在这里，切会话时
+// 只读缓存——绝不能在点击的同步路径里调 getBoundingClientRect：有任务在跑时
+// DOM 每帧都在变，同步量布局会强制浏览器做完所有 pending reflow，点击就"没反应"。
+const aiMainRef = ref<HTMLElement | null>(null)
+const convLoadingStyle = ref<Record<string, string>>({})
 const input = ref('')
 const mode = ref('chat')
 // —— 「哪几条在跑」——
@@ -489,7 +502,7 @@ async function approveTool(tc: AIToolCall, decision: 'allow' | 'deny', remember 
   // 「已拒绝」而不是一条普通的红色报错。
   if (decision === 'deny') tc.denied = true
   try {
-    unwrap(await AIApproveToolCall(tc.approvalConvId || activeId.value, tc.id, decision, remember))
+    unwrap(await AIApproveToolCall(tc.approvalConvId || activeId.value, tc.approvalKey || tc.id, decision, remember))
   } catch (e) {
     tc.approval = 'pending'
     tc.denied = false
@@ -606,6 +619,38 @@ const aiStreamToken = ref('')
 // 都跟着容器走。留在父组件里就得靠事件回传互相读对方状态，反而更容易漏。
 // 这里只保留三个转发入口，父组件在「发送 / 切会话 / 流式跟帧」时调用。
 const msgListRef = ref<InstanceType<typeof AiMessageList> | null>(null)
+
+// 遮罩贴着消息区而不是整个主区：工具栏与输入区高度都不固定（审批条会出现、
+// 免责声明会换行），写死偏移迟早错位。
+// 用 ResizeObserver 在布局稳定后被动量一次，结果存进 convLoadingStyle。
+// 不能在 selectConv 的同步路径里量：任务在跑时 DOM 每帧都在变，同步
+// getBoundingClientRect 会强制 reflow，几百条消息的重新布局就是「点了没反应」。
+let convSkeletonRO: ResizeObserver | null = null
+watch([aiMainRef, msgListRef], () => {
+  convSkeletonRO?.disconnect()
+  const main = aiMainRef.value
+  // 必须用组件暴露的 areaEl()，不能用 $el：script-setup 组件的 $el 在某些
+  // 挂载时序下不是 DOM 节点（实测点侧栏会话时拿到非 HTMLElement，
+  // getBoundingClientRect is not a function，一次点击就一条 vue crash 日志）。
+  const msg = msgListRef.value?.areaEl()
+  // 双重守卫：watch 的 post 回调可能在组件切换中间态跑到，ref 指向的
+  // 是正在卸载的实例/空壳，不是 Element。observe 一个非 Element 会直接抛
+  // "parameter 1 is not of type 'Element'"，比不量更糟——那就退回 inset:0。
+  if (!(main instanceof Element) || !(msg instanceof Element)) return
+  convSkeletonRO = new ResizeObserver(() => {
+    // RO 触发时 msg 可能已被卸载（组件切换），元素脱离 DOM 后 rect 全 0，
+    // 会把遮罩压成一条。此时跳过更新，等下一次 watch 重建 observer。
+    if (!main.isConnected || !msg.isConnected) return
+    const mr = main.getBoundingClientRect()
+    const sr = msg.getBoundingClientRect()
+    convLoadingStyle.value = {
+      top: `${Math.max(0, sr.top - mr.top)}px`,
+      bottom: `${Math.max(0, mr.bottom - sr.bottom)}px`,
+    }
+  })
+  convSkeletonRO.observe(main)
+  convSkeletonRO.observe(msg)
+}, { flush: 'post' })
 
 function scrollToBottom(smooth = false) {
   msgListRef.value?.scrollToBottom(smooth)
@@ -1173,85 +1218,102 @@ async function selectConv(id: string, msgId?: string) {
   // 不再打断正在生成的回答：切换的是「我在看哪条」，不是「停掉哪条」。
   // 停有显式的停止按钮，不拿「切换」当停止的替代品——用户只是想去翻一眼别的
   // 任务，回来时半截回答没了，那是最难受的一种丢内容。
+  // 换会话先淡出消息区；真正的数据加载与几百条 markdown 渲染都在不可见期完成，
+  // 末尾数据就绪后再淡入。只在同一会话被重复点开（id 未变）时跳过，避免无谓闪烁。
+  const switchGen = ++convSwitchGen
+  if (activeId.value !== id) {
+    // 几何已由 ResizeObserver 提前量好，这里只读缓存、不碰 DOM 布局。
+    msgSwitching.value = true
+  }
   activeId.value = id
-  // 看过就消：绿点的含义是「有结果你没看」，人已经在里面了就不该再挂着。
-  // 但正在跑的那条不能删——删了之后再切走，就再也看不出它还在生成了。
-  if (runOf(id)) convRunState.value[id] = 'running'
-  else delete convRunState.value[id]
-  const conv = conversations.value.find((c) => c.id === id)
-  // 切进来先把清单补上：它可能是在别的设备/上次进程里规划好的（WP17）。
-  hydratePlanOf(conv)
-  // 轨迹入口也要补：刷新页面后手上没有 done 事件，只能从库里取最近一次 run。
-  // 不 await——它只影响那个小圆点，不该让切会话等一次往返。
-  // 定时任务在后台跑完的会话带未读点：人已经切进来了就消。
-  // 先改本地数组再发请求，避免后端往返期间点还在闪；写失败只留日志，
-  // 不弹 toast——未读只是提示，不该打断一次正常的切会话。
-  if (conv?.unread) {
-    conv.unread = false
-    void AIMarkConversationRead(id).catch((e) => logErr('ai:markRead', e))
-  }
-  // 工作目录跟着任务走：两条对话可以绑不同项目，切回来时要还原成它自己的那个。
-  convCwd.value = (conv?.cwd || '').trim()
-  // 模式是这个任务创建时选定的属性，切回来要还原——否则「这条是用来翻译的」
-  // 在切走再回来之后就丢了。
-  mode.value = (conv?.mode || 'chat').trim() || 'chat'
-  // 权限跟着任务走：这条对话开过完全访问、或设成只读，切回来要还原成它自己的档位。
-  permLevel.value = restorePermLevel(conv)
-  // 模型也是任务属性，不是全局开关：A 任务用 flash、B 任务用 reasoning，
-  // 两边切来切去不该互相串。老会话没存过，或存的档案已被删掉，就回落到
-  // 全局「最后选择」——否则 <select> 的 value 匹配不到任何 option，会显示空白。
-  const ownProfile = (conv?.profile_id || '').trim()
-  aiActive.value = ownProfile && aiProfiles.value.some((p) => p.id === ownProfile)
-    ? ownProfile
-    : lastActiveProfile
-  // 工作区同样跟着任务走：已开的不再显示开关，只显示「基于哪条分支 + 移除」；
-  // 没开的把草稿状态清干净，免得上一条任务的勾选黏到这一条上。
-  worktreeBranchOpen.value = false
-  if ((conv?.worktree_path || '').trim()) {
-    worktreeEnabled.value = true
-    worktreeBranch.value = (conv?.worktree_branch || '').trim()
-  } else {
-    worktreeEnabled.value = false
-    worktreeBranch.value = ''
-  }
-  // 已有会话的归属以库里的为准，新建待定值在这里作废。
-  pendingSpaceId.value = ''
-  // 流式缓冲不用清：每条流各存一份（见 AIRun），切过来看到的就是这条会话
-  // 自己的半截回答，别的 run 一个字节都不会漏到这一页。
-  // 待发送的 @ 引用必须清：切会话之后 cwd 可能变了，旧路径带过去只会被后端一堆拒。
-  resetComposerState()
-  pageError.value = ''
-  // 从搜索命中点进来时取整段历史：目标消息可能不在首屏 50 条里。
-  await loadMessages(id, !!msgId)
-  // 切回一条「还在跑」的会话时补一次流式渲染。
-  //
-  // 后台那条 run 的 flush 刻意不画（见 flushStream：只画用户正看着的那条），
-  // 所以它的 blocks 停在切走那一刻。不补的话，模型正在跑工具（可能几十秒
-  // 没有新 token）时切回来，看到的是缺了后半截的回答，甚至整个气泡空白。
-  const back = runOf(id)
-  if (back) {
-    // 定时 flush 可能还没到点，先把缓冲并进正文再重画。
-    if (back.buf) { back.text += back.buf; back.buf = '' }
-    if (back.reasonBuf) { back.reasoning += back.reasonBuf; back.reasonBuf = '' }
-    renderLiveBlocks(back.text, back.blocks)
-    scheduleMermaidScan()
-    followBottom()
-  }
-  // 回滚点跟着会话走：切回来要能看到这条对话改过哪些文件。
-  // 与消息分开拉而不是塞进 AIGetMessages：回滚点是「另一张表的东西」，
-  // 混进消息响里会让那个接口为一张很少用到的表付出每次查询的代价。
-  void loadCheckpoints(id)
-
-  // 从搜索命中点进来的：落到那句话上，而不是落在底部让用户自己翻。
-  // 命中可能早于「默认只挂最近 200 条」的窗口，交给 ensureRendered 先补渲染。
-  if (msgId) {
-    await nextTick()
-    // 上面那条「还在跑就补渲染 + followBottom」会把视口拉到底，跳转必须排在它之后。
-    const ok = await msgListRef.value?.ensureRendered(msgId)
-    if (!ok) {
-      // 找不到（消息在这期间被删了 / 换了会话）就停在原处，不提示——
-      // 用户看到的是这条对话本身，位置只差一次滚动。
+  try {
+    // 看过就消：绿点的含义是「有结果你没看」，人已经在里面了就不该再挂着。
+    // 但正在跑的那条不能删——删了之后再切走，就再也看不出它还在生成了。
+    if (runOf(id)) convRunState.value[id] = 'running'
+    else delete convRunState.value[id]
+    const conv = conversations.value.find((c) => c.id === id)
+    // 切进来先把清单补上：它可能是在别的设备/上次进程里规划好的（WP17）。
+    hydratePlanOf(conv)
+    // 轨迹入口也要补：刷新页面后手上没有 done 事件，只能从库里取最近一次 run。
+    // 不 await——它只影响那个小圆点，不该让切会话等一次往返。
+    // 定时任务在后台跑完的会话带未读点：人已经切进来了就消。
+    // 先改本地数组再发请求，避免后端往返期间点还在闪；写失败只留日志，
+    // 不弹 toast——未读只是提示，不该打断一次正常的切会话。
+    if (conv?.unread) {
+      conv.unread = false
+      void AIMarkConversationRead(id).catch((e) => logErr('ai:markRead', e))
+    }
+    // 工作目录跟着任务走：两条对话可以绑不同项目，切回来时要还原成它自己的那个。
+    convCwd.value = (conv?.cwd || '').trim()
+    // 模式是这个任务创建时选定的属性，切回来要还原——否则「这条是用来翻译的」
+    // 在切走再回来之后就丢了。
+    mode.value = (conv?.mode || 'chat').trim() || 'chat'
+    // 权限跟着任务走：这条对话开过完全访问、或设成只读，切回来要还原成它自己的档位。
+    permLevel.value = restorePermLevel(conv)
+    // 模型也是任务属性，不是全局开关：A 任务用 flash、B 任务用 reasoning，
+    // 两边切来切去不该互相串。老会话没存过，或存的档案已被删掉，就回落到
+    // 全局「最后选择」——否则 <select> 的 value 匹配不到任何 option，会显示空白。
+    const ownProfile = (conv?.profile_id || '').trim()
+    aiActive.value = ownProfile && aiProfiles.value.some((p) => p.id === ownProfile)
+      ? ownProfile
+      : lastActiveProfile
+    // 工作区同样跟着任务走：已开的不再显示开关，只显示「基于哪条分支 + 移除」；
+    // 没开的把草稿状态清干净，免得上一条任务的勾选黏到这一条上。
+    worktreeBranchOpen.value = false
+    if ((conv?.worktree_path || '').trim()) {
+      worktreeEnabled.value = true
+      worktreeBranch.value = (conv?.worktree_branch || '').trim()
+    } else {
+      worktreeEnabled.value = false
+      worktreeBranch.value = ''
+    }
+    // 已有会话的归属以库里的为准，新建待定值在这里作废。
+    pendingSpaceId.value = ''
+    // 流式缓冲不用清：每条流各存一份（见 AIRun），切过来看到的就是这条会话
+    // 自己的半截回答，别的 run 一个字节都不会漏到这一页。
+    // 待发送的 @ 引用必须清：切会话之后 cwd 可能变了，旧路径带过去只会被后端一堆拒。
+    resetComposerState()
+    pageError.value = ''
+    // 从搜索命中点进来时取整段历史：目标消息可能不在首屏 50 条里。
+    await loadMessages(id, !!msgId)
+    // 切回一条「还在跑」的会话时补一次流式渲染。
+    //
+    // 后台那条 run 的 flush 刻意不画（见 flushStream：只画用户正看着的那条），
+    // 所以它的 blocks 停在切走那一刻。不补的话，模型正在跑工具（可能几十秒
+    // 没有新 token）时切回来，看到的是缺了后半截的回答，甚至整个气泡空白。
+    const back = runOf(id)
+    if (back) {
+      // 定时 flush 可能还没到点，先把缓冲并进正文再重画。
+      if (back.buf) { back.text += back.buf; back.buf = '' }
+      if (back.reasonBuf) { back.reasoning += back.reasonBuf; back.reasonBuf = '' }
+      renderLiveBlocks(back.text, back.blocks)
+      scheduleMermaidScan()
       followBottom()
+    }
+    // 回滚点跟着会话走：切回来要能看到这条对话改过哪些文件。
+    // 与消息分开拉而不是塞进 AIGetMessages：回滚点是「另一张表的东西」，
+    // 混进消息响里会让那个接口为一张很少用到的表付出每次查询的代价。
+    void loadCheckpoints(id)
+
+    // 从搜索命中点进来的：落到那句话上，而不是落在底部让用户自己翻。
+    // 命中可能早于「默认只挂最近 200 条」的窗口，交给 ensureRendered 先补渲染。
+    if (msgId) {
+      await nextTick()
+      // 上面那条「还在跑就补渲染 + followBottom」会把视口拉到底，跳转必须排在它之后。
+      const ok = await msgListRef.value?.ensureRendered(msgId)
+      if (!ok) {
+        // 找不到（消息在这期间被删了 / 换了会话）就停在原处，不提示——
+        // 用户看到的是这条对话本身，位置只差一次滚动。
+        followBottom()
+      }
+    }
+  } finally {
+    // 中途任何一步抛错也必须摘掉遮罩，否则消息区停在 opacity:0 +
+    // pointer-events:none，界面看起来就是「切过去一片空白、点什么都没反应」。
+    // nextTick 等新 DOM 挂上；只有最后一次切换有权复位，迟到的旧回调不许抢。
+    if (switchGen === convSwitchGen) {
+      await nextTick()
+      if (switchGen === convSwitchGen) msgSwitching.value = false
     }
   }
 }
@@ -3465,6 +3527,9 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  // 遮罩几何的 ResizeObserver 跟着组件收，别对已卸载的元素继续量。
+  convSkeletonRO?.disconnect()
+  convSkeletonRO = null
   // 上膛的 3 秒定时器要跟着组件一起收：否则它会对着已卸载的 ref 赋值。
   disarmScratch()
   Events.Off('ai:conv')
@@ -3550,7 +3615,7 @@ onUnmounted(() => {
     />
 
     <!-- 右侧聊天区 -->
-    <section class="ai-main">
+    <section ref="aiMainRef" class="ai-main">
       <!-- 工具栏只在「进入对话」后出现：落地页（点导航进来、还没发消息/选会话）
            顶部不该挂一条空工具栏，尤其那个点了也没有 run 可看的轨迹入口。
            isNewTask 在发首条消息、选中历史会话或开始流式时立刻转 false，工具栏随即出现。 -->
@@ -3723,6 +3788,7 @@ onUnmounted(() => {
         :mode="mode"
         :runs="runs"
         :active-id="activeId"
+        :switching="msgSwitching"
         :draft-run-id="draftRunId"
         :error-msg="errorMsg"
         :can-retry="canRetry"
@@ -3753,6 +3819,23 @@ onUnmounted(() => {
         @msg-mouseup="onMsgMouseUp"
         @msg-contextmenu="onMsgContextMenu"
       ></AiMessageList>
+
+      <!-- 会话切换遮罩：消息区淡出的同时盖一层骨架色块，形态照着聊天气泡
+           （左右交错），让长会话加载期间不露空白、也不像卡死。z-index 低于
+           划词浮层(50)/右键菜单(700)——那些是「当前会话」的交互，切换中不出现。
+           opacity 过渡与消息区同步收尾。 -->
+      <Transition name="fade">
+        <div v-if="msgSwitching" class="ai-conv-loading" :style="convLoadingStyle" aria-hidden="true">
+          <div class="ai-conv-skeleton">
+            <div class="ai-conv-sk-row right"><span class="ai-conv-sk-bubble sm"></span></div>
+            <div class="ai-conv-sk-row"><span class="ai-conv-sk-bubble lg"></span></div>
+            <div class="ai-conv-sk-row"><span class="ai-conv-sk-bubble md"></span></div>
+            <div class="ai-conv-sk-row right"><span class="ai-conv-sk-bubble md"></span></div>
+            <div class="ai-conv-sk-row"><span class="ai-conv-sk-bubble lg"></span></div>
+            <div class="ai-conv-sk-row"><span class="ai-conv-sk-bubble sm"></span></div>
+          </div>
+        </div>
+      </Transition>
 
       <!-- 「回到底部」按钮由 AiMessageList 自己渲染：它跟着消息容器的滚动状态走，
            放在父组件里要靠事件回传，反而多一层状态。 -->
@@ -4028,6 +4111,45 @@ onUnmounted(() => {
 /* 主区：position:relative 是两个浮层（大纲面板）与「回到底部」按钮的定位锚点，
    拆出去的子组件靠 display:contents 让内容继续参与这里的布局。 */
 .ai-main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+
+/* 会话切换遮罩：只盖消息区（top/bottom 由 ResizeObserver 写进 style，点击时只读缓存），
+   不压工具栏和输入区。pointer-events:none 不挡交互；z-index 低于划词浮层(50)/
+   右键菜单(700)，那些是「当前会话」的东西。 */
+.ai-conv-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  overflow: hidden;
+  pointer-events: none;
+}
+.ai-conv-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  width: min(var(--ai-column-max), calc(100% - var(--space-6) - var(--space-6)));
+  margin: var(--space-8) auto 0;
+}
+.ai-conv-sk-row { display: flex; }
+.ai-conv-sk-row.right { justify-content: flex-end; }
+/* 材质与 PageLoading.pl-bar 保持一致：活动态实色 + 同步呼吸，不用扫光。
+   会话切换骨架常只露一两百毫秒，扫光一轮都跑不完，只会看见几条色块在乱动。
+   形态仍是聊天气泡（左右交错、三档宽度），只统一材质语言。 */
+.ai-conv-sk-bubble {
+  height: 62px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-active);
+  animation: ai-conv-breathe 1.5s ease-in-out infinite;
+}
+.ai-conv-sk-bubble.lg { width: 82%; }
+.ai-conv-sk-bubble.md { width: 64%; }
+.ai-conv-sk-bubble.sm { width: 42%; height: 46px; }
+@keyframes ai-conv-breathe {
+  0%, 100% { opacity: .55; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-conv-sk-bubble { animation: none; opacity: .75; }
+}
 
 /* 输入停靠区：审批卡相对它定位，才能「盖在输入框上」而不是把输入框往下顶。
    flex-shrink:0 必须有——消息区是 flex:1，输入区一旦可收缩，长对话里它会被压扁。 */

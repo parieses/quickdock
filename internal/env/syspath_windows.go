@@ -3,6 +3,7 @@
 package env
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -141,10 +142,45 @@ func splitPath(s string) []string {
 	return out
 }
 
+// normalizePathEntry 把单个 PATH 条目规范成可比较的形式：展开环境变量占位符
+// （如 %SystemRoot%）、去掉包裹引号、清理尾部分隔符。仅供比较/匹配使用，
+// **不回写**——写回 PATH 时仍保留用户原始写法，避免把 %VAR% 全部展开。
+func normalizePathEntry(p string) string {
+	p = strings.TrimSpace(p)
+	p = strings.Trim(p, `"`)
+	// 用 os.Expand 自定义映射：已定义的变量展开，未定义的保留原样（os.ExpandEnv 会把它们变成空串）
+	p = os.Expand(p, func(name string) string {
+		if v, ok := os.LookupEnv(name); ok {
+			return v
+		}
+		return "%" + name + "%"
+	})
+	p = strings.TrimSpace(p)
+	p = strings.Trim(p, `"`)
+	if p == "" {
+		return ""
+	}
+	if c := filepath.Clean(p); c != "." {
+		p = c
+	}
+	return p
+}
+
+// pathEntryEqual 判断两个 PATH 条目是否指向同一目录（Windows 大小写不敏感）。
+func pathEntryEqual(a, b string) bool {
+	na, nb := normalizePathEntry(a), normalizePathEntry(b)
+	if na == "" || nb == "" {
+		return false
+	}
+	return strings.EqualFold(na, nb)
+}
+
 func containsPath(path, dir string) bool {
-	dl := strings.ToLower(filepath.Clean(dir))
+	if normalizePathEntry(dir) == "" {
+		return false
+	}
 	for _, p := range splitPath(path) {
-		if strings.ToLower(filepath.Clean(p)) == dl {
+		if pathEntryEqual(p, dir) {
 			return true
 		}
 	}
@@ -152,13 +188,16 @@ func containsPath(path, dir string) bool {
 }
 
 func removePath(path, dir string) string {
-	dl := strings.ToLower(filepath.Clean(dir))
+	if normalizePathEntry(dir) == "" {
+		// dir 无效时不做任何删除，原样返回
+		return strings.Join(splitPath(path), ";")
+	}
 	out := make([]string, 0)
 	for _, p := range splitPath(path) {
-		if strings.ToLower(filepath.Clean(p)) == dl {
+		if pathEntryEqual(p, dir) {
 			continue
 		}
-		out = append(out, p)
+		out = append(out, p) // 保留原始写法（含 %VAR%）
 	}
 	return strings.Join(out, ";")
 }

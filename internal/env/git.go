@@ -213,7 +213,7 @@ func (g *GitRuntime) Install(ctx context.Context, version string, cb InstallCall
 	if cb.OnLog != nil {
 		cb.OnLog("解压 Git 到 " + g.BaseDir())
 	}
-	if err := Extract(zipPath, g.BaseDir()); err != nil {
+	if err := Extract(ctx, zipPath, g.BaseDir()); err != nil {
 		return fmt.Errorf("解压 Git 失败: %w", err)
 	}
 	if !fileExists(exe) {

@@ -185,7 +185,7 @@ func (c *CaddyRuntime) Install(ctx context.Context, version string, cb InstallCa
 	if cb.OnLog != nil {
 		cb.OnLog("解压 Caddy 到 " + dir)
 	}
-	if err := Extract(zipPath, dir); err != nil {
+	if err := Extract(ctx, zipPath, dir); err != nil {
 		return fmt.Errorf("解压 Caddy 失败: %w", err)
 	}
 	if _, err := os.Stat(c.ExeFor(version)); err != nil {

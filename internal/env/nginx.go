@@ -54,6 +54,20 @@ func (n *NginxRuntime) ExeFor(version string) string {
 	return filepath.Join(n.versionDir(version), "nginx")
 }
 
+// nginxInstallComplete 判断某版本目录是否装完整。
+//
+// 只看 nginx.exe 会把「解压中断」误判成已安装，之后每次安装都被「已安装」短路，
+// 缺 conf/ 的 nginx 永远起不来也永远修不好。Windows 官方包必带 conf/nginx.conf。
+func (n *NginxRuntime) nginxInstallComplete(version string) bool {
+	if _, err := os.Stat(n.ExeFor(version)); err != nil {
+		return false
+	}
+	if fi, err := os.Stat(filepath.Join(n.versionDir(version), "conf")); err != nil || !fi.IsDir() {
+		return false
+	}
+	return true
+}
+
 func (n *NginxRuntime) InstalledVersions() []Install {
 	var out []Install
 	dirs := managedDirs{}
@@ -63,7 +77,7 @@ func (n *NginxRuntime) InstalledVersions() []Install {
 				continue
 			}
 			v := e.Name()
-			if _, err := os.Stat(n.ExeFor(v)); err == nil {
+			if n.nginxInstallComplete(v) {
 				out = append(out, Install{Version: v, Scope: "portable", Path: n.versionDir(v)})
 				dirs.record(filepath.Dir(n.ExeFor(v)))
 			}
@@ -111,7 +125,7 @@ func (n *NginxRuntime) Install(ctx context.Context, version string, cb InstallCa
 		version = Versions(RuntimeNginx)[0]
 	}
 	dir := n.versionDir(version)
-	if _, err := os.Stat(n.ExeFor(version)); err == nil {
+	if n.nginxInstallComplete(version) {
 		if cb.OnLog != nil {
 			cb.OnLog("Nginx " + version + " 已安装: " + n.ExeFor(version))
 		}
@@ -141,7 +155,7 @@ func (n *NginxRuntime) Install(ctx context.Context, version string, cb InstallCa
 	if cb.OnLog != nil {
 		cb.OnLog("解压 Nginx 到 " + dir)
 	}
-	if err := Extract(zipPath, dir); err != nil {
+	if err := Extract(ctx, zipPath, dir); err != nil {
 		return fmt.Errorf("解压 Nginx 失败: %w", err)
 	}
 	if _, err := os.Stat(n.ExeFor(version)); err != nil {

@@ -15,6 +15,13 @@ import (
 	"quickdock/services"
 )
 
+// 导入包的资源限额。单文件大小由 maxFileBytes 兜底，条目数与解压总量在这里兜：
+// 一个体积只有几十 KB 的高压缩比 zip 可以铺出成千上万个条目，把脚本目录写满。
+const (
+	maxImportEntries    = 2000
+	maxImportTotalBytes = 512 << 20
+)
+
 // exportMeta 导出包里的 script.json。
 //
 // 为什么不导出 script_envs：变量里通常就是 Cookie / token，而 zip 是要
@@ -131,6 +138,9 @@ func (s *ScriptService) ImportScript(zipPath string) *services.ApiResult {
 
 	var meta exportMeta
 	var files []*zip.File
+	// 导入包的资源限额：单文件已有 maxFileBytes，但条目数不限时，一个几 KB 的
+	// 高压缩包（成千上万个空文件 / 极大压缩比的同名小文件）足以把脚本目录写满。
+	var totalBytes int64
 	for _, f := range zr.File {
 		if f.Name == "script.json" {
 			rc, err := f.Open()
@@ -142,6 +152,13 @@ func (s *ScriptService) ImportScript(zipPath string) *services.ApiResult {
 			continue
 		}
 		if strings.HasPrefix(f.Name, "files/") {
+			if len(files) >= maxImportEntries {
+				return services.FailMsg(fmt.Sprintf("压缩包条目过多（超过 %d 个），导入已中止", maxImportEntries))
+			}
+			totalBytes += int64(f.UncompressedSize64)
+			if totalBytes > maxImportTotalBytes {
+				return services.FailMsg(fmt.Sprintf("压缩包解压后超过 %dMB，导入已中止", maxImportTotalBytes>>20))
+			}
 			files = append(files, f)
 		}
 	}
@@ -211,9 +228,7 @@ func (s *ScriptService) DeleteScriptRuns(id string) *services.ApiResult {
 		return services.Fail(err)
 	}
 	for _, r := range runs {
-		if r.LogPath != "" {
-			_ = os.Remove(r.LogPath)
-		}
+		removeRunLogs(r.LogPath)
 	}
 	return services.Ok(map[string]any{"deleted": len(runs)})
 }

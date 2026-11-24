@@ -92,12 +92,30 @@ func addTokenUsage(a, b db.TokenUsage) db.TokenUsage {
 	}
 }
 
-// tokensOf 一次调用/一个累计量一共多少 token（输入 + 输出）。
+// tokensOf 全量口径：Prompt + Completion（含缓存命中的输入）。
 //
-// 预算判断只用这两个之和：缓存命中的输入（Cached）已经在 Prompt 里算过一次，
-// 再加一遍会让「省了钱的调用」被当成「花得更多」。
+// 派活的单节点预算（agentNodeTokenCap）与 run 级预算（agentScope.used）都是按
+// 这个口径标定过的，保持不变；主循环改用下面的 billableTokens。
+// 两边口径刻意不同：混用会让那几个调好的预算数字突然松/紧一个数量级。
 func tokensOf(u db.TokenUsage) int {
 	return u.Prompt + u.Completion
+}
+
+// billableTokens 一次调用/一个累计量的「计费口径」token：真正新增的输入 + 输出。
+//
+// Prompt 本身已包含命中缓存的部分（Cached 是 Prompt 的子集，见 toUsage），
+// 命中缓存不按全价计费，也不该吃掉多轮预算。若拿 Prompt+Completion 逐轮累加，
+// 1M 窗口、97% 命中率的长任务跑 60 轮就会记上 700 多万「token」，
+// 实际新增只有 25 万——预算提前收尾，活干一半被掐断（2026-11-24 实测）。
+//
+// 只用于预算判断与预算提示文案；用量明细落库仍记 Prompt/Cached/Completion 全量，
+// 统计面板要看到真实的输入、缓存与命中率。
+func billableTokens(u db.TokenUsage) int {
+	uncached := u.Prompt - u.Cached
+	if uncached < 0 {
+		uncached = 0 // 个别上游会把 cached 报得比 prompt 大，夹一下
+	}
+	return uncached + u.Completion
 }
 
 // recordAIChatTurn 记录多轮工具循环里的一轮模型调用。

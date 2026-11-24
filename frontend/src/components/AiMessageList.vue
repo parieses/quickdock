@@ -91,6 +91,14 @@ const props = defineProps<{
   canLoadEarlier: boolean
   loadingEarlier: boolean
   loadEarlier: () => Promise<void>
+  /**
+   * 会话切换中：整块消息区淡出（见 .ai-messages.is-switching）。
+   * 父组件在 activeId 变化时先置 true，数据 + 视口都就绪后再置 false，
+   * 让「加载 + 200 条 markdown 渲染」这段卡顿发生在不可见期。
+   * 淡出期间顺带屏蔽点击——那时 activeId 已经是新会话、messages 还是旧的，
+   * 点中一条旧消息会触发基于错误上下文的操作。
+   */
+  switching?: boolean
 }>()
 
 // —— 流式状态从 runs 里自己取 ——
@@ -750,7 +758,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 </script>
 
 <template>
-  <div v-key-click ref="msgArea" class="ai-messages" @scroll="onMsgScroll" @mouseup="emit('msg-mouseup', $event)" @keyup="emit('msg-mouseup', $event)" @click="emit('msg-click', $event)" @contextmenu="emit('msg-contextmenu', $event)">
+  <div v-key-click ref="msgArea" class="ai-messages" :class="{ 'is-switching': switching }" @scroll="onMsgScroll" @mouseup="emit('msg-mouseup', $event)" @keyup="emit('msg-mouseup', $event)" @click="emit('msg-click', $event)" @contextmenu="emit('msg-contextmenu', $event)">
     <div ref="msgContent" class="ai-msg-content-wrap">
       <div v-if="!hasKey" class="ai-need-key">
         <Bot :size="40" />
@@ -1597,6 +1605,23 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
      「聊天区不能复制」。这里把整区打开，纯装饰/可点击部件各自关掉。 */
   user-select: text;
   -webkit-user-select: text;
+  /* 会话切换过渡：淡入走 base、淡出走 fast（和导航切页的手感一致）。
+     只动 opacity、不碰 transform——这是滚动容器，transform 会造出 containing
+     block 影响内部定位；而淡入淡出已经足够消掉「啪一下换内容」的突兀感。 */
+  transition: opacity var(--transition-base);
+}
+
+/* 切会话途中先淡出并吃掉点击。父组件在数据加载 + 视口就绪后才摘掉这个 class，
+   于是「拉消息 + 渲染 200 条 markdown」这段最卡的活发生在看不见的时候；
+   淡出期间 activeId 已是新会话、messages 还是旧的，屏蔽点击免得点中旧气泡。
+   transition 必须放在基线上：写在 .is-switching 里的话，class 一摘动画属性
+   也跟着消失，淡入就变成硬切——上一版正是这样，切回来时内容突然蹦出来。 */
+.ai-messages {
+  transition: opacity var(--transition-base);
+}
+.ai-messages.is-switching {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* 只关掉「按钮 / 折叠标题」这类点一下就变的东西：划中它们只会得到噪音。

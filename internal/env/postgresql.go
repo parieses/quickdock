@@ -129,7 +129,7 @@ func (p *PostgresRuntime) Install(ctx context.Context, version string, cb Instal
 	if cb.OnLog != nil {
 		cb.OnLog("解压 PostgreSQL 到 " + dir)
 	}
-	if err := Extract(zipPath, dir); err != nil {
+	if err := Extract(ctx, zipPath, dir); err != nil {
 		return fmt.Errorf("解压 PostgreSQL 失败: %w", err)
 	}
 	if _, err := os.Stat(p.ExeFor(version)); err != nil {

@@ -205,9 +205,25 @@ func Argv(ip Interpreter, spec Spec) []string {
 	}
 	argv = append(argv, spec.Prefix...)
 	if e := strings.TrimSpace(spec.Entry); e != "" {
-		argv = append(argv, filepath.Join(spec.Dir, filepath.FromSlash(e)))
+		argv = append(argv, entryAbsPath(spec.Dir, e))
 	}
 	return append(argv, spec.Args...)
+}
+
+// entryAbsPath 把入口相对路径拼到脚本目录上，并保证结果没有逃出该目录。
+//
+// 库里可能存着历史脏数据（老版本没校验 entry，或 zip 导入带进来的），运行侧
+// 必须再兜一次：入口路径会被裸拼进命令行执行，`../` 一逃出去就是「执行任意文件」。
+// 越界时不拼接，而是返回一个必然不存在的路径，让进程以「找不到文件」失败——这比
+// 静默改成别的文件安全得多。
+func entryAbsPath(dir, entry string) string {
+	root := filepath.Clean(dir)
+	abs := filepath.Clean(filepath.Join(root, filepath.FromSlash(entry)))
+	if r, err := filepath.Rel(root, abs); err != nil || r == ".." ||
+		strings.HasPrefix(r, ".."+string(filepath.Separator)) || filepath.IsAbs(r) {
+		return filepath.Join(root, "__invalid_entry_path__")
+	}
+	return abs
 }
 
 // LogRoot 脚本日志根目录（在日志目录内，故现有 logtail / 日志页能直接打开）。

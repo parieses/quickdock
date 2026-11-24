@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"quickdock/internal/db"
 	"quickdock/internal/logger"
@@ -41,6 +42,34 @@ const healSystemPrompt = `你是脚本排障助手。用户会给你一个失败
 - content 必须是能直接替换原文件的完整内容，不要省略号、不要 diff 片段。
 - 只改与失败有关的部分，不要顺手重构、不要改无关格式。
 - 如果失败原因是外部因素（网络、凭证过期、目标网站改版），content 留空，在 diagnosis 里说清该怎么办。`
+
+// healAutoInterval 同一脚本两次**自动**自愈之间的最小间隔。
+//
+// 为什么不按运行去重而是按脚本：连续失败通常是同一个根因（凭证过期、目标站点
+// 改版），每五分钟给同一个问题付一次模型调用既费钱也会撞上游限流；而用户手动
+// 点「AI 分析」不受这个限制（见 HealScriptRun），那是明确的一次性诉求。
+const healAutoInterval = 30 * time.Minute
+
+// healAutoAllowed 判断该脚本此刻是否允许自动自愈（并占用这个时间窗）。
+// 返回值 true 表示「这次给它」——占用与判断在同一个锁内，避免并发失败同时放行。
+func (s *ScriptService) healAutoAllowed(scriptID string) bool {
+	s.healMu.Lock()
+	defer s.healMu.Unlock()
+	if s.healAt == nil {
+		s.healAt = map[string]time.Time{}
+	}
+	if last, ok := s.healAt[scriptID]; ok && time.Since(last) < healAutoInterval {
+		return false
+	}
+	s.healAt[scriptID] = time.Now()
+	// 顺手清掉早就过期的键：脚本数量有限，但长期运行不该无限增长。
+	for id, at := range s.healAt {
+		if time.Since(at) > 4*healAutoInterval {
+			delete(s.healAt, id)
+		}
+	}
+	return true
+}
 
 // HealScriptRun 手动触发「AI 分析这次失败」。
 func (s *ScriptService) HealScriptRun(runID string) *services.ApiResult {
@@ -185,7 +214,13 @@ func (s *ScriptService) ApplyScriptPatch(runID string, rerun bool) *services.Api
 	out := map[string]any{"path": patch.Path}
 	if rerun {
 		if res := s.RunScriptWithTrigger(run.ScriptID, "", TriggerAI); res.Code == 0 {
-			out["runId"] = res.Data
+			// RunScriptWithTrigger 返回的是 map{runId, logPath}，不是裸 runId。
+			// 直接把 res.Data 塞进 runId，前端拿到的就是一个对象，按 id 订阅
+			// 事件、拼日志地址全部对不上。
+			if m, ok := res.Data.(map[string]any); ok {
+				out["runId"] = m["runId"]
+				out["logPath"] = m["logPath"]
+			}
 		} else {
 			out["rerunError"] = res.Msg
 		}

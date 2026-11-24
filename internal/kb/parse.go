@@ -158,6 +158,10 @@ func normalizeDocWhitespace(doc *Document) {
 // 中文排版里「６０分」和「60分」混用是常态；FTS 是字面匹配，不折叠的话
 // 用户搜半角、原文是全角（或反过来）就永远命中不了。查询侧
 // (internal/db 的 kbFoldWidth) 做同样的折叠，两边口径必须一致。
+// FoldWidth 导出给服务层复用：查询侧必须与写入侧走同一个折叠函数，
+// 各写一份早晚会口径不一（全角查询恒零命中就是这么来的）。
+func FoldWidth(s string) string { return foldWidth(s) }
+
 func foldWidth(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))

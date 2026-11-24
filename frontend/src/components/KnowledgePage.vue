@@ -20,7 +20,7 @@ import { Events } from '@wailsio/runtime'
 import {
   BookOpen, Briefcase, FlaskConical, Home, TrendingUp, Puzzle, GraduationCap, Folder,
   Plus, FolderPlus, RefreshCw, Trash2, Loader2, Settings2, X,
-  Search, Sparkles, FileText, FileSpreadsheet, File as FileIcon, Send, Square, AlertCircle,
+  Search, Sparkles, FileText, FileSpreadsheet, File as FileIcon, Send, Square, AlertCircle, Info,
   Layers, Pencil, PanelRight, ChevronDown, ChevronUp, Eraser,
 } from '@lucide/vue'
 import QdModal from './QdModal.vue'
@@ -130,6 +130,19 @@ interface KBStatus {
   /** 有无可用的 AI 档案（后端判）。与 embedReady 分开：模型名没填也算「档案就绪」。 */
   profileReady: boolean
   embedReady: boolean
+  /** 还没建向量的切片数（含部分失败残留）。 */
+  vecMissing?: number
+  /** 上一次索引结束时仍有切片没向量时，这里是剩余数（终态提示用）。 */
+  vecPending?: number
+}
+
+// 索引阶段里「还在跑」的那几个。其余（ready / failed / missing / embed-partial）
+// 都是终态：以前写的是「非 ready、非 failed 就算 running」，于是向量部分失败时
+// embed-partial 被当成运行中，按钮全灰、又没有轮询，只能刷新页面才好。
+const RUNNING_STAGES = new Set(['parsing', 'chunking', 'embedding'])
+
+function isRunningStage(stage: string | undefined) {
+  return !!stage && RUNNING_STAGES.has(stage)
 }
 
 interface AskMessage {
@@ -203,6 +216,7 @@ const askListEl = ref<HTMLElement | null>(null)
 const settingsOpen = ref(false)
 const settings = reactive({ embedModel: '', embedBaseURL: '', embedAPIKey: '', topN: 5, vectorOn: true })
 const settingsSaving = ref(false)
+const settingsLoading = ref(false)
 
 // 左栏文档筛选。文档上百之后「翻列表找文件」比搜索还慢，
 // 但只有三五个文档时多一个输入框纯属占地方，所以按数量决定显不显示。
@@ -276,8 +290,17 @@ async function loadSources() {
 
 async function loadStatus() {
   try {
-    status.value = unwrap<KBStatus>(await GetKBStatus())
+    const st = unwrap<KBStatus>(await GetKBStatus())
+    if (st) {
+      // 后端只在真的在跑时才置 running；这里再用 stage 兜一道，
+      // 免得旧版本后端（或事件缺失）把界面永久锁在「索引中」。
+      st.running = st.running && isRunningStage(st.stage)
+    }
+    status.value = st
   } catch (e) {
+    // 与 loadSources 一样要喊一声：只 logErr 的话，状态区停在空值上，
+    // 看起来和「这个库还什么都没有」完全一样，用户不会想到是接口挂了。
+    toast.error(getErrorMessage(e))
     logErr('kb', e)
   }
 }
@@ -293,6 +316,8 @@ async function loadSettings() {
       settings.vectorOn = cfg.vectorOn !== false
     }
   } catch (e) {
+    // 读取失败要让用户知道：否则弹窗里是一份空表单，看起来就像「配置全丢了」。
+    toast.error(getErrorMessage(e))
     logErr('kb', e)
   }
 }
@@ -405,9 +430,11 @@ async function addFiles() {
   try {
     const picked = unwrap<string[]>(await SelectLocalFiles(t('kbPickFileTitle'), t('kbPickFileFilter'), KB_PICK_FILTER))
     if (!picked || !picked.length) return
-    const res = unwrap<{ added: number; skipped: number; unsupported: string[] }>(await AddKBFiles(libId.value, picked))
+    const res = unwrap<{ added: number; skipped: number; unsupported: string[]; truncated?: boolean }>(await AddKBFiles(libId.value, picked))
     if (res) {
       if (res.added > 0) toast.success(t('kbAddedCount', { n: res.added }))
+      if (res.skipped > 0) toast.success(t('kbSkippedCount', { n: res.skipped }))
+      if (res.truncated) toast.error(t('kbTruncatedCount', { n: 500 }))
       if (res.unsupported?.length) toast.error(t('kbUnsupported', { names: res.unsupported.slice(0, 3).join(', ') }))
     }
     await refreshAll()
@@ -692,7 +719,10 @@ async function sendQuestion() {
 // ---- 设置 ----
 
 function openSettings() {
-  void loadSettings()
+  // 先等加载完成再开窗：以前 void loadSettings() 之后立刻开窗，加载失败时
+  // 表单是空的（含 Key），用户点保存就把已配好的模型/Key 一起提交清空了。
+  settingsLoading.value = true
+  void loadSettings().finally(() => { settingsLoading.value = false })
   settingsOpen.value = true
 }
 
@@ -742,6 +772,7 @@ function statusKey(s: string) {
     case 'failed': return 'kbStatusFailed'
     case 'missing': return 'kbStatusMissing'
     case 'stale': return 'kbStatusStale'
+    case 'embed-partial': return 'kbStatusEmbedPartial'
     default: return 'kbStatusPending'
   }
 }
@@ -772,14 +803,18 @@ function bindEvents() {
   unsubscribers.push(Events.On('kb:index-progress', (ev: any) => {
     const d = ev?.data ?? ev
     if (d && status.value) {
-      status.value.running = d.stage !== 'ready' && d.stage !== 'failed'
+      status.value.running = isRunningStage(d.stage)
       status.value.stage = d.stage
       status.value.currentName = d.name
       status.value.done = d.done ?? 0
       status.value.total = d.total ?? 0
+      if (d.stage === 'embed-partial') {
+        status.value.vecPending = d.vecPending ?? 0
+      }
     }
-    // 完成或失败时刷一次清单：状态点与块数都变了。
-    if (d && (d.stage === 'ready' || d.stage === 'failed' || d.stage === 'missing')) {
+    // 终态都刷一次清单：状态点与块数都变了。embed-partial 同样是终态
+    // （文档已可检索，只是部分切片没向量），不刷新的话统计一直是旧的。
+    if (d && (d.stage === 'ready' || d.stage === 'failed' || d.stage === 'missing' || d.stage === 'embed-partial')) {
       void refreshAll()
     }
   }))
@@ -854,6 +889,12 @@ onScopeDispose(() => {
       </div>
       <span v-if="status.total" class="kb-progress-count">{{ status.done }}/{{ status.total }}</span>
     </div>
+
+    <!-- 向量部分失败的终态提示：进度条已经消失，但不能让用户以为语义索引齐全了。 -->
+    <p v-else-if="status?.stage === 'embed-partial'" class="kb-hint warn kb-partial-hint">
+      <AlertCircle :size="12" />
+      {{ t('kbIndexPartial', { n: status.vecPending || status.vecMissing || 0 }) }}
+    </p>
 
     <div class="qd-page-body kb-body">
       <aside class="kb-side">
@@ -1148,8 +1189,9 @@ onScopeDispose(() => {
           <span>{{ t('kbSetVector') }}</span>
         </label>
         <!-- 两种未就绪的原因要分开说：都没配 → 送去 AI 设置；档案有、模型名空
-             → 提示就在本弹窗里填，别把人往别处赶（否则用户会以为档案又丢了）。 -->
-        <p v-if="!status?.embedReady" class="kb-hint warn">
+             → 提示就在本弹窗里填，别把人往别处赶（否则用户会以为档案又丢了）。
+             用户自己关掉语义检索时不再警告：那是他的选择，不是配置出错。 -->
+        <p v-if="status?.vectorOn && !status?.embedReady" class="kb-hint warn">
           <AlertCircle :size="12" />
           {{ status?.profileReady ? t('kbVecNoModel') : t('kbVecNotReady') }}
           <button
@@ -1160,10 +1202,16 @@ onScopeDispose(() => {
             {{ t('kbGoAiSettings') }}
           </button>
         </p>
+        <!-- 配置齐全但库里一条向量都没有：这不是「不可用」，是还没建。
+             此前这里什么都不说，用户搜完发现只有关键词命中，会以为模型配错了。 -->
+        <p v-else-if="status?.vectorOn && stats.vecChunks === 0 && stats.chunks > 0" class="kb-hint">
+          <Info :size="12" />
+          {{ t('kbVecPending') }}
+        </p>
       </div>
       <template #footer>
         <button class="qd-btn" @click="settingsOpen = false">{{ t('cancel') }}</button>
-        <button class="qd-btn qd-btn-primary" :disabled="settingsSaving" @click="saveSettings">{{ t('save') }}</button>
+        <button class="qd-btn qd-btn-primary" :disabled="settingsSaving || settingsLoading" @click="saveSettings">{{ t('save') }}</button>
       </template>
     </QdModal>
 
@@ -1224,7 +1272,7 @@ onScopeDispose(() => {
   align-items: center;
   gap: var(--space-4);
   flex-shrink: 0;
-  padding: 5px var(--space-6);
+  padding: var(--space-2) var(--space-6);
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
   background: var(--color-bg-tertiary);
@@ -1284,7 +1332,7 @@ onScopeDispose(() => {
   align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
-  padding: var(--space-4) 10px 7px;
+  padding: var(--space-4) var(--space-4) var(--space-3);
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -1302,7 +1350,7 @@ onScopeDispose(() => {
   align-items: center;
   gap: var(--space-4);
   flex-shrink: 0;
-  padding: 5px var(--space-3) 5px var(--space-5);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-5);
   font-size: var(--text-xs);
   color: var(--color-text-muted);
   border-bottom: 1px solid var(--color-hairline);
@@ -1316,7 +1364,7 @@ onScopeDispose(() => {
 .kb-lib-acts {
   display: inline-flex;
   align-items: center;
-  gap: 1px;
+  gap: var(--space-1);
 }
 
 .kb-side-list {
@@ -1333,7 +1381,7 @@ onScopeDispose(() => {
   gap: var(--space-3);
   flex-shrink: 0;
   margin: var(--space-3) var(--space-4) 0;
-  padding: 3px 7px;
+  padding: var(--space-1) var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--color-bg-primary);
@@ -1365,7 +1413,7 @@ onScopeDispose(() => {
   align-items: center;
   gap: var(--space-4);
   width: 100%;
-  padding: 7px var(--space-4);
+  padding: var(--space-3) var(--space-4);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   background: transparent;
@@ -1406,7 +1454,7 @@ onScopeDispose(() => {
 .kb-doc-main {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: var(--space-1);
   min-width: 0;
   flex: 1;
 }
@@ -1450,7 +1498,7 @@ onScopeDispose(() => {
 .kb-doc-remove {
   position: relative;
   display: inline-flex;
-  padding: 3px;
+  padding: var(--space-1);
   border-radius: var(--radius-sm);
   color: var(--color-text-muted);
 }
@@ -1547,22 +1595,22 @@ onScopeDispose(() => {
 
 .kb-pane-top {
   flex-shrink: 0;
-  padding: 10px var(--space-6) var(--space-2);
+  padding: var(--space-4) var(--space-6) var(--space-2);
 }
 
 .kb-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-4) var(--space-6) 18px;
+  padding: var(--space-4) var(--space-6) var(--space-6);
 }
 
 /* ---- 检索 ---- */
 .kb-search {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 7px 10px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg-secondary);
@@ -1616,7 +1664,7 @@ onScopeDispose(() => {
 /* 命中项做成轻列表而不是一叠卡片：十条结果是十个带框盒子时，
    眼睛要在框线之间反复跳，反而找不到内容。留白 + hover 底色更安静。 */
 .kb-hit {
-  padding: 9px 10px;
+  padding: var(--space-4) var(--space-4);
   margin-bottom: var(--space-1);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
@@ -1637,7 +1685,7 @@ onScopeDispose(() => {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  margin-bottom: 5px;
+  margin-bottom: var(--space-2);
   font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
@@ -1669,7 +1717,7 @@ onScopeDispose(() => {
 }
 
 .kb-tag {
-  padding: 0 5px;
+  padding: 0 var(--space-2);
   border-radius: var(--radius-sm);
   font-size: var(--text-2xs);
   line-height: 16px;
@@ -1705,7 +1753,7 @@ onScopeDispose(() => {
 }
 
 .kb-mark {
-  padding: 0 1px;
+  padding: 0 var(--space-1);
   border-radius: var(--radius-2xs);
   background: var(--color-search-hit-bg);
   color: var(--color-text-primary);
@@ -1716,13 +1764,13 @@ onScopeDispose(() => {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
-  padding: 14px var(--space-6) 10px;
+  padding: var(--space-5) var(--space-6) var(--space-4);
 }
 
 .kb-msg {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: var(--space-2);
   max-width: 88%;
 }
 
@@ -1736,7 +1784,7 @@ onScopeDispose(() => {
 }
 
 .kb-msg-body {
-  padding: 9px var(--space-5);
+  padding: var(--space-4) var(--space-5);
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
   line-height: 1.65;
@@ -1765,7 +1813,7 @@ onScopeDispose(() => {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-2);
 }
 
 .kb-cites-label {
@@ -1774,7 +1822,7 @@ onScopeDispose(() => {
 }
 
 .kb-cite {
-  padding: var(--space-1) 7px;
+  padding: var(--space-1) var(--space-3);
   border: 1px solid var(--card-border-color);
   border-radius: var(--radius-sm);
   background: var(--color-card-bg);
@@ -1792,7 +1840,7 @@ onScopeDispose(() => {
 
 .kb-ask-box {
   flex-shrink: 0;
-  padding: var(--space-4) var(--space-6) 14px;
+  padding: var(--space-4) var(--space-6) var(--space-5);
   border-top: 1px solid var(--color-hairline);
 }
 
@@ -1806,7 +1854,7 @@ onScopeDispose(() => {
   flex: 1;
   min-width: 0;
   resize: none;
-  padding: var(--space-4) 11px;
+  padding: var(--space-4) var(--space-5);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg-secondary);
@@ -1843,7 +1891,7 @@ onScopeDispose(() => {
 .kb-preview-head {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-3);
   flex-shrink: 0;
   padding: var(--space-3) var(--space-3) var(--space-3) var(--space-5);
   border-bottom: 1px solid var(--color-hairline);
@@ -1884,16 +1932,16 @@ onScopeDispose(() => {
 }
 
 .kb-chunk-list {
-  padding: var(--space-4) 10px var(--space-6);
+  padding: var(--space-4) var(--space-4) var(--space-6);
 }
 
 .kb-chunk {
-  padding: var(--space-4) 10px;
+  padding: var(--space-4) var(--space-4);
   margin-bottom: var(--space-3);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
-  scroll-margin: 10px 0;
+  scroll-margin: var(--space-4) 0;
 }
 
 /* 从检索结果跳过来的那一段。用边框 + 底色一起标，只改底色在深色主题下几乎看不出。 */
@@ -1905,7 +1953,7 @@ onScopeDispose(() => {
 .kb-chunk-head {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-3);
   margin-bottom: var(--space-2);
   font-size: var(--text-xs);
   color: var(--color-text-muted);
@@ -1952,8 +2000,8 @@ onScopeDispose(() => {
 .kb-chunk-more {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  margin-top: 5px;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
   padding: 0;
   border: none;
   background: none;
@@ -1975,14 +2023,16 @@ onScopeDispose(() => {
   flex-direction: column;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-10) 18px;
+  padding: var(--space-10) var(--space-6);
   color: var(--color-text-disabled);
   text-align: center;
 }
 
-/* 左栏窄，空态不需要那么大的上下留白，否则一屏只剩"这里什么都没有"。 */
+/* 左栏窄，空态不需要那么大的上下留白，否则一屏只剩"这里什么都没有"。
+   28 = space-8 + space-2：阶梯里没有 28 这一档，但写裸值又绕开单一来源，
+   用两个 token 相加既不变视觉也不新增档位。 */
 .kb-empty-side {
-  padding: 28px 14px;
+  padding: calc(var(--space-8) + var(--space-2)) var(--space-5);
 }
 
 .kb-empty-title {
@@ -2003,7 +2053,7 @@ onScopeDispose(() => {
 .kb-hint {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-2);
   margin: var(--space-3) 0 0;
   font-size: var(--text-xs);
   color: var(--color-text-muted);
@@ -2011,6 +2061,12 @@ onScopeDispose(() => {
 
 .kb-hint.warn {
   color: var(--color-warning);
+}
+
+/* 终态的部分失败提示：跟在页头下方，和进度条占同一位置，不额外撑高页面。 */
+.kb-partial-hint {
+  padding: 0 var(--space-5);
+  margin-bottom: var(--space-2);
 }
 
 /* 提示里的直达入口：做成文字链而不是第二个按钮——它是对警告的补充说明，
@@ -2104,7 +2160,7 @@ onScopeDispose(() => {
   gap: var(--space-2);
   flex-shrink: 0;
   max-width: 170px;
-  padding: 3px var(--space-4);
+  padding: var(--space-1) var(--space-4);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
   background: transparent;

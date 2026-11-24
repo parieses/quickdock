@@ -58,10 +58,18 @@ type ScriptService struct {
 	// healing 防止同一次运行被重复丢给 AI（用户连点「AI 分析」时）。
 	healing sync.Map
 
+	// healAt 自动自愈节流：scriptID -> 上次自动分析的时间。
+	// 定时脚本失败一次就发一次 90s 的 LLM 请求，成本与上游限流都不可控
+	// （5 分钟一次的脚本挂一整夜 = 上百次请求），因此按脚本收敛。
+	healMu sync.Mutex
+	healAt map[string]time.Time
+
 	// 事件触发监听状态（见 watch.go）。
 	watchMu     sync.Mutex
 	watchStates map[string]*watchState
 	watchOn     bool
+	// watchStop 关闭它即结束监听循环（见 StopWatcher）。
+	watchStop chan struct{}
 }
 
 // NewService 创建门面服务。
@@ -239,6 +247,17 @@ func (s *ScriptService) GetScript(id string) *services.ApiResult {
 func (s *ScriptService) CreateScript(in ScriptInput) *services.ApiResult {
 	if s.App.DB == nil {
 		return services.FailMsg("数据库未就绪")
+	}
+	// 入口路径必须落在脚本目录内：它会被原样拼进命令行去执行，而 zip 导入的
+	// script.json 可以携带任意 entry（entry="../../../x.py" 即执行目录外的文件）。
+	// 这里统一拦一次，CreateScript / CreateScriptWithFiles / ImportScript 共三条
+	// 入口都经过本函数。
+	if strings.TrimSpace(in.Entry) != "" {
+		entry, err := s.resolveRelForNew(in.Entry)
+		if err != nil {
+			return services.Fail(fmt.Errorf("入口路径非法: %w", err))
+		}
+		in.Entry = filepath.ToSlash(entry)
 	}
 	sc := &db.Script{
 		Name:        strings.TrimSpace(in.Name),
@@ -522,6 +541,14 @@ func (s *ScriptService) UpdateScript(in ScriptInput) *services.ApiResult {
 	old, err := s.App.DB.GetScript(in.ID)
 	if err != nil {
 		return services.Fail(err)
+	}
+	// 同 CreateScript：入口会被拼进命令行，改的时候也必须校验。
+	if strings.TrimSpace(in.Entry) != "" {
+		entry, verr := s.resolveRelForNew(in.Entry)
+		if verr != nil {
+			return services.Fail(fmt.Errorf("入口路径非法: %w", verr))
+		}
+		in.Entry = filepath.ToSlash(entry)
 	}
 	old.Name = in.Name
 	old.Description = in.Description

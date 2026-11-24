@@ -33,7 +33,12 @@ var cfwMagic = []byte{0xD0, 0xCF, 0x11, 0xE0}
 
 // docxMaxSize docx 的读取上限。PDF/纯文本都有各自的门禁（200MB/16MB），
 // 这里没有的话一个几百 MB 的 docx 会把整份文件读进内存。
-const docxMaxSize = 100 << 20
+const (
+	docxMaxSize = 100 << 20
+	// docxMaxXML word/document.xml 解压后的上限。压缩体 100MB 的 docx 可以解出
+	// 几个 GB 的 XML，只限压缩体等于没限。
+	docxMaxXML = 64 << 20
+)
 
 func parseDocx(path string) (*Document, error) {
 	if st, err := os.Stat(path); err == nil && st.Size() > docxMaxSize {
@@ -76,6 +81,12 @@ func parseDocx(path string) (*Document, error) {
 		}
 	}
 
+	// 压缩体只有 100MB 上限，但 docx 的压缩比可以做到上百倍：真正会吃内存的是
+	// 解压后的 document.xml。头里的 UncompressedSize64 可以伪造，所以只当快速
+	// 拒绝用，实际读取再加一道 o.LimitReader 硬限。
+	if docFile.UncompressedSize64 > docxMaxXML {
+		return nil, fmt.Errorf("%w: docx 正文解压后超过 64MB", ErrUnsupported)
+	}
 	rc, err := docFile.Open()
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCorrupted, err)
@@ -83,7 +94,7 @@ func parseDocx(path string) (*Document, error) {
 	defer rc.Close()
 
 	w := &docxWalker{doc: doc}
-	if err := w.walk(rc); err != nil {
+	if err := w.walk(io.LimitReader(rc, docxMaxXML)); err != nil {
 		return nil, err
 	}
 	w.flushParagraph()

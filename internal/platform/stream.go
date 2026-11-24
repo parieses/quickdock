@@ -49,6 +49,41 @@ type StreamResult struct {
 // 因为脚本日志的用途是「看它在干什么」，不是「完整搬运数据」。
 const streamLineMax = 1 << 20
 
+// streamDrainGrace 扫描器停止读取后，再排空管道的**时间上限**。
+//
+// 为什么必须有这一步：Scanner 遇到超长行（> streamLineMax）会停止读取该路，但管道
+// 里还有没被读走的字节。子进程写满管道缓冲后阻塞在 write 上，而收尾路径先 wg.Wait()
+// 再 cmd.Wait()，于是两边互等：读方不等了、写方动不了、Wait 永不返回。若该脚本
+// TimeoutSec=0（默认，不限时）就没有任何兜底，它的并发闸门和「停止」按钮一起失效，
+// 只能重启应用。
+//
+// 排空本身不设上限（进程正常跑完就会 EOF），但「一个已经放弃解析的流还一直有数据、
+// 且迟迟不 EOF」只可能是子孙进程占着管道不放：这种情况下继续等就是永久挂起，
+// 到点强制关掉读端——读端一关，写方立刻出错退出，收尾才能收敛。
+const streamDrainGrace = 30 * time.Second
+
+// streamKillGrace 取消/超时后等待「进程真的死掉」的时长（分两段，见 StreamCommand）。
+//
+// 同样不能无限等：子孙进程可能仍持有输出管道句柄，或 taskkill 被权限/EDR 拦下，
+// 这时 wg.Wait() / cmd.Wait() 都不会返回。宁可报「没能终止」也不能永久挂住调用方。
+const streamKillGrace = 5 * time.Second
+
+// drainRest 把扫描器放弃之后仍留在管道里的字节读掉，避免子进程写阻塞在管道上。
+// 读到 EOF 立即返回；超过 grace 仍无 EOF 则关闭读端强制收敛。
+func drainRest(r io.ReadCloser) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	select {
+	case <-done:
+	case <-time.After(streamDrainGrace):
+		_ = r.Close()
+		<-done
+	}
+}
+
 // StreamCommand 启动一条命令，把 stdout/stderr 逐行回调出去，直到退出/取消/超时。
 //
 // 为什么不复用 RunCommandCapture：那条路有三个反着的特性——输出封顶 8KB、
@@ -119,17 +154,58 @@ func StreamCommand(ctx context.Context, argv []string, opts StreamOptions) Strea
 		if cmd.Process != nil {
 			// Windows 走 taskkill /F 连子进程，避免 cmd /c 的孙进程残留；
 			// 只杀父进程会让 python 子进程继续跑，用户以为停了其实没停。
-			_ = sysutil.KillProcess(cmd.Process.Pid)
+			//
+			// kill 失败不能吞掉：taskkill 被权限/EDR 拦下、或进程树里有别的用户
+			// 起的孙进程时它会失败，此时子进程继续持有管道句柄，下面的等待就会
+			// 永远挂住——「停止」按钮点了没反应、并发闸门也一起卡死。
+			// 回退到单进程 Kill 至少让 cmd.Wait() 能返回。
+			if kerr := sysutil.KillProcess(cmd.Process.Pid); kerr != nil {
+				_ = cmd.Process.Kill()
+			}
 		}
-		wg.Wait()
-		err := <-done
 		// 父 ctx 有错 = 用户主动取消；否则是我们自己加的 deadline。
 		timedOut := parentCtx.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded)
+
+		// 两段都带 grace：先等输出泵收敛，再等进程收尸。任一超时都按「没能终止」
+		// 返回，绝不无限等待（为什么必须这样见 streamKillGrace 注释）。
+		pumped := waitTimeout(func() { wg.Wait() }, streamKillGrace)
+		var waitErr error
+		got := false
+		if pumped {
+			select {
+			case waitErr = <-done:
+				got = true
+			case <-time.After(streamKillGrace):
+			}
+		}
+		if !pumped || !got {
+			return StreamResult{
+				ExitCode: -1,
+				Canceled: !timedOut,
+				TimedOut: timedOut,
+				Err:      fmt.Errorf("进程未能被完全终止（可能有子孙进程仍占用输出管道），已放弃等待"),
+			}
+		}
 		return StreamResult{
-			ExitCode: exitCodeOf(err),
+			ExitCode: exitCodeOf(waitErr),
 			Canceled: !timedOut,
 			TimedOut: timedOut,
 		}
+	}
+}
+
+// waitTimeout 最多等 f 返回 d，返回 false 表示超时（f 仍在后台跑，不中断它）。
+func waitTimeout(f func(), d time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f()
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(d):
+		return false
 	}
 }
 
@@ -142,8 +218,15 @@ func pumpStream(r io.ReadCloser, stream string, emit func(string, string), wg *s
 		emit(stream, sanitizeLine(sc.Text()))
 	}
 	// ErrTooLong 是「行太长」而非读取失败，已经产生的输出仍然有效，不额外报错。
-	if err := sc.Err(); err != nil && !errors.Is(err, bufio.ErrTooLong) {
+	// 但扫描器已经停止读取，必须把管道里剩下的字节读掉：不读的话子进程写满缓冲后
+	// 会永久阻塞在 write 上，cmd.Wait() 再也不返回（详见 streamDrainGrace 注释）。
+	if err := sc.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) {
+			drainRest(r)
+			return
+		}
 		emit("stderr", "输出读取失败："+err.Error())
+		drainRest(r)
 	}
 }
 

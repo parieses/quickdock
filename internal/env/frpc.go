@@ -190,7 +190,7 @@ func (f *FrpcRuntime) Install(ctx context.Context, version string, cb InstallCal
 	if cb.OnLog != nil {
 		cb.OnLog("解压 frpc 到 " + f.baseDir)
 	}
-	if err := Extract(zipPath, f.baseDir); err != nil {
+	if err := Extract(ctx, zipPath, f.baseDir); err != nil {
 		return fmt.Errorf("解压 frpc 失败: %w（当前版本未受影响）", err)
 	}
 	if _, err := os.Stat(f.ExeFor("")); err != nil {

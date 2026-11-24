@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,17 +20,45 @@ const (
 	maxExtractTotal    int64 = 4 << 30 // 4GB 总解压上限
 )
 
+// errExtractTooLarge 实际写入字节超过限额。
+//
+// 为什么不能只信归档头里的声明值：压缩包头是可以伪造的（把 5GB 的条目声明成 10MB），
+// 只比对声明值等于把防线交给攻击者。这里按「实际写出去了多少」计数，声明值只用来
+// 提前快速失败（省掉一次无谓的解压）。
+var errExtractTooLarge = errors.New("解压内容超出大小限制")
+
+// ErrInstallCanceled 安装被调用方取消（用户点「取消安装」）。
+// 单独成一个哨兵错误，是为了让服务层能区分「取消」与「真失败」——
+// 取消不该弹红色报错，也不该让用户以为环境坏了。
+var ErrInstallCanceled = errors.New("安装已取消")
+
+// copyCount 把 src 拷到 dst，最多写 limit 字节；实际超过 limit 返回 errExtractTooLarge。
+// 与 io.CopyN 的区别：CopyN 到上限就静默截断，会留下一个「看起来装好了」的残缺文件。
+func copyCount(dst io.Writer, src io.Reader, limit int64) (int64, error) {
+	n, err := io.Copy(dst, io.LimitReader(src, limit+1))
+	if err != nil {
+		return n, err
+	}
+	if n > limit {
+		return n, errExtractTooLarge
+	}
+	return n, nil
+}
+
 // Extract 根据扩展名自动选择解压方式，解压到 dest。
 // 仅当归档内所有条目共享单一顶层目录时才剥离该目录（node / go / nginx 适用）；
 // 扁平归档（PHP / redis 直接把 php.exe、ext/、lib/ 铺在根）保留原结构，避免子目录被误删。
 // 支持 .zip 与 .tar.gz/.tgz；带路径穿越防护与体积上限。
-func Extract(archivePath, dest string) error {
+//
+// ctx 取消时尽快返回（逐条目检查 + 读取时中断），供「安装可取消」使用：
+// 大归档解压动辄几十秒，只在下载阶段响应取消等于取消不了。
+func Extract(ctx context.Context, archivePath, dest string) error {
 	lower := strings.ToLower(archivePath)
 	switch {
 	case strings.HasSuffix(lower, ".zip"):
-		return extractZip(archivePath, dest)
+		return extractZip(ctx, archivePath, dest)
 	case strings.HasSuffix(lower, ".tar.gz"), strings.HasSuffix(lower, ".tgz"):
-		return extractTarGz(archivePath, dest)
+		return extractTarGz(ctx, archivePath, dest)
 	default:
 		return fmt.Errorf("不支持的压缩格式: %s", archivePath)
 	}
@@ -86,7 +116,7 @@ func safeJoin(dest, rel string) (string, error) {
 	return target, nil
 }
 
-func extractZip(archivePath, dest string) error {
+func extractZip(ctx context.Context, archivePath, dest string) error {
 	r, err := zip.OpenReader(archivePath)
 	if err != nil {
 		return err
@@ -104,6 +134,9 @@ func extractZip(archivePath, dest string) error {
 
 	var total int64
 	for _, f := range r.File {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("解压已取消: %w", err)
+		}
 		rel := stripTop(f.Name, top)
 		if rel == "" {
 			continue
@@ -136,21 +169,35 @@ func extractZip(archivePath, dest string) error {
 			rc.Close()
 			return err
 		}
-		if _, err := io.CopyN(out, rc, maxExtractFileSize); err != nil && err != io.EOF {
-			out.Close()
-			rc.Close()
-			return err
+		// 按实际写入字节计限额；声明值可能伪造，只作为提前失败的快路径。
+		remain := maxExtractFileSize
+		if total > 0 {
+			remain = maxExtractTotal - total
+			if remain > maxExtractFileSize {
+				remain = maxExtractFileSize
+			}
 		}
+		n, cerr := copyCount(out, ctxReader{ctx: ctx, r: rc}, remain)
 		out.Close()
 		rc.Close()
-		total += int64(f.UncompressedSize64)
+		if cerr != nil {
+			os.Remove(target)
+			if errors.Is(cerr, errExtractTooLarge) {
+				return fmt.Errorf("%w: %s", errExtractTooLarge, f.Name)
+			}
+			if errors.Is(cerr, context.Canceled) || errors.Is(cerr, context.DeadlineExceeded) {
+				return fmt.Errorf("解压已取消: %w", cerr)
+			}
+			return cerr
+		}
+		total += n
 	}
 	return nil
 }
 
-func extractTarGz(archivePath, dest string) error {
+func extractTarGz(ctx context.Context, archivePath, dest string) error {
 	// 第一遍：仅收集条目名以确定是否需要剥离顶层目录（轻量，不拷贝数据）
-	names, err := scanTarNames(archivePath)
+	names, err := scanTarNames(ctx, archivePath)
 	if err != nil {
 		return err
 	}
@@ -175,6 +222,9 @@ func extractTarGz(archivePath, dest string) error {
 
 	var total int64
 	for {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("解压已取消: %w", err)
+		}
 		hdr, err := tr.Next()
 		if err == io.EOF {
 			break
@@ -209,19 +259,48 @@ func extractTarGz(archivePath, dest string) error {
 			if err != nil {
 				return err
 			}
-			if _, err := io.CopyN(out, tr, maxExtractFileSize); err != nil && err != io.EOF {
-				out.Close()
-				return err
+			// 同 zip：按实际写入字节计限额，声明值只作提前失败。
+			remain := maxExtractFileSize
+			if total > 0 {
+				remain = maxExtractTotal - total
+				if remain > maxExtractFileSize {
+					remain = maxExtractFileSize
+				}
 			}
+			n, cerr := copyCount(out, ctxReader{ctx: ctx, r: tr}, remain)
 			out.Close()
-			total += hdr.Size
+			if cerr != nil {
+				os.Remove(target)
+				if errors.Is(cerr, errExtractTooLarge) {
+					return fmt.Errorf("%w: %s", errExtractTooLarge, hdr.Name)
+				}
+				if errors.Is(cerr, context.Canceled) || errors.Is(cerr, context.DeadlineExceeded) {
+					return fmt.Errorf("解压已取消: %w", cerr)
+				}
+				return cerr
+			}
+			total += n
 		}
 	}
 	return nil
 }
 
+// ctxReader 在每次 Read 前检查 ctx，取消时立刻返回错误——
+// 否则解压一个几 GB 的条目期间取消要等到该文件写完才生效。
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
+}
+
 // scanTarNames 单次扫描归档收集所有条目名（轻量，不拷贝数据），供剥离顶层目录判定使用。
-func scanTarNames(archivePath string) ([]string, error) {
+func scanTarNames(ctx context.Context, archivePath string) ([]string, error) {
 	f, err := os.Open(archivePath)
 	if err != nil {
 		return nil, err
@@ -236,6 +315,9 @@ func scanTarNames(archivePath string) ([]string, error) {
 
 	var names []string
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("解压已取消: %w", err)
+		}
 		hdr, err := tr.Next()
 		if err == io.EOF {
 			break

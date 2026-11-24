@@ -186,16 +186,17 @@ func (o *OpenListRuntime) Install(ctx context.Context, version string, cb Instal
 	}
 	defer os.Remove(arcPath)
 
-	staging := filepath.Join(filepath.Dir(o.baseDir), ".openlist-staging")
-	_ = os.RemoveAll(staging)
-	defer os.RemoveAll(staging)
-	if err := os.MkdirAll(staging, 0o755); err != nil {
+	// 暂存区用 MkdirTemp 而非固定名：环境页与下载页可能同时发起安装，
+	// 固定目录会被后到的调用 RemoveAll 清掉前一个还没搬完的内容。
+	staging, err := os.MkdirTemp(filepath.Dir(o.baseDir), ".openlist-staging-*")
+	if err != nil {
 		return err
 	}
+	defer os.RemoveAll(staging)
 	if cb.OnStage != nil {
 		cb.OnStage("extract", "正在解压 OpenList…")
 	}
-	if err := Extract(arcPath, staging); err != nil {
+	if err := Extract(ctx, arcPath, staging); err != nil {
 		return fmt.Errorf("解压 OpenList 失败: %w", err)
 	}
 	// zip/tar.gz 的顶层可能是单层目录，Extract 已自动剥离；exe 应在暂存根目录。

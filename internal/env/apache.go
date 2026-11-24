@@ -133,7 +133,7 @@ func (a *ApacheRuntime) Install(ctx context.Context, version string, cb InstallC
 	if cb.OnLog != nil {
 		cb.OnLog("解压 Apache 到 " + dir)
 	}
-	if err := Extract(zipPath, dir); err != nil {
+	if err := Extract(ctx, zipPath, dir); err != nil {
 		return fmt.Errorf("解压 Apache 失败: %w", err)
 	}
 	// Apache Lounge 的 zip 顶层同时含 Apache24/、ReadMe.txt、-- Win64 VS17 --/ 三个条目，

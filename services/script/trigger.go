@@ -90,10 +90,16 @@ func (s *ScriptService) StartTrigger() *services.ApiResult {
 	if err := s.startTrigger(cfg); err != nil {
 		return services.Fail(err)
 	}
+	// 端口被占时 startTrigger 会自动 +1 另起监听。要报**实际**端口：报配置里的
+	// 端口会给出一个没人监听的地址，用户照着拼进调用方，请求直接连不上。
+	port := cfg.Port
+	if s.trigger != nil {
+		port = s.trigger.port
+	}
 	return services.Ok(map[string]any{
-		"port":  cfg.Port,
+		"port":  port,
 		"token": cfg.Token,
-		"url":   fmt.Sprintf("http://127.0.0.1:%d/run/<脚本ID>", cfg.Port),
+		"url":   fmt.Sprintf("http://127.0.0.1:%d/run/<脚本ID>", port),
 	})
 }
 
@@ -101,9 +107,18 @@ func (s *ScriptService) StartTrigger() *services.ApiResult {
 func (s *ScriptService) StopTrigger() *services.ApiResult {
 	s.triggerMu.Lock()
 	defer s.triggerMu.Unlock()
-	cfg, _ := s.loadTriggerConfig()
+	cfg, err := s.loadTriggerConfig()
+	if err != nil {
+		// 读配置失败时不能拿零值 cfg 写回去：那会把 token 清成空串，等于把
+		// 已发出的调用方地址全部作废，而用户只是想停一下服务。
+		s.stopTriggerLocked()
+		return services.Fail(fmt.Errorf("读取触发配置失败，已停止服务但未改动配置: %w", err))
+	}
 	cfg.Enabled = false
-	_ = s.saveTriggerConfig(cfg)
+	if err := s.saveTriggerConfig(cfg); err != nil {
+		s.stopTriggerLocked()
+		return services.Fail(err)
+	}
 	s.stopTriggerLocked()
 	return services.Ok(nil)
 }
@@ -117,12 +132,17 @@ func (s *ScriptService) TriggerStatus() *services.ApiResult {
 		return services.Ok(map[string]any{"enabled": false, "port": 0, "token": ""})
 	}
 	running := s.trigger != nil
+	// 与 StartTrigger 同理：实际监听端口可能因占用而顺延，状态页要报真实值。
+	port := cfg.Port
+	if s.trigger != nil {
+		port = s.trigger.port
+	}
 	return services.Ok(map[string]any{
 		"enabled": cfg.Enabled,
 		"running": running,
-		"port":    cfg.Port,
+		"port":    port,
 		"token":   cfg.Token,
-		"url":     fmt.Sprintf("http://127.0.0.1:%d/run/<脚本ID>", cfg.Port),
+		"url":     fmt.Sprintf("http://127.0.0.1:%d/run/<脚本ID>", port),
 	})
 }
 
@@ -219,6 +239,8 @@ func (s *ScriptService) stopTriggerLocked() {
 // （Windows 上没有作业对象，Linux 上也没建进程组），留下的是「看不见还在跑」
 // 的孤儿——下次启动收尾时它们还会继续往同一个数据文件里写。
 func (s *ScriptService) Shutdown() {
+	s.StopWatcher()
+
 	s.triggerMu.Lock()
 	s.stopTriggerLocked()
 	s.triggerMu.Unlock()

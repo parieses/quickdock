@@ -4,6 +4,7 @@ package env
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -106,9 +107,17 @@ func (s *EnvironmentService) EnvInstall(runtime, version, sourceID, custom strin
 				}
 			},
 		}
-		if err := s.App.Env.Install(rt, version, sourceID, custom, cb); err != nil {
+		if err := s.App.Env.InstallCtx(context.Background(), rt, version, sourceID, custom, cb); err != nil {
+			stage := "error"
+			msg := err.Error()
+			// 取消不是故障：用 canceled 阶段让前端走「灰色提示」而不是红色错误，
+			// 否则用户主动取消也会看到「安装失败」，误以为环境被弄坏了。
+			if errors.Is(err, envengine.ErrInstallCanceled) {
+				stage = "canceled"
+				msg = "安装已取消（未留下半装文件）"
+			}
 			if s.App.App() != nil {
-				s.App.App().Event.Emit("quickdock:env:progress", envProgress{Runtime: runtime, Stage: "error", Message: err.Error()})
+				s.App.App().Event.Emit("quickdock:env:progress", envProgress{Runtime: runtime, Stage: stage, Message: msg})
 			}
 			return
 		}
@@ -118,6 +127,22 @@ func (s *EnvironmentService) EnvInstall(runtime, version, sourceID, custom strin
 		s.App.Env.RefreshDetected(rt)
 	}()
 	return services.Ok(nil)
+}
+
+// EnvInstallCancel 取消某运行时正在进行的安装（下载与解压都会尽快中断，不留半装文件）。
+// 没有安装在进行时返回 ok=false，由调用方决定提示文案。
+func (s *EnvironmentService) EnvInstallCancel(runtime string) *services.ApiResult {
+	if r := s.checkEnv(); r != nil {
+		return r
+	}
+	rt := envengine.Runtime(runtime)
+	if !s.App.Env.CancelInstall(rt) {
+		return services.Ok(false)
+	}
+	if s.App.App() != nil {
+		s.App.App().Event.Emit("quickdock:env:progress", envProgress{Runtime: runtime, Stage: "log", Message: "已请求取消安装…"})
+	}
+	return services.Ok(true)
 }
 
 // EnvAvailableVersions 返回某运行时全量可下载版本。

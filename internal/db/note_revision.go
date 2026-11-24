@@ -201,9 +201,9 @@ func (d *Database) ApplyNoteRevision(id string) (*Note, error) {
 	if n, err := res.RowsAffected(); err == nil && n == 0 {
 		return nil, fmt.Errorf("笔记不存在或不是文档: %s", rev.NoteID)
 	}
-	// 回滚改了 content/tags/name（都是 notes_fts 的索引列），必须重建索引，
-	// 否则搜到的还是回滚前的旧内容。调用方已持 d.mu，直接调不加锁的重建。
-	if err := d.rebuildNoteIndex(); err != nil {
+	// 回滚改了 content/tags/name（都是 notes_fts 的索引列），必须同步索引，
+	// 否则搜到的还是回滚前的旧内容。调用方已持 d.mu，直接调不加锁的增量同步。
+	if err := d.syncNoteIndexRow(rev.NoteID); err != nil {
 		return nil, err
 	}
 	return d.getNoteNodeLocked(rev.NoteID)

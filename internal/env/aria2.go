@@ -136,16 +136,17 @@ func (a *Aria2Runtime) Install(ctx context.Context, version string, cb InstallCa
 	}
 	defer os.Remove(zipPath)
 
-	staging := filepath.Join(filepath.Dir(a.baseDir), ".aria2-staging")
-	_ = os.RemoveAll(staging)
-	defer os.RemoveAll(staging)
-	if err := os.MkdirAll(staging, 0o755); err != nil {
+	// 暂存区用 MkdirTemp 而非固定名：环境页与下载页可能同时发起安装，
+	// 固定目录会被后到的调用 RemoveAll 清掉前一个还没搬完的内容。
+	staging, err := os.MkdirTemp(filepath.Dir(a.baseDir), ".aria2-staging-*")
+	if err != nil {
 		return err
 	}
+	defer os.RemoveAll(staging)
 	if cb.OnStage != nil {
 		cb.OnStage("extract", "正在解压 aria2…")
 	}
-	if err := Extract(zipPath, staging); err != nil {
+	if err := Extract(ctx, zipPath, staging); err != nil {
 		return fmt.Errorf("解压 aria2 失败: %w", err)
 	}
 	if _, err := os.Stat(filepath.Join(staging, a.exeName())); err != nil {

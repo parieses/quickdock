@@ -102,6 +102,46 @@ func (d *Database) rebuildNoteIndexWithLock() error {
 	return d.rebuildNoteIndex()
 }
 
+// syncNoteIndexWhere 只重刷命中 where 的那些笔记在 notes_fts 里的行（调用方需持 d.mu）。
+//
+// 整表重建（DELETE 全表 + 整表 INSERT 重 tokenize）在每次自动保存（前端防抖 800ms）
+// 时都跑一遍，笔记库越大打字越卡，而且它全程持全局写锁——剪贴板等只读操作一起排队。
+// 单篇改动只需要动它自己那一行：rowid 与 notes 表一致，DELETE 后按同条件重插即可。
+//
+// where 只由本包内的字面量拼出，值走参数。
+// 删除/插入任一步失败（存量库的 notes_fts 可能已损坏，报 267）就退回整表重建，
+// 那条路径自带 DROP 自愈，不能把「保存」变成不可用操作。
+func (d *Database) syncNoteIndexWhere(where string, args ...interface{}) error {
+	if _, err := d.conn.Exec(
+		`DELETE FROM notes_fts WHERE rowid IN (SELECT rowid FROM notes WHERE `+where+`)`, args...); err != nil {
+		logger.W("[db] 增量更新笔记索引失败（删除），退回整表重建: %v", err)
+		return d.rebuildNoteIndex()
+	}
+	if _, err := d.conn.Exec(
+		`INSERT INTO notes_fts(rowid, name, content, tags) SELECT rowid, name, content, tags FROM notes WHERE `+where, args...); err != nil {
+		logger.W("[db] 增量更新笔记索引失败（插入），退回整表重建: %v", err)
+		return d.rebuildNoteIndex()
+	}
+	return nil
+}
+
+// syncNoteIndexRow 单篇笔记的索引同步（调用方需持 d.mu）。
+func (d *Database) syncNoteIndexRow(id string) error {
+	return d.syncNoteIndexWhere(`id = ?`, id)
+}
+
+// purgeNoteIndexOrphans 清掉 notes 里已不存在的索引行（调用方需持 d.mu）。
+//
+// 删除笔记时行已经没了，拿不到 rowid，不能按 id 增量删；但也不需要重 tokenize
+// 整库——按 rowid NOT IN 走一遍删除即可。
+func (d *Database) purgeNoteIndexOrphans() error {
+	if _, err := d.conn.Exec(`DELETE FROM notes_fts WHERE rowid NOT IN (SELECT rowid FROM notes)`); err != nil {
+		logger.W("[db] 清理笔记索引残行失败，退回整表重建: %v", err)
+		return d.rebuildNoteIndex()
+	}
+	return nil
+}
+
 // ---- 写入函数：每个函数在落库后调用 rebuildNoteIndex 同步全文索引 ----
 // 约定：*Locked 后缀的内部函数在「调用方已持 d.mu」的前提下工作，不自行加锁、不重建索引；
 // 公开方法负责加锁 + 调 rebuildNoteIndex。ImportNoteBatch 走 *Locked 变体，
@@ -189,7 +229,7 @@ func (d *Database) CreateNoteFolder(parentID, name string) (*Note, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := d.rebuildNoteIndex(); err != nil {
+	if err := d.syncNoteIndexRow(n.ID); err != nil {
 		return nil, err
 	}
 	return n, nil
@@ -239,7 +279,7 @@ func (d *Database) CreateNoteDoc(parentID, name, content, format string) (*Note,
 	if err != nil {
 		return nil, err
 	}
-	if err := d.rebuildNoteIndex(); err != nil {
+	if err := d.syncNoteIndexRow(n.ID); err != nil {
 		return nil, err
 	}
 	return n, nil
@@ -275,20 +315,24 @@ func (d *Database) RenameNoteNode(id, name string) error {
 	// 旧名必须在 UPDATE 之前取：改名后要回写其它笔记正文里的 [[旧标题]]，
 	// 否则用户只是改个名字，所有指向这篇的 wiki 链接立刻变成「未找到对应条目」。
 	// 查询失败（id 不存在）时 oldName 为空，跳过回写，与原来的静默成功保持一致。
+	//
+	// is_folder 必须一并取出：wiki 链接只能指向文档。此前不判类型，重命名一个
+	// 文件夹会把正文里所有 [[同名文档]] 一起改写——链接静默断掉，且没有回滚。
 	var oldName string
-	_ = d.conn.QueryRow(`SELECT name FROM notes WHERE id = ?`, id).Scan(&oldName)
+	var isFolder int
+	_ = d.conn.QueryRow(`SELECT name, is_folder FROM notes WHERE id = ?`, id).Scan(&oldName, &isFolder)
 	if _, err := d.conn.Exec(`UPDATE notes SET name = ?, updated_at = ? WHERE id = ?`,
 		name, time.Now().Format(time.RFC3339), id); err != nil {
 		return err
 	}
-	if oldName != "" && oldName != name {
+	if isFolder == 0 && oldName != "" && oldName != name {
 		// 回写失败不让改名本身失败：正文引用是派生数据，最坏情况只是留着旧链接，
 		// 与没有这个功能时的表现一致；报错回滚反而会让「改名」变成不可用操作。
 		if err := d.rewriteWikiRefsLocked(oldName, name, "note"); err != nil {
 			logger.W("[note] 改名回写 wiki 引用失败 %q -> %q: %v", oldName, name, err)
 		}
 	}
-	return d.rebuildNoteIndex()
+	return d.syncNoteIndexRow(id)
 }
 
 // UpdateNoteDoc 更新文档内容与标签。影响行数为 0 时报错，避免不存在的 id 静默成功。
@@ -311,7 +355,7 @@ func (d *Database) UpdateNoteDoc(id, content, tags string) error {
 	if n, err := res.RowsAffected(); err == nil && n == 0 {
 		return fmt.Errorf("笔记不存在或不是文档: %s", id)
 	}
-	return d.rebuildNoteIndex()
+	return d.syncNoteIndexRow(id)
 }
 
 // UpdateNoteContent 只更新正文，保留标签（MCP note_update 未传 tags 时使用）。
@@ -329,7 +373,7 @@ func (d *Database) UpdateNoteContent(id, content string) error {
 	if n, err := res.RowsAffected(); err == nil && n == 0 {
 		return fmt.Errorf("笔记不存在或不是文档: %s", id)
 	}
-	return d.rebuildNoteIndex()
+	return d.syncNoteIndexRow(id)
 }
 
 // UpdateNoteTags 只更新标签，保留正文（MCP note_update 只传 tags 时使用）。
@@ -350,7 +394,7 @@ func (d *Database) UpdateNoteTags(id, tags string) error {
 	if n, err := res.RowsAffected(); err == nil && n == 0 {
 		return fmt.Errorf("笔记不存在或不是文档: %s", id)
 	}
-	return d.rebuildNoteIndex()
+	return d.syncNoteIndexRow(id)
 }
 
 // SetNoteFormat 设置笔记渲染格式（markdown | text）。
@@ -458,7 +502,7 @@ func (d *Database) DeleteNoteNode(id string) error {
 	if _, err = d.conn.Exec(`DELETE FROM notes WHERE id IN (`+qs+`)`, args...); err != nil {
 		return err
 	}
-	return d.rebuildNoteIndex()
+	return d.purgeNoteIndexOrphans()
 }
 
 // firstRow 取首行（无行时返回空 map，rowLabel 会退回空串）。
@@ -593,9 +637,9 @@ func (d *Database) GetOrCreateNote(keyword string) (*Note, error) {
 		n.ID, n.Keyword, n.Content, n.Category, n.CreatedAt, n.UpdatedAt); err != nil {
 		return nil, err
 	}
-	// 只有「新建」这一支改变了 notes 的行集合，必须重建索引让行数对得上；
-	// 命中已存在的分支上面直接 return，不重建。
-	if err := d.rebuildNoteIndex(); err != nil {
+	// 只有「新建」这一支改变了 notes 的行集合，必须同步索引让行数对得上；
+	// 命中已存在的分支上面直接 return，不动索引。
+	if err := d.syncNoteIndexRow(n.ID); err != nil {
 		return nil, err
 	}
 	return &n, nil
@@ -609,5 +653,5 @@ func (d *Database) UpdateNote(id, content string) error {
 		content, time.Now().Format(time.RFC3339), id); err != nil {
 		return err
 	}
-	return d.rebuildNoteIndex()
+	return d.syncNoteIndexRow(id)
 }

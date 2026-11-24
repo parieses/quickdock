@@ -241,7 +241,6 @@ func (s *KBService) processSource(id string) {
 
 	_ = s.App.DB.UpdateKBSourceStatus(id, db.KBSourceReady, "")
 	s.invalidateVecCache()
-	s.setRun(false, "", "", "", 0, 0)
 	stage, errMsg := "ready", ""
 	if pending > 0 {
 		stage = "embed-partial"
@@ -251,6 +250,10 @@ func (s *KBService) processSource(id string) {
 			errMsg = fmt.Sprintf("%d 个切片未建立语义索引，下次扫描会自动补", pending)
 		}
 	}
+	// running=false 但**保留 stage**：前端靠它区分「都完成」与「完成但向量不全」。
+	// 此前这里传空 stage，GetKBStatus 读到的 s.stage 永远是空串，
+	// 于是 embed-partial 这个终态只存在于事件流里，一刷新页面就丢了。
+	s.setRun(false, stage, id, src.Name, chunkCount, chunkCount)
 	s.emit("kb:index-progress", map[string]interface{}{
 		"sourceId": id, "name": src.Name, "stage": stage, "done": chunkCount, "total": chunkCount,
 		"embedded": embedded, "vecPending": pending, "error": errMsg,
@@ -288,6 +291,11 @@ func (s *KBService) embedSource(sourceID, name string) (embedded, pendingCount i
 	done := 0
 
 	for i := 0; i < len(pending); {
+		// 每批发请求前判一次「停止」：此前只在 worker 出队时判，
+		// 正在跑的文件会把剩下几十批全部跑完才停（429 退避期间尤其明显）。
+		if atomic.LoadInt32(&s.cancelFlag) == 1 {
+			break
+		}
 		batch, next := nextBatch(pending, i)
 		if len(batch) == 0 {
 			break
@@ -358,6 +366,11 @@ func (s *KBService) storeVecs(model string, batch []db.KBChunk, vecs [][]float32
 // 返回成功写库的条数。
 func (s *KBService) embedBatchSplit(emb *ikb.Embedder, model string, batch []db.KBChunk, firstErr *error) int {
 	if len(batch) == 0 {
+		return 0
+	}
+	// 分治重试也要能被「停止」打断：单条失败会一路重试到叶子，
+	// 不判的话点完停止仍要等整棵重试树跑完。
+	if atomic.LoadInt32(&s.cancelFlag) == 1 {
 		return 0
 	}
 	if len(batch) > 1 {

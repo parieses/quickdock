@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -40,7 +41,7 @@ func TestExtractStripsSingleTopDir(t *testing.T) {
 		"node-v18/bin/bar.txt": []byte("b"),
 	})
 	dest := filepath.Join(dir, "out")
-	if err := Extract(zipPath, dest); err != nil {
+	if err := Extract(context.Background(), zipPath, dest); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dest, "foo.txt")); err != nil {
@@ -65,7 +66,7 @@ func TestExtractFlatPreserves(t *testing.T) {
 		"lib/zend.dll": []byte("Z"),
 	})
 	dest := filepath.Join(dir, "out")
-	if err := Extract(zipPath, dest); err != nil {
+	if err := Extract(context.Background(), zipPath, dest); err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range []string{"php.exe", "ext/xyz.dll", "lib/zend.dll"} {
@@ -85,7 +86,7 @@ func TestExtractRejectsPathTraversal(t *testing.T) {
 		"a/../../evil.txt": []byte("pwned"),
 	})
 	dest := filepath.Join(dir, "out")
-	if err := Extract(zipPath, dest); err == nil {
+	if err := Extract(context.Background(), zipPath, dest); err == nil {
 		t.Fatal("expected error for path traversal entry")
 	}
 	// 目标目录不应被写出越界文件
@@ -141,7 +142,7 @@ func TestExtractTarGzStripsTop(t *testing.T) {
 	f.Close()
 
 	dest := filepath.Join(dir, "out")
-	if err := Extract(tgz, dest); err != nil {
+	if err := Extract(context.Background(), tgz, dest); err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range []string{"src/main.go", "README"} {
@@ -166,7 +167,7 @@ func TestGhInstallLiftsBin(t *testing.T) {
 		"LICENSE":        []byte("mit"),
 	})
 	dest := filepath.Join(dir, "2.100.0")
-	if err := Extract(zipPath, dest); err != nil {
+	if err := Extract(context.Background(), zipPath, dest); err != nil {
 		t.Fatal(err)
 	}
 	// Extract 阶段：多顶层段不剥离，gh.exe 仍在 bin/ 下

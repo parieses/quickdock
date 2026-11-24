@@ -89,6 +89,26 @@ func (d *Database) ExportNoteBatch() ([]NoteExport, error) {
 //
 // 靠首个非空白字符是否是 '[' 来分流，比先 Unmarshal 再猜更省一次大字符串拷贝。
 // ImportNoteBatch 的返回值用命名参数，是为了让 defer 里的索引重建能把错误带出去。
+// importNoteTitle 从单篇导入的 fallbackName 里取出笔记标题。
+//
+// 调用方可能直接传完整路径（拖一个 .md 进来时前端常带上打开对话框的路径），
+// 直接 TrimSuffix(".md") 会把目录层级留在标题里，而标题同时是 notes.name
+// 与 FTS 索引列，标题带路径会让搜索与显示一起变脏。所以先取最后一段，
+// 再大小写不敏感地剥掉 .md / .markdown（Windows 上常见 .MD 大写）。
+func importNoteTitle(name string) string {
+	name = strings.TrimSpace(name)
+	if i := strings.LastIndexAny(name, `/\`); i >= 0 {
+		name = strings.TrimSpace(name[i+1:])
+	}
+	lower := strings.ToLower(name)
+	for _, ext := range []string{".markdown", ".md"} {
+		if strings.HasSuffix(lower, ext) {
+			return strings.TrimSpace(name[:len(name)-len(ext)])
+		}
+	}
+	return name
+}
+
 func (d *Database) ImportNoteBatch(payload, parentID, fallbackName string) (created int, err error) {
 	if strings.TrimSpace(payload) == "" {
 		return 0, fmt.Errorf("导入内容为空")
@@ -99,11 +119,10 @@ func (d *Database) ImportNoteBatch(payload, parentID, fallbackName string) (crea
 			return 0, fmt.Errorf("导入文件格式不是有效的笔记 JSON: %w", err)
 		}
 	} else {
-		name := strings.TrimSpace(fallbackName)
+		name := importNoteTitle(fallbackName)
 		if name == "" {
 			name = "导入的笔记"
 		}
-		name = strings.TrimSuffix(name, ".md")
 		items = []NoteExport{{Path: name + ".md", Content: payload, Format: "markdown", Tags: "[]"}}
 	}
 	if len(items) == 0 {
@@ -229,13 +248,15 @@ func (d *Database) updateNoteTagsByNameLocked(parentID, name, tags string) error
 }
 
 // UpdateNoteTagsByName 给刚导入/剪藏的文档补标签（按 parent+name 取最后一条）。
-// 网页剪藏 ClipNote（services/note）会直接调它，所以保留公开的加锁版 +
-// 重建索引；批量导入走上面的 *Locked 变体，避免逐篇重建。
+// 网页剪藏 ClipNote（services/note）会直接调它，所以保留公开的加锁版 + 同步索引；
+// 批量导入走上面的 *Locked 变体，末尾统一刷一次。
 func (d *Database) UpdateNoteTagsByName(parentID, name, tags string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if err := d.updateNoteTagsByNameLocked(parentID, name, tags); err != nil {
 		return err
 	}
-	return d.rebuildNoteIndex()
+	// 只重刷这一行：整表重建在这个入口上纯粹是浪费（剪藏一篇就 O(N) 重 tokenize）。
+	return d.syncNoteIndexWhere(`id = (SELECT id FROM notes WHERE parent_id = ? AND name = ? AND is_folder = 0
+		ORDER BY rowid DESC LIMIT 1)`, parentID, name)
 }

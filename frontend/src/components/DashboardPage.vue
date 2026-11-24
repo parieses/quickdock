@@ -2572,10 +2572,12 @@ onUnmounted(() => {
                   <button class="db-icon-btn" :title="t('dash_refresh')" @click="loadScripts()">
                     <RefreshCw :size="13" />
                   </button>
+                  <!-- 「全部」和图标同在一个 auto 容器里：两个并列的 margin-left:auto
+                       会把图标推到卡片中间（截图里的位置），只留这一个 auto。 -->
+                  <button class="card-link" @click="go('script')">
+                    {{ t('dash_view_all') }}<ChevronRight :size="11" />
+                  </button>
                 </div>
-                <button class="card-link" @click="go('script')">
-                  {{ t('dash_view_all') }}<ChevronRight :size="11" />
-                </button>
               </header>
               <p v-if="failed.scripts" class="empty">
                 {{ t('dash_load_failed') }} <button class="qc-link" @click="loadScripts()">{{ t('retry') }}</button>

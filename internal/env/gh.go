@@ -176,7 +176,7 @@ func (g *GhRuntime) Install(ctx context.Context, version string, cb InstallCallb
 	if cb.OnLog != nil {
 		cb.OnLog("解压 GitHub CLI 到 " + g.dir)
 	}
-	if err := Extract(zipPath, g.dir); err != nil {
+	if err := Extract(ctx, zipPath, g.dir); err != nil {
 		return fmt.Errorf("解压 GitHub CLI 失败: %w", err)
 	}
 	// cli/cli 官方 Windows zip 顶层同时含 bin/、share/ 及 LICENSE 等散条目，不满足「单一顶层

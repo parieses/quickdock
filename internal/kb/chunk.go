@@ -136,11 +136,16 @@ func mergeTiny(in []Chunk) []Chunk {
 	for _, c := range in {
 		if len(out) > 0 && len([]rune(c.Text)) < chunkMinMerge {
 			prev := &out[len(out)-1]
-			merged := prev.Text + "\n\n" + c.Text
-			// 合并后不能超过两块的大小，否则会挤爆 embedding 的批预算。
-			if len([]rune(merged)) <= ChunkSize*2 {
-				prev.Text = merged
-				continue
+			// 只并入同一章节、同一页的前一块。跨章节 / 跨页合并会让「安装」的
+			// 尾巴和「故障排查」的开头进同一块，模型拿排障步骤当安装步骤答；
+			// 而块的 Heading/Page 记的是前一块的，后一块的内容就彻底失去归属。
+			if prev.Heading == c.Heading && prev.Page == c.Page {
+				merged := prev.Text + "\n\n" + c.Text
+				// 合并后不能超过两块的大小，否则会挤爆 embedding 的批预算。
+				if len([]rune(merged)) <= ChunkSize*2 {
+					prev.Text = merged
+					continue
+				}
 			}
 		}
 		out = append(out, c)

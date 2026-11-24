@@ -7,7 +7,17 @@ import (
 	"time"
 
 	"quickdock/internal/logger"
+	"quickdock/services"
 )
+
+// injectResult AIInjectMessage 的返回数据。
+//
+// Queued=false：这条会话没有正在跑的轮次，这句话没处可塞，前端要把它当新的一条发出去。
+// Interrupted：immediate 时是否真的打断了当前生成。
+type injectResult struct {
+	Queued      bool `json:"queued"`
+	Interrupted bool `json:"interrupted"`
+}
 
 // 运行中插入（steering）：用户在一轮还没跑完时又发了一句话。
 //
@@ -191,8 +201,11 @@ func (a *AIService) injectQueueFor(convID string) *injectQueue {
 	return a.injects[strings.TrimSpace(convID)]
 }
 
-// InjectAIMessage 把一句话塞进这条会话正在跑的那一轮。
-// 第一个返回值 false = 没有在跑的轮次；第二个 = immediate 时是否真的打断了当前生成。
+// AIInjectMessage 把一句话塞进这条会话正在跑的那一轮（bound 方法，R11：返回 ApiResult）。
+//
+// Data 是 injectResult：
+//   - Queued=false 表示没有在跑的轮次，前端应把这句话当新的一条发出去；
+//   - Interrupted 表示 immediate 时是否真的打断了当前生成。
 //
 // 空文本直接拒：误触回车（输入框里只有一个空格或一个 `/`）不该在回答中间插一句空白。
 //
@@ -200,14 +213,14 @@ func (a *AIService) injectQueueFor(convID string) *injectQueue {
 // 正在跑的那次模型调用，让它立刻回到接入点把这句话接进上下文，而不是等模型
 // 把手上这段长回答写完。打断失败（当前在跑工具，不在模型调用里）不算错误——
 // 话已经在队里，那一步结束就会接走，只是前端得如实说一声。
-func (a *AIService) InjectAIMessage(convID, id, text string, immediate bool) (bool, bool) {
+func (a *AIService) AIInjectMessage(convID, id, text string, immediate bool) *services.ApiResult {
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return false, false
+		return services.Ok(injectResult{})
 	}
 	q := a.injectQueueFor(convID)
 	if q == nil {
-		return false, false
+		return services.Ok(injectResult{})
 	}
 	// 重复提交（同一 id 的「立即发送」）不会再入队，见 push。
 	added := q.push(InjectMessage{ID: id, Text: text, At: time.Now()})
@@ -217,5 +230,5 @@ func (a *AIService) InjectAIMessage(convID, id, text string, immediate bool) (bo
 	}
 	logger.I("[ai] 运行中插入消息 conv=%s id=%s 字数=%d 立即=%v 新入队=%v 已打断=%v",
 		convID, id, len([]rune(text)), immediate, added, cut)
-	return true, cut
+	return services.Ok(injectResult{Queued: true, Interrupted: cut})
 }

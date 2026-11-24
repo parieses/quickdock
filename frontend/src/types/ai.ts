@@ -303,6 +303,11 @@ export interface AIToolCall {
   // 审批归属的会话：后端下发而不是读 activeId —— 用户在等待期间可能切走，
   // 切回来再点时 activeId 已经不是原来那个会话了。
   approvalConvId?: string
+  // 宿主生成的审批键：回传 AIApproveToolCall 时用它，不能用 id。
+  //
+  // id 是模型给的 fn_call_id，不保证唯一（重试、并行编排会重复），早先直接拿
+  // 它当待批表的键，重复时两张卡会串台——点「允许」放行的是另一条命令。
+  approvalKey?: string
   // 改动行数（file_edit 有值）：卡片摘要行右侧显示 +N / -M。
   added?: number; removed?: number
   // 行级 diff（file_edit / file_write）：数字说明「改了多少」，它说明「改成了什么」。

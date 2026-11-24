@@ -950,6 +950,16 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 	// 前端才能把「刚跑完的这一条」画成和刷新后一样的按轮样子。
 	finalReasoningRounds := ""
 	var totalUsage db.TokenUsage
+	// budgetUsed 当前预算口径下的已用量。
+	// 主对话按计费口径（billableTokens：缓存命中不算钱）；派活的单节点预算
+	// agentNodeTokenCap 是按全量口径标定的，req.Fresh 时继续用 tokensOf，
+	// 否则 20 万的子任务额度会一下松掉一个数量级。
+	budgetUsed := func() int {
+		if req.Fresh {
+			return tokensOf(totalUsage)
+		}
+		return billableTokens(totalUsage)
+	}
 	var records []aiToolRecord
 	// 本次提问内已成功执行的调用，跨轮复用做去重（见 ai_tools.go 的 toolCallKey）。
 	// 放在循环外、一次提问一个：新提问要重新计数，否则用户说「再发一次」会被挡。
@@ -1140,11 +1150,11 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 			chatBudget = b * req.TurnBudgetFactor
 		}
 	}
-	// 子 agent 的单节点预算：不跟着上下文窗口放大。
+	// 子 agent 的单节点预算：不跟着上下文窗口放大，也不吃主循环的新口径。
 	//
-	// 1M 窗口算出来的单轮预算是 19.3 万，套到「只查三个文件改了什么」的子任务上，
-	// 等于允许它把整个仓库读一遍（实测单人 122 万 prompt token）。这里给一个
-	// 与窗口无关的上限，到线走收尾而不是硬断（见下面的预算分支）。
+	// req.Fresh 走 budgetUsed → tokensOf（全量 Prompt+Completion），这里的
+	// agentNodeTokenCap 也是全量口径标定的（20 万），两者必须成对。若换成
+	// 计费口径，子任务额度会松掉一个数量级，实测能把整个仓库读一遍。
 	if req.Fresh && (chatBudget == 0 || chatBudget > agentNodeTokenCap) {
 		chatBudget = agentNodeTokenCap
 	}
@@ -1156,10 +1166,8 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 	// 空转照样会被挡住（madeProgress 会 false），有进展就给。
 	chatBudgetHard := chatBudget * 3
 	// turnBudgetStart 记下初始预算：续期的「半步」必须相对它算。
-	//
-	// 原来续期写死 `aiChatTurnBudget(cfg)/2`（= 10×history），而定时任务把初始
-	// 预算收紧到 8×history——第一次续期就直接顶到 24×（硬顶），「半步续期」
-	// 在收紧路径上完全失效，无人值守任务的花钱上限实际是配置值的 3 倍。
+	// 这样定时任务的收紧路径（1×history）也能拿到真正的半步，而不是直接用
+	// 主对话的默认值顶到硬顶。
 	turnBudgetStart := chatBudget
 	budgetMark := 0
 	budgetClosed := false
@@ -1253,7 +1261,7 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 		// 之前一撞预算就收尾，用户看到的就是「活儿干到一半自己断了」，
 		// 然后被迫再打一句「继续」——那句话还会被当成新的用户诉求记进记忆。
 		// 硬顶（3 倍）兜住病态空转：真在原地打转的话 madeProgress 很快就是 false。
-		if !budgetClosed && chatBudget > 0 && (tokensOf(totalUsage) >= chatBudget || (req.Fresh && sc.overBudget())) {
+		if !budgetClosed && chatBudget > 0 && (budgetUsed() >= chatBudget || (req.Fresh && sc.overBudget())) {
 			// 只有顶层会自动续期：主对话那头有用户，撞线了说一声「接着做」就是新的一轮。
 			// 子 agent 背后没有人，续期等于把上限变成一句空话——这次实测 run 级预算
 			// 72 万被冲到 123 万，中间没有任何一关卡住它。
@@ -1265,7 +1273,7 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 				}
 				budgetMark = len(records)
 				logger.I("[ai] 主循环超出 token 预算但有进展，自动续到 %d conv=%s 已用=%d",
-					chatBudget, res.ConvID, tokensOf(totalUsage))
+					chatBudget, res.ConvID, budgetUsed())
 			} else {
 				budgetClosed = true
 				// limit 收到本轮：循环只再给一次「作答」机会；即便模型仍在调工具，
@@ -1277,11 +1285,11 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 				if hasTools {
 					toolsClosed = true
 				}
-				msg := fmt.Sprintf("本次提问已消耗约 %d token，达到单次预算，先收尾；没做完说一声「接着做」就行", tokensOf(totalUsage))
+				msg := fmt.Sprintf("本次提问已消耗约 %d token，达到单次预算，先收尾；没做完说一声「接着做」就行", budgetUsed())
 				if req.Fresh {
 					// 子 agent 的收尾话术不能提用户：它看不到对话，也没人能回它一句。
 					msg = fmt.Sprintf("这个子任务已消耗约 %d token，达到上限：请立即用已经查到的信息给出结论，"+
-						"不要再检索；没查完的部分在结论里写明「未覆盖」。", tokensOf(totalUsage))
+						"不要再检索；没查完的部分在结论里写明「未覆盖」。", budgetUsed())
 					// 光撤 tools 还不够。实测（2026-11-19）四个 review 子任务各跑 8 轮、
 					// 烧掉 27 万 prompt token，最后正文只剩一句「我先查看…再逐个审阅」——
 					// 思考模型把分析全写在 reasoning 里，正文永远是过渡语，tools 一消失
@@ -1306,7 +1314,7 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 				}
 				sink.Event("notice", map[string]any{"message": msg})
 				logger.I("[ai] 主循环达到 token 预算 conv=%s 已用=%d 预算=%d 轮次=%d depth=%d",
-					res.ConvID, tokensOf(totalUsage), chatBudget, turnIdx, sc.Depth())
+					res.ConvID, budgetUsed(), chatBudget, turnIdx, sc.Depth())
 			}
 		}
 		// 硬超时前的收尾提醒。
@@ -1929,6 +1937,10 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 			// 停下了（见 ai_tools.go 的 callToolWithTimeout）。
 			saveSegment(assistant, true)
 			persistWire()
+			// 与前端 finally 的 settlePlanCard 对齐。子 agent 也做：它与父会话
+			// 共用 ConvID，plan_update 同样写进父清单（用户现场就是子 agent 的清单
+			// 卡在 doing）。收口是幂等的 doing→stopped，多个子 agent 并发收口也不冲突。
+			a.settleConversationPlan(res.ConvID)
 			sink.Event("done", withReasoningRounds(withRunID(doneEvent(res.ConvID, firstTokenAt, totalUsage, cfg.Model, rounds, len(records), reasonRounds, reasonChars), res.RunID), finalReasoningRounds))
 			res.Text = allText
 			res.Stopped = true
@@ -1950,6 +1962,7 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 		if hint := toolArgErrorHint(lastErr, records); hint != "" {
 			msg += hint
 		}
+		a.settleConversationPlan(res.ConvID) // 报错路径同样收口，别让清单卡在 doing
 		sink.Event("error", map[string]any{"message": msg})
 		res.Text = allText
 		res.Err = lastErr
@@ -1964,6 +1977,9 @@ func (a *AIService) runAgentBuiltin(ctx context.Context, req AgentRunReq, sink E
 		// 侧栏那条对话无缘无故跳到最前面，看起来像用户刚刚发过言。
 		_ = a.App.DB.UpdateAIConversationMeta(res.ConvID, "", "")
 	}
+	// 清单收口落库：与前端 settlePlanCard 对齐，避免刷新后 doing 又转起来。
+	// 子 agent 与父会话共用 ConvID、plan_update 也写父清单，所以同样要收口。
+	a.settleConversationPlan(res.ConvID)
 	logger.I("[ai] 流式结束 conv=%s 首字=%dms 轮次=%d 工具=%d in=%d out=%d cached=%d",
 		res.ConvID, firstTokenAt.Milliseconds(), rounds, len(records), totalUsage.Prompt, totalUsage.Completion, totalUsage.Cached)
 	sink.Event("done", withReasoningRounds(withRunID(doneEvent(res.ConvID, firstTokenAt, totalUsage, cfg.Model, rounds, len(records), reasonRounds, reasonChars), res.RunID), finalReasoningRounds))

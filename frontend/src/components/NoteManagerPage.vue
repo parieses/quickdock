@@ -170,7 +170,11 @@ const recentEdited = ref<Note[]>([])
 async function loadRecentEdited() {
   try {
     recentEdited.value = unwrap<Note[]>(await RecentNotes(8)) || []
-  } catch { /* 最近编辑只是导航捷径，拉不到就静默沿用旧值，不影响树和编辑 */ }
+  } catch (e) {
+    // 最近编辑只是导航捷径，拉不到就沿用旧值，不弹 toast；但必须留日志，
+    // 否则「最近编辑一栏空了」在日志里完全查不到原因。
+    logErr('NoteManager:recentEdited', e)
+  }
 }
 const recentEditedDisplay = computed(() => {
   if (searchQuery.value || activeTag.value) return []
@@ -367,6 +371,7 @@ async function load() {
   } catch (e) {
     loadFailed.value = true
     toast.error(getErrorMessage(e))
+    logErr('NoteManager:load', e)
   } finally { loading.value = false }
 }
 
@@ -387,7 +392,7 @@ async function doSearch() {
     for (const n of py) if (!byId.has(n.id)) byId.set(n.id, n)
     if (seq !== treeSearchSeq || searchQuery.value.trim() !== q) return
     nodes.value = [...byId.values()]
-  } catch (e) { if (seq === treeSearchSeq) toast.error(getErrorMessage(e)) }
+  } catch (e) { if (seq === treeSearchSeq) { toast.error(getErrorMessage(e)); logErr('NoteManager:search', e) } }
 }
 // 输入防抖：每敲一个字符都会打一次后端 LIKE + 一遍全量拼音扫描，
 // 中文输入法逐字上屏时这个代价非常明显。
@@ -462,7 +467,7 @@ async function newFolderAt(folderId: string) {
     await load()
     // 创建后进入重命名，方便直接命名（load 完成后再 startRename，确保节点已在树中，自动聚焦可用）
     if (r) startRename(r)
-  } catch (e) { toast.error(getErrorMessage(e)) }
+  } catch (e) { toast.error(getErrorMessage(e)); logErr('NoteManager:newFolder', e) }
 }
 async function newDocAt(folderId: string) {
   try {
@@ -471,7 +476,7 @@ async function newDocAt(folderId: string) {
     invalidateLinkTargets() // 新笔记立刻可当互链目标，不等候选缓存 TTL
     await load()
     if (r) { const found = nodes.value.find(x => x.id === r.id); if (found) onDoc(found) }
-  } catch (e) { toast.error(getErrorMessage(e)) }
+  } catch (e) { toast.error(getErrorMessage(e)); logErr('NoteManager:newDoc', e) }
 }
 
 // ---- 模板 / 日志笔记 ----
@@ -510,7 +515,7 @@ async function setFormat(fmt: string) {
   try {
     unwrap(await SetNoteDocFormat(selectedDocId.value, fmt))
     selectedDoc.value.format = fmt
-  } catch (e) { toast.error(getErrorMessage(e)) }
+  } catch (e) { toast.error(getErrorMessage(e)); logErr('NoteManager:setFormat', e) }
 }
 
 // 重命名
@@ -524,7 +529,7 @@ async function commitRename(id: string) {
   editingId.value = ''
   editName.value = ''
   if (!name) return
-  try { unwrap(await RenameNoteNode(id, name)); await load() } catch (e) { toast.error(getErrorMessage(e)) }
+  try { unwrap(await RenameNoteNode(id, name)); await load() } catch (e) { toast.error(getErrorMessage(e)); logErr('NoteManager:rename', e) }
 }
 
 // 删除
@@ -537,13 +542,13 @@ async function confirmDeleteNode() {
     unwrap(await DeleteNoteNode(deletingNode.value.id))
     if (selectedDocId.value === deletingNode.value.id) { selectedDocId.value = ''; docContent.value = ''; docTagsText.value = '' }
     toast.success(t('deleted')); showDel.value = false; await load()
-  } catch (e) { toast.error(getErrorMessage(e)) }
+  } catch (e) { toast.error(getErrorMessage(e)); logErr('NoteManager:delete', e) }
 }
 
 // 移动（拖拽）
 async function handleDrop(dragId: string, targetId: string) {
   if (!dragId) return
-  try { unwrap(await MoveNoteNode(dragId, targetId || '')); await load() } catch (e) { toast.error(getErrorMessage(e)) }
+  try { unwrap(await MoveNoteNode(dragId, targetId || '')); await load() } catch (e) { toast.error(getErrorMessage(e)); logErr('NoteManager:move', e) }
 }
 
 /** 某个父目录下的同级节点，按**与树完全相同的规则**排序。
@@ -2068,8 +2073,11 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .notes-page { height: 100%; display: flex; flex-direction: column; background: var(--color-bg-primary); }
 /* 页头已统一到 styles/app.css 的 .qd-page-header（标题 + 搜索 + 标签三段式） */
 .notes-search { width: 240px; flex-shrink: 0; }
-.ns-input { padding-left: 28px; padding-right: 26px; }
-.ns-clear { position: absolute; right: 6px; border: none; background: none; color: var(--color-text-muted); cursor: pointer; display: flex; align-items: center; }
+/* 输入框左右留位给内置的两个图标（左放大镜、右清除按钮），28 / 26 与图标
+   实际尺寸绑定，不能就近取到 24 档（会压到图标上）。用 token 相加表示同一个值：
+   28 = space-8 + space-2，26 = space-8 + space-1。 */
+.ns-input { padding-left: calc(var(--space-8) + var(--space-2)); padding-right: calc(var(--space-8) + var(--space-1)); }
+.ns-clear { position: absolute; right: var(--space-3); border: none; background: none; color: var(--color-text-muted); cursor: pointer; display: flex; align-items: center; }
 .notes-tags { flex: 1; min-width: 0; display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center; margin-left: var(--space-4); }
 .nt-chip { padding: var(--space-1) var(--space-3); border: none; background: transparent; color: var(--color-text-muted); font-size: var(--text-sm); cursor: pointer; font-family: inherit; flex-shrink: 0; line-height: 1; transition: color var(--transition-fast), font-weight var(--transition-fast); }
 .nt-chip:hover { color: var(--color-text-primary); }
@@ -2114,6 +2122,8 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .ne-name:focus { border-color: var(--color-border-focus-soft); }
 .ne-format { display: flex; gap: var(--space-1); flex-shrink: 0; }
 .ne-format button { padding: var(--space-2) var(--space-4); border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-muted); font-size: var(--text-sm); cursor: pointer; font-family: inherit; }
+/* 相邻分段按钮各带 1px 描边，中间会叠成 2px；负 1px 让两条边重合。
+   这是描边重叠技巧而非间距，取 --space 档位（最小 2px）会把缝露出来，故保留裸值。 */
 .ne-format button:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
 .ne-format button:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-left: -1px; }
 .ne-format button.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
@@ -2155,7 +2165,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .ne-more-item:hover { background: var(--color-bg-hover); }
 .ne-more-item.active { color: var(--color-accent); }
 /* 插入 wiki 链接的候选浮层：挂在 .ne-head 上，absolute 不占布局高度 */
-.ne-wiki-pop { position: absolute; top: 100%; right: 12px; z-index: var(--z-dropdown); width: 260px; margin-top: var(--space-2); padding: var(--space-3); border: 1px solid var(--popover-border-color); border-radius: var(--radius-sm); background: var(--color-popover-bg); box-shadow: var(--shadow-sm); }
+.ne-wiki-pop { position: absolute; top: 100%; right: var(--space-5); z-index: var(--z-dropdown); width: 260px; margin-top: var(--space-2); padding: var(--space-3); border: 1px solid var(--popover-border-color); border-radius: var(--radius-sm); background: var(--color-popover-bg); box-shadow: var(--shadow-sm); }
 /* Markdown 语法速查浮层：锚在 ? 按钮所在 span（ne-head 内）。宽度按说明文字排布，
    高度上限 + 内部滚动，避免长语法表在小窗口里顶穿编辑区。 */
 .md-help-wrap { position: relative; display: inline-flex; }
@@ -2174,10 +2184,10 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .md-help-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-2) var(--space-4) var(--space-3); }
 .md-help-group + .md-help-group { margin-top: var(--space-3); padding-top: var(--space-2); border-top: 1px solid var(--color-border); }
 .md-help-group-title { margin: 0 0 var(--space-2); font-size: var(--text-xs); font-weight: 600; color: var(--color-text-muted); }
-.md-help-row { display: flex; align-items: baseline; gap: var(--space-3); width: 100%; padding: 3px var(--space-2); margin: 0; border: none; border-radius: var(--radius-sm); background: none; text-align: left; cursor: pointer; font-family: inherit; }
+.md-help-row { display: flex; align-items: baseline; gap: var(--space-3); width: 100%; padding: var(--space-1) var(--space-2); margin: 0; border: none; border-radius: var(--radius-sm); background: none; text-align: left; cursor: pointer; font-family: inherit; }
 .md-help-row:hover { background: var(--color-bg-hover); }
 .md-help-row:hover .md-help-sample { color: var(--color-text-primary); }
-.md-help-sample { flex-shrink: 0; min-width: 108px; padding: 1px var(--space-2); border-radius: var(--radius-xs); background: var(--color-bg-tertiary); color: var(--color-accent); font-family: var(--font-mono); font-size: var(--text-sm); white-space: nowrap; }
+.md-help-sample { flex-shrink: 0; min-width: 108px; padding: var(--space-1) var(--space-2); border-radius: var(--radius-xs); background: var(--color-bg-tertiary); color: var(--color-accent); font-family: var(--font-mono); font-size: var(--text-sm); white-space: nowrap; }
 .md-help-desc { font-size: var(--text-sm); color: var(--color-text-secondary); }
 .md-help-foot { padding: var(--space-2) var(--space-4); border-top: 1px solid var(--color-border); font-size: var(--text-xs); color: var(--color-text-muted); }
 .md-help-wiki { padding: 0 var(--space-4) var(--space-3); font-size: var(--text-xs); color: var(--color-text-disabled); }
@@ -2186,7 +2196,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .ne-wiki-input:focus { border-color: var(--color-border-focus-soft); }
 .ne-wiki-list { max-height: 180px; overflow-y: auto; margin-top: var(--space-3); }
 /* 一级类型档位：pop 只有 260px 宽，四档要允许换行 */
-.ne-wiki-tabs { display: flex; flex-wrap: wrap; gap: 2px; margin-top: var(--space-2); }
+.ne-wiki-tabs { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-2); }
 .ne-wiki-tab { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-4); border: none; border-radius: var(--radius-xs); background: transparent; color: var(--color-text-muted); font-family: inherit; font-size: var(--text-xs); cursor: pointer; }
 .ne-wiki-tab:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .ne-wiki-tab.on { background: var(--color-accent-bg); color: var(--color-accent); }
@@ -2209,7 +2219,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 /* 目录：浮在编辑区顶部，长文档跳转到标题用。层级用左缩进表达，不画竖线保持轻。 */
 .ne-toc {
   max-height: 180px; overflow-y: auto; padding: var(--space-3); border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg-secondary); display: flex; flex-direction: column; gap: 1px;
+  background: var(--color-bg-secondary); display: flex; flex-direction: column; gap: var(--space-1);
 }
 .ne-toc-item {
   text-align: left; padding: var(--space-2) var(--space-4); border: none; background: transparent; cursor: pointer;
@@ -2218,7 +2228,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 }
 .ne-toc-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 /* 搜索命中高亮：只覆盖文字底色，不用 <mark> 的默认黄底（深色主题下会刺眼） */
-.tn-hl { background: var(--color-accent-bg); color: var(--color-accent); border-radius: var(--radius-2xs); padding: 0 1px; }
+.tn-hl { background: var(--color-accent-bg); color: var(--color-accent); border-radius: var(--radius-2xs); padding: 0 var(--space-1); }
 /* 视图 tab：文档 / 图谱。图谱是覆盖层，tab 必须压在它上面（z-index 更高）。 */
 .ne-viewtabs { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-4); flex-shrink: 0; border-bottom: 1px solid var(--color-border); background: var(--color-bg-secondary); position: relative; z-index: calc(var(--z-dropdown) + 1); }
 .ne-viewtabs button { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted); font-size: var(--text-sm); cursor: pointer; font-family: inherit; }
@@ -2304,7 +2314,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
   font-weight: 500;
   background: var(--color-bg-secondary);
   border-radius: var(--radius-full);
-  padding: 1px var(--space-3);
+  padding: var(--space-1) var(--space-3);
 }
 .recent-row {
   display: flex;
@@ -2318,9 +2328,9 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
   transition: background-color var(--transition-fast);
 }
 .recent-row:hover { background: var(--color-bg-hover); }
-.recent-row .tn-icon { margin-top: 1px; flex-shrink: 0; color: var(--color-text-muted); }
-.recent-row .tn-check { margin-top: 1px; flex-shrink: 0; }
-.recent-row .rn-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.recent-row .tn-icon { margin-top: var(--space-1); flex-shrink: 0; color: var(--color-text-muted); }
+.recent-row .tn-check { margin-top: var(--space-1); flex-shrink: 0; }
+.recent-row .rn-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
 .recent-row .rn-line1 { display: flex; align-items: baseline; gap: var(--space-3); }
 .recent-row .rn-name { font-size: var(--text-md); color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .recent-row .rn-time { font-size: var(--text-2xs); color: var(--color-text-disabled); flex-shrink: 0; }
@@ -2357,11 +2367,11 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .markdown-body :deep(a) { color: var(--color-accent); }
 /* wiki 链接没有 href（避免 DOMPurify 过滤伪协议），补手型与虚下划线让它可点 */
 .markdown-body :deep(a.qd-wiki) { cursor: pointer; border-bottom: 1px dashed var(--color-accent); }
-.markdown-body :deep(code) { background: var(--color-bg-tertiary); padding: 1px var(--space-2); border-radius: var(--radius-xs); font-family: var(--font-mono); font-size: var(--text-md); }
+.markdown-body :deep(code) { background: var(--color-bg-tertiary); padding: var(--space-1) var(--space-2); border-radius: var(--radius-xs); font-family: var(--font-mono); font-size: var(--text-md); }
 .markdown-body :deep(pre) { background: var(--color-bg-tertiary); padding: var(--space-4) var(--space-5); border-radius: var(--radius-sm); overflow: auto; }
 .markdown-body :deep(pre code) { background: none; padding: 0; }
 .markdown-body :deep(blockquote) { border-left: 3px solid var(--color-border-focus); margin: var(--space-4) 0; padding: var(--space-1) var(--space-5); color: var(--color-text-muted); }
-.markdown-body :deep(ul), .markdown-body :deep(ol) { padding-left: 22px; margin: var(--space-4) 0; }
+.markdown-body :deep(ul), .markdown-body :deep(ol) { padding-left: var(--space-7); margin: var(--space-4) 0; }
 .markdown-body :deep(table) { border-collapse: collapse; margin: var(--space-4) 0; }
 .markdown-body :deep(th), .markdown-body :deep(td) { border: 1px solid var(--color-border); padding: var(--space-2) var(--space-4); }
 .markdown-body :deep(img) { max-width: 100%; }

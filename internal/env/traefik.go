@@ -131,7 +131,7 @@ func (t *TraefikRuntime) Install(ctx context.Context, version string, cb Install
 	if cb.OnLog != nil {
 		cb.OnLog("解压 Traefik 到 " + dir)
 	}
-	if err := Extract(zipPath, dir); err != nil {
+	if err := Extract(ctx, zipPath, dir); err != nil {
 		return fmt.Errorf("解压 Traefik 失败: %w", err)
 	}
 	if !fileExists(exe) {

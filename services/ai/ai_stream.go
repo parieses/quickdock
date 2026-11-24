@@ -369,8 +369,16 @@ func (s *aiStreamServer) handleInject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	ok, cut := s.svc.InjectAIMessage(req.ConvID, req.ID, req.Message, req.Immediate)
-	if !ok {
+	res := s.svc.AIInjectMessage(req.ConvID, req.ID, req.Message, req.Immediate)
+	if res.Code != 0 {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"ok":false,"reason":"inject-failed"}`)
+		return
+	}
+	// 这里直接读内部结果而不是再解包 ApiResult：HTTP 层的回执格式与 bound 方法
+	// 解耦，前端两条路径（bindings / fetch）各自只看自己需要的两个字段。
+	ir, _ := res.Data.(injectResult)
+	if !ir.Queued {
 		w.WriteHeader(http.StatusConflict)
 		_, _ = io.WriteString(w, `{"ok":false,"reason":"no-run"}`)
 		return
@@ -378,7 +386,7 @@ func (s *aiStreamServer) handleInject(w http.ResponseWriter, r *http.Request) {
 	// interrupted 只对 immediate 有意义：false 表示此刻在跑工具、不在模型调用里，
 	// 这句话还在队里，那一步结束就会接走——前端据此把按钮退回去并说明原因，
 	// 而不是一直转着「正在打断…」。
-	_, _ = io.WriteString(w, `{"ok":true,"interrupted":`+strconv.FormatBool(cut)+`}`)
+	_, _ = io.WriteString(w, `{"ok":true,"interrupted":`+strconv.FormatBool(ir.Interrupted)+`}`)
 }
 
 // handleStop 接收「用户点了停止」。

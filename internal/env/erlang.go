@@ -183,7 +183,7 @@ func (e *ErlangRuntime) Install(ctx context.Context, version string, cb InstallC
 	if cb.OnLog != nil {
 		cb.OnLog("解压 Erlang 到 " + dir)
 	}
-	if err := Extract(zipPath, dir); err != nil {
+	if err := Extract(ctx, zipPath, dir); err != nil {
 		return fmt.Errorf("解压 Erlang 失败: %w", err)
 	}
 	if e.rootOf(version) == "" {

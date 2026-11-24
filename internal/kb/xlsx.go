@@ -27,6 +27,12 @@ const (
 	xlsxCellMaxRunes = 500  // 单单元格字符上限
 )
 
+// xlsxRow 一行数据 + 它在 Excel 里的真实行号。
+type xlsxRow struct {
+	Num   int
+	Cells []string
+}
+
 func parseXlsx(path string) (*Document, error) {
 	// 加密的 xlsx 同样是 OLE 复合文档，先按文件头判掉，
 	// 免得用户拿到一句 "zip: not a valid zip file"。
@@ -39,7 +45,8 @@ func parseXlsx(path string) (*Document, error) {
 		}
 	}
 
-	// GetRows 是整表载入内存，先挡掉离谱的大文件（与 docx 的门禁同思路）。
+	// 压缩体大小只是第一道门禁：xlsx 的压缩比可以很高，真正吃内存的是解压后的
+	// 单元格文本。下面的流式读取 + 累计字符上限才是实际防线。
 	if st, err := os.Stat(path); err == nil && st.Size() > 100<<20 {
 		return nil, fmt.Errorf("%w: xlsx 超过 100MB", ErrUnsupported)
 	}
@@ -52,31 +59,47 @@ func parseXlsx(path string) (*Document, error) {
 
 	doc := &Document{}
 	truncated := false
+	totalRunes := 0
 
 	for _, sheet := range f.GetSheetList() {
-		rows, err := f.GetRows(sheet)
+		if totalRunes >= MaxTextRunes {
+			truncated = true
+			break
+		}
+		// Rows 是流式迭代，不整表载入：GetRows 会把整张表（含空行空列）
+		// 一次性铺进内存，高压缩比文件能直接 OOM。
+		rows, err := f.Rows(sheet)
 		if err != nil {
 			// 单个 sheet 读失败不该让整份文件报废：图表 sheet、
 			// 隐藏的宏表都可能读不出来，跳过继续。
 			continue
 		}
-		// 行内容全部为空的先剔掉，否则「行 2-31」这种标号会和实际内容对不上，
-		// 用户在预览里看到的行号范围会误导人。
-		var data [][]string
-		for _, r := range rows {
-			if !rowIsEmpty(r) {
-				data = append(data, r)
+		// 行内容全部为空的剔掉，否则「行 2-31」这种标号会和实际内容对不上。
+		// 行号记真实 sheet 行号：此前按「去空行后的下标 +2」推，前面只要有空行，
+		// 用户拿到的行号在 Excel 里就对不上。
+		var data []xlsxRow
+		rowNum := 0
+		for rows.Next() {
+			rowNum++
+			cols, cerr := rows.Columns()
+			if cerr != nil {
+				break
+			}
+			if rowIsEmpty(cols) {
+				continue
+			}
+			data = append(data, xlsxRow{Num: rowNum, Cells: cols})
+			if len(data) >= xlsxMaxRows {
+				truncated = true
+				break
 			}
 		}
+		rows.Close()
 		if len(data) == 0 {
 			continue
 		}
-		if len(data) > xlsxMaxRows {
-			data = data[:xlsxMaxRows]
-			truncated = true
-		}
 
-		header := joinCells(data[0])
+		header := joinCells(data[0].Cells)
 		if doc.Title == "" && header != "" {
 			doc.Title = sheet
 		}
@@ -84,9 +107,10 @@ func parseXlsx(path string) (*Document, error) {
 		if len(body) == 0 {
 			// 只有表头没有数据，也算一块，否则这个 sheet 整个消失。
 			doc.Blocks = append(doc.Blocks, Block{Heading: sheet, Text: header})
+			totalRunes += len([]rune(header))
 			continue
 		}
-		for start := 0; start < len(body); start += xlsxRowsPerChunk {
+		for start := 0; start < len(body) && totalRunes < MaxTextRunes; start += xlsxRowsPerChunk {
 			end := start + xlsxRowsPerChunk
 			if end > len(body) {
 				end = len(body)
@@ -97,13 +121,17 @@ func parseXlsx(path string) (*Document, error) {
 				b.WriteString("\n")
 			}
 			for _, r := range body[start:end] {
-				b.WriteString(joinCells(r))
+				b.WriteString(joinCells(r.Cells))
 				b.WriteString("\n")
 			}
-			// 行号用 Excel 里的真实行号（+1 是因为 data 已去掉空行、
-			// 且第 1 行是表头），用户对着 Excel 能直接定位。
-			heading := fmt.Sprintf("%s · 行 %d-%d", sheet, start+2, end+1)
-			doc.Blocks = append(doc.Blocks, Block{Heading: heading, Text: strings.TrimRight(b.String(), "\n")})
+			text := strings.TrimRight(b.String(), "\n")
+			// 行号用真实行号区间，用户对着 Excel 能直接定位。
+			heading := fmt.Sprintf("%s · 行 %d-%d", sheet, body[start].Num, body[end-1].Num)
+			doc.Blocks = append(doc.Blocks, Block{Heading: heading, Text: text})
+			totalRunes += len([]rune(text))
+		}
+		if totalRunes >= MaxTextRunes {
+			truncated = true
 		}
 	}
 

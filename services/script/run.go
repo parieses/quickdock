@@ -371,8 +371,35 @@ func (s *ScriptService) runDeps(ctx context.Context, sc *db.Script, run *db.Scri
 	// 装依赖给 15 分钟上限：pip 在慢网下装 torch 能跑十分钟以上，但也不能
 	// 无限——它和「运行脚本」抢同一个并发闸门。
 	spec.Timeout = 15 * time.Minute
-	res := scriptrun.Run(ctx, spec, interp, run.LogPath, batcher.add)
+	// 依赖安装写**单独的**日志文件：scriptrun.Run 以 O_TRUNC 打开日志，用它
+	// 就会在脚本真正开跑时把 pip/npm 的报错整段抹掉，事后翻日志只剩「脚本
+	// 自己的输出」，安装失败的原因永远查不到。
+	res := scriptrun.Run(ctx, spec, interp, depsLogPath(run), batcher.add)
 	return res.Status == "ok"
+}
+
+// depsLogPath 依赖安装日志的落点。
+//
+// 不能与脚本主运行共用 run.LogPath：scriptrun.Run 用 O_TRUNC 打开日志，自动装依赖
+// 时写进去的 pip/npm 输出，会在脚本真正开跑那一刻被整段清掉——安装失败了却查不到
+// 原因，日志里只剩脚本自己的输出。
+//
+// 「手动装依赖」这条运行本来只有安装一个阶段（触发源 TriggerDeps），主日志没别的东西
+// 会覆盖它，直接用主日志，前端查看逻辑保持不变。
+func depsLogPath(run *db.ScriptRun) string {
+	if run.LogPath == "" || run.Trigger == TriggerDeps {
+		return run.LogPath
+	}
+	return run.LogPath + ".deps"
+}
+
+// removeRunLogs 删掉一次运行的全部日志（含依赖安装的 .deps 伴生文件）。
+func removeRunLogs(logPath string) {
+	if logPath == "" {
+		return
+	}
+	_ = os.Remove(logPath)
+	_ = os.Remove(logPath + ".deps")
 }
 
 // composerInvocation 决定怎么调 composer：返回可执行文件与它需要的前置参数。
@@ -437,16 +464,18 @@ func (s *ScriptService) finishRun(sc *db.Script, run *db.ScriptRun, status strin
 	// 不做的话每分钟跑的任务一年就是 50 万行 + 50 万个日志文件。
 	if stale, err := s.App.DB.PruneScriptRuns(sc.ID, 200); err == nil {
 		for _, r := range stale {
-			if r.LogPath != "" {
-				_ = os.Remove(r.LogPath)
-			}
+			removeRunLogs(r.LogPath)
 		}
 	}
 
 	// AI 自愈：只有失败、且不是手动运行时才自动分析。手动运行失败时用户
 	// 就在屏幕前，直接看日志比等 AI 三十秒更有用。
 	if status != "ok" && status != "canceled" && run.Trigger != TriggerManual && run.Trigger != TriggerDeps {
-		go s.healRun(run.ID)
+		// 按脚本节流：同一个根因（凭证过期、站点改版）会连续失败几十次，
+		// 每次都给模型付一遍钱既没必要也会撞限流。用户手动分析不受此限。
+		if s.healAutoAllowed(sc.ID) {
+			go s.healRun(run.ID)
+		}
 	}
 }
 
@@ -540,9 +569,18 @@ func (s *ScriptService) GetScriptRunLog(runID string, maxBytes int64) *services.
 	content, err := scriptrun.ReadTail(run.LogPath, maxBytes)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return services.Ok(map[string]any{"content": "", "path": run.LogPath, "missing": true})
+			content = ""
+		} else {
+			return services.Fail(err)
 		}
-		return services.Fail(err)
+	}
+	// 自动装依赖的输出另存为 .deps（见 depsLogPath），这里拼在主日志前面一起展示：
+	// 排查「为什么跑挂」时最先要看的就是安装阶段有没有报错，分两个面板反而更难查。
+	if deps, derr := scriptrun.ReadTail(run.LogPath+".deps", maxBytes/2); derr == nil && deps != "" {
+		content = deps + "\n" + content
+	}
+	if content == "" {
+		return services.Ok(map[string]any{"content": "", "path": run.LogPath, "missing": true})
 	}
 	return services.Ok(map[string]any{"content": content, "path": run.LogPath, "run": run})
 }

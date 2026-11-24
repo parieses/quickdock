@@ -6,7 +6,47 @@ package ai
 // 有人盯着等 = 可以多给（超了他会补一句「接着做」）；
 // 没人盯着 = 早点收尾并说明，比默默烧完 120 轮好。
 
-import "testing"
+import (
+	"testing"
+
+	"quickdock/internal/db"
+)
+
+// token 预算口径：主循环按「新增输入 + 输出」，缓存命中不算钱。
+func TestBillableTokens(t *testing.T) {
+	cases := []struct {
+		name string
+		u    db.TokenUsage
+		want int
+	}{
+		{"无缓存", db.TokenUsage{Prompt: 1000, Completion: 200, Cached: 0}, 1200},
+		{"97%命中", db.TokenUsage{Prompt: 150000, Completion: 60, Cached: 149632}, 428},
+		{"缓存异常大于prompt", db.TokenUsage{Prompt: 100, Completion: 5, Cached: 200}, 5},
+		{"空", db.TokenUsage{}, 0},
+	}
+	for _, c := range cases {
+		if got := billableTokens(c.u); got != c.want {
+			t.Errorf("%s: billableTokens=%d, want %d", c.name, got, c.want)
+		}
+	}
+	// 全量口径仍给派活用，不能跟着改。
+	if got := tokensOf(db.TokenUsage{Prompt: 150000, Completion: 60, Cached: 149632}); got != 150060 {
+		t.Errorf("tokensOf 应保持全量口径, got %d", got)
+	}
+}
+
+// 主对话预算收紧后仍必须比定时任务宽松（「只收窄不放大」按新口径重标定过）。
+func TestChatTurnBudgetTighterThanScheduled(t *testing.T) {
+	cfg := AIProfile{ContextWindow: 1000000, ContextSoftCap: 120000}
+	chat := aiChatTurnBudget(cfg)
+	sched := aiContextBudget(cfg) * scheduledTurnBudgetFactor
+	if sched >= chat {
+		t.Errorf("定时任务预算应紧于主对话: sched=%d chat=%d", sched, chat)
+	}
+	if chat != 240000 || sched != 120000 {
+		t.Errorf("预算口径重标定后数值异常: chat=%d sched=%d", chat, sched)
+	}
+}
 
 func TestRoundBudgetTiers(t *testing.T) {
 	chat := aiRoundBudgetFor("chat", false, false, 0)

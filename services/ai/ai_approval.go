@@ -189,6 +189,15 @@ type approvalDecision struct {
 	Remember bool
 }
 
+// pendingApproval 一条正在等确认的调用。
+//
+// callID 只是模型给的那个 id 的副本，用于日志与旧调用方兼容；真正做键的是宿主
+// 生成的审批键（见 approvalGate.pending 的注释）。
+type pendingApproval struct {
+	ch     chan approvalDecision
+	callID string
+}
+
 // approvalGate 一次顶层执行的审批通道。
 type approvalGate struct {
 	sink   EventSink
@@ -223,8 +232,13 @@ type approvalGate struct {
 
 	// pMu 保护下面两个 map。必须与 askMu 分开：decide 发生在另一条 RPC goroutine
 	// 里，如果它也去抢 askMu，就会和正在等待的 await 互相等死。
-	pMu     sync.Mutex
-	pending map[string]chan approvalDecision
+	pMu sync.Mutex
+	// pending 的键是**宿主生成的审批键**，不是模型给的 callID。
+	//
+	// 模型给的 id 不保证唯一：重试、并行编排复用同一模板时会出现重复的 fn_call_id，
+	// 两张卡就会写进同一个键——先弹的那张被后弹的覆盖，用户点「允许」放行的是另一
+	// 条命令。键改由宿主生成，callID 只随事件下发，用于展示与日志对号。
+	pending map[string]*pendingApproval
 	granted map[string]bool
 }
 
@@ -237,7 +251,7 @@ func newApprovalGate(sink EventSink, convID string, database *db.Database, rules
 		fullAccess: fullAccess,
 		grants:     grants,
 		cwd:        cwd,
-		pending:    make(map[string]chan approvalDecision),
+		pending:    make(map[string]*pendingApproval),
 		granted:    make(map[string]bool),
 	}
 }
@@ -353,12 +367,15 @@ func (g *approvalGate) await(ctx context.Context, callID, name string, level int
 
 	// 带缓冲 1：decide 在另一条 goroutine 里，无缓冲会把它卡住并牵连那条 RPC。
 	ch := make(chan approvalDecision, 1)
+	// 审批键由宿主生成，不复用模型给的 callID：重复的 fn_call_id 会让两张卡
+	// 落进同一个键，用户点了「允许」放行的却是另一条命令。
+	approvalKey := "ap-" + uuid.New().String()
 	g.pMu.Lock()
-	g.pending[callID] = ch
+	g.pending[approvalKey] = &pendingApproval{ch: ch, callID: callID}
 	g.pMu.Unlock()
 	defer func() {
 		g.pMu.Lock()
-		delete(g.pending, callID)
+		delete(g.pending, approvalKey)
 		g.pMu.Unlock()
 	}()
 
@@ -368,6 +385,7 @@ func (g *approvalGate) await(ctx context.Context, callID, name string, level int
 	}
 	g.sink.Event("approval", map[string]any{
 		"callId":       callID,
+		"approvalKey":  approvalKey,
 		"convId":       g.convID,
 		"name":         name,
 		"level":        level,
@@ -424,18 +442,34 @@ func (g *approvalGate) await(ctx context.Context, callID, name string, level int
 
 // decide 把一次点击送到正等着它的那条调用上。
 //
-// 返回「这个 callId 是否真的有人在等」：前端卡片可能比 gate 晚一步消失
+// id 是前端从 approval 事件里拿到并原样回传的值：新版是宿主生成的 approvalKey，
+// 升级前就开着的窗口只会回传模型的 callID。两种都要认——先按审批键查，查不到
+// 再按模型 callID 兜底扫一遍（重复 id 时取第一条，尽力而为；新前端不会走这条）。
+//
+// 返回「这个 id 是否真的有人在等」：前端卡片可能比 gate 晚一步消失
 // （会话已结束、用户已点停止），此时静默丢弃比报错好——报错只会让前端弹一个
 // 用户无从解释的红框。
-func (g *approvalGate) decide(callID string, allow, remember bool) bool {
+func (g *approvalGate) decide(id string, allow, remember bool) bool {
+	if id == "" {
+		return false
+	}
+	var pa *pendingApproval
 	g.pMu.Lock()
-	ch, ok := g.pending[callID]
+	pa = g.pending[id]
+	if pa == nil {
+		for _, cand := range g.pending {
+			if cand.callID == id {
+				pa = cand
+				break
+			}
+		}
+	}
 	g.pMu.Unlock()
-	if !ok {
+	if pa == nil {
 		return false
 	}
 	select {
-	case ch <- approvalDecision{Allow: allow, Remember: remember}:
+	case pa.ch <- approvalDecision{Allow: allow, Remember: remember}:
 		return true
 	default:
 		// 缓冲已满 = 已经有人点过（连点两下），后一次丢掉。
@@ -482,6 +516,9 @@ func (a *AIService) gateFor(convID string) *approvalGate {
 }
 
 // AIApproveToolCall 前端对一条待确认的工具调用作出决定（bound 方法）。
+//
+// id 既可以是 approval 事件里的 approvalKey（HostTime 生成），也可以是模型的
+// callId（升级前就开着的窗口只会回传后者），两种都认，见 decide。
 //
 // decision 只认 "allow" / "deny"，不把前端字符串直接转 bool：拼错一个字母会被
 // 当成 false（拒绝），而那种 bug 表现为「点了允许但什么也没发生」，极难查。

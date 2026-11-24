@@ -687,8 +687,9 @@ func runCommand(ctx context.Context, d Deps, args map[string]any) (any, error) {
 	go func() { waitCh <- cmd.Wait() }()
 
 	var (
-		waitErr  error
-		finished bool
+		waitErr   error
+		finished  bool
+		killStuck bool
 	)
 	select {
 	case waitErr = <-waitCh:
@@ -710,7 +711,14 @@ func runCommand(ctx context.Context, d Deps, args map[string]any) (any, error) {
 		}
 		// 用户点停止，或纯等待命令超时：整组杀掉，别把 CPU 和端口留在后台。
 		killCommandTree(cmd, dir)
-		waitErr = <-waitCh
+		// 等待必须有上限：taskkill 被权限/安全软件拦下、或孙进程仍攥着输出管道时，
+		// cmd.Wait() 不会返回（本机可复现：Access denied 后一直挂到命令自然结束）。
+		// 到点就按「没能终止」返回，绝不把调用方（以及整轮 AI 任务）卡死在这里。
+		select {
+		case waitErr = <-waitCh:
+		case <-time.After(runCmdKillGrace):
+			killStuck = true
+		}
 	}
 	duration := time.Since(started)
 
@@ -758,6 +766,15 @@ func runCommand(ctx context.Context, d Deps, args map[string]any) (any, error) {
 		// 用户眼里差别很大：前者是他按了停止，后者要他去查问题。
 		res["canceled"] = true
 		res["note"] = "用户停止了本轮任务，命令已连同子进程一起终止"
+	}
+	if killStuck {
+		// 杀不掉（权限不足 / 安全软件拦截 / 孙进程还攥着管道）时，绝不能
+		// 让调用方以为命令已经干净结束：exitCode 此时是 0，ok 会被算成 true。
+		// 明确标成失败并说清后果，用户至少知道要自己去收尾。
+		res["ok"] = false
+		res["canceled"] = true
+		res["note"] = fmt.Sprintf("已请求终止命令，但 %v 内没能确认它退出（可能被权限或安全软件拦截，"+
+			"或有孙进程仍占用输出管道），请检查该进程是否还在运行", runCmdKillGrace)
 	}
 	if timedOut {
 		// 走到这里只有两种可能：纯等待命令（sleep 类），或者转后台失败（没库 /

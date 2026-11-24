@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
+	"time"
 
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
@@ -276,12 +278,11 @@ func (o *OllamaRuntime) Install(ctx context.Context, version string, cb InstallC
 	}
 	defer os.Remove(zipPath)
 
-	// 先解压到同级的临时目录，全部成功后再替换——避免「旧版已删、新版没装成」。
-	// 刻意放在 baseDir 同级（同一卷）以保证 os.Rename 不跨卷。
-	staging := filepath.Join(filepath.Dir(o.baseDir), ".ollama-staging")
-	// 上次失败可能留下残留，先清掉。
-	_ = os.RemoveAll(staging)
-	if err := os.MkdirAll(staging, 0o755); err != nil {
+	// 先解压到临时暂存目录，全部成功后再做目录级切换——避免「旧版已删、新版没装成」。
+	// 刻意放在 baseDir 同级（同一卷）以保证 os.Rename 不跨卷；用 MkdirTemp 而不是固定名，
+	// 是为了让「环境页安装」与「下载页自动安装」并发时各写各的目录，不会互相清掉暂存区。
+	staging, err := os.MkdirTemp(filepath.Dir(o.baseDir), ".ollama-staging-*")
+	if err != nil {
 		return fmt.Errorf("创建临时目录失败: %w", err)
 	}
 	defer os.RemoveAll(staging)
@@ -291,7 +292,7 @@ func (o *OllamaRuntime) Install(ctx context.Context, version string, cb InstallC
 	}
 	// 归档顶层是 ollama.exe 与 lib/ 两个不同段，commonTopDir 判定为「非单一顶层目录」而不剥离，
 	// 正是 PHP/redis 那种扁平归档形态，无需改动 extract.go。
-	if err := Extract(zipPath, staging); err != nil {
+	if err := Extract(ctx, zipPath, staging); err != nil {
 		return fmt.Errorf("解压 Ollama 失败: %w（当前版本未受影响）", err)
 	}
 	if _, err := os.Stat(filepath.Join(staging, filepath.Base(o.ExeFor("")))); err != nil {
@@ -299,30 +300,25 @@ func (o *OllamaRuntime) Install(ctx context.Context, version string, cb InstallC
 	}
 
 	// ---- 校验通过，开始替换 ----
-	// 升级时保留用户的 ollama.env（配置里可能改过 OLLAMA_MODELS/HOST，必须延续）。
-	envBak := ""
-	if isUpgrade {
-		if b, err := os.ReadFile(o.envPath("")); err == nil {
-			envBak = string(b)
-		}
-	}
 	if cb.OnStage != nil {
 		cb.OnStage("install", "正在替换程序文件…")
 	}
-	// 只清程序相关文件，不动目录本身（避免并发启动时路径消失）。
-	if isUpgrade {
-		for _, n := range []string{"ollama.exe", "ollama", "lib"} {
-			_ = os.RemoveAll(filepath.Join(o.baseDir, n))
+	// 运行中的 ollama.exe 在 Windows 上删不掉也改不了名，替换前必须先停服务并等端口真正释放。
+	// 这一步放在「解压已成功」之后：下载/解压失败时不动用户正在跑的服务。
+	if isPortOpen(o.port("")) {
+		if cb.OnLog != nil {
+			cb.OnLog("检测到 Ollama 正在运行，先停止服务再替换程序文件…")
+		}
+		o.Stop("")
+		if !waitPortClosed(o.port(""), 10*time.Second) {
+			return fmt.Errorf("Ollama 仍在运行，端口 %d 未释放，无法替换程序文件（请手动停止后重试，当前版本未受影响）", o.port(""))
 		}
 	}
-	if err := os.MkdirAll(o.baseDir, 0o755); err != nil {
-		return fmt.Errorf("创建目录失败: %w", err)
-	}
-	if err := moveDirContents(staging, o.baseDir); err != nil {
-		return fmt.Errorf("替换程序文件失败: %w", err)
-	}
-	if envBak != "" {
-		_ = os.WriteFile(o.envPath(""), []byte(envBak), 0o644)
+	// 目录级原子切换：新版全部就位后，旧目录整体改名让位（aside），再让新版目录顶上。
+	// 任一步失败都能把旧目录改回来，不会出现「exe 已删、lib 也没了」的半装状态。
+	aside := filepath.Join(filepath.Dir(o.baseDir), ".ollama-old-"+strconv.FormatInt(time.Now().UnixNano(), 36))
+	if err := switchRuntimeDir(staging, o.baseDir, aside); err != nil {
+		return fmt.Errorf("替换程序文件失败: %w（已回滚到原版本）", err)
 	}
 	_ = os.WriteFile(filepath.Join(o.baseDir, "VERSION"), []byte(version), 0o644)
 
@@ -334,6 +330,53 @@ func (o *OllamaRuntime) Install(ctx context.Context, version string, cb InstallC
 		}
 	}
 	return nil
+}
+
+// switchRuntimeDir 用 staging 目录整体替换 dst 目录，失败则回滚。
+//
+// 步骤：
+//  1. 把 dst 里 staging 没有的条目（ollama.env / 日志 / 用户放的其它文件）先搬进 staging，
+//     让新版目录成为旧目录的超集——否则整体替换会把用户配置一起丢掉；
+//  2. dst 整体改名成 aside（旧程序文件原样保留，随时可回滚）；
+//  3. staging 改名为 dst；
+//  4. 成功后才删 aside（失败只记日志，不阻断安装成功）。
+//
+// dst 不存在（首次安装）时只需第 3 步。
+func switchRuntimeDir(staging, dst, aside string) error {
+	if fi, err := os.Stat(dst); err == nil && fi.IsDir() {
+		entries, rerr := os.ReadDir(dst)
+		if rerr != nil {
+			return rerr
+		}
+		for _, e := range entries {
+			to := filepath.Join(staging, e.Name())
+			if _, err := os.Stat(to); err == nil {
+				continue // 新版自带该条目，用新版的
+			}
+			if err := os.Rename(filepath.Join(dst, e.Name()), to); err != nil {
+				return fmt.Errorf("保留原有文件 %s 失败: %w", e.Name(), err)
+			}
+		}
+		if err := os.Rename(dst, aside); err != nil {
+			return fmt.Errorf("暂存旧版本目录失败: %w", err)
+		}
+		if err := os.Rename(staging, dst); err != nil {
+			// 回滚：把旧目录改回去，新内容留在 staging（defer 清理）
+			if rbErr := os.Rename(aside, dst); rbErr != nil {
+				logger.E("[env][ollama] 回滚失败，旧版本目录残留在 %s: %v", aside, rbErr)
+				return fmt.Errorf("%w；旧版本目录残留在 %s，请手动改名恢复", err, aside)
+			}
+			return err
+		}
+		if rmErr := os.RemoveAll(aside); rmErr != nil {
+			logger.W("[env][ollama] 清理旧版本目录 %s 失败: %v", aside, rmErr)
+		}
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	return os.Rename(staging, dst)
 }
 
 // moveDirContents 把 src 下的条目逐个移动到 dst。

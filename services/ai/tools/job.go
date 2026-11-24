@@ -77,6 +77,19 @@ func jobLogPath(id string) string {
 	return filepath.Join(jobDir(), id+".log")
 }
 
+// isUnderDir 判断 p 是否真的位于 dir 之内。
+//
+// 为什么不能只用 strings.HasPrefix：这样 ai_jobs_bak\x.log 也会命中 ai_jobs，
+// 清理过期任务时会把隔壁目录的文件一起删掉。比较必须在目录分隔符边界上做。
+func isUnderDir(p, dir string) bool {
+	cp, cd := filepath.Clean(p), filepath.Clean(dir)
+	if cp == cd {
+		return true
+	}
+	sep := string(os.PathSeparator)
+	return strings.HasPrefix(cp, strings.TrimSuffix(cd, sep)+sep)
+}
+
 // newJobID 生成任务 id。时间戳在前，列表按 id 倒序就是按时间倒序。
 func newJobID() string {
 	return "job_" + strconv.FormatInt(time.Now().UnixMilli(), 36) + "_" + strconv.Itoa(os.Getpid())
@@ -511,15 +524,24 @@ func ReadJobLog(path string, head bool) (string, bool, error) {
 	size := st.Size()
 	truncated := size > aiJobOutputMax
 	if head || size <= aiJobOutputMax {
+		// 用 io.ReadFull 而不是单次 Read：Read 允许短读（尤其大文件 + 网络盘），
+		// 短读会让模型只拿到开头一小截却以为这就是全部。ErrUnexpectedEOF
+		// 表示文件本来就不足一块，属正常。
 		buf := make([]byte, aiJobOutputMax)
-		n, _ := f.Read(buf)
+		n, err := io.ReadFull(f, buf)
+		if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+			return "", false, err
+		}
 		return platform.DecodeConsoleText(string(buf[:n])), truncated, nil
 	}
 	if _, err := f.Seek(size-aiJobOutputMax, 0); err != nil {
 		return "", false, err
 	}
 	buf := make([]byte, aiJobOutputMax)
-	n, _ := f.Read(buf)
+	n, err := io.ReadFull(f, buf)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return "", false, err
+	}
 	// 从中间切进去的第一行多半是半截：丢掉它，避免把一行错误日志读成乱码。
 	s := string(buf[:n])
 	if i := strings.IndexByte(s, '\n'); i >= 0 && i < len(s)-1 {
@@ -613,7 +635,8 @@ func PurgeOldJobs(database *db.Database) {
 	for _, p := range paths {
 		// 只删自己目录下的文件：库里的路径是当初自己写的，但硬盘上的东西
 		// 不归我们保证（用户可能把数据目录指到别处、或手动改过库）。
-		if strings.HasPrefix(filepath.Clean(p), filepath.Clean(jobDir())) {
+		// 比较必须带上一层分隔符：光用 HasPrefix，ai_jobs_bak/… 也会命中 ai_jobs。
+		if isUnderDir(p, jobDir()) {
 			_ = os.Remove(p)
 		}
 	}

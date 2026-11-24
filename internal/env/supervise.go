@@ -63,7 +63,19 @@ func (m *Manager) saveStates() {
 	if err := os.MkdirAll(filepath.Dir(m.statesFile()), 0755); err != nil {
 		return
 	}
-	_ = os.WriteFile(m.statesFile(), b, 0644)
+	// 临时文件 + rename 原子替换：直接覆盖写时若进程在写到一半崩掉，
+	// 会留下半截 JSON，下次启动 loadStates 反序列化失败，所有运行时的
+	// 开启状态一起丢失。rename 在同一分区内是原子的，要么旧内容要么新内容。
+	tmp := m.statesFile() + ".tmp"
+	if err := os.WriteFile(tmp, b, 0644); err != nil {
+		logger.W("env: 写 states 临时文件失败: %v", err)
+		_ = os.Remove(tmp)
+		return
+	}
+	if err := os.Rename(tmp, m.statesFile()); err != nil {
+		logger.W("env: 替换 states 文件失败: %v", err)
+		_ = os.Remove(tmp)
+	}
 }
 
 // Enabled 返回某运行时的期望状态（是否已开启常驻）。

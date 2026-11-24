@@ -31,6 +31,7 @@ import { RevealInExplorer } from '../../bindings/quickdock/services/system/syste
 import {
   EnvList,
   EnvInstall,
+  EnvInstallCancel,
   EnvAvailableVersions,
   EnvRestart,
   EnvStart,
@@ -712,6 +713,9 @@ function failState(r: RuntimeInfo, e: any) {
   s.error = true
   s.installing = false
   toast.error(s.message)
+  // toast 两秒就消失，事后排查只剩用户的一句话。日志里要留一条，
+  // 前端诊断页才能把「哪个运行时、什么错」和 Go 侧日志对上。
+  logErr('EnvironmentPage.failState', { runtime: r.id, error: s.message })
 }
 
 
@@ -1474,6 +1478,18 @@ function onProgress(payload: any) {
     s.error = false
     toast.success(rt.toUpperCase() + ' ' + t('envInstalled'))
     load()
+  } else if (p.stage === 'canceled') {
+    // 用户主动取消：归位并给灰色提示，不按失败处理（s.error = false）。
+    s.installing = false
+    s.written = 0
+    s.total = -1
+    s.speed = 0
+    s.eta = 0
+    s.stage = ''
+    s.message = p.message || t('envInstallCanceled')
+    s.error = false
+    toast.success(rt.toUpperCase() + ': ' + s.message)
+    load()
   } else if (p.stage === 'error') {
     s.installing = false
     s.written = 0
@@ -1513,6 +1529,26 @@ async function install(r: RuntimeInfo) {
     })()
   } catch (e: any) {
     failState(r, e)
+  }
+}
+
+// 取消安装：后端在下一个解压条目/下载读块处中断，已写的半截文件会被删掉。
+// 取消后仍等 error 事件把 s.installing 置回 false，避免按钮闪回可点状态导致重复触发。
+async function cancelInstall(r: RuntimeInfo) {
+  const s = stateFor(r.id, r)
+  if (!s.installing) return
+  s.message = t('envInstallCanceling')
+  try {
+    const canceled = unwrap(await EnvInstallCancel(r.id))
+    if (!canceled) {
+      // 后端已经没有在装的流程（例如刚好装完）：立刻归位，别等永不到来的事件。
+      s.installing = false
+      s.message = t('envInstallCancelNone')
+    }
+  } catch (e: any) {
+    s.message = getErrorMessage(e)
+    toast.error(s.message)
+    logErr('EnvironmentPage.cancelInstall', { runtime: r.id, error: s.message })
   }
 }
 
@@ -3275,6 +3311,9 @@ const dialogCtx = reactive({
               <span v-else-if="stateFor(selected.id, selected).written > 0">{{ (stateFor(selected.id, selected).written / 1048576).toFixed(1) }} MB</span>
               <span v-if="percent(stateFor(selected.id, selected)) >= 0 && stateFor(selected.id, selected).speed > 0">{{ formatSpeed(stateFor(selected.id, selected).speed) }} · {{ formatEta(stateFor(selected.id, selected).eta) }}</span>
             </div>
+            <button class="link-btn env-cancel-install" @click="cancelInstall(selected)">
+              {{ t('envInstallCancel') }}
+            </button>
           </div>
           <p v-else-if="stateFor(selected.id, selected).message" class="env-msg" :class="{ error: stateFor(selected.id, selected).error }">{{ stateFor(selected.id, selected).message }}</p>
         </section>
@@ -3895,6 +3934,7 @@ const dialogCtx = reactive({
 .env-progress-fill.indeterminate { animation: env-indet 1.1s ease-in-out infinite; }
 @keyframes env-indet { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
 .env-progress-text { display: flex; justify-content: space-between; font-size: var(--text-xs); color: var(--color-text-muted); }
+.env-cancel-install { align-self: flex-start; font-size: var(--text-xs); }
 .env-msg { font-size: var(--text-xs); color: var(--color-text-disabled); margin: 10px 0 0; word-break: break-all; user-select: text; -webkit-user-select: text; }
 .env-msg.error { color: var(--color-danger); }
 .ftp-form .env-input { margin-bottom: var(--space-3); }

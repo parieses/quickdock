@@ -223,7 +223,7 @@ func (e *EverythingRuntime) downloadEverything(ctx context.Context, cb InstallCa
 	if err := os.MkdirAll(e.baseDir, 0755); err != nil {
 		return fmt.Errorf("创建目录失败: %w", err)
 	}
-	if err := Extract(zipPath, e.baseDir); err != nil {
+	if err := Extract(ctx, zipPath, e.baseDir); err != nil {
 		return fmt.Errorf("解压 Everything 失败: %w", err)
 	}
 
@@ -368,7 +368,7 @@ func (e *EverythingRuntime) InstallEs(ctx context.Context, cb InstallCallback) e
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return fmt.Errorf("创建目录失败: %w", err)
 	}
-	if err := Extract(zipPath, destDir); err != nil {
+	if err := Extract(ctx, zipPath, destDir); err != nil {
 		return fmt.Errorf("解压 es.exe 失败: %w", err)
 	}
 

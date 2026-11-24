@@ -79,6 +79,22 @@ func (p *PHPRuntime) ExeFor(version string) string {
 	return filepath.Join(p.versionDir(version), "php")
 }
 
+// phpInstallComplete 判断某版本目录是否装完整。
+//
+// 只看 php.exe 会把「解压中断」误判成已安装：exe 往往是归档里最早落盘的文件，
+// 而 ext/ 下的 dll 才是解压出问题的重灾区。残缺的 PHP 之后无论怎么点安装都会被
+// 「已安装」短路挡回去，永远修不好——这正是本判定的由来。
+func (p *PHPRuntime) phpInstallComplete(version string) bool {
+	if _, err := os.Stat(p.ExeFor(version)); err != nil {
+		return false
+	}
+	// 官方 Windows 包必带 ext 目录；没有它 PHP 加载不了任何扩展，等同不可用。
+	if fi, err := os.Stat(filepath.Join(p.versionDir(version), "ext")); err != nil || !fi.IsDir() {
+		return false
+	}
+	return true
+}
+
 func (p *PHPRuntime) InstalledVersions() []Install {
 	var out []Install
 	dirs := managedDirs{}
@@ -88,7 +104,7 @@ func (p *PHPRuntime) InstalledVersions() []Install {
 				continue
 			}
 			v := e.Name()
-			if _, err := os.Stat(p.ExeFor(v)); err == nil {
+			if p.phpInstallComplete(v) {
 				out = append(out, Install{Version: v, Scope: "portable", Path: p.versionDir(v)})
 				dirs.record(filepath.Dir(p.ExeFor(v)))
 			}
@@ -121,7 +137,7 @@ func (p *PHPRuntime) Install(ctx context.Context, version string, cb InstallCall
 		version = Versions(RuntimePHP)[0]
 	}
 	dir := p.versionDir(version)
-	if _, err := os.Stat(p.ExeFor(version)); err == nil {
+	if p.phpInstallComplete(version) {
 		if cb.OnLog != nil {
 			cb.OnLog("PHP " + version + " 已安装: " + p.ExeFor(version))
 		}
@@ -151,7 +167,7 @@ func (p *PHPRuntime) Install(ctx context.Context, version string, cb InstallCall
 	if cb.OnLog != nil {
 		cb.OnLog("解压 PHP 到 " + dir)
 	}
-	if err := Extract(zipPath, dir); err != nil {
+	if err := Extract(ctx, zipPath, dir); err != nil {
 		return fmt.Errorf("解压 PHP 失败: %w", err)
 	}
 	if err := p.ensurePHPIni(dir); err != nil {

@@ -713,6 +713,9 @@ export function useAiRuns(deps: AiRunsDeps) {
               at.riskNote = String(data.riskNote || '')
               at.rememberable = !!data.rememberable
               at.grantScope = String(data.grantScope || '')
+              // 待批表的键用后端给的 approvalKey，不是这张卡自己的 id：
+              // 模型的 fn_call_id 可能重复，两张卡会串台（见 ai_approval.go）。
+              at.approvalKey = String(data.approvalKey || '')
               // 会话由后端下发：用户可能在这张卡等着的时候切走再切回，
               // 那时 activeId 已经不是发起审批的那个会话了。
               at.approvalConvId = String(data.convId || '')
@@ -1152,6 +1155,11 @@ export function useAiRuns(deps: AiRunsDeps) {
    * 清单还在动」，而且在下一条消息触发下一次 plan_update 之前都不会变。
    *
    * 收成 stopped 而不是 done：那一步确实没被确认完成，标成已完成是在骗人。
+   *
+   * 两处都要改，缺一不可：planCards 是内存索引（下一轮 / hydrate 用它），
+   * messages 里那条 assistant 的 m.plan 才是界面实际渲染的对象。二者在 plan
+   * 事件里指向同一个 card，收口若只 set Map（换了个新对象），m.plan 仍是旧的
+   * doing 引用，v-memo 盯 m.plan 没变就不重渲染——表现就是「回答完了清单还在转」。
    */
   function settlePlanCard(convId: string) {
     if (!convId) return
@@ -1163,7 +1171,15 @@ export function useAiRuns(deps: AiRunsDeps) {
       changed = true
       return { ...it, status: 'stopped' }
     })
-    if (changed) planCards.set(convId, { items, note: card.note })
+    if (!changed) return
+    const settled = { items, note: card.note }
+    planCards.set(convId, settled)
+    // 固化到消息上的那份也要换成新对象：v-memo 按 m.plan 的引用决定是否重绘，
+    // 原地改 items 不会触发。只收口当前会话的消息，别的会话不该被顺带改。
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      const m = messages.value[i]
+      if (m.role === 'assistant' && m.plan === card) m.plan = settled
+    }
   }
 
   /**

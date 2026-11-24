@@ -55,8 +55,16 @@ type versCacheEntry struct {
 var (
 	versCacheMu   sync.RWMutex
 	versCache     = make(map[string]versCacheEntry)
-	versCacheRead bool                    // 磁盘缓存是否已加载（每进程一次）
+	versCacheRead bool                    // 磁盘缓存是否已成功加载（每进程一次）
 	versInflight  = make(map[string]bool) // 正在拉取的 key，防后台刷新与页面查询各拉一遍
+
+	// versLoadMu 串行化「首次加载」，避免并发首次访问各读一遍盘、也避免读到一半被写覆盖。
+	versLoadMu sync.Mutex
+	// versCacheLoadFailed 记录「这次加载因 IO/解析错误失败」。
+	// 读失败时绝不能落盘：内存里是空的，一旦覆盖写就把磁盘上那份完好的缓存
+	// 清成只剩当前这一项，下次启动退化成并发打上游（撞 GitHub 匿名限额）。
+	// 文件不存在不算失败——那本来就等价于「还没有缓存」。
+	versCacheLoadFailed bool
 
 	// versPersistMu 串行化落盘：后台刷新是并发的（3 个 worker），共用一个 .tmp
 	// 路径时两个 goroutine 交错写会写出半截 JSON，rename 也会互相踩。
@@ -106,43 +114,67 @@ type versCacheDiskEntry struct {
 }
 
 // versCacheEnsureLoaded 首次访问时把磁盘缓存读进内存。
-// 文件不存在或损坏都不算错误：等价于「还没有缓存」，下次拉取会重建。
+//
+// 关键点：只有「读成功」或「文件确实不存在」才置已加载标记并允许后续覆盖写。
+// 一旦读失败（IO 抖动、权限被拦、文件正在被别的实例写），就只标记失败、不再重试，
+// 但后续 versCachePersist 会跳过落盘——宁可这次运行少一份缓存，也不能把磁盘上
+// 那份完好的缓存清空。
 func versCacheEnsureLoaded() {
-	versCacheMu.Lock()
-	if versCacheRead {
-		versCacheMu.Unlock()
+	versLoadMu.Lock()
+	defer versLoadMu.Unlock()
+	if versCacheRead || versCacheLoadFailed {
+		return
+	}
+	loadFailed := false
+	b, err := os.ReadFile(versCacheFilePath())
+	if err != nil {
+		if !os.IsNotExist(err) {
+			// 文件存在但读不出来：不能当「没有缓存」处理。
+			loadFailed = true
+			logger.W("[env][vers] 读取版本缓存失败，本次运行不覆盖磁盘缓存: %v", err)
+		}
+	} else {
+		var disk versCacheDisk
+		if uerr := json.Unmarshal(b, &disk); uerr != nil {
+			loadFailed = true
+			logger.W("[env][vers] 版本缓存内容损坏，本次运行不覆盖磁盘缓存: %v", uerr)
+		} else if len(disk.Entries) > 0 {
+			versCacheMu.Lock()
+			for k, e := range disk.Entries {
+				if len(e.Versions) == 0 {
+					continue
+				}
+				at := time.UnixMilli(e.FetchedAt)
+				ttl := versTTL
+				if !e.OK {
+					ttl = versFailTTL
+				}
+				versCache[k] = versCacheEntry{vs: e.Versions, fetchedAt: at, expired: at.Add(ttl), ok: e.OK}
+			}
+			versCacheMu.Unlock()
+			logger.I("[env][vers] 已载入版本列表缓存 %d 项", len(disk.Entries))
+		}
+	}
+	if loadFailed {
+		versCacheLoadFailed = true
 		return
 	}
 	versCacheRead = true
-	versCacheMu.Unlock()
-
-	b, err := os.ReadFile(versCacheFilePath())
-	if err != nil {
-		return
-	}
-	var disk versCacheDisk
-	if json.Unmarshal(b, &disk) != nil || len(disk.Entries) == 0 {
-		return
-	}
-	versCacheMu.Lock()
-	for k, e := range disk.Entries {
-		if len(e.Versions) == 0 {
-			continue
-		}
-		at := time.UnixMilli(e.FetchedAt)
-		ttl := versTTL
-		if !e.OK {
-			ttl = versFailTTL
-		}
-		versCache[k] = versCacheEntry{vs: e.Versions, fetchedAt: at, expired: at.Add(ttl), ok: e.OK}
-	}
-	versCacheMu.Unlock()
-	logger.I("[env][vers] 已载入版本列表缓存 %d 项", len(disk.Entries))
 }
 
 // versCachePersist 原子落盘（临时文件 + rename）。失败只记日志：
 // 缓存写不进去只是下次多一次网络请求，不影响功能。
+//
+// 若本次运行未能成功加载既有缓存，直接跳过写入：用「内存里只有当前这一项」的
+// 状态覆盖磁盘，等于把缓存清空，下次启动会并发打上游并撞匿名限额。
 func versCachePersist() {
+	versLoadMu.Lock()
+	skip := versCacheLoadFailed
+	versLoadMu.Unlock()
+	if skip {
+		logger.W("[env][vers] 既有缓存加载失败，跳过写入以免清空磁盘缓存")
+		return
+	}
 	versPersistMu.Lock()
 	defer versPersistMu.Unlock()
 

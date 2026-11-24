@@ -41,6 +41,17 @@ const (
 	// 超了就不再推（命令照常跑完，最终结果仍由 tool_result 给全）：实时输出的
 	// 作用是「让人看见它在动」，不是日志归档。真要看完整输出应该重定向到文件。
 	cmdStreamMaxPush = 64 << 10
+
+	// cmdStreamMaxLine 单行缓冲的字节上限。
+	//
+	// 没有换行的超长单行（压缩后的 min.js、一行写完的 JSON、base64 大块）会让
+	// 当前行缓冲跟着输出无限涨——`cat min.js` 一次就能吃掉几百 MB。到上限后只
+	// 标记截断、不再 append，输出时补一句省略标记：实时通道本来只做「看见它在动」，
+	// 完整内容仍由最终 tool_result 给。
+	cmdStreamMaxLine = 64 << 10
+
+	// cmdLineTruncMark 超长单行被截断后追加的标记。
+	cmdLineTruncMark = "…（单行超长已截断）"
 )
 
 // CmdProgressFn 实时输出回调：callID 是工具调用 id（事件靠它找到卡片），
@@ -86,6 +97,8 @@ type cmdStream struct {
 	add  []string // 待推的完整行（已解码）
 	cr   bool     // 上一个字节是 \r：下一个字节若是常规字符即「回车覆盖」
 
+	lineTruncated bool // 当前行已超 cmdStreamMaxLine，后续字节丢弃
+
 	lastTail string    // 上次推送的当前行，用于「没变化就不推」
 	lastAt   time.Time // 上次推送时间（节流）
 	sent     int       // 已推字节数（上限控制）
@@ -104,6 +117,11 @@ func (s *cmdStream) Write(p []byte) (int, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// 已到推送上限：继续解析只会白占内存和 CPU（stopped 后不再 emit），
+	// 命令本身照跑，字节数照常返回。
+	if s.stopped {
+		return len(p), nil
+	}
 	for _, b := range p {
 		switch b {
 		case '\r':
@@ -117,6 +135,14 @@ func (s *cmdStream) Write(p []byte) (int, error) {
 			if s.cr {
 				s.cr = false
 				s.line = s.line[:0] // 回车覆盖：新内容从行首重写
+				s.lineTruncated = false
+			}
+			// 单行上限：到顶就只记标记，不再 append（否则超长单行会无限涨）。
+			if len(s.line) >= cmdStreamMaxLine {
+				if !s.lineTruncated {
+					s.lineTruncated = true
+				}
+				continue
 			}
 			s.line = append(s.line, b)
 		}
@@ -125,10 +151,20 @@ func (s *cmdStream) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// currentLineLocked 解出当前行文本，已截断时补省略标记（调用方须持锁）。
+func (s *cmdStream) currentLineLocked() string {
+	text := decodeCmdLine(s.line)
+	if s.lineTruncated {
+		text += cmdLineTruncMark
+	}
+	return text
+}
+
 // commitLineLocked 把当前行并入待推行（调用方须持锁）。
 func (s *cmdStream) commitLineLocked() {
-	s.add = append(s.add, decodeCmdLine(s.line))
+	s.add = append(s.add, s.currentLineLocked())
 	s.line = s.line[:0]
+	s.lineTruncated = false
 }
 
 // maybeFlushLocked 按节流窗口决定要不要推（调用方须持锁）。
@@ -154,7 +190,7 @@ func (s *cmdStream) flushLocked() {
 	if add != "" {
 		add += "\n"
 	}
-	tail := decodeCmdLine(s.line)
+	tail := s.currentLineLocked()
 	// 只有 tail 没变化就别推：进度条没动的时候不该产生事件。
 	if add == "" && tail == s.lastTail {
 		return

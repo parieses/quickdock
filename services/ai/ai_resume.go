@@ -73,6 +73,37 @@ func (a *AIService) saveConversationPlan(convID string, u aitools.PlanUpdate) {
 	}
 }
 
+// settleConversationPlan 一轮结束后，把库里还挂着的 doing 收成 stopped，与前端
+// settlePlanCard 对齐。
+//
+// 为什么必须做：模型常在最后一步直接给出答案、忘了再调一次 plan_update 把
+// 「正在做」那条打勾。只靠前端收口的话，刷新后 hydratePlanOf 从库里读回 doing，
+// 那张卡又转起来——用户看到的就是「回答完了，任务列表还在跑」。
+// 收成 stopped 而不是 done：那一步没被确认完成，标成已完成是在骗人。
+func (a *AIService) settleConversationPlan(convID string) {
+	if a == nil || a.App == nil || a.App.DB == nil || strings.TrimSpace(convID) == "" {
+		return
+	}
+	conv, err := a.App.DB.GetAIConversation(convID)
+	if err != nil || conv == nil || strings.TrimSpace(conv.Plan) == "" {
+		return
+	}
+	var u aitools.PlanUpdate
+	if err := json.Unmarshal([]byte(conv.Plan), &u); err != nil {
+		return // 坏数据不动，留给下一轮 plan_update 覆盖
+	}
+	changed := false
+	for i := range u.Items {
+		if strings.TrimSpace(u.Items[i].Status) == "doing" {
+			u.Items[i].Status = "stopped"
+			changed = true
+		}
+	}
+	if changed {
+		a.saveConversationPlan(convID, u)
+	}
+}
+
 // aiResumeMarkers 短指令前缀：只用来判断「这句是不是在说接着干」。
 //
 // 为什么要判：用户打「继续」两个字时，模型没有任何依据知道「继续什么」；

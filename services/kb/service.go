@@ -180,6 +180,12 @@ func (s *KBService) SaveKBSettings(cfg Settings) *services.ApiResult {
 	if cfg.EmbedAPIKey == kbKeyMask {
 		cfg.EmbedAPIKey = old.EmbedAPIKey
 	}
+	// 空串在「设置了独立地址」的语境下几乎只可能是「前端加载设置失败后拿空值提交」，
+	// 而不是有意清空：清空独立 Key 的正常路径是先把地址也清掉、回退到激活档案。
+	// 已经配了地址却收到空 Key 时保留原值，避免一次加载失败把 Key 抹掉。
+	if cfg.EmbedAPIKey == "" && cfg.EmbedBaseURL != "" && old.EmbedBaseURL == cfg.EmbedBaseURL {
+		cfg.EmbedAPIKey = old.EmbedAPIKey
+	}
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		return services.Fail(err)
@@ -331,6 +337,7 @@ func (s *KBService) AddKBFiles(libraryID string, paths []string) *services.ApiRe
 	}
 
 	var files []string
+	truncated := false
 	for _, p := range paths {
 		st, err := os.Stat(p)
 		if err != nil {
@@ -340,20 +347,22 @@ func (s *KBService) AddKBFiles(libraryID string, paths []string) *services.ApiRe
 			files = append(files, collectFiles(p, true)...)
 			if len(files) >= maxFilesPerAdd {
 				files = files[:maxFilesPerAdd]
+				truncated = true
 				break
 			}
 			continue
 		}
-		files = append(files, p)
 		if len(files) >= maxFilesPerAdd {
+			truncated = true
 			break
 		}
+		files = append(files, p)
 	}
 
 	res := AddKBResult{Unsupported: []string{}}
-	if len(files) >= maxFilesPerAdd {
-		res.Truncated = true
-	}
+	// 只有真的丢掉过文件才算截断：恰好 500 个文件时上面的循环不会进
+	// 「达到上限」分支，此前用 len(files) >= max 判断会误报。
+	res.Truncated = truncated
 
 	for _, p := range files {
 		ext := strings.ToLower(filepath.Ext(p))
@@ -386,7 +395,12 @@ func (s *KBService) AddKBFiles(libraryID string, paths []string) *services.ApiRe
 			if existing.Hash != "" {
 				src.Hash = existing.Hash
 			}
-			if existing.Status == db.KBSourceReady &&
+			// 同路径已在别的库里 ready 且指纹没变：不是「重复添加」而是「换库」。
+			// 此前 skip 只看 Status/Size/Mtime，选到另一个库时被静默 Skipped++，
+			// 用户以为加成功了，实际文件还留在原库。库不同就继续走 Upsert
+			// （SQL 里 library_id 非空即覆盖归属），不跳过。
+			if existing.LibraryID == lib &&
+				existing.Status == db.KBSourceReady &&
 				existing.Size == src.Size && existing.Mtime == src.Mtime {
 				res.Skipped++
 				continue
@@ -844,7 +858,7 @@ func (s *KBService) searchKB(query string, topN int, libraryID, sourceID string)
 	if r := s.dbOK(); r != nil {
 		return r
 	}
-	q := strings.TrimSpace(query)
+	q := ikb.FoldWidth(strings.TrimSpace(query))
 	if q == "" {
 		return services.Ok(SearchResult{Query: q, Hits: []SearchHit{}, Mode: "fts"})
 	}

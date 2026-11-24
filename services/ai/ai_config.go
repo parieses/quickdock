@@ -248,11 +248,29 @@ func apiEndpoint(cfg AIProfile) (url string, authKey, authVal string) {
 
 // ---- 多档案配置存储 ----
 
-// loadAIProfiles 读取档案列表（自动从旧的单配置迁移）
+// loadAIProfiles 读取档案列表（自动从旧的单配置迁移）。
+//
+// 解析失败时返回 nil：这里的调用方（列表渲染、找激活项、按 id 找密文）只做
+// 只读展示，拿空列表与改动前一致。**写路径不要用它**——那需要知道「读失败」
+// 与「本来就没有」的区别，用 loadAIProfilesE。
 func (a *AIService) loadAIProfiles() []aiProfileStored {
+	out, err := a.loadAIProfilesE()
+	if err != nil {
+		return nil
+	}
+	return out
+}
+
+// loadAIProfilesE 读取档案列表，并把解析错误原样交给调用方。
+//
+// 为什么要区分：AISaveProfiles 以「现有档案」为基线回填被留空 / 掩码的 API
+// Key。如果 JSON 解析失败被吞成空列表，基线就成了空的，所有留空的 Key 会被
+// 写成空串——用户一次误保存就能清掉全部 Key。所以写路径必须拿到错误并中止
+// （fail-closed）。
+func (a *AIService) loadAIProfilesE() ([]aiProfileStored, error) {
 	out := []aiProfileStored{}
 	if a.App.DB == nil {
-		return out
+		return out, nil
 	}
 	raw, err := a.App.DB.GetSetting(aiProfilesKey)
 	if err != nil || raw == "" {
@@ -267,13 +285,15 @@ func (a *AIService) loadAIProfiles() []aiProfileStored {
 					s.Name = "默认"
 				}
 				out = append(out, s)
-				return out
+				return out, nil
 			}
 		}
-		return out
+		return out, nil
 	}
-	_ = json.Unmarshal([]byte(raw), &out)
-	return out
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil, fmt.Errorf("AI 档案配置解析失败: %w", err)
+	}
+	return out, nil
 }
 
 // loadActiveProfileID 读取当前激活的档案 ID（无效时回退到第一个）
@@ -539,8 +559,14 @@ func (a *AIService) AISaveProfiles(req AISaveProfilesRequest) *services.ApiResul
 	if r := a.dbOK(); r != nil {
 		return r
 	}
+	// 基线必须是「读成功」的现有档案：读失败时不能当成空列表，否则下面
+	// 从 existing[id] 找回密文的逻辑全部落空，会把留空的 Key 写成空串。
+	existingList, lerr := a.loadAIProfilesE()
+	if lerr != nil {
+		return services.FailMsg("读取现有 AI 档案失败，已中止保存以防清空 API Key")
+	}
 	existing := map[string]aiProfileStored{}
-	for _, e := range a.loadAIProfiles() {
+	for _, e := range existingList {
 		existing[e.ID] = e
 	}
 	out := make([]aiProfileStored, 0, len(req.Profiles))

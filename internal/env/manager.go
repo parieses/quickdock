@@ -155,6 +155,15 @@ type Manager struct {
 	procSnapMu sync.Mutex
 	procSnap   []sysutil.ProcStat
 	procSnapAt time.Time
+	// installMu 每运行时一把安装锁，防止「环境页安装」与「下载页自动安装」同时
+	// 对同一运行时动手：两者会共写同一个 zip、互删暂存目录，装出来的东西半新半旧。
+	// 用 TryLock 而非 Lock：重复请求应立刻回「正在安装」，而不是排队等到前一次跑完
+	// （一次安装可能是 1.4 GB，排队等待在界面上表现为卡死）。
+	installMuMu sync.Mutex
+	installMu   map[Runtime]*sync.Mutex
+	// installCancel 记录进行中安装的取消函数，供「取消安装」入口调用。
+	// 与 installMu 共用 installMuMu 保护（写入口径都在安装开始/结束时）。
+	installCancel map[Runtime]context.CancelFunc
 }
 
 // runtimeOrder 运行时固定展示顺序
@@ -592,7 +601,14 @@ func orEmpty[T any](s []T) []T {
 }
 
 // Install 安装指定运行时的指定版本（先切换下载源，再委托 adapter）。
+// 等价于 InstallCtx(context.Background(), ...)：调用方无法取消。
 func (m *Manager) Install(rt Runtime, version, sourceID, custom string, cb InstallCallback) error {
+	return m.InstallCtx(context.Background(), rt, version, sourceID, custom, cb)
+}
+
+// InstallCtx 同 Install，但整个流程受 parent 控制：parent 取消时下载与解压都会尽快中断。
+// 取消后不保留任何半装文件（解压会删掉写了一半的目标文件），下次可重新安装。
+func (m *Manager) InstallCtx(parent context.Context, rt Runtime, version, sourceID, custom string, cb InstallCallback) error {
 	// 单版本运行时（aria2/git/ollama 等）允许调用方不传版本：用 registry 推荐版本兜底，
 	// 避免前端 EnvList 尚未回填 recommended 时被「版本号为空」拦下。未知运行时仍会
 	// 在 validateVersion 处照常报错（Versions 对未知运行时返回空清单）。
@@ -608,13 +624,29 @@ func (m *Manager) Install(rt Runtime, version, sourceID, custom string, cb Insta
 	if err != nil {
 		return err
 	}
+	// 同一运行时同一时刻只允许一个安装流程。两个入口（环境页 / 下载页自动安装）都会
+	// 走到这里，没有互斥时会互删暂存目录、共写同一个 zip，结果是装出半套文件。
+	lock := m.installLock(rt)
+	if !lock.TryLock() {
+		return fmt.Errorf("%s 正在安装中，请等待当前安装完成", DisplayName(rt))
+	}
+	defer lock.Unlock()
+	// 注册取消函数：CancelInstall 拿到它即可让下载/解压中途停下。
+	// 这里用独立 ctx 而不是 parent，是为了让「安装页取消」与「调用方超时」两条路都能触发。
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	m.setInstallCancel(rt, cancel)
+	defer m.clearInstallCancel(rt)
 	if sourceID != "" {
 		SetActiveSource(rt, sourceID)
 	}
 	if custom != "" {
 		SetCustomSource(rt, custom)
 	}
-	if err := a.Install(context.Background(), version, cb); err != nil {
+	if err := a.Install(ctx, version, cb); err != nil {
+		if cerr := ctx.Err(); cerr != nil {
+			return fmt.Errorf("%w: %v", ErrInstallCanceled, cerr)
+		}
 		return err
 	}
 	// 安装完成后重扫并重新保存检测结果，列表立即含新版本（触发点之一）
@@ -631,6 +663,59 @@ func (m *Manager) Install(rt Runtime, version, sourceID, custom string, cb Insta
 		}
 	}
 	return nil
+}
+
+// installLock 取（必要时创建）某运行时的安装互斥锁。
+func (m *Manager) installLock(rt Runtime) *sync.Mutex {
+	m.installMuMu.Lock()
+	defer m.installMuMu.Unlock()
+	if m.installMu == nil {
+		m.installMu = make(map[Runtime]*sync.Mutex, len(runtimeOrder))
+	}
+	l, ok := m.installMu[rt]
+	if !ok {
+		l = &sync.Mutex{}
+		m.installMu[rt] = l
+	}
+	return l
+}
+
+// setInstallCancel 登记某运行时当前安装流程的取消函数。
+func (m *Manager) setInstallCancel(rt Runtime, cancel context.CancelFunc) {
+	m.installMuMu.Lock()
+	defer m.installMuMu.Unlock()
+	if m.installCancel == nil {
+		m.installCancel = make(map[Runtime]context.CancelFunc, 4)
+	}
+	m.installCancel[rt] = cancel
+}
+
+// clearInstallCancel 安装结束时摘掉取消函数（只在仍指向自己时删，避免误删下一次的）。
+func (m *Manager) clearInstallCancel(rt Runtime) {
+	m.installMuMu.Lock()
+	defer m.installMuMu.Unlock()
+	delete(m.installCancel, rt)
+}
+
+// CancelInstall 取消某运行时正在进行的安装。
+// 返回是否确有安装在进行：没有在装时返回 false，调用方可据此提示用户。
+func (m *Manager) CancelInstall(rt Runtime) bool {
+	m.installMuMu.Lock()
+	cancel, ok := m.installCancel[rt]
+	m.installMuMu.Unlock()
+	if !ok || cancel == nil {
+		return false
+	}
+	cancel()
+	return true
+}
+
+// InstallRunning 判断某运行时当前是否有安装流程在进行（UI 据此显示/隐藏取消入口）。
+func (m *Manager) InstallRunning(rt Runtime) bool {
+	m.installMuMu.Lock()
+	defer m.installMuMu.Unlock()
+	cancel, ok := m.installCancel[rt]
+	return ok && cancel != nil
 }
 
 // AvailableVersions 返回某运行时的全量可下载版本（上游拉取，失败兜底推荐列表）。

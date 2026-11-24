@@ -43,15 +43,41 @@ func (s *ScriptService) StartWatcher() {
 	if s.watchStates == nil {
 		s.watchStates = map[string]*watchState{}
 	}
+	// 每次启动一个新 stop 通道：StopWatcher 关掉它，循环随之退出。
+	// 原来没有停止路径，watchOn 一旦置位就再也没有机会置回，Shutdown 之后
+	// 循环仍在跑（并且继续读库、跑脚本）。
+	stop := make(chan struct{})
+	s.watchStop = stop
 	s.watchMu.Unlock()
-	go s.watchLoop()
+	go s.watchLoop(stop)
 }
 
-func (s *ScriptService) watchLoop() {
+// StopWatcher 停止监听循环（幂等）。应用退出时调用。
+func (s *ScriptService) StopWatcher() {
+	s.watchMu.Lock()
+	if !s.watchOn {
+		s.watchMu.Unlock()
+		return
+	}
+	s.watchOn = false
+	stop := s.watchStop
+	s.watchStop = nil
+	s.watchMu.Unlock()
+	if stop != nil {
+		close(stop)
+	}
+}
+
+func (s *ScriptService) watchLoop(stop <-chan struct{}) {
 	t := time.NewTicker(watchInterval)
 	defer t.Stop()
-	for range t.C {
-		s.tickWatchers()
+	for {
+		select {
+		case <-t.C:
+			s.tickWatchers()
+		case <-stop:
+			return
+		}
 	}
 }
 

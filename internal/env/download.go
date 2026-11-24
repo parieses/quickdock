@@ -95,8 +95,10 @@ func newDownloadClient() *http.Client {
 	return &http.Client{
 		Transport: ProxyTransport(),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return fmt.Errorf("重定向层数过多（>10），疑似跳转环: %s", req.URL)
+			// 安全性检查前置：协议降级、非 HTTP(S)、公网源导向内网一律拒绝。
+			// （详见 redirect.go；这类跳转不是「下载失败」，而是「不可信」）
+			if err := checkRedirectSafety(req, via); err != nil {
+				return err
 			}
 			if GitHubAccelerateEnabled() {
 				if p := ghProxyURL(req.URL.String()); p != "" {
@@ -236,14 +238,34 @@ func downloadOne(ctx context.Context, urlStr, dst string, onProgress func(writte
 	if _, err := io.Copy(out, tmp); err != nil {
 		return err
 	}
-	// 落盘后再做一次魔数校验，拦截「后缀为 .zip 但内容不是 zip」的情况
-	// （如源站对不存在路径返回 HTML 错误页但 HTTP 200，Content-Type 未必标记 text/html）。
-	if strings.HasSuffix(strings.ToLower(dst), ".zip") {
+	// 落盘后做内容校验，三道：
+	//   1. .zip 查 ZIP 魔数，拦截「后缀为 .zip 但内容不是 zip」；
+	//   2. .exe/.phar 查可执行文件魔数（PE/ELF/Mach-O），拦截 200+HTML 错误页；
+	//   3. 能拿到官方 sha256 的（GitHub Release）比对哈希，拦截被镜像替换的二进制。
+	// 三者失败都属「确定性失败」，包装成 httpFatalError 让上层换下一个候选源而非重试同一地址。
+	if err := verifyDownloadedFile(ctx, dst, urlStr); err != nil {
+		os.Remove(dst)
+		return &httpFatalError{URL: urlStr, Msg: fmt.Sprintf("%v: %s", err, urlStr)}
+	}
+	return nil
+}
+
+// verifyDownloadedFile 对已落盘的下载结果做内容与来源校验（详见 downloadOne 调用处注释）。
+func verifyDownloadedFile(ctx context.Context, dst, srcURL string) error {
+	lower := strings.ToLower(dst)
+	switch {
+	case strings.HasSuffix(lower, ".zip"):
 		if err := verifyZipMagic(dst); err != nil {
-			os.Remove(dst)
-			// 同为确定性失败（内容不是 zip），包装成 httpFatalError 让上层跳过重试
-			return &httpFatalError{URL: urlStr, Msg: fmt.Sprintf("%v（下载源可能返回了错误页）: %s", err, urlStr)}
+			return fmt.Errorf("%v（下载源可能返回了错误页）", err)
 		}
+	case strings.HasSuffix(lower, ".exe"):
+		// 只认 Windows 可执行后缀：composer.phar 是 PHP 脚本（带 shebang），不适用魔数判断。
+		if err := verifyBinaryMagic(dst); err != nil {
+			return err
+		}
+	}
+	if _, err := VerifyOfficialDigest(ctx, dst, srcURL); err != nil {
+		return err
 	}
 	return nil
 }

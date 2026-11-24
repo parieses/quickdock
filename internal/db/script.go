@@ -556,14 +556,6 @@ func (d *Database) GetScriptStats(scriptID string) (ScriptStats, error) {
 	return st, err
 }
 
-// CountRunningScriptRuns 该脚本当前是否有未收尾的运行（并发闸门用）。
-func (d *Database) CountRunningScriptRuns(scriptID string) (int, error) {
-	var n int
-	err := d.conn.QueryRow(`SELECT COUNT(*) FROM script_runs
-		WHERE script_id = ? AND status = 'running'`, scriptID).Scan(&n)
-	return n, err
-}
-
 // FailStaleScriptRuns 进程崩溃后遗留的 running 记录在新一次启动时收尾成 fail。
 //
 // 不做的话「并发闸门」会永久卡住：上一进程被强杀，running 记录留着，
