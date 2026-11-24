@@ -6,12 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"quickdock/internal/sysutil"
 	"runtime"
 	"strings"
+	"time"
 
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
+	"quickdock/internal/sysutil"
 )
 
 const nginxBaseRel = "runtime/nginx"
@@ -237,6 +238,12 @@ func (n *NginxRuntime) Stop(version string) error {
 	stopByPort(nginxDefaultPort, "nginx.exe")
 	// 3) 清掉会话内记录的句柄
 	svcMgr.forget(RuntimeNginx)
+	// 4) 复核：端口仍被占则说明没停掉（权限不足 / taskkill 被拦），如实报错。
+	// 这里不能静默返回 nil——界面会显示「已停止」，而端口实际还在监听，
+	// 用户随后重启服务时才会在别处撞上「端口被占用」。
+	if !waitPortClosed(nginxDefaultPort, 2*time.Second) {
+		return fmt.Errorf("Nginx 仍在监听端口 %d，可能未完全停止（请检查权限或以管理员身份重试）", nginxDefaultPort)
+	}
 	return nil
 }
 

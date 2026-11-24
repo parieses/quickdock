@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
@@ -298,6 +299,11 @@ func (r *RedisRuntime) Stop(version string) error {
 	// 3) 清掉会话内记录的句柄
 	svcMgr.forget(RuntimeRedis)
 	logger.I("[env][redis] Stop 完成 version=%s port=%d", version, port)
+	// 4) 复核：端口仍被占说明没停掉（taskkill 失败 / 权限不足 / 孙进程接管），
+	// 必须如实报错。此前一律 return nil，界面显示「已停止」而端口还在监听。
+	if !waitPortClosed(port, 2*time.Second) {
+		return fmt.Errorf("Redis 仍在监听端口 %d，可能未完全停止（请检查 redis 密码配置或权限）", port)
+	}
 	return nil
 }
 
