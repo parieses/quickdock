@@ -203,13 +203,13 @@ func matchPathRewrite(rel, rewriteFrom, rewriteTo string) *pathRewriteFile {
 // 原始大小（不是压缩后的字节数）。压缩后大小会小于原始大小，若用压缩后字节做
 // 分子、分母用原始大小，百分比永远到不了 100%——进度条会停在 90% 上下不动。
 func ArchiveDataDir(src, dstZip string, progress archiveProgress) (int, int64, error) {
-	return archiveDataDir(src, dstZip, "", "", nil, progress)
+	return archiveDataDir(src, dstZip, "", "", nil, nil, progress)
 }
 
 // ArchiveDataDirWithRewrite 与 ArchiveDataDir 相同，但会把写死旧目录路径的文本配置
 // 里的路径改写为 rewriteTo。
 func ArchiveDataDirWithRewrite(src, dstZip, rewriteFrom, rewriteTo string, progress archiveProgress) (int, int64, error) {
-	return archiveDataDir(src, dstZip, rewriteFrom, rewriteTo, nil, progress)
+	return archiveDataDir(src, dstZip, rewriteFrom, rewriteTo, nil, nil, progress)
 }
 
 // archiveExtra 打包时要额外写入 zip 的条目（不在 src 目录里）。
@@ -222,7 +222,9 @@ type archiveExtra struct {
 	srcFile string
 }
 
-func archiveDataDir(src, dstZip, rewriteFrom, rewriteTo string, extra []archiveExtra, progress archiveProgress) (int, int64, error) {
+// archiveDataDir 的 include 为按功能打包时的文件过滤器：入参是相对数据目录的
+// 斜杠路径，返回 false 的文件不进包。nil 表示全量（同机目录搬家与旧整机包）。
+func archiveDataDir(src, dstZip, rewriteFrom, rewriteTo string, extra []archiveExtra, include func(string) bool, progress archiveProgress) (int, int64, error) {
 	src = filepath.Clean(src)
 	if src == "" {
 		return 0, 0, fmt.Errorf("数据目录不能为空")
@@ -253,6 +255,10 @@ func archiveDataDir(src, dstZip, rewriteFrom, rewriteTo string, extra []archiveE
 		// 同名文件，这里再扫进来会和 extra 的那个形成两条同名 zip 条目——
 		// 解压/读取时取到哪条不确定，可能读到过期 manifest。
 		if slash == TransferManifestName {
+			continue
+		}
+		// 按勾选的导航菜单筛选：只保留所选功能的数据目录子项。
+		if include != nil && !include(slash) {
 			continue
 		}
 		entries = append(entries, entry{rel: f.rel, size: f.size})

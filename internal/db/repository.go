@@ -4,10 +4,13 @@ package db
 
 // Workspace 工作空间
 type Workspace struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Storage   string `json:"storage"`
-	Remark    string `json:"remark"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Storage string `json:"storage"`
+	Remark  string `json:"remark"`
+	// NoSearch 是否从 Ctrl+K 搜索里排除（1 = 排除）。应用只有一个工作空间时
+	// 这个开关意义不大，但它与场景/集合/项目保持同一套字段，避免特例分支。
+	NoSearch  int    `json:"noSearch"`
 	CreatedAt string `json:"createdAt"`
 	UpdatedAt string `json:"updatedAt"`
 }
@@ -21,13 +24,15 @@ type Scene struct {
 	Description string `json:"description"`
 	// GroupName 分组名（侧栏按组折叠渲染）。空串=未分组。刻意叫 group_name 而非 group：
 	// group 是 SQL 保留字，直接用会撞上 codebase 里大量 GROUP BY 查询。
-	GroupName  string `json:"groupName"`
-	Icon       string `json:"icon"`
-	Color      string `json:"color"`
-	Favorite   int    `json:"favorite"`
-	Unbound    int    `json:"unbound"`
-	UsageCount int    `json:"usageCount"`
-	Sort       int    `json:"sort"`
+	GroupName string `json:"groupName"`
+	Icon      string `json:"icon"`
+	Color     string `json:"color"`
+	Favorite  int    `json:"favorite"`
+	Unbound   int    `json:"unbound"`
+	// NoSearch 1 = 该场景不出现在 Ctrl+K 搜索结果里（全局开关之外的单条排除）。
+	NoSearch   int `json:"noSearch"`
+	UsageCount int `json:"usageCount"`
+	Sort       int `json:"sort"`
 	// Env 场景绑定的环境服务，JSON 数组：[{"runtime":"mysql","version":"8.4.3"}]。
 	// version 为空表示跟随激活版本（或首个已装版本）。空串/空数组=未绑定任何服务。
 	Env       string `json:"env"`
@@ -53,11 +58,13 @@ type Collection struct {
 	Recent        int    `json:"recent"`
 	RecentAt      string `json:"recentAt"`
 	Unbound       int    `json:"unbound"`
-	PluginID      string `json:"pluginId"`
-	UsageCount    int    `json:"usageCount"`
-	Sort          int    `json:"sort"`
-	CreatedAt     string `json:"createdAt"`
-	UpdatedAt     string `json:"updatedAt"`
+	// NoSearch 1 = 该集合不出现在 Ctrl+K 搜索结果里。
+	NoSearch   int    `json:"noSearch"`
+	PluginID   string `json:"pluginId"`
+	UsageCount int    `json:"usageCount"`
+	Sort       int    `json:"sort"`
+	CreatedAt  string `json:"createdAt"`
+	UpdatedAt  string `json:"updatedAt"`
 }
 
 // CollectionItem 项目
@@ -76,10 +83,13 @@ type CollectionItem struct {
 	Color            string `json:"color"`
 	Remark           string `json:"remark"`
 	PluginData       string `json:"pluginData"`
-	UsageCount       int    `json:"usageCount"`
-	Sort             int    `json:"sort"`
-	CreatedAt        string `json:"createdAt"`
-	UpdatedAt        string `json:"updatedAt"`
+	// NoSearch 1 = 该条目不出现在 Ctrl+K 搜索结果里（书签导入几百条后，
+	// 逐个排除不现实，通常配合设置里的「项目不参与搜索」总开关使用）。
+	NoSearch   int    `json:"noSearch"`
+	UsageCount int    `json:"usageCount"`
+	Sort       int    `json:"sort"`
+	CreatedAt  string `json:"createdAt"`
+	UpdatedAt  string `json:"updatedAt"`
 	// Env 条目绑定的运行时版本，JSON 数组 [{"runtime":"node","version":"18.20.0"}]，
 	// 与 scenes.env 同形。打开该条目时把这些版本的 bin 目录前置到子进程 PATH——
 	// 只影响本次打开，不改系统环境变量（那是全局激活 SetActive 的职责）。

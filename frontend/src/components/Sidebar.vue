@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { ref, inject, computed, onMounted, onUnmounted, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useWorkspaceStore } from '../stores/workspace'
-import CreateDialog from './CreateDialog.vue'
 import NavBadge from './NavBadge.vue'
 import NotificationCenter from './NotificationCenter.vue'
 import { getErrorMessage } from '../utils/error'
@@ -10,7 +8,7 @@ import type { ToastAPI } from '../types'
 import { Events } from '@wailsio/runtime'
 // 导航项图标已收敛到 pages/registry（纯数据），侧边栏仅保留仍在本文件直接使用的图标
 import {
-  FolderKanban, ChevronDown, ChevronLeft, ChevronRight, Plus, Pencil, Trash2, Settings,
+  ChevronDown, ChevronLeft, ChevronRight, Settings,
   EyeOff, ArrowUp, ArrowDown, RotateCcw,
 } from '@lucide/vue'
 // navEntries 不再直接使用：可见性/顺序交给 useNavPrefs，它内部仍以 registry 为唯一真相
@@ -18,10 +16,8 @@ import type { NavDotKind } from '../pages/registry'
 
 import { useNavPrefs } from '../composables/useNavPrefs'
 import { useNavBadges } from '../composables/useNavBadges'
-import { useDragSort } from '../composables/useDragSort'
 import { aiGenerating, aiFinishedUnread } from '../composables/bridge'
 
-const store = useWorkspaceStore()
 const { t } = useI18n()
 
 const emit = defineEmits<{
@@ -126,9 +122,8 @@ function onCollapseLeave(el: Element) {
   e.style.opacity = '0'
 }
 
-// 点击外部关闭：右键菜单 / 已隐藏浮层 / 工作空间菜单共用（避免多个浮层互相打架）
+// 点击外部关闭：右键菜单 / 已隐藏浮层共用（避免多个浮层互相打架）
 function onDocumentClick() {
-  showWorkspaceMenu.value = false
   navMenu.value = null
   showHidden.value = false
 }
@@ -199,157 +194,10 @@ const navItems = computed<NavItemView[]>(() =>
     }
   }),
 )
-
-// ---- 工作空间 ----
-// 拖拽排序复用 useDragSort（集合/条目列表同一套原生 HTML5 管道），落点算好新顺序后
-// 调 store.reorderWorkspaces 持久化；该方法内部已带「失败重拉 ListWorkspaces」回退。
-// 搜索/筛选时禁用：此刻列表可能被过滤，若把过滤后的下标当全量写回，顺序必然错乱
-// （与 CollectionList/ItemList 的 !store.hasSearch 禁用是同一口径）。
-const wsDragDisabled = computed(() => store.hasSearch)
-const {
-  dragId: wsDragId,
-  dragOverIndex: wsDragOverIndex,
-  onDragStart: wsSortDragStart,
-  onDragOver: wsSortDragOver,
-  onDrop: wsSortDrop,
-  onDragEnd: wsSortDragEnd,
-  moveByKey: moveWsByKey,
-} = useDragSort({
-  ids: () => store.workspaces.map(w => w.id),
-  onReorder: (ids) => {
-    if (wsDragDisabled.value) return
-    void store.reorderWorkspaces(ids).catch(async (e) => {
-      // store 内部已重拉过一次；这里再兜一层，保证界面最终与 DB 顺序一致
-      await store.fetchWorkspaces().catch(() => {})
-      toast.error(getErrorMessage(e))
-    })
-  },
-})
-
-function onWsDragStart(id: string, e: DragEvent, i: number) {
-  if (wsDragDisabled.value) { e.preventDefault(); return }
-  wsSortDragStart(id, e, i)
-}
-// 键盘重排：Alt+↑/↓，与拖拽同守卫（搜索时列表被过滤，不能按过滤下标写回全量）
-const wsMoveMsg = ref('')
-function onWsMoveKey(e: KeyboardEvent, ws: { id: string; name: string }) {
-  if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return
-  if (wsDragDisabled.value) return
-  e.preventDefault()
-  if (moveWsByKey(ws.id, e.key === 'ArrowUp' ? -1 : 1)) {
-    wsMoveMsg.value = t(e.key === 'ArrowUp' ? 'sceneMovedUp' : 'sceneMovedDown', { name: ws.name })
-  }
-}
-function onWsDragOver(i: number, e: DragEvent) {
-  // 禁用时不 preventDefault：浏览器不认为是合法落点，既不画指示线也不派发 drop
-  if (wsDragDisabled.value) return
-  wsSortDragOver(i, e)
-}
-function onWsDrop(id: string, e: DragEvent) {
-  if (wsDragDisabled.value) { e.preventDefault(); wsSortDragEnd(); return }
-  wsSortDrop(id, e)
-}
-
-const showWorkspaceMenu = ref(false)
-const showCreateWorkspaceDialog = ref(false)
-const showEditWorkspaceDialog = ref(false)
-const editingWorkspaceId = ref('')
-const editingWorkspaceName = ref('')
-
-function toggleWorkspaceMenu() {
-  showWorkspaceMenu.value = !showWorkspaceMenu.value
-}
-
-function selectWorkspace(id: string) {
-  showWorkspaceMenu.value = false
-  store.selectWorkspace(id)
-}
-
-async function handleCreateWorkspace(values: Record<string, string>) {
-  try {
-    await store.addWorkspace(values.name)
-    showCreateWorkspaceDialog.value = false
-    showWorkspaceMenu.value = false
-  } catch (e) {
-    toast.error(t('createFailed') + ': ' + getErrorMessage(e))
-  }
-}
-
-function startEditWorkspace(ws: { id: string; name: string }) {
-  editingWorkspaceId.value = ws.id
-  editingWorkspaceName.value = ws.name
-  showWorkspaceMenu.value = false
-  showEditWorkspaceDialog.value = true
-}
-
-async function handleEditWorkspace(values: Record<string, string>) {
-  try {
-    await store.updateWorkspaceAction(editingWorkspaceId.value, values.name)
-    showEditWorkspaceDialog.value = false
-  } catch (e) {
-    toast.error(t('updateFailed') + ': ' + getErrorMessage(e))
-  }
-}
-
-async function handleDeleteWorkspace(wsId: string) {
-  showWorkspaceMenu.value = false
-  if (!(await toast.confirm(t('confirmDeleteWorkspace')))) return
-  try {
-    await store.removeWorkspace(wsId)
-  } catch (e) {
-    toast.error(t('deleteFailed') + ': ' + getErrorMessage(e))
-  }
-}
 </script>
 
 <template>
   <aside class="sidebar" :class="{ collapsed }">
-    <!-- 键盘重排的状态播报：视觉隐藏，读屏会念出移动结果 -->
-    <span class="qd-sr-only" aria-live="polite">{{ wsMoveMsg }}</span>
-    <!-- 工作空间切换器 -->
-    <div v-key-click class="workspace-selector" @click.stop="toggleWorkspaceMenu">
-      <FolderKanban :size="16" class="ws-icon" />
-      <span class="ws-name">{{ store.activeWorkspace?.name || t('selectWorkspace') }}</span>
-      <ChevronDown :size="14" class="ws-arrow" />
-      <Transition name="dropdown">
-        <div v-key-click v-if="showWorkspaceMenu" class="ws-dropdown" @click.stop>
-          <div class="ws-dropdown-header">{{ t('workspaces') }}</div>
-          <div
-            v-for="(ws, i) in store.workspaces"
-            :key="ws.id"
-            class="ws-item-row"
-            :class="{ dragging: wsDragId === ws.id, 'drop-before': !!wsDragId && wsDragOverIndex === i && wsDragId !== ws.id }"
-            :draggable="!wsDragDisabled"
-            @keydown="onWsMoveKey($event, ws)"
-            :title="wsDragDisabled ? t('workspaceDragDisabledHint') : t('workspaceDragHint')"
-            @dragstart="onWsDragStart(ws.id, $event, i)"
-            @dragover="onWsDragOver(i, $event)"
-            @drop="onWsDrop(ws.id, $event)"
-            @dragend="wsSortDragEnd"
-          >
-            <button
-              :class="['ws-option', { active: ws.id === store.activeWorkspaceId }]"
-              @click="selectWorkspace(ws.id)"
-            >
-              <FolderKanban :size="14" />
-              <span>{{ ws.name }}</span>
-            </button>
-            <button class="ws-item-action" :title="t('edit')" @click="startEditWorkspace(ws)">
-              <Pencil :size="11" />
-            </button>
-            <button class="ws-item-action danger" :title="t('delete')" :disabled="store.workspaces.indexOf(ws) === 0" :class="{ 'ws-action-disabled': store.workspaces.indexOf(ws) === 0 }" @click="handleDeleteWorkspace(ws.id)">
-              <Trash2 :size="11" />
-            </button>
-          </div>
-          <div class="ws-dropdown-divider" />
-          <button class="ws-option ws-create" @click="showCreateWorkspaceDialog = true">
-            <Plus :size="14" />
-            <span>{{ t('addWorkspace') }}</span>
-          </button>
-        </div>
-      </Transition>
-    </div>
-
     <!-- 页面导航（由 pages/registry 驱动 + useNavPrefs 裁剪排序，新增页面只改注册表）
          一个模板覆盖全部导航项：active / loading / 指示点的差异由 navItems 按条目字段算好，模板不分 kind。
          插件项的「可更新」角标同样不需要显式清零 —— 进入 plugins 页时 useNavBadges 的
@@ -411,15 +259,6 @@ async function handleDeleteWorkspace(wsId: string) {
         </Transition>
       </div>
     </div>
-
-    <!-- 工作空间新建 / 编辑弹窗（场景相关已迁移到右侧 SceneRail） -->
-    <CreateDialog :visible="showCreateWorkspaceDialog" :title="t('addWorkspace')"
-      :fields="[{ key: 'name', label: t('workspace'), type: 'text', placeholder: t('workspaceNamePlaceholder') }]"
-      @confirm="handleCreateWorkspace" @cancel="showCreateWorkspaceDialog = false" />
-    <CreateDialog :visible="showEditWorkspaceDialog" :title="t('edit')"
-      :fields="[{ key: 'name', label: t('workspace'), type: 'text', placeholder: t('workspaceNamePlaceholder') }]"
-      :editValues="{ name: editingWorkspaceName }"
-      @confirm="handleEditWorkspace" @cancel="showEditWorkspaceDialog = false" />
 
     <!-- 底部固定：设置 + 收起（设置始终沉在最底部，与导航区独立） -->
     <div class="sidebar-footer">
@@ -493,18 +332,14 @@ async function handleDeleteWorkspace(wsId: string) {
 
 /* 收起态：仅显示图标 */
 .sidebar.collapsed { width: 54px; min-width: 54px; }
-.sidebar.collapsed .ws-name,
-.sidebar.collapsed .ws-arrow,
 .sidebar.collapsed .nav-item span,
 .sidebar.collapsed .settings-btn span { display: none; }
-.sidebar.collapsed .workspace-selector { justify-content: center; margin: var(--space-3) var(--space-4) 0; padding: 0; }
 .sidebar.collapsed .nav-item { justify-content: center; padding-left: 0; padding-right: 0; }
 /* 收起态 54px 宽放不下「通知 + 设置 + 折叠」三个横排按钮（实测超 90px），
    居中后最右的折叠/展开箭头会被侧栏 overflow:hidden 裁掉——用户就「找不到展开按钮」。
    改成竖向堆叠：三项各自居中，展开箭头恒定可见，也不挤占横向。 */
 .sidebar.collapsed .sidebar-footer { flex-direction: column; justify-content: center; gap: var(--space-4); padding: var(--space-4) 0; }
 .sidebar.collapsed .settings-btn { flex: 0; padding: var(--space-3); }
-.sidebar.collapsed .ws-dropdown { left: 6px; right: auto; width: 200px; }
 /* 收起态同样不能隐藏 span（浮层里的行要靠它显示名字），
    只在不同的 class 上做显隐，不用 :has() —— WebView2 版本不可控。
    但「已隐藏」分组的展开箭头必须保留：只剩一个灰色眼睛图标时毫无「可展开」提示，
@@ -515,31 +350,14 @@ async function handleDeleteWorkspace(wsId: string) {
 .sidebar.collapsed .hidden-toggle { color: var(--color-text-secondary); }
 .sidebar.collapsed .hidden-toggle .hidden-caret { color: var(--color-text-secondary); }
 
-/* 工作空间切换器：并入导航区，不再是独立的一条 44px 横带。
-   顶部从「系统标题栏 + 44px 横带 + 46px 页头」收成「系统标题栏 + 46px 页头」；
-   切换器与 .nav-item 同高、同左右内边距，视觉上是导航列表的第一项。 */
-.workspace-selector {
-  position: relative;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  min-height: 32px;
-  margin: var(--space-3) 10px 0;
-  padding: 0 10px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  user-select: none;
-  transition: background var(--transition-fast);
-}
-.workspace-selector:hover { background: var(--color-bg-hover); }
-.ws-icon { color: var(--color-accent); flex-shrink: 0; }
-
 /* 导航菜单（自身可滚动，避免导航过长把底部按钮挤出） */
 .sidebar-navigator {
   flex: 1 1 auto;
   min-height: 0;
-  padding: var(--space-3) 10px 10px;
+  /* 顶部不留 padding：移除工作空间切换器后，第一项要顶到与右侧
+     .qd-page-header 的标题同一水平线。原来 6px 上边距会让左侧「总览」
+     比右侧页头标题低一截，红框里看着像两边没对齐。 */
+  padding: 0 10px 10px;
   border-bottom: 1px solid var(--color-border);
   overflow-y: auto;
 }
@@ -562,10 +380,7 @@ async function handleDeleteWorkspace(wsId: string) {
   text-align: left;
 }
 .nav-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-/* 选中态与工作空间三栏的 .qd-row.active 同一套语言：底色 + 左缘竖条。
-   底色用 --color-select-bg（14% 蓝）而不是 accent-bg（8.5%）——8.5% 压在
-   侧栏底色上几乎看不出，于是又叠竖条、又给图标变色去凑信号，三个都弱。
-   现在两个信号都做足，图标保持中性：颜色只表达"当前在哪"，不兼任装饰。 */
+/* 选中态与工作空间三栏的 .qd-row.active 同一套语言：底色 + 左缘竖条。 */
 .nav-item.active { background: var(--color-select-bg); color: var(--color-text-primary); font-weight: 500; }
 .nav-item.active::before {
   content: '';
@@ -590,8 +405,7 @@ async function handleDeleteWorkspace(wsId: string) {
 .footer-badge { margin-left: var(--space-2); flex-shrink: 0; }
 .sidebar.collapsed .nav-item .nav-badge,
 .sidebar.collapsed .settings-btn .footer-badge {
-  /* 收起态「只留图标」的规则是 .nav-item span（0-3-1），这里必须至少 0-4-0 才能翻盘；
-     之前收起态角标从不显示，根因正是权重输给了那条 */
+  /* 收起态「只留图标」的规则是 .nav-item span（0-3-1），这里必须至少 0-4-0 才能翻盘 */
   display: inline-block;
   position: absolute;
   top: 4px;
@@ -615,9 +429,8 @@ async function handleDeleteWorkspace(wsId: string) {
 }
 @keyframes nav-spin { to { transform: rotate(360deg); } }
 
-/* 导航项行尾的「后台活动」指示点（provider 表见 DOT_PROVIDERS，键是 registry 的 NavDotKind）：
-   running = 还在跑（呼吸动画），done = 已跑完等你回来看。
-   颜色不用红：红色留给监控掉线这类真故障（与通知中心角标同一口径）。 */
+/* 导航项行尾的「后台活动」指示点（provider 表见 DOT_PROVIDERS）：
+   running = 还在跑（呼吸动画），done = 已跑完等你回来看。 */
 .nav-dot {
   flex-shrink: 0; margin-left: auto;
   width: 7px; height: 7px; border-radius: 50%;
@@ -628,7 +441,7 @@ async function handleDeleteWorkspace(wsId: string) {
 /* NavBadge 也挂在行尾，两者同排时留一点间距 */
 .nav-dot + * { margin-left: var(--space-2); }
 /* 收起态照样要看见：`.collapsed .nav-item span` 会 display:none（0-3-1），
-   这里必须同样的权重以上才能翻盘（nav-badge 是同样的坑，见上） */
+   这里必须同样的权重以上才能翻盘 */
 .sidebar.collapsed .nav-item .nav-dot {
   display: inline-block;
   position: absolute;
@@ -639,9 +452,7 @@ async function handleDeleteWorkspace(wsId: string) {
 
 /* 已隐藏项折叠组：虚线框 + 就地恢复列表 */
 .hidden-group { margin-top: var(--space-3); }
-/* 可点击的按钮，不是禁用项：默认就用 secondary（disabled 在深底上对比度不足），
-   hover 再提到 primary。收起态那条更高权重的规则也一并覆盖，避免展开箭头
-   在收起态永远不会提亮。 */
+/* 可点击的按钮，不是禁用项：默认就用 secondary，hover 再提到 primary */
 .hidden-toggle { color: var(--color-text-secondary); }
 .hidden-toggle:hover, .sidebar.collapsed .hidden-toggle:hover { color: var(--color-text-primary); }
 .hidden-caret { margin-left: auto; color: var(--color-text-disabled); transition: transform var(--transition-base); }
@@ -671,7 +482,6 @@ async function handleDeleteWorkspace(wsId: string) {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
 }
-/* 已隐藏项被 hover 时才显示「恢复」按钮：默认不占用横向空间 */
 /* 已隐藏项：外层是 div（内含「取回」按钮，不能嵌套 button），
    所以显式补上按钮本来自带的行为 */
 .hidden-item {
@@ -740,94 +550,6 @@ async function handleDeleteWorkspace(wsId: string) {
 .nav-menu button.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 .nav-menu-divider { height: 1px; background: var(--color-border); margin: var(--space-2) var(--space-1); }
 
-.ws-name {
-  flex: 1;
-  font-size: var(--text-md);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ws-arrow {
-  color: var(--color-text-disabled);
-  flex-shrink: 0;
-  transition: transform var(--transition-base);
-}
-.ws-arrow.open { transform: rotate(180deg); }
-.ws-dropdown {
-  position: absolute;
-  top: 100%;
-  left: var(--space-4);
-  right: var(--space-4);
-  z-index: 100;
-  background: var(--color-popover-bg);
-  border: 1px solid var(--popover-border-color);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
-  overflow: hidden;
-}
-.ws-dropdown-header {
-  padding: var(--space-4) var(--space-5);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  color: var(--color-text-disabled);
-  
-  letter-spacing: 0.5px;
-}
-.ws-option {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
-  border: none;
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: var(--text-md);
-  cursor: pointer;
-  font-family: inherit;
-  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
-  text-align: left;
-}
-.ws-option:hover { background: var(--color-bg-active); color: var(--color-text-primary); }
-.ws-option.active { color: var(--color-accent); }
-
-/* 工作空间条目行 */
-.ws-item-row { display: flex; align-items: center; }
-/* 拖拽排序视觉反馈：源行淡出、落点画顶部指示线（inset 不占布局、不跳动）。
-   用属性选择器而非 :has()/:is()/:container —— WebView2 版本不可控。 */
-.ws-item-row[draggable="true"] { cursor: grab; }
-.ws-item-row[draggable="true"] .ws-option { cursor: grab; }
-.ws-item-row[draggable="true"]:active,
-.ws-item-row[draggable="true"]:active .ws-option { cursor: grabbing; }
-.ws-item-row.dragging { opacity: .4; }
-.ws-item-row.drop-before { box-shadow: inset 0 2px 0 var(--color-accent); }
-.ws-item-row .ws-option { flex: 1; min-width: 0; }
-.ws-item-action {
-  flex-shrink: 0;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: none;
-  background: transparent;
-  color: var(--color-text-disabled);
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  margin-right: var(--space-2);
-  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
-}
-.ws-item-row:hover .ws-item-action { display: flex; }
-.ws-item-action:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
-.ws-item-action.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
-.ws-item-action:disabled,
-.ws-item-action.ws-action-disabled { display: none; }
-.ws-create { border-top: 1px solid var(--color-border); color: var(--color-text-disabled); }
-.ws-create:hover { color: var(--color-accent); }
-.ws-dropdown-divider { height: 1px; background: var(--color-border); }
-
 /* 底部固定：设置 + 收起 */
 .sidebar-footer {
   flex-shrink: 0;
@@ -868,13 +590,4 @@ async function handleDeleteWorkspace(wsId: string) {
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 .collapse-btn:hover { color: var(--color-text-muted); background: var(--color-bg-tertiary); }
-
-/* 工作空间下拉动画 */
-.dropdown-enter-active, .dropdown-leave-active {
-  transition: opacity var(--transition-base), transform var(--transition-base);
-}
-.dropdown-enter-from, .dropdown-leave-to {
-  opacity: 0;
-  transform: translateY(-4px);
-}
 </style>

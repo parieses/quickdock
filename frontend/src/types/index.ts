@@ -21,6 +21,8 @@ export interface Scene {
   color?: string
   favorite?: number
   unbound?: number
+  /** 1 = 不参与 Ctrl+K 搜索 */
+  noSearch?: number
   usageCount?: number
   sort?: number
   createdAt?: string
@@ -44,6 +46,8 @@ export interface Collection {
   recent?: number
   recentAt?: string
   unbound?: number
+  /** 1 = 不参与 Ctrl+K 搜索 */
+  noSearch?: number
   pluginId?: string
   usageCount?: number
   sort?: number
@@ -69,6 +73,8 @@ export interface CollectionItem {
   // env 绑定的运行时版本（JSON 数组，与 scenes.env 同形）：打开该条目时把这些版本的
   // bin 目录前置到子进程 PATH，只影响本次打开，不改系统环境变量。
   env?: string
+  /** 1 = 不参与 Ctrl+K 搜索 */
+  noSearch?: number
   usageCount?: number
   sort?: number
   createdAt?: string

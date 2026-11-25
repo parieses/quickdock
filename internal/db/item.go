@@ -36,7 +36,10 @@ func expandItemVars(s string) string {
 	return s
 }
 
-const itemCols = "id, workspace_id, collection_id, name, type, value, working_directory, tool_id, tool, args, icon, color, remark, plugin_data, usage_count, sort, created_at, updated_at, env"
+// itemCols 是 items 的显式列清单（ListAllItems / SearchAllItems / GetMostUsedItems 共用）。
+// 必须含 no_search：这几条路径返回的 CollectionItem 曾一律 NoSearch=0，导致 Ctrl+K 与
+// MCP 对「单条不参与搜索」的过滤全部空转——勾了开关却照样搜得到。
+const itemCols = "id, workspace_id, collection_id, name, type, value, working_directory, tool_id, tool, args, icon, color, remark, plugin_data, no_search, usage_count, sort, created_at, updated_at, env"
 
 // ---- 项目 ----
 
@@ -201,8 +204,42 @@ func (d *Database) scanItems(rows *sql.Rows) ([]CollectionItem, error) {
 	var items []CollectionItem
 	for rows.Next() {
 		var item CollectionItem
-		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.CollectionID, &item.Name, &item.Type, &item.Value, &item.WorkingDirectory, &item.ToolID, &item.Tool, &item.Args, &item.Icon, &item.Color, &item.Remark, &item.PluginData, &item.UsageCount, &item.Sort, &item.CreatedAt, &item.UpdatedAt, &item.Env); err != nil {
+		// items 表里只有 id / workspace_id / collection_id / name / value /
+		// created_at / updated_at 是 NOT NULL；其余列即便写了 DEFAULT，只要有人
+		// 显式 INSERT NULL（或整库合并把旧包的 NULL 带进来）就会是 NULL。
+		// 直接 Scan 进 string/int 会让**整批**查询失败——一条脏数据就能让
+		// Ctrl+K 全量池、最近使用、FTS 搜索同时空掉。这里统一经 Null* 兜底。
+		var (
+			typ, workingDir, toolID, tool, args  sql.NullString
+			icon, color, remark, pluginData, env sql.NullString
+			noSearch, usageCount, sort           sql.NullInt64
+		)
+		if err := rows.Scan(
+			&item.ID, &item.WorkspaceID, &item.CollectionID, &item.Name,
+			&typ, &item.Value, &workingDir, &toolID, &tool, &args,
+			&icon, &color, &remark, &pluginData, &noSearch,
+			&usageCount, &sort, &item.CreatedAt, &item.UpdatedAt, &env,
+		); err != nil {
 			return nil, err
+		}
+		item.Type = typ.String
+		item.WorkingDirectory = workingDir.String
+		item.ToolID = toolID.String
+		item.Tool = tool.String
+		item.Args = args.String
+		item.Icon = icon.String
+		item.Color = color.String
+		item.Remark = remark.String
+		item.PluginData = pluginData.String
+		item.Env = env.String
+		if noSearch.Valid {
+			item.NoSearch = int(noSearch.Int64)
+		}
+		if usageCount.Valid {
+			item.UsageCount = int(usageCount.Int64)
+		}
+		if sort.Valid {
+			item.Sort = int(sort.Int64)
 		}
 		item.iconFresh = enrichItemIcon(&item)
 		items = append(items, item)

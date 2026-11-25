@@ -1,25 +1,41 @@
 <!-- README 结构：定位 → 这是什么（关键词） → 截图 → 功能一览 → 功能详解 → 架构 → 技术栈 → 开发 → 界面设计 → 插件 → 许可。
-     长文详解收进 <details>，默认折叠。改完请同步 website/index.html 的更新日志（见 AGENTS.md 发版纪律）。 -->
+     长文详解收进 <details>，默认折叠。中文为默认语言，英文版见 README.en.md，两版需同步。
+     改完请同步 website/index.html 的更新日志（见 AGENTS.md 发版纪律）。 -->
 
 <div align="center">
 
 # 快启坞 QuickDock
 
-Windows 桌面工具。资源集合、快速启动、本地开发环境、若干常用工具，都放在一个窗口里。
+**Windows 桌面效率工具箱 · 本地开发环境管理器 · AI Agent 与 MCP 中枢**
 
-![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-4a9eff)
-![Version](https://img.shields.io/badge/Version-v0.0.57-4a9eff)
-![License](https://img.shields.io/badge/License-MIT-4a9eff)
-![Built with](https://img.shields.io/badge/Built%20with-Go%20%2B%20Vue-4a9eff)
-![Framework](https://img.shields.io/badge/Framework-Wails%20v3-4a9eff)
+`资源集合` · `全局热键` · `运行环境` · `AI agent` · `插件生态`
 
-官网 <https://parieses.github.io/quickdock/>　·　使用说明 <https://parieses.github.io/quickdock/guide.html>　·　Issues <https://github.com/parieses/quickdock/issues>　·　插件市场 <https://github.com/parieses/quickdock-plugins>
+![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-4a9eff?style=flat-square)
+![Version](https://img.shields.io/badge/Version-v0.0.57-4a9eff?style=flat-square)
+![Dev](https://img.shields.io/badge/Dev-Active-22c55e?style=flat-square)
+![License](https://img.shields.io/badge/License-MIT-4a9eff?style=flat-square)
+![Built with](https://img.shields.io/badge/Built%20with-Go%20%2B%20Vue-4a9eff?style=flat-square)
+![Framework](https://img.shields.io/badge/Framework-Wails%20v3-4a9eff?style=flat-square)
+
+**中文** · [English](README.en.md)
+
+[官网](https://parieses.github.io/quickdock/) · [使用说明](https://parieses.github.io/quickdock/guide.html) · [Issues](https://github.com/parieses/quickdock/issues) · [插件市场](https://github.com/parieses/quickdock-plugins)
 
 </div>
 
+<p align="center">
+  <img src="image/main-ui.png" alt="QuickDock 主界面" width="920" />
+</p>
+
 ---
 
-![主界面截图](image/main-ui.png)
+## 目录
+
+- [定位](#定位) · [这是什么](#这是什么)
+- [功能一览](#功能一览) · [安装](#安装)
+- [功能详解](#功能详解)
+- [架构](#架构) · [技术栈](#技术栈) · [开发](#开发)
+- [界面设计](#界面设计) · [插件生态](#插件生态) · [许可](#许可) · [第三方组件](#第三方组件)
 
 ---
 
@@ -35,7 +51,7 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 - **AI**：能改文件、跑命令的本地 agent（每步可审批、可回滚），多模型对话、SSH 终端侧栏、剪贴板与笔记的快捷问答，对外提供 MCP 服务
 - **脚本任务**：青龙式的本机脚本站，JS / Python / Shell / Go / PHP 直接跑，依赖随脚本安装，代码与日志都能在界面里看，也能交给 AI 建和改
 - **网盘**：自建浏览页接管聚合网关，在线预览 / 播放、批量下载交给下载器，不内嵌厂商后台
-- **跨机迁移**：整机数据导出 zip、在另一台电脑合并导入，密码库用口令加密随包带走
+- **跨机迁移**：可整机导出 zip，也可按导航菜单只勾选需要的功能打包；在另一台电脑合并导入，密码库用口令加密随包带走
 - **密码库**：SSH、网站登录等场景共用一处，AES-256-GCM 本地加密、密钥由系统 DPAPI 包裹；配浏览器扩展可在网页里自动填充，不联网、不外传
 - **安装**：单文件，用户态安装，不需要管理员权限，更新就地替换
 - **锁定**：`Ctrl+Alt+L` 一键锁界面，后台任务照常跑；密码输满自动解锁，忘密码用一次性恢复码
@@ -80,6 +96,7 @@ English: Windows launcher, desktop launcher, app launcher, command palette, dev 
 | 剪贴板历史 | `` Ctrl+` `` | 监听文本、图片、文件。支持固定、全库搜索（后端下推）、过期清理、批量清空，文件条目可在资源管理器定位，图片可另存；可「粘贴为纯文本 / Markdown / JSON」，或把多条加入队列连续粘贴；按来源窗口忽略、暂停捕获 |
 | 剪贴板自动规则 | — | 按条件清洗复制进来的内容：去空白、删空行、去重行、排序、JSON 格式化、去 ANSI 颜色、URL 解码、大小写转换。规则可排优先级，可模拟来源窗口试跑 |
 | 快捷笔记 | `Ctrl+Alt+N` | 树形 Markdown 笔记库，自动保存，失焦隐藏；正文支持 `[[wiki]]` 链接与反向链接，笔记 / 待办 / 项目条目可互相关联并点击跳转。另有关联图谱与块级大纲：图谱按链接力度导向排布，大纲可折叠到任意标题层级。左栏按「最近编辑」分组，命令面板可直接跳到任一篇 |
+| 书签 | — | 直接读本机 Chrome / Edge / Brave / Chromium / Vivaldi / Firefox 的书签（Chrome 系读 `Bookmarks` JSON，Firefox 复制 `places.sqlite` 再读），也可选浏览器导出的 HTML：文件夹映射成集合（多级路径进组名）、书签落成「网页」类型项目，归一化 URL 判重，重复导入幂等。导入后按需补全网站图标、可查死链（404 / 反爬 / 地址已变 / 内容已变四类）、合并重复条目、看收藏画像（从未打开、积压超 30 天、本周新增） |
 | 快捷键备忘单 | — | 命令面板输入 `cheatsheet`，或点「设置 → 快捷键设置」页头按钮。列出当前生效的键位 |
 | 最近动态 | — | 「设置 → 历史」：左栏使用热度，右栏操作时间线，同页可切到回收站 |
 | 日志查看器 | — | 「设置 → 日志」按天查看应用日志与崩溃记录，可过滤级别、清理旧日志，也能把当前这段日志一键交给 AI 分析 |
@@ -145,7 +162,7 @@ English: Windows launcher, desktop launcher, app launcher, command palette, dev 
 | 文件搜索 | — | 接 Everything 的独立检索页：四态探测（未安装 / 未运行 / 索引进度 / 正常）带安装引导，支持查询语法提示、排序与条数、多选批量复制路径，右侧直接预览文件 |
 | WebDAV 同步与快照 | — | 全量 JSON 备份恢复、多版本、任意 WebDAV 服务器 |
 | 数据目录搬家 | — | 「设置 → 存储与同步」更换存储位置，整个数据目录打包迁移，重启生效 |
-| 跨机数据迁移 | — | A 机把整机数据导出成 zip（含 DB 一致性快照与 manifest），B 机在设置里导入：按行合并而非替换，同名记录保留本机、只补缺失、不换目录不用重启；密码库用用户口令封一份便携包随 zip 带走，换机解开后还原。导入前只读校验包内容，全程有进度提示 |
+| 跨机数据迁移 | — | A 机导出 zip（含 DB 一致性快照与 manifest）：可整机全量，也可**按导航菜单勾选功能**，只打包所选功能的数据库表与数据目录文件；B 机在设置里导入，按行合并而非替换，同名记录保留本机、只补缺失、不换目录不用重启；密码库用用户口令封一份便携包随 zip 带走，换机解开后还原。导入前只读校验包内容并显示打包范围，全程有进度提示 |
 | 界面缩放 | — | 主界面与全部独立窗口统一 1.15 倍等比放大 |
 
 </details>
@@ -885,8 +902,8 @@ macOS 每个 release 产出 `quickdock-darwin-arm64` 与 `quickdock-darwin-amd64
 │                                                                   │
 │   ┌────────────────────┐      ┌────────────────────────────────┐  │
 │   │  Vue 3 前端         │◄────►│  services/  Wails 绑定门面      │  │
-│   │  (frontend/dist     │ IPC  │  AppService + 32 领域子包      │  │
-│   │   go:embed)         │      │  798 个绑定方法                 │  │
+│   │  (frontend/dist     │ IPC  │  AppService + 33 领域子包      │  │
+│   │   go:embed)         │      │  842 个绑定方法                 │  │
 │   └────────────────────┘      └───────────────┬────────────────┘  │
 │                                                │ 单向依赖          │
 │                                 ┌──────────────▼────────────────┐  │
@@ -905,7 +922,7 @@ macOS 每个 release 产出 `quickdock-darwin-arm64` 与 `quickdock-darwin-amd64
 
 几点实现上的选择：
 
-- **门面分层**：领域能力下沉到 32 个门面子包，宿主核心留在 AppService；`wails3 generate bindings` 生成 34 个 Service / 798 个绑定方法（口径以 bindings 导出函数为准，见下方项目结构）
+- **门面分层**：领域能力下沉到 33 个门面子包，宿主核心留在 AppService；`wails3 generate bindings` 生成 37 个 Service / 842 个绑定方法（口径以 bindings 导出函数为准，见下方项目结构）
 - **截图层用原生窗口**：自建 Win32 分层窗口整帧提交，工具条、标注、图形都画进同一张 DIB，可以避免 WebView 流程带来的闪烁
 - **次级窗口延迟创建**：首次热键触发时才创建 WebView2，减少启动白屏；浮窗位置经 kvstore 持久化
 - **后台服务**：SQLite WAL、待办（10s）、定时与监控调度器、AI 流式 HTTP 服务、邮件 IMAP 长连接、天气轮询、插件健康检查、DSH 隐藏进程、内置 MCP（9230）
@@ -998,7 +1015,7 @@ wails3 generate bindings -ts -i -clean   # 等价于 cd frontend && npm run bind
 ```
 quickdock/
 ├── main.go / tray.go / windows.go        # 入口、托盘、浮动窗口、单实例锁
-├── services/                             # Wails 门面层，宿主 + 32 领域子包，798 个绑定方法
+├── services/                             # Wails 门面层，宿主 + 33 领域子包，842 个绑定方法
 │   ├── service.go  api_result.go  types.go  lifecycle.go
 │   ├── hotkey.go  theme.go  autostart.go  winmgr_service.go
 │   ├── app_launcher.go  focus.go  tool.go  clipboard_sys.go  clipboard_files.go

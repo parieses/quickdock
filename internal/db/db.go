@@ -104,7 +104,11 @@ var validColumns = map[string]bool{
 	"storage": true, "remark": true, "description": true,
 	"icon": true, "color": true, "status": true,
 	"favorite": true, "unbound": true, "usage_count": true,
-	"sort": true, "is_default": true, "is_pinned": true,
+	// no_search：workspaces / scenes / collections / items 四张表共用的
+	// 「不参与 Ctrl+K 搜索」标记。白名单全局共用，漏了就是回收站恢复整行
+	// 转插入时报「非法列名」，看起来像数据丢了。
+	"no_search": true,
+	"sort":      true, "is_default": true, "is_pinned": true,
 	"open_strategy": true, "tool": true,
 	"recent": true, "recent_at": true,
 	// 定时任务增强（2026-11-13）：AI 动作档位 / 作用域 / 有效期 / 通知策略，

@@ -42,6 +42,9 @@ const color = ref('');
 const icon = ref('');
 // 跨集合移动：collection_id 本来就在更新白名单里，前端一直没有入口
 const collectionId = ref('');
+// Ctrl+K 搜索排除：勾上后这条项目不再出现在命令面板结果里。
+// 与设置页「项目不参与搜索」是叠加关系（总开关关掉时单条无所谓）。
+const noSearch = ref(false);
 const nameError = ref(false);
 const panelRef = ref<HTMLElement | null>(null)
 const { onKeydown: onKeydownTrap } = useFocusTrap(toRef(props, 'visible'), panelRef)
@@ -240,6 +243,7 @@ watch(() => [props.visible, props.item], ([v]) => {
     args.value = props.item?.args ?? '';
     color.value = props.item?.color ?? '';
     icon.value = props.item?.icon ?? '';
+    noSearch.value = !!props.item?.noSearch;
     // 新建时目标集合就是当前集合；编辑时是它原本所属的集合
     collectionId.value = props.item?.collectionId ?? store.activeCollectionId;
     nameError.value = false;
@@ -293,6 +297,7 @@ function handleSave() {
     args: args.value.trim(),
     color: color.value,
     icon: icon.value,
+    noSearch: noSearch.value ? 1 : 0,
   }
   // 只有编辑态才可能真的「移动」：新建时集合由 activeCollectionId 决定
   if (props.item && collectionId.value && collectionId.value !== props.item.collectionId) {
@@ -433,6 +438,11 @@ function onKeydown(e: KeyboardEvent) {
                 <button v-if="addRuntime && addVersion" type="button" class="link-btn" @click="addBinding">{{ t('projectEnvAddConfirm') }}</button>
               </div>
             </div>
+            <label class="field field-inline">
+              <input v-model="noSearch" type="checkbox" class="field-check" />
+              <span class="field-label">{{ t('searchExcludeSingle') }}</span>
+              <p class="field-hint">{{ t('searchExcludeSingleHint') }}</p>
+            </label>
             <label class="field">
               <span class="field-label">{{ t('remark') }}</span>
               <textarea v-model="remark" class="field-textarea" :placeholder="t('remarkPlaceholder')"></textarea>
@@ -480,6 +490,15 @@ function onKeydown(e: KeyboardEvent) {
   display: flex; flex-direction: column; gap: var(--space-6);
 }
 .field { display: flex; flex-direction: column; gap: var(--space-3); }
+/* 勾选行：图标 + 标签同一行，说明文字换行到下面（field 本身是 column） */
+.field-inline {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+.field-inline .field-hint { flex-basis: 100%; margin-top: 0; }
+.field-check { width: 15px; height: 15px; margin: 0; accent-color: var(--color-accent); cursor: pointer; }
 .field-label { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-muted); }
 .field-input {
   padding: var(--space-4) var(--space-5); border: 1px solid var(--color-border); border-radius: var(--radius-sm);

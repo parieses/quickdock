@@ -126,7 +126,10 @@ async function handleCreateScene(values: Record<string, string>) {
 async function handleEditScene(values: Record<string, string>) {
   if (!editingScene.value) return
   try {
-    await store.updateSceneAction(editingScene.value.id, { name: values.name, type: values.type, groupName: values.groupName })
+    await store.updateSceneAction(editingScene.value.id, {
+      name: values.name, type: values.type, groupName: values.groupName,
+      noSearch: values.noSearch === '1' ? 1 : 0,
+    })
     showEditDialog.value = false
     editingScene.value = null
   } catch (e) {
@@ -247,7 +250,7 @@ function openCreate() {
     <CreateDialog :visible="showSceneDialog" :title="t('addScene')" :fields="sceneFields"
       @confirm="handleCreateScene" @cancel="showSceneDialog = false" />
     <CreateDialog :visible="showEditDialog" :title="t('editScene')" :fields="sceneFields"
-      :editValues="editingScene ? { name: editingScene.name, type: editingScene.type ?? '通用', groupName: editingScene.groupName ?? '' } : undefined"
+      :editValues="editingScene ? { name: editingScene.name, type: editingScene.type ?? '通用', groupName: editingScene.groupName ?? '', noSearch: editingScene.noSearch ? '1' : '0' } : undefined"
       @confirm="handleEditScene" @cancel="showEditDialog = false; editingScene = null" />
   </aside>
 </template>

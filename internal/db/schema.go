@@ -21,6 +21,7 @@ var baseTables = []string{
 		name TEXT NOT NULL,
 		storage TEXT DEFAULT '',
 		remark TEXT DEFAULT '',
+		no_search INTEGER NOT NULL DEFAULT 0,
 		sort INTEGER DEFAULT 0,
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
@@ -37,6 +38,7 @@ var baseTables = []string{
 		color TEXT DEFAULT '',
 		favorite INTEGER DEFAULT 0,
 		unbound INTEGER DEFAULT 0,
+		no_search INTEGER NOT NULL DEFAULT 0,
 		usage_count INTEGER DEFAULT 0,
 		sort INTEGER DEFAULT 0,
 		env TEXT NOT NULL DEFAULT '',
@@ -61,6 +63,7 @@ var baseTables = []string{
 		recent INTEGER DEFAULT 0,
 		recent_at TEXT,
 		unbound INTEGER DEFAULT 0,
+		no_search INTEGER NOT NULL DEFAULT 0,
 		plugin_id TEXT,
 		usage_count INTEGER DEFAULT 0,
 		sort INTEGER DEFAULT 0,
@@ -83,6 +86,7 @@ var baseTables = []string{
 		color TEXT DEFAULT '',
 		remark TEXT,
 		plugin_data TEXT,
+		no_search INTEGER NOT NULL DEFAULT 0,
 		usage_count INTEGER DEFAULT 0,
 		sort INTEGER DEFAULT 0,
 		created_at TEXT NOT NULL,
@@ -1002,6 +1006,25 @@ var ftsTables = []string{
 	// 在写入时会把虚拟表写坏（SQLITE_CORRUPT_VTAB / 267），实测复现。普通内容表配
 	// 直接 DELETE 删除则稳定。正文在索引里多存一份，个人量级可接受（知识库亦如此）。
 	// 重建逻辑见 rebuildNoteIndex；索引的增量同步已由整表重建取代（触发器会死锁，见该注释）。
+	// 书签/网页条目的存活状态（死链检查结果）。
+	//
+	// 单独建表而不是给 items 加列：探活结果是易失数据（每次检查整行覆盖），
+	// 与条目本身的编辑语义无关；混进 items 会让「补列 → 迁移 → 绑定 → 前端全量
+	// 重拉」跟着一起动，而这张表只有书签页会读。
+	// content_hash 用来判断「内容是否悄悄变了」（同 URL 但页面已换），
+	// 只在用户勾选深度检查时写入，平时为空。
+	`CREATE TABLE IF NOT EXISTS item_health (
+		item_id TEXT PRIMARY KEY,
+		status TEXT NOT NULL DEFAULT '',
+		http_code INTEGER DEFAULT 0,
+		final_url TEXT DEFAULT '',
+		err_msg TEXT DEFAULT '',
+		content_hash TEXT DEFAULT '',
+		changed INTEGER DEFAULT 0,
+		checked_at TEXT DEFAULT '',
+		FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+	)`,
+
 	notesFtsDDL,
 }
 
@@ -1347,6 +1370,12 @@ func (d *Database) migrate() error {
 		// scripts.watch_path：事件触发监听的路径（空 = 不监听）。
 		// 老库补空串 = 关闭，升级后行为与之前一致。
 		{"scripts", "watch_path", "TEXT NOT NULL DEFAULT ''"},
+		// Ctrl+K 搜索排除标记（1 = 不出现在命令面板结果里）。四张表同一个语义：
+		// 老库补 0 表示照旧参与搜索，升级后搜索结果不会突然变少。
+		{"workspaces", "no_search", "INTEGER NOT NULL DEFAULT 0"},
+		{"scenes", "no_search", "INTEGER NOT NULL DEFAULT 0"},
+		{"collections", "no_search", "INTEGER NOT NULL DEFAULT 0"},
+		{"items", "no_search", "INTEGER NOT NULL DEFAULT 0"},
 	}
 	var addedCols []string
 	for _, m := range columnMigrations {
@@ -1574,6 +1603,13 @@ func (d *Database) migrate() error {
 			return fmt.Errorf("重建笔记全文索引失败: %w", err)
 		}
 		logger.I("[db] 重建笔记全文索引：notes=%d fts=%d corrupt=%v", noteRows, ftsRows, corrupt)
+	}
+
+	// 数据迁移：应用已去掉工作空间切换，老库里非默认工作空间再也点不到，
+	// 里面的数据等于失联。一次性把它们并入默认空间（旧「书签」空间的场景类型补成
+	// 「书签」）。幂等：合并完空间就没了，下次启动直接跳过。
+	if err := d.mergeWorkspacesIntoDefaultLocked(); err != nil {
+		return fmt.Errorf("合并工作空间失败: %w", err)
 	}
 
 	return nil

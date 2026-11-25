@@ -682,6 +682,13 @@ html.qd-backdrop .app-content > *,
 html.qd-backdrop .app-content > * > * {
   background: transparent;
 }
+/* 一级页头处在 L3（.app-content > page-shell > .qd-page > .qd-page-header），
+   上面两级子代选择器够不到，于是它在材质模式下仍铺实色 bg-secondary(#14171f)，
+   紧挨半透明的侧栏就成了一块更深的色板（左上角左右色差）。页头本身不是文字
+   承载区，让它透出 .app-content 那唯一一层窗口底，只留 1px 下边线做分隔。 */
+html.qd-backdrop .app-content .qd-page-header {
+  background: transparent;
+}
 
 /* 多栏页左栏 / 全屏引导层：它们处在 L3 及更深，上面两级子代选择器够不到。
    旧版这些层各自铺一份半透明 bg-*，和 .app-content 连乘后左栏只剩 25% 透过

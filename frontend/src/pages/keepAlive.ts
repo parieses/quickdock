@@ -32,6 +32,10 @@ export const KEEP_ALIVE = {
   script: 'ScriptPage',
   clipboard: 'ClipboardPanel',
   filesearch: 'FileSearchPage',
+  // 书签页：死链检查在后台跑、页面靠轮询跟进度；切走销毁会让进度条与结果
+  // 在回来时全部重来（后端仍在跑，但前端什么也看不到）。列表本身也够大，
+  // 每次切回重拉一遍是白花一次 IPC。
+  bookmarks: 'BookmarkPage',
 } as const
 
 // 类型写成 string[] 而不是 readonly：KeepAlive 的 include 声明是可变的

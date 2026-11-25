@@ -9,7 +9,7 @@ import { ListWorkspaces, CreateWorkspace, DeleteWorkspace, UpdateWorkspace, GetW
 import { ListScenes, CreateScene, UpdateScene, DeleteScene, ReorderScenes } from '../../bindings/quickdock/services/scene/sceneservice'
 import { ListCollections, CreateCollection, UpdateCollection, DeleteCollection, ReorderCollections, OpenItem, OpenAllInCollection } from '../../bindings/quickdock/services/collection/collectionservice'
 import { ListItems, CreateItem, UpdateItem, DeleteItem, ReorderItems } from '../../bindings/quickdock/services/item/itemservice'
-import { ListTools, GetValue, SetValue, SearchPalette } from '../../bindings/quickdock/services/appservice'
+import { ListTools, GetValue, SetValue, SearchPalette, GetSearchExclusions, GetSearchShowHidden } from '../../bindings/quickdock/services/appservice'
 import type { Workspace, Scene, Collection, CollectionItem, OpenTool } from '../types'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
@@ -77,6 +77,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const scenes = ref<Scene[]>([])
   const collections = ref<Collection[]>([])
   const items = ref<CollectionItem[]>([])
+  // 资源树展示的搜索排除偏好（与命令面板/settings 同一份落库设置）。
+  // 只作用于展示 computed：底层 ref 保持全量，编辑界面仍能拿到被隐藏的项并取消勾选。
+  const searchExclusions = ref({ workspaces: false, scenes: false, items: false })
+  const showHidden = ref(false)
 
   // 网页条目的图标是后端后台抓的（保存时不再同步等网络）。抓回来时后端发
   // quickdock:item:icon，这里就地补到已渲染的条目上——不重拉列表，也不会
@@ -193,6 +197,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const hasSearch = computed(() => searchQuery.value.trim().length > 0)
 
+  // 资源树展示的可见性判定。与后端 services/search_prefs.go、命令面板 usePaletteData.ts
+  // 同一口径：showHidden 打开全放行；类别总开关关掉整类不可见；单条 noSearch 不可见。
+  // 只作用在展示 computed，底层 ref 仍是全量——设置页打开 showHidden 即可重新编辑取消。
+  function treeVisible(kind: 'scenes' | 'collections' | 'items', row: { noSearch?: number }): boolean {
+    if (showHidden.value) return true
+    const ex = searchExclusions.value
+    if (kind === 'scenes' && (ex.workspaces || ex.scenes)) return false
+    if (kind === 'collections' && (ex.workspaces || ex.scenes)) return false
+    if (kind === 'items' && ex.items) return false
+    return !row.noSearch
+  }
+
   // ---- 计算属性 ----
 
   const activeWorkspace = computed(() =>
@@ -205,17 +221,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     collections.value.find(c => c.id === activeCollectionId.value) ?? null
   )
   const sortedScenes = computed(() =>
-    [...scenes.value].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
+    [...scenes.value].filter(s => treeVisible('scenes', s)).sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
   )
   const filteredCollections = computed(() => {
     if (hasSearch.value && searchResults.value) {
       const ids = new Set(searchResults.value.collections.map(c => c.id))
       return [...collections.value]
-        .filter(c => ids.has(c.id))
+        .filter(c => ids.has(c.id) && treeVisible('collections', c))
         .sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
     }
     return collections.value
-      .filter(c => c.sceneId === activeSceneId.value || (activeSceneId.value === '' && !c.sceneId))
+      .filter(c => (c.sceneId === activeSceneId.value || (activeSceneId.value === '' && !c.sceneId)) && treeVisible('collections', c))
       .sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
   })
   const filteredItems = computed(() => {
@@ -225,10 +241,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       // 再与 items.value 取交集只会把「存过但没点开过」的 FTS 命中滤掉，
       // 表现就是「我明明存过这条却搜不到」。直接用搜索结果，不要交集。
       return [...searchResults.value.items]
+        .filter(i => treeVisible('items', i))
         .sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
     }
     return items.value
-      .filter(i => i.collectionId === activeCollectionId.value)
+      .filter(i => i.collectionId === activeCollectionId.value && treeVisible('items', i))
       .sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
   })
 
@@ -256,7 +273,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // ---- 数据加载 ----
 
   async function initialize() {
-    await Promise.all([fetchTools(), fetchWorkspaces()])
+    await Promise.all([fetchTools(), reloadSearchPrefs(), fetchWorkspaces()])
     // 恢复上次选中的工作空间和场景
     try {
       const lastWs = unwrap<string>(await GetValue('lastWorkspaceId'))
@@ -280,6 +297,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       error.value = getErrorMessage(e)
       logErr('fetchTools', e)
     }
+  }
+
+  // 读取搜索排除偏好（资源树展示用）。设置页保存后也会主动调一次这里刷新。
+  // 读失败一律按「都不排除」处理：宁可多显示，也不要让整棵树凭空消失。
+  async function reloadSearchPrefs() {
+    try {
+      const ex = unwrap<{ workspaces?: boolean; scenes?: boolean; items?: boolean }>(await GetSearchExclusions())
+      if (ex) searchExclusions.value = { workspaces: !!ex.workspaces, scenes: !!ex.scenes, items: !!ex.items }
+    } catch (e) { logErr('workspace:reloadSearchPrefs', e) }
+    try {
+      showHidden.value = !!unwrap<boolean>(await GetSearchShowHidden())
+    } catch (e) { logErr('workspace:reloadSearchPrefs', e) }
   }
 
   async function fetchWorkspaces() {
@@ -707,6 +736,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     loading, error,
     scenesLoading, collectionsLoading,
     searchQuery, hasSearch, searchResults, searchLoading,
+    searchExclusions, showHidden, reloadSearchPrefs,
     activeWorkspace, activeScene, activeCollection,
     sortedScenes, filteredCollections, filteredItems,
     initialize, fetchTools, fetchWorkspaces, fetchScenes, fetchCollections, fetchItems,

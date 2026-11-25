@@ -47,6 +47,13 @@ type TransferManifest struct {
 	// HasVault 包里带了一份密码库便携包（见 TransferVaultName）。
 	// 旧包没有这个字段 → false，导入端据此决定要不要问口令。
 	HasVault bool `json:"hasVault"`
+	// Scope 打包范围："full"=整机全量（旧包无此字段，按全量处理）；
+	// "selected"=只含所选导航菜单的数据，DB 里未选的表已被清空。
+	Scope string `json:"scope,omitempty"`
+	// NavIDs / Tables / Dirs 记录 selected 包的具体范围，导入前只读展示用。
+	NavIDs []string `json:"navIds,omitempty"`
+	Tables []string `json:"tables,omitempty"`
+	Dirs   []string `json:"dirs,omitempty"`
 }
 
 // MarshalTransferManifest 序列化 manifest。
@@ -87,7 +94,25 @@ func WriteTransferArchive(src, dstZip, dbSnapshot, vaultFile string, m TransferM
 	if vaultFile != "" {
 		extra = append(extra, archiveExtra{name: TransferVaultName, srcFile: vaultFile})
 	}
-	return archiveDataDir(src, dstZip, "", "", extra, progress)
+	return WriteTransferArchiveFiltered(src, dstZip, dbSnapshot, vaultFile, m, nil, progress)
+}
+
+// WriteTransferArchiveFiltered 与 WriteTransferArchive 相同，但按 include 过滤
+// 数据目录里的文件（DB 快照/manifest/密码库这类 extra 条目不受过滤影响）。
+// include 为 nil 时等价全量。用于「按导航菜单选择功能」的整机迁移包。
+func WriteTransferArchiveFiltered(src, dstZip, dbSnapshot, vaultFile string, m TransferManifest, include func(string) bool, progress archiveProgress) (int, int64, error) {
+	manifestBytes, err := MarshalTransferManifest(m)
+	if err != nil {
+		return 0, 0, err
+	}
+	extra := []archiveExtra{
+		{name: TransferDBName, srcFile: dbSnapshot},
+		{name: TransferManifestName, data: manifestBytes},
+	}
+	if vaultFile != "" {
+		extra = append(extra, archiveExtra{name: TransferVaultName, srcFile: vaultFile})
+	}
+	return archiveDataDir(src, dstZip, "", "", extra, include, progress)
 }
 
 // ReadTransferManifest 从已有 zip 里只读地取出 manifest，用于导入前的格式校验

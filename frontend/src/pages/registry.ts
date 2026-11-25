@@ -22,7 +22,7 @@ import { defineAsyncComponent, type AsyncComponentLoader, type Component, type R
 import {
   FolderKanban, FileText, ListTodo, AlarmClock, Activity,
 	Clipboard, Server, SquareTerminal, Bot, Terminal, Puzzle, LayoutDashboard, GitBranch, Search, BookOpen, Download,
-	KeyRound, Cloud, FileCode2,
+	KeyRound, Cloud, FileCode2, Bookmark,
 } from '@lucide/vue'
 // 保活白名单从零依赖模块引（名字常量与组件里 defineOptions 共用同一份）
 import { KEEP_ALIVE_PAGES } from './keepAlive'
@@ -99,6 +99,9 @@ const FileSearchPage = lazy(() => import('../components/FileSearchPage.vue'))
 // 自带问答与分段预览。与「文件搜索」是两件事：那边按文件名找文件、不建索引，
 // 这边打开文件内容建索引、能问问题。
 const KnowledgePage = lazy(() => import('../components/KnowledgePage.vue'))
+// 书签：浏览器导出文件导入 + 死链检查 / 重复合并 / 策展洞察。导入结果就是
+// 「网页」类型项目（落在「书签」工作空间），不另建实体，故与资源树共用打开链路。
+const BookmarkPage = lazy(() => import('../components/BookmarkPage.vue'))
 // 下载器：aria2 daemon 由环境管理托管，页面只调 DownloadService 绑定方法。
 const DownloadPage = lazy(() => import('../components/DownloadPage.vue'))
 // 网盘：入口是本机 OpenList 网关的 WebDAV（网关本身同样由环境管理托管）。
@@ -182,6 +185,9 @@ export const navEntries: NavEntry[] = [
   //   缺档案时由页面直接把人送到 AI 设置，否则只有一句「尚未配置」没人知道去哪配。
   { id: 'knowledge', labelKey: 'navKnowledge', icon: BookOpen, component: KnowledgePage,
     listeners: (ctx) => ({ 'open-settings': ctx.openSettings }) },
+  // bookmarks：与 knowledge 相邻——同属「存下来的东西怎么再找回来」，
+  // 一个管文档问答、一个管网址收藏。
+  { id: 'bookmarks', labelKey: 'navBookmarks', icon: Bookmark, component: BookmarkPage },
   { id: 'environments', labelKey: 'navEnvironments', icon: Server, component: EnvironmentPage,
     props: (ctx) => ({ initialSection: ctx.envInitialSection.value }) },
   // download：引擎（aria2）是环境管理里注册的一个运行时，这里是任务面板；

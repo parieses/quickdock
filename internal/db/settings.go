@@ -51,6 +51,11 @@ var internalSettingKeys = map[string]bool{
 	"ai_tool_policy":    true,
 	"ai_trace_enabled":  true,
 	"ai_hooks_approved": true,
+	// Ctrl+K 搜索排除（三个类别开关，后端经 GetSearchExclusions 暴露）
+	"search.exclude.workspaces": true,
+	"search.exclude.scenes":     true,
+	"search.exclude.items":      true,
+	"search.showHidden":         true,
 	// 启动锁
 	"startup_password_hash":     true,
 	"startup_password_recovery": true,

@@ -655,6 +655,34 @@ func unwrap(r *services.ApiResult) (any, error) {
 	return r.Data, nil
 }
 
+// unwrapVisible 与 unwrap 相同，但对四类资源树结果套用搜索排除口径（类别总开关 +
+// 单条 no_search + showHidden 逃生口）。AI 复用同一套 MCP Surface，所以这里过滤一次
+// 就同时覆盖 MCP 客户端与 AI 工具调用，不必在 ai 包再写一份。
+//
+// 只用在「列举/搜索」类只读工具；写入工具按 id 定位不应被过滤（否则恢复/删除隐藏项
+// 会失败），这类路径继续用 unwrap。
+func (s *MCPService) unwrapVisible(r *services.ApiResult, kind string) (any, error) {
+	data, err := unwrap(r)
+	if err != nil {
+		return nil, err
+	}
+	switch kind {
+	case "workspaces":
+		v, _ := data.([]db.Workspace)
+		return s.App.VisibleWorkspaces(v), nil
+	case "scenes":
+		v, _ := data.([]db.Scene)
+		return s.App.VisibleScenes(v), nil
+	case "collections":
+		v, _ := data.([]db.Collection)
+		return s.App.VisibleCollections(v), nil
+	case "items":
+		v, _ := data.([]db.CollectionItem)
+		return s.App.VisibleItems(v), nil
+	}
+	return data, nil
+}
+
 // envStart 启动服务；已在运行时不重复拉起（避免端口冲突检测把自身占用误判为冲突）。
 func (s *MCPService) envStart(id, version string) (any, error) {
 	if s.App.Env == nil {

@@ -13,7 +13,7 @@ import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { useThemeName } from './useThemeName'
-import { ListAllItems, ScanInstalledApps, ResetInstalledAppsCache } from '../../bindings/quickdock/services/appservice'
+import { ListAllItems, ScanInstalledApps, ResetInstalledAppsCache, GetSearchExclusions, GetSearchShowHidden } from '../../bindings/quickdock/services/appservice'
 import { ListPlugins, GetPluginIcon } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { ListNotesTree } from '../../bindings/quickdock/services/note/noteservice'
 import { GetRecentUsage } from '../../bindings/quickdock/services/frecency/frecencyservice'
@@ -167,6 +167,26 @@ export function usePaletteData(deps: PaletteDataDeps) {
     }
   }
 
+  // Ctrl+K 搜索排除（设置页三个类别开关）。面板是独立窗口，localStorage 与主窗口
+  // 不共享，所以每次唤起都从库里读一次（app_state 有内存缓存，成本约等于一次 map 查）。
+  // 读失败按「都不排除」处理：搜索少显示东西比凭空搜不到更让人困惑。
+  const exclusions = { workspaces: false, scenes: false, items: false }
+  // showHidden 逃生口：设置页打开后隐藏项在命令面板也应放行，与资源树/AI/MCP 口径一致。
+  let showHidden = false
+  async function loadExclusions() {
+    try {
+      const v = unwrap<{ workspaces?: boolean; scenes?: boolean; items?: boolean }>(await GetSearchExclusions())
+      if (v) {
+        exclusions.workspaces = !!v.workspaces
+        exclusions.scenes = !!v.scenes
+        exclusions.items = !!v.items
+      }
+    } catch (e) { logErr('CommandPalette:GetSearchExclusions', e) }
+    try {
+      showHidden = !!unwrap<boolean>(await GetSearchShowHidden())
+    } catch (e) { logErr('CommandPalette:GetSearchShowHidden', e) }
+  }
+
   // 场景 / 集合全量池：面板是独立浮窗，与主窗口的 Pinia store 不共享状态，
   // 读不到 workspace store 里的 scenes/collections，只能自己拉一份。
   // 后端只按 workspaceId / sceneId 提供列表，故按 工作空间 → 场景 → 集合 逐层展开；
@@ -175,12 +195,17 @@ export function usePaletteData(deps: PaletteDataDeps) {
   async function loadWorkspaceNodes(gen: number) {
     try {
       const workspaces = unwrap<any[]>(await ListWorkspaces()) || []
+      if (!showHidden && (exclusions.workspaces || exclusions.scenes)) {
+        // 整个工作空间关掉 = 侧栏那棵树整体不参与搜索：场景与集合一起清空
+        if (gen === itemsLoadGen) { scenes.value = []; collections.value = [] }
+        return
+      }
       const sceneRows = (await Promise.all(
         workspaces.map(async w => { try { return await ListScenes(w.id) } catch { return null } }),
-      )).flatMap(r => (unwrap<any[]>(r) || []))
+      )).flatMap(r => (unwrap<any[]>(r) || [])).filter((s: any) => showHidden || !s.noSearch)
       const collectionRows = (await Promise.all(
         sceneRows.map(async s => { try { return await ListCollections(s.id) } catch { return null } }),
-      )).flatMap(r => (unwrap<any[]>(r) || []))
+      )).flatMap(r => (unwrap<any[]>(r) || [])).filter((c: any) => showHidden || !c.noSearch)
       if (gen !== itemsLoadGen) return
       scenes.value = sceneRows.map(s => ({
         id: s.id, name: s.name, description: s.description || '', workspaceId: s.workspaceId,
@@ -198,13 +223,14 @@ export function usePaletteData(deps: PaletteDataDeps) {
   async function loadPaletteData() {
     loading.value = true
     const gen = ++itemsLoadGen
+    await loadExclusions()
     await deps.loadFrecency()
     // 与 items / notes 的全量池一起拉：面板打开一次即可，后续匹配都在前端做
     await loadWorkspaceNodes(gen)
     try {
-      const result = unwrap<CollectionItem[]>(await ListAllItems())
+      const result = (!showHidden && exclusions.items) ? [] : (unwrap<CollectionItem[]>(await ListAllItems()) || []).filter(it => showHidden || !(it as any).noSearch)
       if (gen !== itemsLoadGen) return
-      items.value = result || []
+      items.value = result
     } catch (e) { console.error('[CmdPalette] ListAllItems:', getErrorMessage(e)) }
     // 每次 Ctrl+K 唤起都主动刷新一次已安装应用：后端 GetCachedApps 采用「来源目录 mtime
     // 惰性失效」，未装/卸软件时直接命中内存缓存（零磁盘扫描），仅当开始菜单确实变化时才重扫。

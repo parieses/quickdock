@@ -24,6 +24,7 @@ import (
 	"quickdock/internal/sysutil"
 	"quickdock/services"
 	aisvc "quickdock/services/ai"
+	bookmarksvc "quickdock/services/bookmark"
 	clipboardsvc "quickdock/services/clipboard"
 	collectionsvc "quickdock/services/collection"
 	credentialssvc "quickdock/services/credentials"
@@ -703,6 +704,9 @@ func main() {
 	sceneSvc := scenesvc.NewSceneService(appService)
 	snapshotSvc := snapshotsvc.NewSnapshotService(appService)
 	itemSvc := itemsvc.NewItemService(appService)
+	// 书签门面：浏览器书签导入（解析在 internal/bookmark）+ 死链检查（internal/linkcheck）
+	// + 查重 + 策展统计。书签就是「网页」类型项目，不另开表，故与资源树共用 items。
+	bookmarkSvc := bookmarksvc.NewBookmarkService(appService)
 	portSvc := portsvc.NewPortService(appService)
 	// 天气请求必须留在宿主：WebView2 跟随系统代理，代理端口没起时前端 fetch 全超时。
 	weatherSvc := weathersvc.NewWeatherService()
@@ -831,6 +835,7 @@ func main() {
 			application.NewService(sceneSvc),
 			application.NewService(snapshotSvc),
 			application.NewService(itemSvc),
+			application.NewService(bookmarkSvc),
 			application.NewService(portSvc),
 			application.NewService(weatherSvc),
 			application.NewService(mailboxSvc),

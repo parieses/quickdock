@@ -26,10 +26,17 @@ export function useSceneFields() {
         key: 'type',
         label: t('sceneType'),
         type: 'select',
-        options: ['项目', '办公', '工程', '设计', '通用', '自定义'].map(v => ({
+        options: ['项目', '办公', '工程', '设计', '通用', '书签', '自定义'].map(v => ({
           label: types[v] || v,
           value: v,
         })),
+      },
+      {
+        // 单条搜索排除：与设置页的类别总开关叠加，任一命中就不进 Ctrl+K 结果
+        key: 'noSearch',
+        label: t('searchExcludeSingle'),
+        type: 'checkbox',
+        hint: t('searchExcludeSingleHint'),
       },
       {
         key: 'groupName',

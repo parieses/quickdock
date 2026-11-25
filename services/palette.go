@@ -52,10 +52,19 @@ func (a *AppService) SearchPalette(query string) *ApiResult {
 	if q == "" {
 		return Ok(out)
 	}
-	if v, err := a.DB.SearchAllItems(q); err != nil {
-		logger.W("[palette-search] 项目检索失败: %v", err)
-	} else if v != nil {
-		out.Items = v
+	// 项目类别被整体排除时连查询都不必发：命令面板前端池已经过滤过一遍，
+	// 这条补充检索（FTS5，覆盖全量池 5000 上限之外）必须用同一口径，否则
+	// 「设置里关掉了项目」仍会从补充结果里冒出几条。
+	if !a.DB.GetSearchExclusions().Items || a.DB.GetSearchShowHidden() {
+		if v, err := a.DB.SearchAllItems(q); err != nil {
+			logger.W("[palette-search] 项目检索失败: %v", err)
+		} else if v != nil {
+			if a.DB.GetSearchShowHidden() {
+				out.Items = v
+			} else {
+				out.Items = excludeNoSearchItems(v)
+			}
+		}
 	}
 	if v, err := a.DB.SearchNotes(q); err != nil {
 		logger.W("[palette-search] 笔记检索失败: %v", err)
@@ -70,6 +79,24 @@ func (a *AppService) SearchPalette(query string) *ApiResult {
 		out.Todos = v
 	}
 	return Ok(out)
+}
+
+// excludeNoSearchItems 丢掉标了 no_search 的项目（Ctrl+K 单条排除）。
+//
+// 只用在命令面板这条路上：ListAllItems / ListScenes 还被资源树、MCP、AI 工具
+// 使用，那些地方要全量数据。
+func excludeNoSearchItems(items []db.CollectionItem) []db.CollectionItem {
+	if len(items) == 0 {
+		return items
+	}
+	out := items[:0:0]
+	for _, it := range items {
+		if it.NoSearch != 0 {
+			continue
+		}
+		out = append(out, it)
+	}
+	return out
 }
 
 // GetMostUsedItems 返回最常使用的项目（命令面板「最近使用」）

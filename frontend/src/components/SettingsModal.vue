@@ -18,6 +18,7 @@ import SettingsClipboardRules from './SettingsClipboardRules.vue'
 import SettingsHistory from './SettingsHistory.vue'
 import QdTabs from './QdTabs.vue'
 import QdSwitch from './QdSwitch.vue'
+import QdModal from './QdModal.vue'
 import SettingsAI from './SettingsAI.vue'
 import SettingsSnapshot from './SettingsSnapshot.vue'
 import SettingsSync from './SettingsSync.vue'
@@ -37,8 +38,10 @@ import {
   SuspendHotkeys,
   ResumeHotkeys,
 } from '../../bindings/quickdock/services/clipboard/clipboardservice'
+import { GetSearchExclusions, SaveSearchExclusions, GetSearchShowHidden, SetSearchShowHidden } from '../../bindings/quickdock/services/appservice'
 import { GetAutoStart, SetAutoStart, GetDataDir, SetDataDir, ResetDataDir, NormalizeDataDir, GetUiZoom, SetUiZoom, GetWindowBackdrop, SetWindowBackdrop, RestartApp as RestartAppPlain, SelectLocalFile, SelectSavePath } from '../../bindings/quickdock/services/appservice'
-import { StorageMigrate, DataExport, DataImport, DataImportInspect } from '../../bindings/quickdock/services/storageservice'
+import { StorageMigrate, DataExport, DataExportSelected, DataImport, DataImportInspect } from '../../bindings/quickdock/services/storageservice'
+import { navEntries } from '../pages/registry'
 import { GetValue, SetValue } from '../../bindings/quickdock/services/appservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { GetAppVersion, CheckForUpdates, DownloadUpdate, RestartApp, GetUpdateState } from '../../bindings/quickdock/services/update/updateservice'
@@ -701,29 +704,81 @@ async function resetStorage() {
 // （同名主键/同名文件保留本地那份）。所以它不切数据目录、也不用重启。
 const dataTransferBusy = ref(false)
 const dataTransferDone = ref(false)
-const dataImportInfo = ref<{ sourceDir: string; createdAt: string; dbBytes: number; hasVault: boolean } | null>(null)
+const dataImportInfo = ref<{
+  sourceDir: string
+  createdAt: string
+  dbBytes: number
+  hasVault: boolean
+  scope?: string
+  navIds?: string[]
+} | null>(null)
 // 密码库口令。导出时给一个口令重新封装（本机 DPAPI 的密文搬不走），
 // 导入时用同一个口令解开。空 = 不动密码库。
 const dataVaultPassword = ref('')
 const importZipPath = ref('')
 
-/** 导出当前数据到 zip：选保存位置 → 后端异步打包，进度走 quickdock:storage:migrate。 */
+// ---- 按导航菜单选择打包范围 ----
+// 勾选的 id 直接交给后端做「导航 → 表 / 数据目录」映射，前端只负责文案与勾选状态。
+// 默认全选；勾「整机全量」时仍走原来的 DataExport，旧行为一点不变。
+const exportScopeOpen = ref(false)
+const exportZipPath = ref('')
+const exportWholeMachine = ref(true)
+const selectedNavs = ref<string[]>(navEntries.map((e) => e.id))
+
+/** 导出：选保存位置 → 弹窗选择要打包的导航功能 → 后端异步打包。 */
 async function exportData() {
   if (dataTransferBusy.value) return
-  dataTransferBusy.value = true
   storageMsg.value = ''
   try {
     const day = new Date().toISOString().slice(0, 10)
     const dest = (unwrap<string>(await SelectSavePath(t('dataExportSaveTitle'), `quickdock-backup-${day}.zip`)) ?? '').trim()
-    if (!dest) { dataTransferBusy.value = false; return }
+    if (!dest) return
+    exportZipPath.value = dest
+    exportScopeOpen.value = true
+  } catch (e: any) {
+    toast.error(getErrorMessage(e))
+    logErr('Settings.exportData', e)
+  }
+}
+
+function toggleNav(id: string) {
+  const cur = selectedNavs.value
+  selectedNavs.value = cur.includes(id) ? cur.filter((v) => v !== id) : [...cur, id]
+}
+
+/** 确认打包范围并启动导出；进度仍走 quickdock:storage:migrate。 */
+async function confirmExportScope() {
+  if (dataTransferBusy.value || !exportZipPath.value) return
+  if (!exportWholeMachine.value && selectedNavs.value.length === 0) {
+    toast.error(t('dataExportNeedNav'))
+    return
+  }
+  exportScopeOpen.value = false
+  dataTransferBusy.value = true
+  try {
     resetMigrateUi()
-    unwrap(await DataExport(dest, dataVaultPassword.value.trim()))
+    const pass = dataVaultPassword.value.trim()
+    if (exportWholeMachine.value) {
+      unwrap(await DataExport(exportZipPath.value, pass))
+    } else {
+      unwrap(await DataExportSelected(exportZipPath.value, pass, selectedNavs.value))
+    }
     toast.success(t('dataExportStarted'))
   } catch (e: any) {
     dataTransferBusy.value = false
     toast.error(getErrorMessage(e))
     logErr('Settings.exportData', e)
   }
+}
+
+function cancelExportScope() {
+  exportScopeOpen.value = false
+  exportZipPath.value = ''
+}
+
+const allNavsSelected = computed(() => selectedNavs.value.length === navEntries.length)
+function toggleAllNavs() {
+  selectedNavs.value = allNavsSelected.value ? [] : navEntries.map((e) => e.id)
 }
 
 /** 选 zip → 先校验是不是整机包，是则记住信息，供「开始导入」使用。 */
@@ -742,6 +797,8 @@ async function pickImportZip() {
         createdAt: info.createdAt,
         dbBytes: info.dbBytes,
         hasVault: !!info.hasVault,
+        scope: info.scope || 'full',
+        navIds: info.navIds || [],
       }
       importZipPath.value = path
       storageMsg.value = t('dataImportReady', { dir: info.sourceDir })
@@ -1022,6 +1079,13 @@ onMounted(async () => {
   try {
     autoStart.value = unwrap<boolean>(await GetAutoStart()) ?? false
   } catch (e) { logErr('SettingsModal', e) }
+  try {
+    const ex = unwrap<{ workspaces?: boolean; scenes?: boolean; items?: boolean }>(await GetSearchExclusions())
+    if (ex) searchExclusions.value = { workspaces: !!ex.workspaces, scenes: !!ex.scenes, items: !!ex.items }
+  } catch (e) { logErr('SettingsModal', e) }
+  try {
+    showHidden.value = !!unwrap<boolean>(await GetSearchShowHidden())
+  } catch (e) { logErr('SettingsModal', e) }
   // 能力探测要在根菜单渲染前拿到结果，否则「窗口材质」不会拼进菜单描述。
   loadWindowBackdrop()
 })
@@ -1074,6 +1138,42 @@ async function cleanNow() {
     cleanupTimer.value = setTimeout(() => { cleanupResult.value = ''; cleanupTimer.value = null }, 3000)
   } catch (e) {
     cleanupResult.value = t('cleanupResult') + ': ' + getErrorMessage(e)
+  }
+}
+
+// ---- Ctrl+K 搜索排除 ----
+// 三类实体各一个总开关；单条排除在各自的编辑表单里（场景/集合/项目）。
+// 只影响命令面板（Ctrl+K）的检索，不影响资源树与 MCP/AI 工具的全量读取。
+const searchExclusions = ref({ workspaces: false, scenes: false, items: false })
+const searchPrefsBusy = ref(false)
+
+async function toggleSearchExclusion(kind: 'workspaces' | 'scenes' | 'items') {
+  if (searchPrefsBusy.value) return
+  const next = { ...searchExclusions.value, [kind]: !searchExclusions.value[kind] }
+  searchPrefsBusy.value = true
+  try {
+    const saved = unwrap<{ workspaces?: boolean; scenes?: boolean; items?: boolean }>(await SaveSearchExclusions(next))
+    if (saved) searchExclusions.value = { workspaces: !!saved.workspaces, scenes: !!saved.scenes, items: !!saved.items }
+    await store.reloadSearchPrefs()
+  } catch (e) {
+    toast.error(t('saveFailed2') + ': ' + getErrorMessage(e))
+  } finally {
+    searchPrefsBusy.value = false
+  }
+}
+
+// 显示隐藏项：被排除的项默认从资源树/AI/MCP 完全消失，打开这个开关后重新可见，
+// 用于点进去把勾选取消（否则等于把数据锁进黑洞）。与三个类别开关叠加：showHidden
+// 打开时所有类别一律放行。
+const showHidden = ref(false)
+
+async function toggleShowHidden() {
+  try {
+    await SetSearchShowHidden(!showHidden.value)
+    showHidden.value = !showHidden.value
+    await store.reloadSearchPrefs()
+  } catch (e) {
+    toast.error(t('saveFailed2') + ': ' + getErrorMessage(e))
   }
 }
 
@@ -1275,6 +1375,45 @@ async function toggleAutoStart() {
                   <span class="toggle-label">{{ autoStart ? t('autoStartOn') : t('autoStartOff') }}</span>
                 </div>
                 <p v-if="autoStartResult" class="result-hint error">{{ autoStartResult }}</p>
+              </div>
+            </div>
+            <!-- Ctrl+K 搜索排除：三类实体各一个总开关，关掉后整类不再出现在
+                 命令面板结果里。单条排除在各自的编辑表单中（场景/集合/项目）。 -->
+            <div class="section">
+              <h3 class="section-title">{{ t('searchScopeTitle') }}</h3>
+              <p class="section-desc">{{ t('searchScopeDesc') }}</p>
+              <div class="setting-row">
+                <label class="setting-label">{{ t('searchScopeWorkspaces') }}</label>
+                <div class="setting-control">
+                  <QdSwitch :model-value="searchExclusions.workspaces" :label="t('searchScopeWorkspaces')"
+                            @update:model-value="toggleSearchExclusion('workspaces')" />
+                  <span class="toggle-label">{{ searchExclusions.workspaces ? t('searchScopeExcluded') : t('searchScopeIncluded') }}</span>
+                </div>
+              </div>
+              <div class="setting-row">
+                <label class="setting-label">{{ t('searchScopeScenes') }}</label>
+                <div class="setting-control">
+                  <QdSwitch :model-value="searchExclusions.scenes" :label="t('searchScopeScenes')"
+                            @update:model-value="toggleSearchExclusion('scenes')" />
+                  <span class="toggle-label">{{ searchExclusions.scenes ? t('searchScopeExcluded') : t('searchScopeIncluded') }}</span>
+                </div>
+              </div>
+              <div class="setting-row">
+                <label class="setting-label">{{ t('searchScopeItems') }}</label>
+                <div class="setting-control">
+                  <QdSwitch :model-value="searchExclusions.items" :label="t('searchScopeItems')"
+                            @update:model-value="toggleSearchExclusion('items')" />
+                  <span class="toggle-label">{{ searchExclusions.items ? t('searchScopeExcluded') : t('searchScopeIncluded') }}</span>
+                </div>
+              </div>
+              <p class="section-desc">{{ t('showHiddenHint') }}</p>
+              <div class="setting-row">
+                <label class="setting-label">{{ t('showHidden') }}</label>
+                <div class="setting-control">
+                  <QdSwitch :model-value="showHidden" :label="t('showHidden')"
+                            @update:model-value="toggleShowHidden" />
+                  <span class="toggle-label">{{ showHidden ? t('showHiddenOn') : t('showHiddenOff') }}</span>
+                </div>
               </div>
             </div>
             <div class="section">
@@ -1502,6 +1641,7 @@ async function toggleAutoStart() {
               </div>
               <p class="field-hint" v-if="dataImportInfo">
                 {{ t('dataImportSource', { dir: dataImportInfo.sourceDir }) }}
+                <span v-if="dataImportInfo.scope === 'selected'"> · {{ t('dataImportScope', { n: dataImportInfo.navIds?.length || 0 }) }}</span>
                 <span v-if="dataImportInfo.hasVault"> · {{ t('dataImportHasVault') }}</span>
               </p>
               <p class="field-hint">{{ t('dataImportTip') }}</p>
@@ -1565,6 +1705,37 @@ async function toggleAutoStart() {
     @confirm="onUpdateAdminConfirm"
     @cancel="showUpdateAdminConfirm = false"
   />
+
+  <!-- 导出前选打包范围：整机全量，或只勾导航菜单对应的功能数据 -->
+  <QdModal
+    v-if="exportScopeOpen"
+    :model-value="true"
+    :title="t('dataExportScopeTitle')"
+    width="560px"
+    @update:model-value="cancelExportScope"
+  >
+    <p class="field-hint">{{ t('dataExportScopeHint') }}</p>
+    <label class="export-scope-row export-scope-whole">
+      <input v-model="exportWholeMachine" type="checkbox" />
+      <span>{{ t('dataExportWhole') }}</span>
+    </label>
+    <div v-if="!exportWholeMachine" class="export-scope-list">
+      <div class="export-scope-head">
+        <span class="field-hint">{{ selectedNavs.length }} / {{ navEntries.length }}</span>
+        <button class="btn btn-secondary btn-sm" @click="toggleAllNavs">
+          {{ allNavsSelected ? t('dataExportNavNone') : t('dataExportNavAll') }}
+        </button>
+      </div>
+      <label v-for="e in navEntries" :key="e.id" class="export-scope-row">
+        <input type="checkbox" :checked="selectedNavs.includes(e.id)" @change="toggleNav(e.id)" />
+        <span>{{ t(e.labelKey) }}</span>
+      </label>
+    </div>
+    <div class="action-row">
+      <button class="btn btn-secondary" @click="cancelExportScope">{{ t('cancel') }}</button>
+      <button class="btn btn-primary" @click="confirmExportScope">{{ t('dataExportBtn') }}</button>
+    </div>
+  </QdModal>
 </template>
 
 <style scoped>
@@ -1617,5 +1788,33 @@ async function toggleAutoStart() {
 .menu-badge.tone-danger { background: var(--color-danger); }
 .menu-badge.tone-warning { background: var(--color-warning); }
 .menu-badge.tone-info { background: var(--color-accent); }
+
+/* 导出范围选择：两列网格排导航项，21 项一屏能扫完，不必滚很多屏。 */
+.export-scope-whole {
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+}
+.export-scope-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+.export-scope-list {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px var(--space-4);
+  max-height: 340px; overflow-y: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.export-scope-row {
+  display: flex; align-items: center; gap: var(--space-2);
+  min-height: 26px; padding: 0 var(--space-2);
+  font-size: var(--text-md); color: var(--color-text-secondary);
+  border-radius: var(--radius-sm); cursor: pointer;
+}
+.export-scope-row:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.export-scope-row input { accent-color: var(--color-accent); }
 </style>
 

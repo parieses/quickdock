@@ -108,7 +108,10 @@ async function handleCreateCollection(values: Record<string, string>) {
 async function handleEditCollection(values: Record<string, string>) {
   if (!editingCollection.value) return
   try {
-    await store.updateCollectionAction(editingCollection.value.id, { name: values.name, type: values.type, openStrategy: values.openStrategy || 'single', groupName: values.groupName })
+    await store.updateCollectionAction(editingCollection.value.id, {
+      name: values.name, type: values.type, openStrategy: values.openStrategy || 'single', groupName: values.groupName,
+      noSearch: values.noSearch === '1' ? 1 : 0,
+    })
     showEditDialog.value = false
     editingCollection.value = null
   } catch (e) {
@@ -317,7 +320,7 @@ function onDropCol(e: DragEvent, targetId: string) {
     <CreateDialog :visible="showCollectionDialog" :title="t('addCollection')" :fields="collectionFields"
       @confirm="handleCreateCollection" @cancel="showCollectionDialog = false" />
     <CreateDialog :visible="showEditDialog" :title="t('editCollection')" :fields="collectionFields"
-      :editValues="editingCollection ? { name: editingCollection.name, type: editingCollection.type ?? '目录集合', openStrategy: editingCollection.openStrategy ?? 'single', groupName: editingCollection.groupName ?? '' } : undefined"
+      :editValues="editingCollection ? { name: editingCollection.name, type: editingCollection.type ?? '目录集合', openStrategy: editingCollection.openStrategy ?? 'single', groupName: editingCollection.groupName ?? '', noSearch: editingCollection.noSearch ? '1' : '0' } : undefined"
       @confirm="handleEditCollection" @cancel="showEditDialog = false; editingCollection = null" />
   </section>
 </template>

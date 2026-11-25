@@ -42,6 +42,12 @@ export function useCollectionFields() {
         ],
       },
       {
+        key: 'noSearch',
+        label: t('searchExcludeSingle'),
+        type: 'checkbox',
+        hint: t('searchExcludeSingleHint'),
+      },
+      {
         key: 'groupName',
         label: t('mon_group'),
         type: 'text',

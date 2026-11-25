@@ -12,6 +12,7 @@ import (
 	"quickdock/internal/credentials"
 	"quickdock/internal/db"
 	"quickdock/internal/logger"
+	"quickdock/internal/migration"
 	"quickdock/internal/platform"
 )
 
@@ -347,6 +348,18 @@ func detectEnvRuntimes(dir string) []envRuntimeTarget {
 // 密码库的密文是用本机 DPAPI 的 DEK 加密的，原样带走在新机器上解不开，
 // 所以导出时解密、用用户口令重新封一份。
 func (s *StorageService) DataExport(zipPath, vaultPassword string) *ApiResult {
+	return s.dataExport(zipPath, vaultPassword, nil)
+}
+
+// DataExportSelected 按勾选的导航菜单打包：只写所选功能的表数据（未选表清空）
+// 与对应数据目录子项。navIDs 为空等同整机全量导出。
+//
+// 异步执行，进度事件与 DataExport 完全共用（phase 以 export_ 开头）。
+func (s *StorageService) DataExportSelected(zipPath, vaultPassword string, navIDs []string) *ApiResult {
+	return s.dataExport(zipPath, vaultPassword, navIDs)
+}
+
+func (s *StorageService) dataExport(zipPath, vaultPassword string, navIDs []string) *ApiResult {
 	if strings.TrimSpace(zipPath) == "" {
 		return FailMsg("保存路径不能为空")
 	}
@@ -388,6 +401,22 @@ func (s *StorageService) DataExport(zipPath, vaultPassword string) *ApiResult {
 			s.emit(storageMigrateProgress{Phase: "error", Err: "导出数据库快照失败：" + err.Error()})
 			return
 		}
+
+		// 按勾选的导航菜单裁剪快照：未选功能的表只留空壳，FTS 索引同步重建。
+		var keepTables, packDirs []string
+		var needVault bool
+		if len(navIDs) > 0 {
+			keepTables, packDirs, needVault = migration.Resolve(navIDs)
+			keep := make(map[string]bool, len(keepTables))
+			for _, tb := range keepTables {
+				keep[tb] = true
+			}
+			s.emit(storageMigrateProgress{Phase: "export_db", Message: "正在按所选功能裁剪数据…"})
+			if err := db.PruneDatabaseForScope(snapPath, keep); err != nil {
+				s.emit(storageMigrateProgress{Phase: "error", Err: "裁剪数据失败：" + err.Error()})
+				return
+			}
+		}
 		var dbBytes int64
 		if st, err := os.Stat(snapPath); err == nil {
 			dbBytes = st.Size()
@@ -395,9 +424,10 @@ func (s *StorageService) DataExport(zipPath, vaultPassword string) *ApiResult {
 
 		// 密码库：有条目且用户给了口令才带。没给口令 = 用户选择不迁移密码，
 		// 不静默降级成明文——那等于把口令库写在桌面的 zip 里。
+		// 按功能打包时，只有勾了「密码库」这一项才额外封便携包。
 		vaultFile := ""
 		hasVault := false
-		if strings.TrimSpace(vaultPassword) != "" {
+		if strings.TrimSpace(vaultPassword) != "" && (len(navIDs) == 0 || needVault) {
 			if n, _ := credentials.Count(); n > 0 {
 				s.emit(storageMigrateProgress{Phase: "export_vault", Message: "正在封装密码库…"})
 				data, verr := credentials.ExportPortable(vaultPassword)
@@ -420,9 +450,26 @@ func (s *StorageService) DataExport(zipPath, vaultPassword string) *ApiResult {
 			CreatedAt: time.Now().UTC().Format(time.RFC3339),
 			DBBytes:   dbBytes,
 			HasVault:  hasVault,
+			Scope:     "full",
+		}
+		// 按功能打包：只收所选导航对应的数据目录子项（DB 快照/manifest 不受影响）。
+		var include func(string) bool
+		if len(navIDs) > 0 {
+			m.Scope = "selected"
+			m.NavIDs = navIDs
+			m.Tables = keepTables
+			m.Dirs = packDirs
+			include = func(rel string) bool {
+				for _, d := range packDirs {
+					if rel == d || strings.HasPrefix(rel, d+"/") {
+						return true
+					}
+				}
+				return false
+			}
 		}
 		s.emit(storageMigrateProgress{Phase: "export_packing", Message: "正在打包数据…"})
-		totalFiles, totalBytes, err := platform.WriteTransferArchive(src, zipPath, snapPath, vaultFile, m,
+		totalFiles, totalBytes, err := platform.WriteTransferArchiveFiltered(src, zipPath, snapPath, vaultFile, m, include,
 			func(doneFiles, tf int, doneBytes, tb int64, cur string) {
 				s.emit(storageMigrateProgress{
 					Phase: "export_packing", TotalFiles: tf, DoneFiles: doneFiles,
@@ -453,6 +500,11 @@ type DataImportInfo struct {
 	DBBytes   int64  `json:"dbBytes"`
 	// HasVault 包里有密码库便携包：前端据此显示「口令」输入框。
 	HasVault bool `json:"hasVault"`
+	// Scope/NavIDs 打包范围：selected 包只含部分功能，导入前给个明确提示。
+	Scope  string   `json:"scope"`
+	NavIDs []string `json:"navIds"`
+	Tables []string `json:"tables"`
+	Dirs   []string `json:"dirs"`
 }
 
 // DataImportInspect 只读地检查一个 zip 是否为合法的整机迁移包，返回其信息。
@@ -465,7 +517,10 @@ func (s *StorageService) DataImportInspect(zipPath string) *ApiResult {
 	if err != nil {
 		return FailMsg(err.Error())
 	}
-	return Ok(DataImportInfo{SourceDir: m.SourceDir, CreatedAt: m.CreatedAt, DBBytes: m.DBBytes, HasVault: m.HasVault})
+	return Ok(DataImportInfo{
+		SourceDir: m.SourceDir, CreatedAt: m.CreatedAt, DBBytes: m.DBBytes, HasVault: m.HasVault,
+		Scope: m.Scope, NavIDs: m.NavIDs, Tables: m.Tables, Dirs: m.Dirs,
+	})
 }
 
 // DataImport 把整机迁移包**合并**进当前数据目录（不替换、不换目录、不用重启）。

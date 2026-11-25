@@ -9,6 +9,12 @@ import (
 
 // ---- 工作空间 ----
 
+// defaultWorkspaceName 唯一工作空间的名字。
+//
+// 与 services.DefaultWorkspaceName 同一个字面量：应用里不再支持新建/切换工作空间，
+// 只剩这一个空间，书签导入、默认工具等需要「往哪儿放」的地方统一落到它身上。
+const defaultWorkspaceName = "默认工作空间"
+
 func (d *Database) ListWorkspaces() ([]Workspace, error) {
 	rows, err := d.ListTable("workspaces")
 	if err != nil {

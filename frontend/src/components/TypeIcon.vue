@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import {
   Layers, Folder, FolderOpen, Globe, Terminal,
   File, Monitor, Briefcase, Building2, Wrench,
-  Palette, Star, Link,
+  Palette, Star, Link, Bookmark,
 } from '@lucide/vue'
 import { ITEM_TYPE } from '../constants/itemTypes'
 
@@ -24,6 +24,7 @@ const sceneIconMap: Record<string, any> = {
   '工程': Wrench,
   '设计': Palette,
   '通用': Layers,
+  '书签': Bookmark,
   '自定义': Star,
 }
 

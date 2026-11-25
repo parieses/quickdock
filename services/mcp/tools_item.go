@@ -24,14 +24,14 @@ func registerItemTools(s *MCPService, r *toolRegistrar) {
 		if s.Workspace == nil {
 			return nil, errors.New("工作空间服务未就绪")
 		}
-		return unwrap(s.Workspace.ListWorkspaces())
+		return s.unwrapVisible(s.Workspace.ListWorkspaces(), "workspaces")
 	}, mcpsrv.LevelRead, "workspace_list", "列出所有工作空间（workspace_list_all 的兼容别名，返回相同结果；新调用建议用 workspace_list_all）", nil, nil)
 
 	r.add(func(args map[string]any) (any, error) {
 		q := mcpsrv.Arg(args, "query")
 		if q == "" {
-			// 空词语义不变：仍走 ListAllItems 返回全量池，SearchPalette("") 刻意返回空。
-			return unwrap(s.App.ListAllItems())
+			// 空词语义不变：仍走 ListAllItems 返回全量池（套搜索排除口径），SearchPalette("") 刻意返回空。
+			return s.unwrapVisible(s.App.ListAllItems(), "items")
 		}
 		data, err := unwrap(s.App.SearchPalette(q))
 		if err != nil {
@@ -57,14 +57,14 @@ func registerItemTools(s *MCPService, r *toolRegistrar) {
 		if s.Workspace == nil {
 			return nil, errors.New("工作空间服务未就绪")
 		}
-		return unwrap(s.Workspace.ListWorkspaces())
+		return s.unwrapVisible(s.Workspace.ListWorkspaces(), "workspaces")
 	}, mcpsrv.LevelRead, "workspace_list_all", "列出所有工作空间（含 id、名称）。scene_list / collection_list 要用这里的 workspaceId 作过滤", nil, nil)
 
 	r.add(func(args map[string]any) (any, error) {
 		if s.Scene == nil {
 			return nil, errors.New("场景服务未就绪")
 		}
-		return unwrap(s.Scene.ListScenes(mcpsrv.Arg(args, "workspaceId")))
+		return s.unwrapVisible(s.Scene.ListScenes(mcpsrv.Arg(args, "workspaceId")), "scenes")
 	}, mcpsrv.LevelRead, "scene_list", "列出场景（可按 workspaceId 过滤）。用户问「我有哪些场景」时用", nil,
 		map[string]any{"workspaceId": str("工作空间 id，来自 workspace_list_all；留空返回全部")})
 
@@ -72,7 +72,7 @@ func registerItemTools(s *MCPService, r *toolRegistrar) {
 		if s.Collection == nil {
 			return nil, errors.New("集合服务未就绪")
 		}
-		return unwrap(s.Collection.ListCollections(mcpsrv.Arg(args, "sceneId")))
+		return s.unwrapVisible(s.Collection.ListCollections(mcpsrv.Arg(args, "sceneId")), "collections")
 	}, mcpsrv.LevelRead, "collection_list", "列出集合（可按 sceneId 过滤）。用户问「某个场景下有哪些集合」时用", nil,
 		map[string]any{"sceneId": str("场景 id，来自 scene_list；留空返回全部")})
 
@@ -80,7 +80,7 @@ func registerItemTools(s *MCPService, r *toolRegistrar) {
 		if s.Item == nil {
 			return nil, errors.New("快捷项服务未就绪")
 		}
-		return unwrap(s.Item.ListItems(mcpsrv.Arg(args, "collectionId")))
+		return s.unwrapVisible(s.Item.ListItems(mcpsrv.Arg(args, "collectionId")), "items")
 	}, mcpsrv.LevelRead, "item_list", "列出某集合下的全部快捷项（项目/命令/目录/网址）。要打开某一项先用这个拿到 id", nil,
 		map[string]any{"collectionId": str("集合 id，来自 collection_list；留空返回全部")})
 

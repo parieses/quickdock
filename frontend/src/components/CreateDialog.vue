@@ -9,7 +9,9 @@ const { t } = useI18n()
 export interface CreateField {
   key: string
   label: string
-  type: 'text' | 'select' | 'textarea'
+  // checkbox 的值统一用字符串 '1' / '0'：整张表单的 values 是 Record<string,string>，
+  // 单独给布尔开一条类型会让每个消费方都要再判断一次。
+  type: 'text' | 'select' | 'textarea' | 'checkbox'
   options?: { label: string; value: string }[]
   placeholder?: string
   default?: string
@@ -45,6 +47,8 @@ function resetValues() {
       map[f.key] = props.editValues[f.key]
     } else if (f.default !== undefined) {
       map[f.key] = f.default
+    } else if (f.type === 'checkbox') {
+      map[f.key] = '0'
     } else {
       map[f.key] = f.type === 'select' ? (f.options?.[0]?.value ?? '') : ''
     }
@@ -119,6 +123,13 @@ function onKeydown(e: KeyboardEvent) {
                 class="field-input field-textarea"
                 rows="10"
               ></textarea>
+              <input
+                v-else-if="f.type === 'checkbox'"
+                type="checkbox"
+                class="field-check"
+                :checked="values[f.key] === '1'"
+                @change="values[f.key] = ($event.target as HTMLInputElement).checked ? '1' : '0'"
+              />
               <select v-else v-model="values[f.key]" class="field-input">
                 <option v-for="o in f.options" :key="o.value" :value="o.value">
                   {{ o.label }}
@@ -180,6 +191,13 @@ function onKeydown(e: KeyboardEvent) {
 }
 .field-input:focus { border-color: var(--color-border-focus-soft); }
 .field-input::placeholder { color: var(--color-text-disabled); }
+/* 勾选项：不占满整行宽度，跟输入框左侧对齐即可 */
+.field-check {
+  width: 16px; height: 16px; margin: 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+  align-self: flex-start;
+}
 .field-textarea { resize: vertical; min-height: 220px; font-family: var(--font-mono); line-height: 1.5; }
 .field-error {
   font-size: var(--text-sm); color: var(--color-danger); margin: -8px 0 0; padding: 0;
