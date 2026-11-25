@@ -79,8 +79,6 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 - **数据与安全**：本地知识库问答（FTS5 检索 + 向量召回融合）/ 快捷笔记与双向链接 / 本地密码管理器（AES-256-GCM 加密，密钥由系统 DPAPI 包裹，配浏览器扩展自动填充）/ 跨机数据迁移与备份
 - **AI**：本地 AI 助手 / AI 编程 agent（改文件、跑命令、按步回滚）/ AI 运行轨迹与用量统计 / MCP 服务器（`http://127.0.0.1:9230/mcp`）/ 插件生态
 
-English: Windows launcher, desktop launcher, app launcher, command palette, dev environment manager, runtime and SDK version manager, developer productivity toolbox, clipboard manager, window manager, screenshot annotation, SSH / SFTP client, local password manager, todo and kanban, cron scheduler, uptime and port monitor, local knowledge base, local AI agent, MCP server, plugin system, self-hosted, local-first, offline-capable, built with Wails, Go and Vue.
-
 ---
 
 ## 功能一览

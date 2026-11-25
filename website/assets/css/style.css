@@ -572,6 +572,50 @@ section {
   border-radius: 0 0 var(--r-lg) var(--r-lg);
 }
 
+/* ---------- 7b. 界面图库：两列网格，每格一张窗口截图 ---------- */
+#screens {
+  border-top: 1px solid var(--line);
+  padding-top: var(--s9);
+}
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s5);
+}
+
+.gallery-item {
+  margin: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  background: var(--ink-850);
+  overflow: hidden;
+  transition: border-color 0.3s var(--ease), transform 0.4s var(--ease);
+}
+
+.gallery-item:hover {
+  border-color: var(--line-3);
+  transform: translateY(-3px);
+}
+
+.gallery-item img {
+  width: 100%;
+  display: block;
+}
+
+.gallery-item figcaption {
+  padding: var(--s3) var(--s4);
+  font-size: 13px;
+  color: var(--t2);
+  border-top: 1px solid var(--line);
+}
+
+.gallery-note {
+  margin-top: var(--s5);
+  font-size: 13px;
+  color: var(--t4);
+}
+
 /* ---------- 8. 场景排版：说明在上、截图满宽在下 ---------- */
 .rows {
   display: grid;
@@ -1197,6 +1241,9 @@ section {
     padding-top: 0;
   }
   .tools {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .gallery {
     grid-template-columns: minmax(0, 1fr);
   }
   .duo {
