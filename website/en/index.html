@@ -358,6 +358,21 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">Import bookmarks straight from your browser, one default workspace, feature-scoped data migration</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>New Bookmarks page: read local Chrome / Edge / Brave / Chromium / Vivaldi / Firefox bookmarks directly (Chromium Bookmarks JSON, including account bookmarks; Firefox copies its database read-only), or import a browser-exported HTML file. Folders become collections and multi-level paths become group names; bookmarks become web-page items with normalized URL dedupe, so re-importing adds no duplicates. Everything lands in the default workspace — scenes of type "Bookmark", collections of type "Web page collection", groups labeled with the scene name — with no separate bookmarks workspace. Then fill in icons, check dead links (404 / blocked / moved / content changed), merge duplicates and review curation insights (never opened, stale over 30 days, added this week).</li>
+          <li>There is now a single default workspace: no new-workspace or switcher controls in the sidebar, and data from older workspaces is merged in on upgrade (same-named scenes merge, no items lost). Workspaces, scenes, collections and items can each be marked "exclude from Ctrl+K search" — hidden from the resource tree, command palette, AI tools and MCP results alike. Settings → Search scope has a "show hidden items" toggle to reveal them for editing.</li>
+          <li>Machine migration can be scoped by feature: export everything, or tick only the navigation entries you need so just their tables and data directories go into the zip. The import preview shows the scope before merging, and the password vault is only sealed into an encrypted portable file when selected and a passphrase is provided.</li>
+          <li>Fixed a palette crash: a NULL working_directory made the whole item search fail; all nullable columns are now handled. The README is available in Chinese (default) and English.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.57</span>
+          <span class="log-date">2026-11-24</span>
           <span class="log-title">Safer downloads, long-running fixes, and smoother AI chat switching</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -406,22 +421,6 @@
         </ul>
       </details>
 
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.54</span>
-          <span class="log-date">2026-11-22</span>
-          <span class="log-title">Arrange your dashboard cards, steadier AI memory and long chats, more note links and MCP tools</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>The dashboard header has a new grid button: reorder cards, hide the ones you don't use, and restore defaults in one click — preferences stay on this machine. A readout whose refresh failed now says "load failed" instead of showing a stale number, ages past 5 minutes turn yellow and past 30 minutes red with a retry link, and clicking a readout lands on the overdue todo, down monitor or dirty repo itself. A new full-width "Up next" card collects upcoming todos and scheduled tasks by time, followed by real activity counts for the last 7 days. Header shortcuts create a todo or copy the latest verification code without switching pages first.</li>
-          <li>AI memory is now an evergreen set of sections — project baseline, hard rules, gotchas, facts, decisions — so one damaged file no longer wipes the whole thing and parallel sub-agents cannot collide on volume numbers. Follow-up questions no longer throw away the whole context prefix: the exact tool conversation sent with each prompt is saved and replayed byte-for-byte when rebuilding history. Session replay, tool ordering and compaction timing were stabilized too. The run tree now shows sub-agents as team-member cards with roles and an execution plan.</li>
-          <li>In a chat you can attach files from the "+" panel, paste or drop them, and have their contents injected by file type with a chip on your message. Long pastes collapse into a chip you can expand to read the full text, and the sources behind an answer collapse into a short link list.</li>
-          <li>Note links are easier to use: candidates are grouped by notes / todos / items and loaded on demand, backlinks show their source title instead of "deleted", renaming a note rewrites wiki references in other notes so links stop dangling, and newly created items become searchable immediately instead of waiting for the cache to expire.</li>
-          <li>MCP gained 23 read-only tools covering knowledge-base source chunks, notes and individual history versions, full clipboard search, cloud-drive listing and search, monitor logs, mailbox verification codes and credential-vault status. todo_update now changes only the fields you pass, and note_update can clear a body with an empty string. The vault still exposes status and random password generation only — no plaintext reads or writes.</li>
-          <li>Environment gained health probes and missing-version diagnostics: a process listening on no port is flagged, and a source missing one particular version is no longer mistaken for a dead source; failed steps in manifest imports now surface a warning instead of a false "success". Knowledge-base search finds single characters, plugin path fields are case-insensitive for permission checks, the downloader can explicitly clear its RPC secret, cloud-drive transfers have a stall guard, SSH SOCKS failures return standard error codes, and notification badges no longer overwrite each other under concurrency. A pass through all 18 navigation chapters fixed 75 usability defects.</li>
-        </ul>
-      </details>
 
     </div>
 

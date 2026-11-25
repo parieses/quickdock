@@ -358,6 +358,21 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">书签能直接读浏览器了，工作空间归为一个，数据可按功能打包迁移</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>新增书签页：直接读本机 Chrome / Edge / Brave / Chromium / Vivaldi / Firefox 的书签（Chrome 系读 Bookmarks 文件，包括账号书签；Firefox 复制数据库只读打开），也能导入浏览器导出的 HTML。文件夹映射成集合、多级路径写进组名，书签落成网页项目，归一化 URL 去重，重复导入不会多出副本。导入落在默认工作空间：场景类型「书签」、集合类型「网页集合」，分组按场景名显示，不再单独建一个「书签」空间。导入后可按需补图标、查死链（404 / 反爬 / 地址已变 / 内容已变）、合并重复、看收藏画像（从未打开、积压 30 天、本周新增）。</li>
+          <li>工作空间收敛为唯一的默认空间：侧栏去掉新建和切换入口，升级时旧空间的数据自动并入，同名场景合并、条目不丢。工作空间、场景、集合、项目都能单独勾选「不参与 Ctrl+K 搜索」，资源树、命令面板、AI 工具和 MCP 结果一并隐藏；设置 → 搜索范围里可临时打开「显示隐藏项」把东西找回来编辑。</li>
+          <li>整机迁移支持按功能打包：导出时可以整机带走，也可以只勾导航菜单里需要的几项，只把对应的数据表和数据目录写进 zip；导入前会先展示包里的范围，导入仍按原来的合并语义。密码库只在勾选且填了口令时才封成加密便携包。</li>
+          <li>修掉命令面板的一条崩溃：条目里 working_directory 为 NULL 时整批搜索会失败，现在所有可空列都做了兜底；README 补了中英双语版，默认中文。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.57</span>
+          <span class="log-date">2026-11-24</span>
           <span class="log-title">下载校验、长任务修复与会话切换过渡，一批稳定性加固</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -406,22 +421,6 @@
         </ul>
       </details>
 
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.54</span>
-          <span class="log-date">2026-11-22</span>
-          <span class="log-title">总览卡片能自己排了，AI 记忆与长对话更稳，笔记关联和 MCP 工具补齐</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>总览页头新增网格按钮：卡片可以上下调序、隐藏不用的，「恢复默认」一键还原，偏好只存在本机。读数拉取失败会就地显示「加载失败」而不是旧数字，超过 5 分钟标黄、30 分钟标红并给重试入口；点读数会直接落到那条逾期待办、掉线监控或待处理的仓库。新增通栏的「接下来」卡，把临近的待办和定时任务按时间排在一起，下面带近 7 天的真实活动数字；页头还加了「新建待办」和「复制验证码」两个快捷动作。</li>
-          <li>AI 的记忆改成常青分区：项目基线、硬规则、坑、事实、决策分开记，读坏一份不会把整份记忆抹掉，并行子 agent 也不会撞号。长对话追问不再每次都从头算缓存：落库时记下真正发给模型的工具对话原文，重建历史时逐字节接回去；会话重放、工具排序与折叠时机也一起稳住。编排树现在用团队成员卡展示子任务与执行计划，角色分工一眼看清。</li>
-          <li>对话里可以直接从「+」面板选文件、粘贴或拖入文件，文件内容按后缀转成文本进上下文，气泡上留文件 chip；大段粘贴折成 chip、点开可看全文，回答底部的来源链接也能折叠查看。</li>
-          <li>笔记互链补齐：关联候选按笔记 / 待办 / 条目分档且按需加载，反链会显示来源标题而不再一行「已删除」，改名会回写正文里的 wiki 引用不让链接悬空，新建条目后候选立刻能搜到、不用等缓存过期。</li>
-          <li>MCP 新增 23 个只读工具，覆盖知识库来源分块、笔记与历史版本、剪贴板全库搜索、网盘目录与搜索、监控日志、邮箱验证码、密码库状态等；todo_update 改成只改你传的字段，note_update 传空内容可以真正清空正文。密码库仍只给状态和随机密码，不暴露明文读写。</li>
-          <li>环境管理加了健康探活与版本缺失诊断：进程还在但端口没监听会标异常，某个源缺某个版本不再被误判成源失效；清单导入失败的步骤会透出告警而不是报「成功」。知识库搜单字不再零命中，插件路径字段大小写不再影响权限判断，下载器 secret 可以显式清空，网盘传输加了卡死护栏，SSH SOCKS 失败会回标准错误码，通知角标并发不再互相覆盖。另按导航顺序走查 18 章，集中修掉 75 条体验缺陷。</li>
-        </ul>
-      </details>
 
     </div>
 

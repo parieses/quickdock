@@ -5,8 +5,7 @@
 `Resource tree` · `Global hotkeys` · `Runtimes` · `AI agent` · `Plugin ecosystem`
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-4a9eff?style=flat-square)
-![Version](https://img.shields.io/badge/Version-v0.0.57-4a9eff?style=flat-square)
-![Dev](https://img.shields.io/badge/Dev-Active-22c55e?style=flat-square)
+![Version](https://img.shields.io/badge/Version-v0.0.58-4a9eff?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-4a9eff?style=flat-square)
 ![Built with](https://img.shields.io/badge/Built%20with-Go%20%2B%20Vue-4a9eff?style=flat-square)
 ![Framework](https://img.shields.io/badge/Framework-Wails%20v3-4a9eff?style=flat-square)
@@ -81,7 +80,7 @@ Find it by these terms:
 
 | Feature | Default hotkey | Notes |
 |---------|----------------|-------|
-| Workspace / scene / collection / item | — | Four-level resource tree, 6 item types, drag sorting, FTS5 search. Scenes and collections can be named into collapsible groups; batch delete / move across collections, color flags and custom icons |
+| Workspace / scene / collection / item | — | Four-level resource tree, 6 item types, drag sorting, FTS5 search. There is a single default workspace; data from older workspaces is merged in on upgrade. Workspaces / scenes / collections / items can each be marked "exclude from Ctrl+K search", hiding them across the resource tree, command palette, AI and MCP (with a settings toggle to reveal hidden entries). Scenes and collections can be named into collapsible groups; batch delete / move across collections, color flags and custom icons |
 | Command palette | `Ctrl+K` | Searches workspaces, scenes, collections, items, notes, todos, apps, files, plugin commands and system commands; backend resolves items / notes / todos in one pass; jump straight to any page anchored on a result. Type "new note / new todo" to create inline. URLs are saved as items; file results preview inline (images, code, Markdown, PDF, audio/video, archives, folders) |
 | Clipboard history | `` Ctrl+` `` | Text, images and files; pinning, backend search, expiry cleanup, bulk clear, reveal in Explorer, save images, "paste as plain text / Markdown / JSON", multi-item paste queue, ignore by source window, pause capture |
 | Clipboard rules | — | Clean copied content by condition: trim blanks, drop empty/duplicate lines, sort, JSON format, strip ANSI, URL decode, case conversion; priority ordering and dry-run with a simulated source window |
@@ -211,12 +210,12 @@ All of these can be changed under Settings → Hotkeys and Settings → Window M
 <details>
 <summary><b>Workspace & resources</b></summary>
 
-- **Workspace**: top-level container (only one default workspace remains in current versions)
+- **Workspace**: a single default workspace — no creating or switching workspaces; on upgrade, data from older workspaces is merged into the default one (same-named scenes merge, no items lost)
 - **Scene**: a view group under a workspace, with tags, icons and colors
 - **Group**: scenes and collections can have a group name shown as a collapsible section; unnamed groups sink to the bottom. Scene exports keep groups intact across machines
 - **Collection**: a concrete resource folder; default tool, open strategy and plugin binding can be set per collection
 - **Item**: 6 types (web page, directory, app, command, tool, plugin); variables like `%WORKDIR%` expand on open
-- **Search**: FTS5 over items plus pinyin initials and substring matching in the command palette; workspaces, scenes, collections and items can individually opt out of `Ctrl+K` search (Settings → General → Search scope), with a "show hidden items" escape hatch for editing
+- **Search**: FTS5 over items plus pinyin initials and substring matching in the command palette; workspaces, scenes, collections and items can individually opt out of `Ctrl+K` search. Hidden entries are filtered from the resource tree, command palette, AI tools and MCP results alike (Settings → Search scope), with a "show hidden items" escape hatch for editing
 - **Bookmarks**: imported bookmarks land in the default workspace under a scene of type "Bookmark" and collections of type "Web page collection"; the folder path is kept as the collection group name
 
 </details>

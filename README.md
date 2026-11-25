@@ -11,8 +11,7 @@
 `资源集合` · `全局热键` · `运行环境` · `AI agent` · `插件生态`
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-4a9eff?style=flat-square)
-![Version](https://img.shields.io/badge/Version-v0.0.57-4a9eff?style=flat-square)
-![Dev](https://img.shields.io/badge/Dev-Active-22c55e?style=flat-square)
+![Version](https://img.shields.io/badge/Version-v0.0.58-4a9eff?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-4a9eff?style=flat-square)
 ![Built with](https://img.shields.io/badge/Built%20with-Go%20%2B%20Vue-4a9eff?style=flat-square)
 ![Framework](https://img.shields.io/badge/Framework-Wails%20v3-4a9eff?style=flat-square)
@@ -91,7 +90,7 @@ English: Windows launcher, desktop launcher, app launcher, command palette, dev 
 
 | 能力 | 默认热键 | 说明 |
 |------|---------|------|
-| 工作空间 / 场景 / 集合 / 项目 | — | 四级资源树，6 种项目类型，拖拽排序，FTS5 全文搜索。场景与集合可命名分组、按组折叠；可勾选批量删除与跨集合移动，可设标记颜色与自定义图标 |
+| 工作空间 / 场景 / 集合 / 项目 | — | 四级资源树，6 种项目类型，拖拽排序，FTS5 全文搜索。只有一个默认工作空间，升级时旧空间的数据自动并入；场景与集合可命名分组、按组折叠；工作空间 / 场景 / 集合 / 项目都可单独勾选「不参与 Ctrl+K 搜索」，资源树、命令面板、AI 与 MCP 一并隐藏（设置里可临时显示隐藏项）；可勾选批量删除与跨集合移动，可设标记颜色与自定义图标 |
 | 命令面板 | `Ctrl+K` | 搜工作空间、场景、集合、项目、笔记、待办、应用、文件、插件命令、系统命令，结果按来源分组；项目 / 笔记 / 待办三类由后端一次查完，还能直接跳到任一功能页并停在那一条。输入「新建笔记 / 新建待办」可直接建条目并打开。URL 自动识别保存为项目；文件结果可在面板内直接预览（图片、代码、Markdown、PDF、音视频、压缩包与目录）；新建动作在面板内就地输入标题，不必先跳页 |
 | 剪贴板历史 | `` Ctrl+` `` | 监听文本、图片、文件。支持固定、全库搜索（后端下推）、过期清理、批量清空，文件条目可在资源管理器定位，图片可另存；可「粘贴为纯文本 / Markdown / JSON」，或把多条加入队列连续粘贴；按来源窗口忽略、暂停捕获 |
 | 剪贴板自动规则 | — | 按条件清洗复制进来的内容：去空白、删空行、去重行、排序、JSON 格式化、去 ANSI 颜色、URL 解码、大小写转换。规则可排优先级，可模拟来源窗口试跑 |
@@ -221,13 +220,13 @@ English: Windows launcher, desktop launcher, app launcher, command palette, dev 
 <details>
 <summary><b>工作空间与资源管理</b></summary>
 
-- **工作空间**：顶级容器，用于隔离不同项目的上下文
-- **场景**：工作空间下的视图分组，支持标签、图标、颜色
+- **工作空间**：只有一个默认工作空间，不再新建或切换；升级时自动把旧工作空间的数据并入默认空间，同名场景合并、条目不丢
+- **场景**：工作空间下的视图分组，支持标签、图标、颜色；书签导入会建「书签」类型场景
 - **分组**：场景与集合都可以起个组名，侧栏按组折叠；没起名的沉在最后。导出场景包时分组跟着走，导到另一台机器不会散
-- **集合**：资源逻辑分组，四种打开策略
+- **集合**：资源逻辑分组，四种打开策略；书签导入建「网页集合」类型集合，多级书签路径写进组名
 - **项目**：六种类型，`directory` 目录、`file` 文件、`url` 网页、`command` 终端命令、`app` 应用、`quicklink` 带参快捷方式
 
-全层级支持拖拽排序与 FTS5 全文搜索，场景标签与设置页导航项都长按拖动即可换位。`value`、命令、URL 支持 `{date}` `{time}` `{username}` `{clipboard}` 变量，打开时即时展开。
+全层级支持拖拽排序与 FTS5 全文搜索，场景标签与设置页导航项都长按拖动即可换位。工作空间、场景、集合、项目都能单独关掉「参与 Ctrl+K 搜索」：关掉后资源树、命令面板、AI 工具与 MCP 返回都不再包含它；设置 → 搜索范围里可打开「显示隐藏项」临时找回。`value`、命令、URL 支持 `{date}` `{time}` `{username}` `{clipboard}` 变量，打开时即时展开。
 
 - **批量操作**：项目列表可勾选，批量删除或移到当前场景的其它集合，失败项单独回报
 - **外观**：条目可设标记颜色与自定义图标（256 KB 内的图片），列表里直接看出来是哪个环境
