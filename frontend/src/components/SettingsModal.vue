@@ -12,7 +12,6 @@ import { Events, Browser } from '@wailsio/runtime'
 
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
-const store = useWorkspaceStore()
 import HotkeySettings from './HotkeySettings.vue'
 import SettingsClipboardRules from './SettingsClipboardRules.vue'
 import SettingsHistory from './SettingsHistory.vue'
@@ -48,7 +47,6 @@ import { GetAppVersion, CheckForUpdates, DownloadUpdate, RestartApp, GetUpdateSt
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 // UpdateStatus 改从 ../types 取：接口统一返回 ApiResult 后 bindings 不再生成它的 model
 import type { ToastAPI, UpdateStatus } from '../types'
-import { useWorkspaceStore } from '../stores/workspace'
 import { getErrorMessage } from '../utils/error'
 import { navBadges } from '../composables/useNavBadges'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -1154,7 +1152,6 @@ async function toggleSearchExclusion(kind: 'workspaces' | 'scenes' | 'items') {
   try {
     const saved = unwrap<{ workspaces?: boolean; scenes?: boolean; items?: boolean }>(await SaveSearchExclusions(next))
     if (saved) searchExclusions.value = { workspaces: !!saved.workspaces, scenes: !!saved.scenes, items: !!saved.items }
-    await store.reloadSearchPrefs()
   } catch (e) {
     toast.error(t('saveFailed2') + ': ' + getErrorMessage(e))
   } finally {
@@ -1162,16 +1159,14 @@ async function toggleSearchExclusion(kind: 'workspaces' | 'scenes' | 'items') {
   }
 }
 
-// 显示隐藏项：被排除的项默认从资源树/AI/MCP 完全消失，打开这个开关后重新可见，
-// 用于点进去把勾选取消（否则等于把数据锁进黑洞）。与三个类别开关叠加：showHidden
-// 打开时所有类别一律放行。
+// 显示隐藏项：被排除的项默认从 Ctrl+K / AI / MCP 结果里消失，打开后重新可见，
+// 用于点进去把勾选取消（否则等于把数据锁进黑洞）。资源树始终显示全量，不受影响。
 const showHidden = ref(false)
 
 async function toggleShowHidden() {
   try {
     await SetSearchShowHidden(!showHidden.value)
     showHidden.value = !showHidden.value
-    await store.reloadSearchPrefs()
   } catch (e) {
     toast.error(t('saveFailed2') + ': ' + getErrorMessage(e))
   }

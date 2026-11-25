@@ -60,7 +60,7 @@ export default {
   sceneNamePlaceholder: 'e.g. Frontend Dev',
   // Ctrl+K search scope (settings page)
   searchScopeTitle: 'Search Scope',
-  searchScopeDesc: 'Choose what the Ctrl+K palette can find. Excluded kinds disappear from search results; the resource tree, AI and MCP reads are unaffected.',
+  searchScopeDesc: 'Choose what Ctrl+K and AI/MCP can find. Excluded kinds disappear from those results; the resource tree always shows everything.',
   searchScopeWorkspaces: 'Workspaces',
   searchScopeScenes: 'Scenes & collections',
   searchScopeItems: 'Items',
@@ -69,7 +69,7 @@ export default {
   // Per-entity exclusion (scene / collection / item forms)
   searchExcludeSingle: 'Hide from Ctrl+K search',
   showHidden: 'Show hidden items',
-  showHiddenHint: 'When on, excluded workspaces/scenes/collections/items reappear in the resource tree and AI/MCP results, so you can uncheck them.',
+  showHiddenHint: 'When on, excluded workspaces/scenes/collections/items reappear in Ctrl+K and AI/MCP results, so you can uncheck them. The resource tree always shows everything.',
   showHiddenOn: 'All visible',
   showHiddenOff: 'Hidden items excluded',
   searchExcludeSingleHint: 'When checked, this entry never shows up in palette results',

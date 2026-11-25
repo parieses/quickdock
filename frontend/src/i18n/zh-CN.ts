@@ -61,7 +61,7 @@ export default {
   sceneNamePlaceholder: '例如：前端开发',
   // Ctrl+K 搜索范围（设置页）
   searchScopeTitle: '搜索范围',
-  searchScopeDesc: '控制 Ctrl+K 命令面板能搜到哪些东西。关掉的类别不会出现在搜索结果里，但资源树、AI 与 MCP 读取不受影响。',
+  searchScopeDesc: '控制 Ctrl+K 命令面板与 AI/MCP 能读到哪些东西。关掉的类别不会出现在这些结果里，资源树始终显示全部内容。',
   searchScopeWorkspaces: '工作空间',
   searchScopeScenes: '场景与集合',
   searchScopeItems: '项目',
@@ -70,7 +70,7 @@ export default {
   // 单条排除（场景 / 集合 / 项目编辑表单）
   searchExcludeSingle: '不参与 Ctrl+K 搜索',
   showHidden: '显示隐藏项',
-  showHiddenHint: '开启后，被排除的工作空间/场景/集合/项目会重新出现在资源树与 AI/MCP 结果里，便于取消勾选。',
+  showHiddenHint: '开启后，被排除的工作空间/场景/集合/项目会重新出现在 Ctrl+K 与 AI/MCP 结果里，便于取消勾选。资源树始终显示全部内容。',
   showHiddenOn: '全部可见',
   showHiddenOff: '已隐藏的不可见',
   searchExcludeSingleHint: '勾选后这一条不会出现在命令面板的搜索结果里',
