@@ -18,6 +18,7 @@ import (
 
 // ServiceStartup 应用启动时调用（v3 生命周期）
 func (a *AppService) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
+	startupAt := time.Now()
 	// 创建剪贴板监听上下文，用于管理剪贴板处理 goroutine 的生命周期
 	a.ClipboardCtx, a.ClipboardCancel = context.WithCancel(ctx)
 	// 打开数据库
@@ -172,19 +173,38 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 	// 设置全局 App 引用（供 SetClipboardText 等函数使用）
 	AppRef.Store(a.app)
 
+	// —— 启动耗时打点 ——
+	//
+	// Wails v3 的 Run 是「先串行跑完所有 ServiceStartup，再 Run 窗口」（见框架
+	// application.go：startup() 里 for services 逐个 startupService，之后才跑
+	// pendingRun 里的窗口）。也就是说本函数里每一毫秒的同步耗时都会原样加到首屏上。
+	// 现场日志里「进程启动 → 主窗口就绪」在 3.3s~9s 之间大幅波动（11-24 有 4 次
+	// 撞满 8s 兜底），而旧日志只有 DB 打开一处耗时，剩下几秒无从归因。
+	//
+	// 这里按阶段各记一笔：下次启动看日志就能直接读出「哪一段吃掉了时间」，
+	// 不必再靠代码猜。定位到具体段之后再优化，避免对着空气做微优化。
+	stageAt := startupAt
+	stage := func(name string) {
+		logger.I("[启动] %s 耗时=%v", name, time.Since(stageAt).Round(time.Millisecond))
+		stageAt = time.Now()
+	}
+
 	// 启动剪贴板捕获工作协程：WM_CLIPBOARDUPDATE 回调只置信号，读取/解析/入库都在
 	// 这条协程上做（详见 clipboard_sys.go 的 startClipboardWorker）。必须早于
 	// StartHotkeyListenerFn——监听一旦启动就会立刻收到变更通知。
 	a.startClipboardWorker(a.ClipboardCtx)
+	stage("剪贴板工作协程")
 
 	// 启动全局快捷键和系统托盘（由 main 包注入的回调）
 	a.Flags.Main.Store(true)
 	if a.StartHotkeyListenerFn != nil {
 		a.StartHotkeyListenerFn(a.app, a)
 	}
+	stage("托盘与全局热键")
 
 	// 启动待办定时提醒调度器（常驻后台轮询，到期推送系统通知）
 	a.StartReminderScheduler()
+	stage("待办提醒调度器")
 
 	// 脚本域：收尾遗留运行 + 事件监听 + 恢复 HTTP 触发。
 	//
@@ -195,12 +215,15 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 	if a.StartScriptRuntimeFn != nil {
 		a.StartScriptRuntimeFn()
 	}
+	stage("脚本运行时")
 
 	// 启动定时任务调度器（精确定时器，到期执行 打开软件/目录/网址/命令/脚本/HTTP）
 	a.StartScheduleRunner()
+	stage("定时任务调度器")
 
 	// 启动网站监控检查器（仿 UptimeRobot，按 interval 定时探测并记录在线率）
 	a.StartMonitorChecker()
+	stage("网站监控检查器")
 
 	// dsh web 自动启动：QuickDock 起来后延迟 5s 在后台拉起 dsh 服务（默认开启，
 	// 可在「环境管理 → DeepSeek Harness」用开关关闭）。只起服务不开窗口，用户点侧边栏 dsh
@@ -222,6 +245,12 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 			}
 		}()
 	}
+
+	// 总账：Wails v3 要等本函数返回才 Run 窗口，所以这个数就是首屏延迟里
+	// 属于「Go 侧同步初始化」的那一份。剩下的（WebView2 进程 + 前端 bundle）
+	// 由 main.go 的「进程启动 → 就绪」端到端日志给出，两者相减即框架与渲染层开销。
+	logger.I("[启动] ServiceStartup 结束，Go 侧同步初始化总耗时=%v（此后框架才 Run 窗口）",
+		time.Since(startupAt).Round(time.Millisecond))
 
 	return nil
 }

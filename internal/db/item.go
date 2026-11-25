@@ -204,7 +204,7 @@ func (d *Database) scanItems(rows *sql.Rows) ([]CollectionItem, error) {
 		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.CollectionID, &item.Name, &item.Type, &item.Value, &item.WorkingDirectory, &item.ToolID, &item.Tool, &item.Args, &item.Icon, &item.Color, &item.Remark, &item.PluginData, &item.UsageCount, &item.Sort, &item.CreatedAt, &item.UpdatedAt, &item.Env); err != nil {
 			return nil, err
 		}
-		enrichItemIcon(&item)
+		item.iconFresh = enrichItemIcon(&item)
 		items = append(items, item)
 	}
 	return items, rows.Err()
@@ -213,11 +213,14 @@ func (d *Database) scanItems(rows *sql.Rows) ([]CollectionItem, error) {
 // persistExtractedIcons 把扫描时新提取的图标写回 DB（仅在 icon 为空时），
 // 单独走写锁，避免在只读查询热路径持写锁做 I/O。
 // WHERE icon = ” 防止并发覆盖用户手动设置的图标；与扫描读之间即便有并发写也安全。
+//
+// 只收 iconFresh 的项：其余条目的 Icon 是 DB 读出来的既有值，再写一遍既不可能命中
+// 也不会改变任何状态，却要为它构造参数、拿写锁，与 AI 流式落库/剪贴板写入抢锁。
 func (d *Database) persistExtractedIcons(items []CollectionItem) {
 	ids := make([]string, 0, len(items))
 	iconVals := make([]string, 0, len(items))
 	for i := range items {
-		if items[i].Icon == "" {
+		if !items[i].iconFresh || items[i].Icon == "" {
 			continue
 		}
 		ids = append(ids, items[i].ID)
@@ -464,13 +467,17 @@ func resolveItemIcon(itemType, value string) string {
 // enrichItemIcon 读取时自愈：item 无图标且为应用/exe/lnk 类型时，尝试补提取一次。
 // 仅对缺失图标的条目生效；ExtractIconBase64 内部有磁盘缓存，二次读取几乎零成本。
 // 用于修复「保存时图标提取偶发失败导致 icon 字段永久为空」的历史数据。
-func enrichItemIcon(item *CollectionItem) {
+// enrichItemIcon 读取时自愈：item 无图标且为应用/exe/lnk 类型时，尝试补提取一次。
+// 返回 true 表示「本次真的提取到了图标」，供调用方决定是否需要回写 DB。
+func enrichItemIcon(item *CollectionItem) bool {
 	if item.Icon != "" || !isAppLike(item.Type, item.Value) {
-		return
+		return false
 	}
 	if icon := platform.ExtractItemIcon(item.Type, item.Value); icon != "" {
 		item.Icon = icon
+		return true
 	}
+	return false
 }
 
 // isAppLike 判断是否为需要提取文件图标的类型（应用 或 exe/lnk 路径）

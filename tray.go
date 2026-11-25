@@ -276,15 +276,26 @@ func StartHotkeyListener(app *application.App, svc *services.AppService) {
 // createSystemTray 用框架 SystemTray 创建托盘图标与菜单。
 // 左键显示主窗口；右键未设置回调时框架自动弹出菜单（applySmartDefaults）。
 func createSystemTray(app *application.App) {
+	menuAt := time.Now()
 	menu := buildTrayMenu(app)
+	menuCost := time.Since(menuAt)
 
+	// SetIcon / SetMenu / Show 三个方法在框架内部都走 InvokeSync（见 wails v3
+	// systemtray.go）：impl 已就绪时会把调用投递到主线程并 wg.Wait()。而本函数是在
+	// ServiceStartup 里被调用的，主线程此刻正串行跑启动序列、还没轮到 Run 窗口，
+	// 一旦 impl 非 nil 这些调用就只能干等——现场日志里 02.2s→04.1s 那段没有任何
+	// 打点的空档，位置正好在这里。所以把构建与「建+配+显示」分开计时，
+	// 下次启动能直接看出这段到底占了多少，再决定要不要挪到后台。
+	trayAt := time.Now()
+	tray := app.SystemTray.New()
 	// SetIcon 接收一帧资源数据（见 trayIconData）：框架 CreateSmallHIconFromImage
 	// 会按 SM_CXSMICON 缩放到托盘标准尺寸。注意不能传整份 .ico 文件，否则框架会
 	// 把含 ICONDIR 头的整包交给 CreateIconFromResourceEx 而创建失败（误导性 WARN）。
-	tray := app.SystemTray.New()
 	tray.SetIcon(trayIconData())
 	tray.SetTooltip("快启坞 QuickDock")
 	tray.SetMenu(menu)
+	trayCost := time.Since(trayAt)
+
 	trayInstance = tray
 	tray.OnClick(func() {
 		if win := GetMainWindow(); win != nil {
@@ -292,8 +303,10 @@ func createSystemTray(app *application.App) {
 		}
 	})
 
+	showAt := time.Now()
 	tray.Show()
-	logger.I("QuickDock: 系统托盘已创建 (Wails SystemTray)")
+	logger.I("QuickDock: 系统托盘已创建 (Wails SystemTray) 构建菜单=%v 创建配置=%v 显示=%v",
+		menuCost.Round(time.Millisecond), trayCost.Round(time.Millisecond), time.Since(showAt).Round(time.Millisecond))
 }
 
 // buildTrayMenu 构建托盘右键菜单（框架 smart default 已处理右键弹出）。

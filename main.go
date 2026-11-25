@@ -399,6 +399,10 @@ var (
 var windowFlags = &services.WindowFlags{}
 
 func main() {
+	// 端到端启动计时的起点。logger 此时还没 Init，先在内存里记着，
+	// 等窗口就绪时统一算「进程启动 → 主窗口可用」的总账。
+	bootAt := time.Now()
+
 	// 提权子进程快速路径：必须早于 logger.Init 与 application.New（单实例互斥在 New 里），
 	// 详见 elevated_cli.go。
 	runElevatedCLI()
@@ -1011,9 +1015,11 @@ func main() {
 		select {
 		case <-mainWindowReady:
 		case <-time.After(8 * time.Second):
-			logger.W("[启动] 主窗口 8s 内未就绪，仍开始后台对账本地服务")
+			logger.W("[启动] 主窗口 8s 内未就绪，仍开始后台对账本地服务（进程启动 → 此处 = %v）",
+				time.Since(bootAt).Round(time.Millisecond))
 		}
-		logger.I("[启动] 主窗口已就绪，转后台对账启动本地服务")
+		logger.I("[启动] 主窗口已就绪，转后台对账启动本地服务（进程启动 → 就绪 = %v）",
+			time.Since(bootAt).Round(time.Millisecond))
 		appService.StartEnvServicesAsync()
 	}()
 

@@ -456,20 +456,27 @@ func validateCronExpr(expr string) error {
 // 任务被增删改/启停时用 schedWake 立即唤醒重排。这正是调度库内部的核心机制，
 // 但无需引入额外依赖，且与进程内状态天然一致。
 func (a *AppService) StartScheduleRunner() {
-	// 启动时给每个 AI 任务补一次专属空间：升级前所有任务共用一个「定时任务」分组，
-	// 且老会话都堆在里面。不做这一步，重启后仍看不到闹钟空间，得等下一次执行
-	// 或手动编辑任务才出现——用户会以为「改了没生效」。
-	a.ensureAllAISpaces()
 	a.schedWake = make(chan struct{}, 1)
 	a.schedWG.Add(1)
 	// 常驻循环：panic 落盘后不重抛，避免一次异常让整个调度器静默停摆
 	go logger.CapturePanicInGo("schedule:loop", func() {
 		defer a.schedWG.Done()
+		// 历史补齐放在常驻循环内部、scheduleLoop 之前执行，而不是留在这里的调用方线程上。
+		//
+		// 时序没有变化：补齐依然早于第一次扫描到期任务，所以「重启后第一次定时执行
+		// 被跳过」那类问题不会回来；变化的是它不再占用 ServiceStartup 的同步路径。
+		// Wails v3 要等所有 ServiceStartup 返回才 Run 窗口（见 lifecycle.go 的打点注释），
+		// 而这个函数内部是「每个 AI 任务 4 次库操作 + 合并历史会话」的遍历，
+		// 任务与历史会话一多就是纯粹的启动延迟。
+		a.ensureAllAISpaces()
 		a.scheduleLoop()
 	})()
 }
 
 // ensureAllAISpaces 启动时幂等补齐 AI 任务的专属空间，并把历史会话收敛成一条。
+//
+// 不做这一步，升级后的旧任务重启后仍看不到自己的闹钟空间，得等下一次执行或手动
+// 编辑任务才出现——用户会以为「改了没生效」。
 //
 // 空间幂等由 db 层按 task_id 保证；旧共享空间只在其会话全属于同一任务时被原地认领。
 // 收拢会话是「一个任务一条会话」的必要一步：旧口径每个运行点开一条，

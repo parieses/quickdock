@@ -1,4 +1,4 @@
-<!-- README 结构：定位 → 截图 → 功能一览 → 功能详解 → 架构 → 技术栈 → 开发 → 界面设计 → 插件 → 许可。
+<!-- README 结构：定位 → 这是什么（关键词） → 截图 → 功能一览 → 功能详解 → 架构 → 技术栈 → 开发 → 界面设计 → 插件 → 许可。
      长文详解收进 <details>，默认折叠。改完请同步 website/index.html 的更新日志（见 AGENTS.md 发版纪律）。 -->
 
 <div align="center">
@@ -39,6 +39,32 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 - **密码库**：SSH、网站登录等场景共用一处，AES-256-GCM 本地加密、密钥由系统 DPAPI 包裹；配浏览器扩展可在网页里自动填充，不联网、不外传
 - **安装**：单文件，用户态安装，不需要管理员权限，更新就地替换
 - **锁定**：`Ctrl+Alt+L` 一键锁界面，后台任务照常跑；密码输满自动解锁，忘密码用一次性恢复码
+
+---
+
+## 这是什么
+
+| | |
+|---|---|
+| **类别** | Windows 桌面启动器 · 本地开发环境管理器 · 效率工具箱 |
+| **平台** | Windows 10 / 11 桌面应用（Go + Wails v3 + Vue 3），单文件、用户态安装、就地更新 |
+| **数据** | 本地 SQLite + FTS5 全文索引；可选 WebDAV 同步与整机 zip 迁移；不需要注册账号 |
+| **AI** | 自带 Key 接 OpenAI / DeepSeek / Kimi / 通义 / Ollama / 自定义兼容接口；本地 agent 可改文件、跑命令，每步可审批可回滚；对外提供 MCP 服务 |
+| **环境** | 语言、数据库、中间件、网络服务到 AI 工具的运行时管理：Node.js、Go、PHP、Python、Bun、JDK、Erlang、MySQL、MariaDB、PostgreSQL、MongoDB、Redis、Memcached、RabbitMQ、MinIO、Nginx、Apache、Caddy、Traefik、Git、GitHub CLI、Composer、FFmpeg、aria2 等，安装 / 切换版本 / 启停 / 看日志都在应用内 |
+| **扩展** | 插件市场；插件分纯前端、内嵌 JS 沙箱、独立子进程三种运行时，Host API 声明式权限校验 |
+| **许可** | MIT，免费，无广告，无付费墙 |
+
+一句话：**一个窗口装下桌面快捷方式、全局热键、开发环境的安装启停、AI agent 和一堆小工具**——不用在桌面上摆一排图标，也不用为每个运行时单独装一套管理软件。
+
+按用途找，它覆盖这些词：
+
+- **桌面效率**：Windows 启动器 / 桌面启动器 / 快捷启动工具 / 应用启动器 / 桌面整理 / 效率工具箱 / 开发者工具箱 / 命令面板（`Ctrl+K` 全局搜索并直达条目）/ 剪贴板历史管理（文本、图片、文件与清洗规则）/ 窗口管理与贴屏分屏（九宫格排版）/ 截图标注与贴图 / 界面锁屏
+- **开发环境**：本地开发环境管理器 / 运行时与 SDK 版本管理（多版本并存、切换、启停、配置、日志）/ 本地开发站点与 HTTPS 证书（mkcert，自身不监听端口）/ PATH 可视化 / 项目目录体检 / SSH 终端与 SFTP 文件管理 / Git 面板 / 下载器图形界面（aria2）/ 网盘聚合浏览（OpenList、WebDAV）
+- **任务与监控**：待办清单 · 看板 · 四象限 · 番茄钟 / 定时任务调度（cron 与间隔、每日、每周、每月）/ 本机脚本任务（JS、Python、Shell、Go、PHP 直接跑，依赖自动装）/ 网站与端口监控 · 状态页 / 通知中心 / 邮件验证码收取
+- **数据与安全**：本地知识库问答（FTS5 检索 + 向量召回融合）/ 快捷笔记与双向链接 / 本地密码管理器（AES-256-GCM 加密，密钥由系统 DPAPI 包裹，配浏览器扩展自动填充）/ 跨机数据迁移与备份
+- **AI**：本地 AI 助手 / AI 编程 agent（改文件、跑命令、按步回滚）/ AI 运行轨迹与用量统计 / MCP 服务器（`http://127.0.0.1:9230/mcp`）/ 插件生态
+
+English: Windows launcher, desktop launcher, app launcher, command palette, dev environment manager, runtime and SDK version manager, developer productivity toolbox, clipboard manager, window manager, screenshot annotation, SSH / SFTP client, local password manager, todo and kanban, cron scheduler, uptime and port monitor, local knowledge base, local AI agent, MCP server, plugin system, self-hosted, local-first, offline-capable, built with Wails, Go and Vue.
 
 ---
 

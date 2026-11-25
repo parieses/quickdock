@@ -84,6 +84,15 @@ type CollectionItem struct {
 	// 与 scenes.env 同形。打开该条目时把这些版本的 bin 目录前置到子进程 PATH——
 	// 只影响本次打开，不改系统环境变量（那是全局激活 SetActive 的职责）。
 	Env string `json:"env"`
+
+	// iconFresh 标记「本次扫描时图标是刚从文件提取出来的」，仅供 persistExtractedIcons
+	// 决定要回写哪几行，不导出（不进 JSON、不进 Wails 绑定）。
+	//
+	// 为什么需要它：DB 里本来就存着图标的条目，扫出来的 Icon 同样非空，若只按
+	// 「Icon != ""」收集，UPDATE 的参数里 100% 是已经落过库的行（实测 4/4），
+	// 靠 WHERE icon='' 兜着一条都改不到——每条只读查询却要白拿一次全局写锁、
+	// 白构造一条 CASE 语句（5000 条全量池时 SQL 过百 KB、参数上万）。
+	iconFresh bool
 }
 
 // OpenTool 打开工具
