@@ -1,6 +1,6 @@
 export default {
   // General
-  appName: 'QuickDock',
+  appName: '快启坞 QuickDock',
   search: 'Search...',
   open: 'Open',
   copyValue: 'Copy value',
@@ -412,7 +412,7 @@ export default {
   version: 'Version',
   appDesc: 'Lightweight app launcher & project management tool',
   aboutTech: 'Built with Wails + Vue 3 + Go',
-  aboutCopyright: '© 2026 QuickDock',
+  aboutCopyright: '© 2026 快启坞 QuickDock',
   aboutSiteGuide: 'User Guide',
   aboutSiteMain: 'Website',
   aboutSitePlugins: 'Plugins Site',
@@ -2258,7 +2258,7 @@ export default {
   notesTplResearchBody: '## Background\n\n## Goals\n\n## Options\n- Option one:\n- Option two:\n\n## Comparison\n\n## Risks\n\n## References\n- \n',
 
   // Onboarding
-  welcomeTitle: 'Welcome to QuickDock',
+  welcomeTitle: 'Welcome to 快启坞 QuickDock',
   welcomeDesc: 'Lightweight app launcher & project management tool',
   getStarted: 'Get Started',
   defaultWorkspaceName: 'My Workspace',
@@ -5145,7 +5145,7 @@ export default {
   dlImportDone: 'Imported {added} task(s), skipped {skipped}',
 
   // ---- Startup lock (lock screen + Settings → Security + lock hotkey) ----
-  lockTitle: 'QuickDock is locked',
+  lockTitle: '快启坞 QuickDock is locked',
   lockNoticeDesc: 'Unlock in the main window with your startup password. Background tasks keep running.',
   lockNoticeOpen: 'Open main window',
   lockDesc: 'Enter your startup password to continue. Monitoring, scheduled tasks and notifications keep running in the background.',

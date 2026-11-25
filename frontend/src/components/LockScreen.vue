@@ -203,7 +203,7 @@ onUnmounted(() => {
       <div class="lock-drag" aria-hidden="true"></div>
 
       <div class="lock-card">
-        <div class="lock-brand"><span class="lock-brand-dot"></span>QuickDock</div>
+        <div class="lock-brand"><span class="lock-brand-dot"></span>{{ t('appName') }}</div>
 
         <div class="lock-icon"><Lock :size="21" :stroke-width="2" /></div>
         <h1 class="lock-title">{{ t('lockTitle') }}</h1>

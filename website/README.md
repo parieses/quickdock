@@ -1,4 +1,4 @@
-# QuickDock 官网
+# 快启坞 QuickDock 官网
 
 纯静态站点，无构建步骤，由 `.github/workflows/pages.yml` 部署到 GitHub Pages。
 

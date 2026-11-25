@@ -1,6 +1,6 @@
 export default {
   // 通用
-  appName: '快启坞',
+  appName: '快启坞 QuickDock',
   search: '搜索...',
   open: '打开',
   copyValue: '复制内容',
@@ -413,7 +413,7 @@ export default {
   version: '版本',
   appDesc: '轻量级应用启动与项目管理工具',
   aboutTech: '基于 Wails + Vue 3 + Go 构建',
-  aboutCopyright: '© 2026 QuickDock',
+  aboutCopyright: '© 2026 快启坞 QuickDock',
   aboutSiteGuide: '使用说明',
   aboutSiteMain: '官网',
   aboutSitePlugins: '插件官网',
@@ -2263,7 +2263,7 @@ export default {
   notesTplResearchBody: '## 背景\n\n## 目标\n\n## 候选方案\n- 方案一：\n- 方案二：\n\n## 对比结论\n\n## 风险\n\n## 参考资料\n- \n',
 
   // 引导页
-  welcomeTitle: '欢迎使用快启坞',
+  welcomeTitle: '欢迎使用快启坞 QuickDock',
   welcomeDesc: '轻量级应用启动与项目管理工具',
   getStarted: '开始使用',
   defaultWorkspaceName: '我的工作空间',
@@ -5162,7 +5162,7 @@ export default {
   dlImportDone: '已导入 {added} 个任务，跳过 {skipped} 个',
 
   // ---- 启动锁（锁层 + 设置 → 安全 + 锁定热键） ----
-  lockTitle: '快启坞已被锁定',
+  lockTitle: '快启坞 QuickDock 已被锁定',
   lockNoticeDesc: '请在主窗口输入启动密码解锁，后台任务仍在正常运行。',
   lockNoticeOpen: '前往主窗口',
   lockDesc: '输入启动密码继续。后台监控、定时任务与通知推送仍在正常运行。',

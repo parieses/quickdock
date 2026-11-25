@@ -1,6 +1,6 @@
-# QuickDock
+# 快启坞 QuickDock
 
-**Windows productivity toolbox · Local development environment manager · AI agent & MCP hub**
+**Windows 桌面效率工具箱 · 本地开发环境管理器 · AI Agent 与 MCP 中枢**
 
 `Resource tree` · `Global hotkeys` · `Runtimes` · `AI agent` · `Plugin ecosystem`
 
