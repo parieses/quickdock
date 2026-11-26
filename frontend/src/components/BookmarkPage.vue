@@ -432,7 +432,7 @@ async function confirmImport() {
 // ── 死链检查 ──────────────────────────────────────────
 async function startCheck() {
   try {
-    const st = unwrap<CheckStatus>(await StartLinkCheck(null, false))
+    const st = unwrap<CheckStatus>(await StartLinkCheck([], false))
     checking.value = st ?? null
     poll()
   } catch (e) {

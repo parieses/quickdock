@@ -66,12 +66,13 @@ func TestEstimateCost(t *testing.T) {
 // （V4.1-Flash），而 deepseek-chat / deepseek-reasoner 早在 7 月已下线 ——
 // 只留旧名字，最近一个月的用量就全都不算钱。
 func TestEstimateCostCurrentModels(t *testing.T) {
-	// deepseek-flash 谷时：输入 $0.15/M、缓存 $0.003/M、输出 $0.60/M（折人民币 ×7.2）
+	// deepseek-flash 谷时：输入 $0.15/M、缓存 $0.003/M、输出 $0.60/M。
+	// 价目里存美元原值，折算汇率由 usdRate() 统一给出（快照 rate，缺失时 7.2）。
 	cost, ok := estimateCost("deepseek-flash", 1_000_000, 1_000_000, 0, false)
 	if !ok {
 		t.Fatal("deepseek-flash 应命中价目表")
 	}
-	if want := (0.15 + 0.60) * usdToCNY; math.Abs(cost-want) > 1e-9 {
+	if want := (0.15 + 0.60) * usdRate(); math.Abs(cost-want) > 1e-9 {
 		t.Errorf("cost=%v want %v", cost, want)
 	}
 	// 峰时恰好翻倍
@@ -89,7 +90,7 @@ func TestEstimateCostCurrentModels(t *testing.T) {
 		t.Errorf("agnes 不分峰谷，峰时 %v 应等于谷时 %v", v1, v0)
 	}
 	// 同族里更长的前缀（-beta）必须赢过 -pro
-	if p, ok := lookupPrice("agnes-2.5-pro-beta"); !ok || math.Abs(p.Input-0.10*usdToCNY) > 1e-9 {
+	if p, ok := lookupPrice("agnes-2.5-pro-beta"); !ok || math.Abs(p.Input-0.10) > 1e-9 || !p.USD {
 		t.Errorf("agnes-2.5-pro-beta 应命中 beta 条目，实得 %+v ok=%v", p, ok)
 	}
 }

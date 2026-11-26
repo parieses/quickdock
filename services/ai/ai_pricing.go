@@ -18,14 +18,18 @@ import (
 	"time"
 )
 
-// usdToCNY 估算用的固定汇率。
+// usdToCNY 兜底汇率。
 //
-// 界面只出人民币，而 DeepSeek / Agnes 的官方刊例是美元，这里统一按 7.2 折。
-// 汇率浮动会带来百分之几的误差——对「今天大概花了多少」这种问题不影响结论，
-// 真要精确到分只能去厂商后台看账单（个人 API Key 调不到那个接口）。
+// 价目表里两种币混着：国内厂商（通义 / 智谱）的刊例本来就是人民币，DeepSeek /
+// Agnes / 海外模型的刊例是美元。折算只在算钱的那一刻做（见 estimateCost），
+// 价目本身保留原币，否则改一次汇率就要重排整张表。
+//
+// 真正的汇率来源是价目快照的 rate 字段（usdRate()）；这里只在快照缺失或损坏时
+// 兜底。汇率浮动会带来百分之几的误差——对「今天大概花了多少」不影响结论，
+// 真要精确到分只能去厂商后台看账单。
 const usdToCNY = 7.2
 
-// ModelPrice 元 / 百万 token
+// ModelPrice 单价：默认人民币 / 百万 token。
 //
 // CachedInput 是「命中前缀缓存」那部分输入的单价。为 0 表示该厂商未单独定价
 // （或未收录），此时按正常输入价计 —— 宁可高估，也不要把账单外的折扣当成已省。
@@ -33,6 +37,10 @@ type ModelPrice struct {
 	Input       float64
 	CachedInput float64
 	Output      float64
+	// USD 三个单价是否为美元原值。为真时由 estimateCost 按 usdRate() 折算，
+	// 价目表里只存原币数字：同一张表混两种币，换算点只能有一处，否则
+	// 「有的按 7.2、有的按 6.68」这种口径不一致会悄悄混进同一个总额里。
+	USD bool
 	// PeakMultiplier 峰时相对谷时的倍数。0 或 1 表示该厂商不分峰谷。
 	//
 	// DeepSeek 从 2026 年起按时段计价（工作日白天翻倍），同一批 token 记在
@@ -49,13 +57,17 @@ func cnyPrice(in, cached, out float64) ModelPrice {
 	return ModelPrice{Input: in, CachedInput: cached, Output: out}
 }
 
-// usdPrice 按厂商的美元刊例价构造一条人民币价目。
+// usdPrice 按厂商的美元刊例价构造一条价目。
+//
+// 存的是美元原值、不在这里折算：汇率只有一个换算点（estimateCost），
+// 构造期各折一次会让同族模型出现「7.2 折」和「6.68 折」两种口径。
 // 参数顺序就是官方价目表的列序：输入 / 缓存命中输入 / 输出，最后一个才是峰时倍数。
 func usdPrice(in, cached, out, peakMultiplier float64) ModelPrice {
 	return ModelPrice{
-		Input:          in * usdToCNY,
-		CachedInput:    cached * usdToCNY,
-		Output:         out * usdToCNY,
+		Input:          in,
+		CachedInput:    cached,
+		Output:         out,
+		USD:            true,
 		PeakMultiplier: peakMultiplier,
 	}
 }
@@ -170,7 +182,7 @@ func lookupPrice(model string) (ModelPrice, bool) {
 // peak 表示这批 token 是否消耗在厂商的峰时（见 isPeakBeijing）。对不分峰谷的
 // 厂商它没有作用，所以调用方可以无脑传「这条记录发生在峰时吗」。
 func estimateCost(model string, promptTokens, completionTokens, cachedTokens int, peak bool) (float64, bool) {
-	p, ok := lookupPrice(model)
+	p, ok := priceFor(model)
 	if !ok {
 		return 0, false
 	}
@@ -188,7 +200,19 @@ func estimateCost(model string, promptTokens, completionTokens, cachedTokens int
 	cost := float64(missTokens)/1e6*p.Input +
 		float64(cachedTokens)/1e6*cachedRate +
 		float64(completionTokens)/1e6*p.Output
-	return cost * peakMultiplier(p, peak), true
+	return toCNY(cost, p) * peakMultiplier(p, peak), true
+}
+
+// toCNY 把按原币单价算出的金额折成人民币。
+//
+// 全流程只有这一个换算点：价目里两种币混着存（cnyPrice / usdPrice），
+// 在哪一刻折算决定了「同一批 DeepSeek 调用会不会按两个汇率入账」。
+// 放在构造期就必然分裂——手写表和图省快照各有各的汇率。
+func toCNY(v float64, p ModelPrice) float64 {
+	if p.USD {
+		return v * usdRate()
+	}
+	return v
 }
 
 // cacheSaving 缓存命中相对「全按输入价」省下的钱（元），用于界面上的「已省」。
@@ -197,11 +221,11 @@ func cacheSaving(model string, cachedTokens int, peak bool) float64 {
 	if cachedTokens <= 0 {
 		return 0
 	}
-	p, ok := lookupPrice(model)
+	p, ok := priceFor(model)
 	if !ok || p.CachedInput <= 0 || p.CachedInput >= p.Input {
 		return 0
 	}
-	return float64(cachedTokens) / 1e6 * (p.Input - p.CachedInput) * peakMultiplier(p, peak)
+	return toCNY(float64(cachedTokens)/1e6*(p.Input-p.CachedInput), p) * peakMultiplier(p, peak)
 }
 
 func peakMultiplier(p ModelPrice, peak bool) float64 {
