@@ -189,7 +189,7 @@ function close() { emit('cancel') }
 }
 .crumb-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .crumb-item.on { color: var(--color-accent); background: var(--color-accent-bg); }
-.crumb-sep { color: var(--color-text-disabled); flex-shrink: 0; }
+.crumb-sep { color: var(--color-text-muted); flex-shrink: 0; }
 
 .picker-body {
   flex: 1; overflow-y: auto; min-height: 140px; max-height: 52vh;
@@ -202,7 +202,7 @@ function close() { emit('cancel') }
 .item-icon-img { width: 20px; height: 20px; object-fit: contain; border-radius: var(--radius-xs); }
 .picker-empty, .picker-err, .picker-loading {
   padding: var(--space-7) var(--space-2); text-align: center;
-  font-size: var(--text-sm); color: var(--color-text-disabled);
+  font-size: var(--text-sm); color: var(--color-text-muted);
 }
 .picker-err { color: var(--color-danger); }
 .picker-loading .spin {

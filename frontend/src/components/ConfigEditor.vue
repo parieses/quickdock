@@ -293,10 +293,10 @@ defineExpose({ markSaved, focus })
   font-size: var(--text-xs); color: var(--color-text-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
-.ce-st-sep { color: var(--color-text-disabled); }
+.ce-st-sep { color: var(--color-text-muted); }
 .ce-dirty { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--color-warning); }
 .ce-dirty-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-warning); }
 .ce-st-warn { color: var(--color-warning); }
 .ce-spacer { flex: 1 1 auto; }
-.ce-keys { color: var(--color-text-disabled); }
+.ce-keys { color: var(--color-text-muted); }
 </style>

@@ -551,14 +551,14 @@ function exportSnapshot() {
   margin-left: auto;
 }
 .st-refresh { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--color-text-secondary); cursor: pointer; }
-.st-note { margin: 0; font-size: var(--text-xs); line-height: 1.6; color: var(--color-text-disabled); }
+.st-note { margin: 0; font-size: var(--text-xs); line-height: 1.6; color: var(--color-text-muted); }
 
 .st-state {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: var(--space-3); min-height: 160px; font-size: var(--text-md); color: var(--color-text-muted);
 }
 .st-state-error { color: var(--color-danger); }
-.st-state-hint { margin: 0; font-size: var(--text-sm); color: var(--color-text-disabled); }
+.st-state-hint { margin: 0; font-size: var(--text-sm); color: var(--color-text-muted); }
 
 .st-banner {
   padding: var(--space-6); border-radius: var(--radius-md);
@@ -618,5 +618,5 @@ function exportSnapshot() {
 .st-cell { width: 10px; height: 16px; border-radius: var(--radius-xs); background: var(--color-border-light); }
 .st-cell.up { background: var(--color-success); }
 .st-cell.down { background: var(--color-danger); }
-.st-cells-empty { font-size: var(--text-xs); color: var(--color-text-disabled); }
+.st-cells-empty { font-size: var(--text-xs); color: var(--color-text-muted); }
 </style>

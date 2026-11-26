@@ -121,7 +121,7 @@ defineExpose({ reload })
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   font-size: var(--text-md);
   user-select: none;
 }

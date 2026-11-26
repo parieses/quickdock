@@ -206,7 +206,7 @@ onUnmounted(() => { if (copyTimer) clearTimeout(copyTimer) })
   border-radius: var(--radius-sm);
 }
 .md-meta div { display: flex; min-width: 0; gap: var(--space-4); font-size: var(--text-xs); line-height: 1.5; }
-.md-meta dt { flex: 0 0 52px; color: var(--color-text-disabled); }
+.md-meta dt { flex: 0 0 52px; color: var(--color-text-muted); }
 .md-meta dd {
   min-width: 0; margin: 0; color: var(--color-text-secondary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -229,7 +229,7 @@ onUnmounted(() => { if (copyTimer) clearTimeout(copyTimer) })
 }
 /* 勾选框尺寸/勾型由 style.css 的全局自绘规则唯一负责，这里只留布局。 */
 .md-remote input { margin: 0; }
-.md-hint { margin-left: auto; font-size: var(--text-2xs); color: var(--color-text-disabled); white-space: nowrap; }
+.md-hint { margin-left: auto; font-size: var(--text-2xs); color: var(--color-text-muted); white-space: nowrap; }
 .md-trunc { flex: 0 0 auto; margin: -2px 0 var(--space-3); font-size: var(--text-2xs); color: var(--color-warning); }
 
 .md-body-wrap {
@@ -250,7 +250,7 @@ onUnmounted(() => { if (copyTimer) clearTimeout(copyTimer) })
 }
 .md-state {
   margin: 0; padding: var(--space-8) 14px; text-align: center;
-  font-size: var(--text-sm); color: var(--color-text-disabled);
+  font-size: var(--text-sm); color: var(--color-text-muted);
 }
 .md-state.err { color: var(--color-danger-text); }
 

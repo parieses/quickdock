@@ -5,8 +5,10 @@ import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, inje
 import { useI18n } from 'vue-i18n'
 import { KEEP_ALIVE } from '../pages/keepAlive'
 defineOptions({ name: KEEP_ALIVE.clipboard })
-import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight, ListTodo, FilePlus, Sparkles, FolderSearch, ImageDown, ClipboardPaste, AlignLeft, ListPlus, Layers, Play, SkipForward, CheckSquare, Ban, Loader2, AlertCircle, MoreHorizontal, BookMarked } from '@lucide/vue'
+import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight, ChevronDown, ListTodo, FilePlus, Sparkles, FolderSearch, ImageDown, ClipboardPaste, AlignLeft, ListPlus, Layers, Play, SkipForward, CheckSquare, Ban, Loader2, AlertCircle, MoreHorizontal, BookMarked, Copy, Check, Clock, Monitor } from '@lucide/vue'
 import ClipboardAiPanel from './ClipboardAiPanel.vue'
+import { clipboardCodeView } from '../utils/clipboardCode'
+import '../styles/hljs-theme.css'
 import {
   ListClipboardEntries,
   ListClipboardEntriesByType,
@@ -106,11 +108,22 @@ function cacheImage(id: string, dataUri: string) {
 // 标签只需 id/label/icon：真正的匹配逻辑全部下沉到 utils/clipboardFilter.ts
 // （filterByTag 按 tagId 判定，且智能分类已下推到 SQL 的 text_type 列）。
 // 这里不再保留每标签的 match 回调——它和 filterByTag 是两套判定，容易再次分叉。
-const tags = computed(() => [
+//
+// 分两排管理：primary 是高频类型（一行放得下），secondary 收进「更多」下拉。
+// 原先 9 个标签 + 来源下拉 + 4 段时间平铺一行，窄窗口直接折成两排密密的药丸，
+// 用户扫过去找不到落点；现在一排只留 7 个，其余按需展开。
+const PRIMARY_TAG_IDS = ['all', 'favorite', 'text', 'image', 'file', 'url', 'code']
+const SECONDARY_TAG_IDS = ['email', 'json', 'phone']
+// 浮窗只有 480px：只留最常用的四个，其余（含文件/链接/代码）全部收进「更多」，
+// 否则药丸会折成三排、把列表挤到只剩半屏。主窗口仍然一排 7 个。
+const COMPACT_PRIMARY_TAG_IDS = ['all', 'favorite', 'text', 'image']
+
+const allTags = computed(() => [
   { id: 'all', label: t('tagAll'), icon: Tag },
   { id: 'favorite', label: t('tagFavorite'), icon: Star },
-  // 图片 / 文件是 content_type 已有的两类，单独成标签直接下推到 SQL 过滤
+  // text / image / file 是 content_type 里的三个整类，单独成标签直接下推到 SQL 过滤
   // （前端不再把整段历史拉回再筛）。
+  { id: 'text', label: t('tagText'), icon: AlignLeft },
   { id: 'image', label: t('tagImage'), icon: ImageIcon },
   { id: 'file', label: t('tagFile'), icon: FileIcon },
   // 文本智能分类：入库时已按正则算好 text_type，筛选阶段下推到 SQL，
@@ -121,6 +134,20 @@ const tags = computed(() => [
   { id: 'code', label: t('tagCode'), icon: Code },
   { id: 'phone', label: t('tagPhone'), icon: Phone },
 ])
+
+const primaryTags = computed(() => {
+  const ids = props.compact ? COMPACT_PRIMARY_TAG_IDS : PRIMARY_TAG_IDS
+  return allTags.value.filter(x => ids.includes(x.id))
+})
+const secondaryTags = computed(() => {
+  // 浮窗里「更多」承接所有没进主排的标签，保证任何筛选都点得到。
+  const primaryIds = props.compact ? COMPACT_PRIMARY_TAG_IDS : PRIMARY_TAG_IDS
+  return props.compact
+    ? allTags.value.filter(x => !primaryIds.includes(x.id))
+    : allTags.value.filter(x => SECONDARY_TAG_IDS.includes(x.id))
+})
+/** 当前选中的是「更多」里的某个标签时，把它的名字显示在外层按钮上，避免筛选态被藏起来。 */
+const activeSecondaryTag = computed(() => secondaryTags.value.find(x => x.id === activeTag.value) || null)
 
 // 需要下推到 SQL 的类型标签与智能分类标签的判定，见 utils/clipboardFilter.ts。
 // （image/file 不是 text 的子类 —— 曾经统一套了 text 前置条件，
@@ -143,7 +170,7 @@ const filteredEntries = computed(() => {
     list = list.filter(e => e.createdAt >= cutoff)
   }
   // 按标签筛选（filterByTag 内部按 tagId 判定；智能分类已下推到 SQL，这里只兜底校验）
-  const tag = tags.value.find(t => t.id === activeTag.value)
+  const tag = allTags.value.find(t => t.id === activeTag.value)
   if (tag && tag.id !== 'all') {
     list = filterByTag(list, tag.id)
   }
@@ -224,6 +251,35 @@ const totalClipboardPages = computed(() =>
   Math.max(1, Math.ceil(filteredEntries.value.length / CLIPBOARD_PAGE_SIZE))
 )
 
+// 分页条写清「第几条到第几条 / 共多少条」。
+// 以前标题一个数、底部一个「共 N 条」，N 又只是当前筛选结果，
+// 两个数字对不上时用户无法判断到底是没数据还是被筛掉了。
+const pageFrom = computed(() =>
+  filteredEntries.value.length === 0 ? 0 : (clipboardPage.value - 1) * CLIPBOARD_PAGE_SIZE + 1
+)
+const pageTo = computed(() =>
+  Math.min(clipboardPage.value * CLIPBOARD_PAGE_SIZE, filteredEntries.value.length)
+)
+
+/** 是否处于任何筛选态（标签 / 时间 / 来源 / 搜索）。用于决定要不要报「筛出 N 条」。 */
+const filterActive = computed(() =>
+  activeTag.value !== 'all' ||
+  timeFilter.value !== 'all' ||
+  sourceFilter.value !== 'all' ||
+  !!searchQuery.value.trim()
+)
+
+// 文本条目的代码预览：只对当前页的条目求值（20 条），且同一条目命中缓存，
+// 滚动、勾选、30s 轮询刷新都不会重跑高亮。
+const codeViews = computed<Record<string, ReturnType<typeof clipboardCodeView>>>(() => {
+  const map: Record<string, ReturnType<typeof clipboardCodeView>> = {}
+  for (const e of displayEntries.value) {
+    if (e.contentType !== 'text') continue
+    map[e.id] = clipboardCodeView(e.id, e.textContent || '', e.textType)
+  }
+  return map
+})
+
 // 页码只在筛选条件变化时归 1。
 // 绑到 filteredEntries 会让每 30 秒一次的轮询刷新（以及每次复制后的刷新）
 // 把正在看的第 3 页弹回第 1 页——数据本身没变，只是重新取了一遍。
@@ -258,6 +314,43 @@ function selectTag(tagId: string) {
   // 保留搜索词：以前切一下分类就把刚敲的关键词清了，"先在搜索结果里换个分类"
   // 这个最自然的动作反而要重打一遍。要清空搜索用搜索框里的 ×。
   selectedIndex.value = 0
+}
+
+// ---- 三个下拉（页头「更多」/ 标签「更多」/ 来源）----
+// 同一时刻只允许开一个：它们位置相邻，两个浮层同时展开会互相遮挡。
+const headerMenuOpen = ref(false)
+const tagMenuOpen = ref(false)
+const sourceMenuOpen = ref(false)
+function closeTopMenus() {
+  headerMenuOpen.value = false
+  tagMenuOpen.value = false
+  sourceMenuOpen.value = false
+}
+function toggleHeaderMenu() {
+  const next = !headerMenuOpen.value
+  closeTopMenus()
+  headerMenuOpen.value = next
+}
+function toggleTagMenu() {
+  const next = !tagMenuOpen.value
+  closeTopMenus()
+  tagMenuOpen.value = next
+}
+function toggleSourceMenu() {
+  const next = !sourceMenuOpen.value
+  closeTopMenus()
+  sourceMenuOpen.value = next
+}
+/** 选中「更多」里的标签后自动收起下拉，并让外层按钮显示当前筛选名。 */
+function pickTag(tagId: string) {
+  selectTag(tagId)
+  tagMenuOpen.value = false
+}
+function pickSource(name: string) {
+  sourceFilter.value = name
+  sourceMenuOpen.value = false
+  selectedIndex.value = 0
+  clipboardPage.value = 1
 }
 
 // 每次窗口打开时清除搜索状态
@@ -643,6 +736,107 @@ function enqueueChecked() {
   multiSelect.value = false
 }
 
+// ---- 批量操作 ----
+// 勾选后页头下方浮出批量条（已选 N 项 + 动作），而不是让用户去猜
+// 右上角那个「全选」图标能干什么。
+const batchBusy = ref(false)
+
+function clearChecked() {
+  checkedIds.value = []
+  multiSelect.value = false
+}
+
+function selectAllPage() {
+  checkedIds.value = displayEntries.value.map((e) => e.id)
+}
+
+const allPageSelected = computed(() =>
+  displayEntries.value.length > 0 &&
+  displayEntries.value.every((e) => checkedIds.value.includes(e.id))
+)
+
+async function batchDelete() {
+  const ids = [...checkedIds.value]
+  if (!ids.length || batchBusy.value) return
+  const ok = await toast?.confirm?.(t('cbBatchDeleteConfirm', { n: ids.length }))
+  if (!ok) return
+  batchBusy.value = true
+  const failed: string[] = []
+  // 逐条删：后端没有批量删除接口，单条删除已是幂等操作，
+  // 失败项继续尝试并统一回报，避免「删了一半就中断」。
+  for (const id of ids) {
+    try {
+      unwrap(await DeleteClipboardEntry(id))
+      const idx = entries.value.findIndex((e) => e.id === id)
+      if (idx >= 0) entries.value.splice(idx, 1)
+      const bidx = baseEntries.value.findIndex((e) => e.id === id)
+      if (bidx >= 0) baseEntries.value.splice(bidx, 1)
+    } catch {
+      failed.push(id)
+    }
+  }
+  batchBusy.value = false
+  checkedIds.value = []
+  if (!failed.length) toast.success(t('cbBatchDeleted', { n: ids.length }))
+  else toast.error(t('cbBatchDeletePartial', { n: failed.length }))
+  void loadTotal()
+}
+
+async function batchPin() {
+  const ids = [...checkedIds.value]
+  if (!ids.length || batchBusy.value) return
+  batchBusy.value = true
+  let done = 0
+  for (const id of ids) {
+    const entry = entries.value.find((e) => e.id === id)
+    // 已经是收藏态的不再点一次：TogglePin 是开关，无脑调用会把已收藏的取消掉。
+    if (entry?.isPinned === 1) { done++; continue }
+    try {
+      unwrap<boolean>(await TogglePinClipboardEntry(id))
+      if (entry) entry.isPinned = 1
+      done++
+    } catch {
+      // 单条失败不阻断整批
+    }
+  }
+  batchBusy.value = false
+  if (done) toast.success(t('cbBatchPinned', { n: done }))
+  checkedIds.value = []
+}
+
+// ---- 条目展开 / 收起 ----
+// 长文本与代码默认只露 3 行，超出部分给「展开全文」。以前整段铺满，
+// 一条 500 字的记录就把后面十几条挤出视野，列表失去节奏。
+const expandedIds = ref<Set<string>>(new Set())
+function isExpanded(id: string): boolean {
+  return expandedIds.value.has(id)
+}
+function toggleExpand(id: string) {
+  const next = new Set(expandedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expandedIds.value = next
+}
+function isExpandable(entry: ClipboardEntry): boolean {
+  if (entry.contentType !== 'text') return false
+  const text = entry.textContent || ''
+  if (codeViews.value[entry.id]) {
+    // 代码块按行数判断：超过 6 行就要能收起
+    return text.split('\n').length > 6
+  }
+  if (text.length > 140) return true
+  return (text.match(/\n/g) || []).length >= 3
+}
+
+/** 卡片点击：多选态下是勾选，否则沿用「点一条即复制」。 */
+function handleCardClick(entry: ClipboardEntry) {
+  if (multiSelect.value) {
+    toggleChecked(entry.id)
+    return
+  }
+  handleCopy(entry)
+}
+
 async function runPasteQueue() {
   if (pasteRunning.value || pasteQueue.value.length === 0) return
   // 代次令牌：清空时 +1，让仍在 sleep 的旧循环醒来后直接退出，
@@ -869,7 +1063,7 @@ function safeIndex(listLen: number): number {
 
 function scrollToSelected() {
   if (!listRef.value) return
-  const items = listRef.value.querySelectorAll('.clipboard-item')
+  const items = listRef.value.querySelectorAll('.cb-card')
   const el = items[selectedIndex.value] as HTMLElement | undefined
   el?.scrollIntoView({ block: 'nearest' })
 }
@@ -878,6 +1072,9 @@ function onPanelKeydown(e: KeyboardEvent) {
   // 锁定期间这条必须让路：Enter 是「复制选中项并关闭窗口」，
   // 用户在密码框里按回车会直接把浮窗关掉（锁层挡得住视觉，挡不住这条 document 监听）。
   if (isAppLocked()) return
+  // 已被更内层处理过的按键（v-key-click 的卡片会 preventDefault 后自己 click）
+  // 不再重复处理，否则一次 Enter 会复制两遍。
+  if (e.defaultPrevented) return
   const list = displayEntries.value
   if (list.length === 0) return
 
@@ -890,6 +1087,18 @@ function onPanelKeydown(e: KeyboardEvent) {
       e.stopPropagation()
       closeAi()
     }
+    return
+  }
+
+  // 焦点落在卡片内的按钮 / 勾选框上时，Enter 属于那个控件自己。
+  // 不加这道闸，在「删除」上按回车会把选中项又复制一遍（还顺带删掉一条）。
+  const target = e.target as HTMLElement | null
+  if (
+    (e.key === 'Enter' || e.key === ' ') &&
+    target &&
+    target !== searchInputRef.value &&
+    target.closest('button, a[href], input, textarea, select, [contenteditable="true"]')
+  ) {
     return
   }
 
@@ -955,7 +1164,8 @@ function onPanelKeydown(e: KeyboardEvent) {
 const clipboardEventOffs: Array<() => void> = []
 
 // 条目「更多」菜单：点击面板任意位置即收起（按钮自身用 @click.stop 拦截）。
-function closeMenus() { closeMoreMenu() }
+// 页头 / 标签 / 来源三个下拉共用同一条全局点击关闭链路。
+function closeMenus() { closeMoreMenu(); closeTopMenus() }
 
 // 本页既在 KeepAlive 白名单里（主窗口内容页），也被独立剪贴板窗口单独渲染
 // （那边没有 KeepAlive）。所以所有全局监听必须跟着激活态挂/摘，且启停要幂等：
@@ -1034,10 +1244,11 @@ onUnmounted(() => {
         <h2 class="qd-page-title">
           <ClipboardList :size="16" />
           {{ t('clipboardHistoryTitle') }}
-          <!-- 已载入 / 总数：单写 entries.length 会被误读成"历史就这么多" -->
+          <!-- 只报历史总数，不再拼「总数 · 已载入」：两个数并列时没人分得清哪个是哪个。
+               已载入多少交给悬停提示，日常不需要知道。 -->
           <span v-if="totalCount || entries.length" class="cb-count"
                 :title="t('clipboardCountTip', { loaded: entries.length, total: totalCount || entries.length })">
-            {{ totalCount || entries.length }}{{ entries.length < totalCount ? ' · ' + entries.length : '' }}
+            {{ t('cbTotalBadge', { n: totalCount || entries.length }) }}
           </span>
         </h2>
         <span v-if="!compact" class="qd-page-sub">{{ t('clipboardSubtitle') }}</span>
@@ -1056,50 +1267,147 @@ onUnmounted(() => {
           </button>
         </div>
       </div>
+      <!-- 页头只留「选择 / 刷新 / 更多」三件：导出与清空是低频且危险的动作，
+           摊在页头里既挤又容易误点，收进「更多」后每个动作都带文字标签。 -->
       <div class="qd-page-actions">
-        <button class="qd-icon-btn" :class="{ active: multiSelect }" :aria-pressed="multiSelect" @click="toggleMultiSelect" :title="t('cbMultiSelect')" :aria-label="t('cbMultiSelect')">
-          <CheckSquare :size="14" />
-        </button>
-        <button v-if="checkedIds.length" class="qd-icon-btn" @click="enqueueChecked" :title="t('cbBatchEnqueue', { n: checkedIds.length })" :aria-label="t('cbBatchEnqueue', { n: checkedIds.length })">
-          <ListPlus :size="14" />
+        <button
+          class="qd-btn qd-btn-sm cb-select-toggle"
+          :class="{ 'is-on': multiSelect }"
+          :aria-pressed="multiSelect"
+          :title="t('cbMultiSelect')"
+          @click="toggleMultiSelect"
+        >
+          <CheckSquare :size="13" /><span class="cb-select-label">{{ t('cbMultiSelect') }}</span>
         </button>
         <button class="qd-icon-btn" @click="loadEntries" :title="t('refresh')" :aria-label="t('refresh')">
           <RefreshCw :size="14" />
         </button>
-        <button class="qd-icon-btn" @click="exportClipboard" :title="t('exportClipboard')" :aria-label="t('exportClipboard')">
-          <Download :size="14" />
-        </button>
-        <button class="qd-icon-btn" @click="clearClipboard" :title="t('clearClipboard')" :aria-label="t('clearClipboard')">
-          <Trash2 :size="14" />
-        </button>
+        <div class="save-wrap">
+          <button
+            class="qd-icon-btn"
+            :class="{ active: headerMenuOpen }"
+            :title="t('cbMoreActions')"
+            :aria-label="t('cbMoreActions')"
+            :aria-expanded="headerMenuOpen"
+            @click.stop="toggleHeaderMenu"
+          >
+            <MoreHorizontal :size="14" />
+          </button>
+          <div v-if="headerMenuOpen" class="save-menu cb-head-menu" @click.stop>
+            <button class="save-menu-item" @click="exportClipboard(); closeTopMenus()">
+              <Download :size="13" /><span>{{ t('exportClipboard') }}</span>
+            </button>
+            <button class="save-menu-item danger" @click="clearClipboard(); closeTopMenus()">
+              <Trash2 :size="13" /><span>{{ t('clearClipboard') }}</span>
+            </button>
+          </div>
+        </div>
       </div>
     </PageHeader>
 
-    <!-- 智能分类标签栏 + 时间过滤（合成一行，右侧时间分段） -->
-    <div class="clipboard-tags">
-      <button
-        v-for="tag in tags"
-        :key="tag.id"
-        :class="['tag-btn', { active: activeTag === tag.id }]"
-        @click="selectTag(tag.id)"
-      >
-        <component :is="tag.icon" :size="12" />
-        <span>{{ tag.label }}</span>
+    <!-- 筛选栏：左边只放高频类型，右边是「筛出多少条 + 来源 + 时间」。
+         低频智能分类（邮箱 / JSON / 手机号）收进「更多」下拉，整行不再折成两排药丸。 -->
+    <div class="cb-filters">
+      <div class="cb-filter-types">
+        <button
+          v-for="tag in primaryTags"
+          :key="tag.id"
+          :class="['tag-btn', { active: activeTag === tag.id }]"
+          @click="selectTag(tag.id)"
+        >
+          <component :is="tag.icon" :size="12" />
+          <span>{{ tag.label }}</span>
+        </button>
+        <div class="save-wrap">
+          <button
+            class="tag-btn cb-more-tag"
+            :class="{ active: !!activeSecondaryTag }"
+            :aria-expanded="tagMenuOpen"
+            :title="t('cbMoreTags')"
+            @click.stop="toggleTagMenu"
+          >
+            <component :is="activeSecondaryTag ? activeSecondaryTag.icon : MoreHorizontal" :size="12" />
+            <span>{{ activeSecondaryTag ? activeSecondaryTag.label : t('cbMoreTags') }}</span>
+            <ChevronDown :size="11" class="cb-caret" />
+          </button>
+          <div v-if="tagMenuOpen" class="save-menu cb-tag-menu" @click.stop>
+            <button
+              v-for="tag in secondaryTags"
+              :key="tag.id"
+              class="save-menu-item"
+              :class="{ 'is-active': activeTag === tag.id }"
+              @click="pickTag(tag.id)"
+            >
+              <component :is="tag.icon" :size="13" /><span>{{ tag.label }}</span>
+              <Check v-if="activeTag === tag.id" :size="12" class="cb-menu-check" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <span class="cb-filters-fill" />
+
+      <!-- 筛出多少条：只有真的在筛选时才出现，空白视图下这一个数字没有意义 -->
+      <span v-if="filterActive" class="cb-filtered-count">{{ t('cbFilteredCount', { n: filteredEntries.length }) }}</span>
+
+      <!-- 来源筛选：换成带文字的轻量下拉，原生 select 在深色主题里像一块补丁 -->
+      <div v-if="knownSources.length" class="save-wrap">
+        <button
+          class="cb-src-btn"
+          :class="{ active: sourceFilter !== 'all' }"
+          :title="t('cbSourceFilter')"
+          :aria-expanded="sourceMenuOpen"
+          @click.stop="toggleSourceMenu"
+        >
+          <Monitor :size="12" />
+          <span class="cb-src-name">{{ sourceFilter === 'all' ? t('cbSourceAll') : sourceFilter }}</span>
+          <ChevronDown :size="11" />
+        </button>
+        <div v-if="sourceMenuOpen" class="save-menu cb-src-menu" @click.stop>
+          <button class="save-menu-item" :class="{ 'is-active': sourceFilter === 'all' }" @click="pickSource('all')">
+            <span class="cb-src-menu-name">{{ t('cbSourceAll') }}</span>
+            <Check v-if="sourceFilter === 'all'" :size="12" class="cb-menu-check" />
+          </button>
+          <button
+            v-for="s in knownSources"
+            :key="s"
+            class="save-menu-item"
+            :class="{ 'is-active': sourceFilter === s }"
+            @click="pickSource(s)"
+          >
+            <span class="cb-src-menu-name" :title="s">{{ s }}</span>
+            <Check v-if="sourceFilter === s" :size="12" class="cb-menu-check" />
+          </button>
+        </div>
+      </div>
+
+      <div class="cb-time">
+        <button
+          v-for="tf in ([{id:'all'},{id:'today'},{id:'week'},{id:'month'}] as const)"
+          :key="'time-' + tf.id"
+          :class="['time-btn', { active: timeFilter === tf.id }]"
+          @click="timeFilter = tf.id; selectedIndex = 0; clipboardPage = 1"
+        >
+          {{ t('time' + tf.id.charAt(0).toUpperCase() + tf.id.slice(1)) }}
+        </button>
+      </div>
+    </div>
+
+    <!-- 批量操作条：勾了才会出现，位置紧贴筛选栏下方（视线不用回头找页头） -->
+    <div v-if="checkedIds.length" class="cb-batch">
+      <span class="cb-batch-count">{{ t('cbBatchSelected', { n: checkedIds.length }) }}</span>
+      <button class="cb-batch-btn" :disabled="batchBusy" @click="batchPin">
+        <Star :size="12" />{{ t('cbBatchPin') }}
       </button>
-      <div class="tags-divider"></div>
-      <!-- 来源筛选：只对出现在历史里的来源给出选项，选中后只看该来源 -->
-      <select v-if="knownSources.length" v-model="sourceFilter" class="cb-source-select" :title="t('cbSourceFilter')" :aria-label="t('cbSourceFilter')">
-        <option value="all">{{ t('cbSourceAll') }}</option>
-        <option v-for="s in knownSources" :key="s" :value="s">{{ s }}</option>
-      </select>
-      <button
-        v-for="tf in ([{id:'all'},{id:'today'},{id:'week'},{id:'month'}] as const)"
-        :key="'time-' + tf.id"
-        :class="['time-btn', { active: timeFilter === tf.id }]"
-        @click="timeFilter = tf.id; selectedIndex = 0; clipboardPage = 1"
-      >
-        {{ t('time' + tf.id.charAt(0).toUpperCase() + tf.id.slice(1)) }}
+      <button class="cb-batch-btn" :disabled="batchBusy" @click="enqueueChecked">
+        <ListPlus :size="12" />{{ t('cbBatchEnqueue', { n: checkedIds.length }) }}
       </button>
+      <button class="cb-batch-btn danger" :disabled="batchBusy" @click="batchDelete">
+        <Trash2 :size="12" />{{ t('cbBatchDelete') }}
+      </button>
+      <span class="cb-batch-fill" />
+      <button class="cb-batch-btn" :disabled="allPageSelected" @click="selectAllPage">{{ t('cbSelectAll') }}</button>
+      <button class="cb-batch-btn" @click="clearChecked">{{ t('cbBatchCancel') }}</button>
     </div>
 
     <!-- 粘贴队列：入队后常驻，运行中显示进度与跳过/清空。放在标签栏下方是让它在
@@ -1124,9 +1432,9 @@ onUnmounted(() => {
     <!-- 列表 -->
     <!-- 只在「首次加载、还没有任何数据」时让位给加载占位；后台刷新期间
          loading 也为 true，但列表必须继续显示上一次的条目（SWR）。 -->
-    <div ref="listRef" class="clipboard-list" v-if="entries.length > 0 || (!loading && !loadError)">
+    <div ref="listRef" class="clipboard-list" :class="{ 'is-empty': filteredEntries.length === 0 }" v-if="entries.length > 0 || (!loading && !loadError)">
       <div v-if="filteredEntries.length === 0" class="clipboard-empty">
-        <ClipboardList :size="36" class="empty-icon" />
+        <ClipboardList :size="20" class="empty-icon" />
         <!-- 区分「库里真的一条都没有」与「有记录但被当前筛选滤空」，后者给出去掉筛选的入口 -->
         <p v-if="entries.length === 0" class="empty-text">{{ t('noClipboardRecords') }}</p>
         <template v-else>
@@ -1134,136 +1442,169 @@ onUnmounted(() => {
           <button class="qd-btn qd-btn-sm" @click="showAllRecords">{{ t('clipSwitchToAll') }}</button>
         </template>
       </div>
-      <div v-key-click
+      <!-- 卡片：文本/文件整行通栏，图片进两三列的网格（统一 4:3 裁切），
+           不再让宽度不一的图片各自撑出参差的左边界。 -->
+      <article
         v-for="(entry, idx) in displayEntries"
         :key="entry.id"
-        :class="['clipboard-item', {
+        v-key-click
+        :class="['cb-card', {
           'is-image': entry.contentType === 'image',
-          'selected': idx === selectedIndex
+          'is-code': !!codeViews[entry.id],
+          'selected': idx === selectedIndex,
+          'checked': checkedIds.includes(entry.id),
+          'multi': multiSelect
         }]"
-        @click="handleCopy(entry)"
+        @click="handleCardClick(entry)"
         @mouseenter="selectedIndex = idx"
       >
         <label v-if="multiSelect" class="cb-check" @click.stop>
           <input type="checkbox" :checked="checkedIds.includes(entry.id)" @change="toggleChecked(entry.id)" />
         </label>
-        <div class="item-content">
-          <!-- 图片条目 — 懒加载 -->
-          <template v-if="entry.contentType === 'image'">
-            <div class="image-thumb-wrap"
-              :data-image-id="entry.id"
-              :ref="(el: any) => observeImage(el as HTMLElement, entry.id)"
-            >
-              <img
-                v-if="imageCache[entry.id]"
-                :src="imageCache[entry.id]"
-                class="image-thumb"
-              />
-              <div v-else class="image-placeholder">
-                <ImageIcon :size="24" />
-              </div>
-            </div>
-            <div v-if="entry.imageHash && entry.textContent" class="file-entry file-entry--top">
-              <FileIcon :size="14" class="file-icon" />
-              <div class="file-paths file-paths--sm">{{ entry.textContent }}</div>
-            </div>
-          </template>
-          <!-- 文件条目 -->
-          <template v-else-if="entry.contentType === 'file'">
-            <div class="file-entry">
-              <FileIcon :size="16" class="file-icon" />
-              <div class="file-paths">{{ entry.textContent }}</div>
-              <button class="file-reveal" :disabled="revealBusyId === entry.id"
-                      :title="t('clipboardReveal')" @click.stop="revealEntry(entry)">
-                <FolderSearch :size="13" />
-              </button>
-            </div>
-          </template>
-          <!-- 文本条目 -->
-          <template v-else>
-            <div class="item-text item-text-hl">
-              <template v-for="(seg, si) in highlight(entry.textContent || '', searchQuery)" :key="si">
-                <mark v-if="seg.hit" class="hl-hit">{{ seg.text }}</mark>
-                <template v-else>{{ seg.text }}</template>
-              </template>
-            </div>
-          </template>
-          <div class="item-meta">
-            <span class="item-time">{{ timeAgo(entry.createdAt) }}</span>
-            <span v-if="entry.sourceApp" class="item-source">
-              {{ entry.sourceApp }}
-              <button class="item-source-block" :title="t('cbSourceBlock', { name: entry.sourceApp })" :aria-label="t('cbSourceBlock', { name: entry.sourceApp })" @click.stop="blockSource(entry.sourceApp)"><Ban :size="11" /></button>
-            </span>
-            <span v-if="entry.copyCount > 1" class="item-count">{{ entry.copyCount }} {{ t('count') }}</span>
-          </div>
-          <div v-if="entry.note" class="item-note">
-            <StickyNote :size="12" class="item-note-icon" />
-            <span>{{ entry.note }}</span>
-          </div>
-        </div>
-        <!-- 低频操作收进「更多」；置顶 / 删除常驻。复用现有 save-menu 浮层。 -->
-        <div class="save-wrap">
-          <button
-            class="note-btn"
-            :class="{ active: moreMenuId === entry.id }"
-            :title="[t('clipboardSaveAs'), t('cbPasteAs'), t('cbQueueAdd'), t('clipboardAskAI'), t('clipboardEditNote')].join(' / ')"
-            @click.stop="toggleMoreMenu(entry)"
+
+        <!-- 图片条目 — 懒加载 -->
+        <template v-if="entry.contentType === 'image'">
+          <div
+            class="cb-img"
+            :data-image-id="entry.id"
+            :ref="(el: any) => observeImage(el as HTMLElement, entry.id)"
           >
-            <MoreHorizontal :size="13" />
-          </button>
-          <div v-key-click v-if="moreMenuId === entry.id" class="save-menu item-more-menu" @click.stop>
-            <button
-              v-if="entry.contentType === 'image'"
-              class="save-menu-item"
-              @click="saveImageAs(entry); closeMoreMenu()"
-            ><ImageDown :size="13" /><span>{{ t('clipboardSaveImage') }}</span></button>
-            <template v-if="entry.contentType === 'text'">
-              <button class="save-menu-item" @click="saveAsTodo(entry); closeMoreMenu()">
-                <ListTodo :size="13" /><span>{{ t('clipboardSaveTodo') }}</span>
-              </button>
-              <button class="save-menu-item" @click="saveAsNote(entry); closeMoreMenu()">
-                <FilePlus :size="13" /><span>{{ t('clipboardSaveNote') }}</span>
-              </button>
-              <button class="save-menu-item" @click="saveAsKB(entry); closeMoreMenu()">
-                <BookMarked :size="13" /><span>{{ t('saveAsKB') }}</span>
-              </button>
-              <button class="save-menu-item" @click="pasteAs(entry, 'plain'); closeMoreMenu()">
-                <AlignLeft :size="13" /><span>{{ t('cbPastePlain') }}</span>
-              </button>
-              <button class="save-menu-item" @click="pasteAs(entry, 'markdown'); closeMoreMenu()">
-                <Code :size="13" /><span>{{ t('cbPasteMarkdown') }}</span>
-              </button>
-              <button class="save-menu-item" @click="pasteAs(entry, 'json'); closeMoreMenu()">
-                <Braces :size="13" /><span>{{ t('cbPasteJson') }}</span>
-              </button>
-              <button class="save-menu-item" @click="openAi(entry); closeMoreMenu()">
-                <Sparkles :size="13" /><span>{{ t('clipboardAskAI') }}</span>
-              </button>
-            </template>
-            <button class="save-menu-item" @click="enqueue([entry]); closeMoreMenu()">
-              <ListPlus :size="13" /><span>{{ t('cbQueueAdd') }}</span>
-            </button>
-            <button class="save-menu-item" @click="openNoteEditor(entry); closeMoreMenu()">
-              <StickyNote :size="13" /><span>{{ t('clipboardEditNote') }}</span>
+            <img
+              v-if="imageCache[entry.id]"
+              :src="imageCache[entry.id]"
+              class="cb-img-el"
+              alt=""
+            />
+            <div v-else class="cb-img-ph">
+              <ImageIcon :size="22" />
+            </div>
+          </div>
+          <div v-if="entry.imageHash && entry.textContent" class="cb-img-path" :title="entry.textContent">
+            {{ entry.textContent }}
+          </div>
+        </template>
+
+        <!-- 文件条目 -->
+        <template v-else-if="entry.contentType === 'file'">
+          <div class="cb-file">
+            <FileIcon :size="15" class="cb-file-icon" />
+            <div class="cb-file-paths">{{ entry.textContent }}</div>
+            <button class="cb-file-reveal" :disabled="revealBusyId === entry.id"
+                    :title="t('clipboardReveal')" @click.stop="revealEntry(entry)">
+              <FolderSearch :size="13" />
             </button>
           </div>
+        </template>
+
+        <!-- 文本条目：识别成 JSON / 代码的走高亮块，其余按可展开的段落 -->
+        <template v-else>
+          <pre
+            v-if="codeViews[entry.id]"
+            class="cb-code hljs"
+            :class="{ 'is-open': isExpanded(entry.id) }"
+            v-html="codeViews[entry.id]?.html"
+          ></pre>
+          <div v-else class="cb-text" :class="{ 'is-open': isExpanded(entry.id) }">
+            <template v-for="(seg, si) in highlight(entry.textContent || '', searchQuery)" :key="si">
+              <mark v-if="seg.hit" class="hl-hit">{{ seg.text }}</mark>
+              <template v-else>{{ seg.text }}</template>
+            </template>
+          </div>
+          <button v-if="isExpandable(entry)" class="cb-expand" @click.stop="toggleExpand(entry.id)">
+            <span>{{ isExpanded(entry.id) ? t('cbCollapse') : t('cbExpand') }}</span>
+            <ChevronDown :size="11" :class="['cb-expand-caret', { up: isExpanded(entry.id) }]" />
+          </button>
+        </template>
+
+        <!-- 元数据：图标 + 提亮一档的次要色。原来整行是 disabled 灰，
+             在深色底上几乎和背景糊在一起。 -->
+        <div class="cb-meta">
+          <span class="cb-meta-item">
+            <Clock :size="11" />{{ timeAgo(entry.createdAt) }}
+          </span>
+          <span v-if="codeViews[entry.id]" class="cb-meta-item cb-meta-lang">{{ codeViews[entry.id]?.lang }}</span>
+          <span v-if="entry.sourceApp" class="cb-meta-item cb-meta-src">
+            <Monitor :size="11" />
+            <span class="cb-meta-src-text" :title="entry.sourceApp">{{ entry.sourceApp }}</span>
+            <button class="cb-source-block" :title="t('cbSourceBlock', { name: entry.sourceApp })"
+                    :aria-label="t('cbSourceBlock', { name: entry.sourceApp })"
+                    @click.stop="blockSource(entry.sourceApp)"><Ban :size="10" /></button>
+          </span>
+          <span v-if="entry.copyCount > 1" class="cb-meta-item cb-meta-count">{{ entry.copyCount }} {{ t('count') }}</span>
         </div>
-        <button
-          class="pin-btn"
-          :class="{ pinned: entry.isPinned === 1 }"
-          :title="entry.isPinned ? t('unpin') : t('pin')"
-          @click.stop="handleTogglePin(entry)"
-        >
-          <Star :size="13" />
-        </button>
-        <button
-          class="delete-btn"
-          :title="t('delete')"
-          @click.stop="handleDelete(entry)"
-        >
-          <Trash2 :size="13" />
-        </button>
-      </div>
+        <div v-if="entry.note" class="item-note">
+          <StickyNote :size="12" class="item-note-icon" />
+          <span>{{ entry.note }}</span>
+        </div>
+
+        <!-- 收藏标记：操作栏收起时也能看出这条是收藏过的，悬停后让位给操作栏 -->
+        <span v-if="entry.isPinned === 1" class="cb-pin-flag" :title="t('pin')"><Star :size="10" /></span>
+
+        <!-- 悬停操作栏：半透明浮层压在卡片右上角，不再挤在内容行尾部 -->
+        <div class="cb-actions" @click.stop>
+          <button
+            class="cb-act"
+            :class="{ on: entry.isPinned === 1 }"
+            :title="entry.isPinned ? t('unpin') : t('pin')"
+            :aria-label="entry.isPinned ? t('unpin') : t('pin')"
+            @click="handleTogglePin(entry)"
+          >
+            <Star :size="13" />
+          </button>
+          <button class="cb-act" :title="t('cbCopyAction')" :aria-label="t('cbCopyAction')" @click="handleCopy(entry)">
+            <Copy :size="13" />
+          </button>
+          <div class="save-wrap">
+            <button
+              class="cb-act"
+              :class="{ on: moreMenuId === entry.id }"
+              :title="[t('clipboardSaveAs'), t('cbPasteAs'), t('cbQueueAdd'), t('clipboardAskAI'), t('clipboardEditNote')].join(' / ')"
+              @click.stop="toggleMoreMenu(entry)"
+            >
+              <MoreHorizontal :size="13" />
+            </button>
+            <div v-key-click v-if="moreMenuId === entry.id" class="save-menu item-more-menu" @click.stop>
+              <button
+                v-if="entry.contentType === 'image'"
+                class="save-menu-item"
+                @click="saveImageAs(entry); closeMoreMenu()"
+              ><ImageDown :size="13" /><span>{{ t('clipboardSaveImage') }}</span></button>
+              <template v-if="entry.contentType === 'text'">
+                <button class="save-menu-item" @click="saveAsTodo(entry); closeMoreMenu()">
+                  <ListTodo :size="13" /><span>{{ t('clipboardSaveTodo') }}</span>
+                </button>
+                <button class="save-menu-item" @click="saveAsNote(entry); closeMoreMenu()">
+                  <FilePlus :size="13" /><span>{{ t('clipboardSaveNote') }}</span>
+                </button>
+                <button class="save-menu-item" @click="saveAsKB(entry); closeMoreMenu()">
+                  <BookMarked :size="13" /><span>{{ t('saveAsKB') }}</span>
+                </button>
+                <button class="save-menu-item" @click="pasteAs(entry, 'plain'); closeMoreMenu()">
+                  <AlignLeft :size="13" /><span>{{ t('cbPastePlain') }}</span>
+                </button>
+                <button class="save-menu-item" @click="pasteAs(entry, 'markdown'); closeMoreMenu()">
+                  <Code :size="13" /><span>{{ t('cbPasteMarkdown') }}</span>
+                </button>
+                <button class="save-menu-item" @click="pasteAs(entry, 'json'); closeMoreMenu()">
+                  <Braces :size="13" /><span>{{ t('cbPasteJson') }}</span>
+                </button>
+                <button class="save-menu-item" @click="openAi(entry); closeMoreMenu()">
+                  <Sparkles :size="13" /><span>{{ t('clipboardAskAI') }}</span>
+                </button>
+              </template>
+              <button class="save-menu-item" @click="enqueue([entry]); closeMoreMenu()">
+                <ListPlus :size="13" /><span>{{ t('cbQueueAdd') }}</span>
+              </button>
+              <button class="save-menu-item" @click="openNoteEditor(entry); closeMoreMenu()">
+                <StickyNote :size="13" /><span>{{ t('clipboardEditNote') }}</span>
+              </button>
+            </div>
+          </div>
+          <button class="cb-act danger" :title="t('delete')" :aria-label="t('delete')" @click="handleDelete(entry)">
+            <Trash2 :size="13" />
+          </button>
+        </div>
+      </article>
       <!-- 备注编辑弹窗 -->
       <div v-if="noteEditingId" class="note-editor-mask" @click.self="closeNoteEditor">
         <div class="note-editor">
@@ -1302,7 +1643,7 @@ onUnmounted(() => {
       <button class="page-btn" :disabled="clipboardPage >= totalClipboardPages" @click="clipboardPage++">
         <ChevronRight :size="14" />
       </button>
-      <span class="page-total">{{ t('paginationTotal', { total: filteredEntries.length }) }}</span>
+      <span class="page-total">{{ t('cbPageRange', { from: pageFrom, to: pageTo, total: filteredEntries.length }) }}</span>
     </div>
 
     <div v-if="loading && !entries.length" class="clipboard-loading">
@@ -1379,24 +1720,23 @@ onUnmounted(() => {
 }
 .icon-btn:hover { background: var(--color-bg-hover); color: var(--color-text-secondary); }
 
-/* 智能分类标签栏：横向滚动，允许换行；时间筛选同排展示，右侧分隔 */
-.clipboard-tags {
+/* ---- 筛选栏 ----
+   一排：左「类型」、右「筛出条数 / 来源 / 时间」。宽窗口不换行；
+   窄窗口整组换行（不横向滚动）——滚动容器会裁掉下拉浮层，标签「更多」点开就看不见了。 */
+.cb-filters {
   display: flex;
   align-items: center;
+  gap: var(--space-4);
+  row-gap: var(--space-3);
   flex-wrap: wrap;
-  gap: var(--space-3);
   padding: var(--space-4) var(--space-6);
   border-bottom: 1px solid var(--color-border);
-  overflow-x: auto;
   flex-shrink: 0;
 }
-.tags-divider {
-  width: 1px;
-  height: 16px;
-  margin: 0 var(--space-2);
-  background: var(--color-border);
-  flex-shrink: 0;
-}
+.cb-filter-types { display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; }
+.cb-filters-fill { flex: 1; min-width: var(--space-4); }
+.cb-filtered-count { font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap; flex-shrink: 0; }
+.cb-caret { opacity: 0.7; margin-left: 1px; }
 
 /* 时间筛选：同排的轻量分段，选中用蓝字+淡蓝底 */
 .time-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
@@ -1417,6 +1757,11 @@ onUnmounted(() => {
   color: var(--color-accent);
   background: var(--color-accent-bg);
   border-color: var(--color-accent-border, var(--color-accent-bg));
+}
+.cb-time {
+  display: flex; align-items: center; gap: var(--space-1); flex-shrink: 0;
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--color-border);
 }
 
 .tag-btn {
@@ -1447,6 +1792,53 @@ onUnmounted(() => {
   background: var(--color-accent-bg);
 }
 
+/* 来源筛选：带文字的轻量下拉，替代原生 select（深色主题下原生下拉像一块补丁） */
+.cb-src-btn {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  height: 22px; max-width: 200px; padding: 0 8px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-full);
+  background: transparent; color: var(--color-text-muted);
+  font-size: var(--text-xs); font-family: inherit; cursor: pointer; flex-shrink: 0;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+.cb-src-btn:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
+.cb-src-btn.active { color: var(--color-accent); border-color: var(--color-accent-border); background: var(--color-accent-bg); }
+.cb-src-name { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cb-src-menu { max-width: 320px; }
+.cb-src-menu-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cb-menu-check { color: var(--color-accent); margin-left: var(--space-3); flex-shrink: 0; }
+.save-menu-item.is-active { color: var(--color-accent); }
+
+/* 页头「更多」：导出 / 清空 */
+.cb-head-menu { min-width: 150px; }
+.cb-head-menu .save-menu-item.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+
+/* 页头「选择」按钮：带文字，省得用户猜图标是干啥的 */
+.cb-select-toggle { gap: var(--space-2); }
+.cb-select-toggle.is-on { color: var(--color-accent); border-color: var(--color-accent-border); background: var(--color-accent-bg); }
+
+/* ---- 批量操作条 ---- */
+.cb-batch {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: 6px var(--space-6); flex-shrink: 0;
+  background: var(--color-accent-bg);
+  border-bottom: 1px solid var(--color-accent-border);
+  flex-wrap: wrap; row-gap: var(--space-2);
+}
+.cb-batch-count { font-size: var(--text-xs); font-weight: 600; color: var(--color-accent); white-space: nowrap; }
+.cb-batch-fill { flex: 1; }
+.cb-batch-btn {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  height: 24px; padding: 0 var(--space-4);
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary); color: var(--color-text-secondary);
+  font-size: var(--text-xs); font-family: inherit; cursor: pointer; white-space: nowrap;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast);
+}
+.cb-batch-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
+.cb-batch-btn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); background: var(--color-danger-bg); }
+.cb-batch-btn:disabled { opacity: 0.45; cursor: default; }
+
 /* 搜索命中高亮：明显区分 —— 主题蓝字 + 半粗 + 极淡蓝底，
    一眼能看清命中词，又不刺眼 */
 .hl-hit {
@@ -1459,59 +1851,204 @@ onUnmounted(() => {
   -webkit-box-decoration-break: clone;
 }
 
-/* 文本条目：限制高度 + 溢出省略，避免高亮显示长文本撑爆列表 */
-.item-text-hl {
+/* ---- 列表 = 网格 ----
+   文本 / 文件通栏（grid-column: 1/-1），图片占一列。
+   图片卡固定高度 + object-fit: cover：不再出现「宽度不一、左边一片空白」的锯齿边界。 */
+.clipboard-list {
+  flex: 1; overflow-y: auto; padding: var(--space-4);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-4);
+  align-content: start;
+}
+
+/* 空态：网格只有一张卡时不该被 align-content:start 顶到最上面 */
+.clipboard-list.is-empty { display: flex; align-items: center; justify-content: center; }
+
+.cb-card {
+  grid-column: 1 / -1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.cb-card:hover { background: var(--color-bg-hover); }
+/* 悬停/聚焦的卡片提到上层：条目「更多」菜单向下展开时会压到下一张卡片，
+   不抬 z-index 的话菜单会被后渲染的卡片盖住。 */
+.cb-card:hover, .cb-card:focus-within { z-index: 5; }
+/* 键盘游标（鼠标划过也算）只给一圈淡蓝边；真正的「已勾选」才用实蓝边 + 淡底，
+   两者不混用——否则鼠标扫过整列时每条都像被选中（旧版的老问题）。 */
+.cb-card.selected { border-color: var(--color-accent-border); }
+.cb-card.checked {
+  border-color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px var(--color-accent-border);
+  background: var(--color-select-bg);
+}
+
+/* 多选态给复选框让位：文本卡片的正文不能压在勾选框下面 */
+.cb-card.multi { padding-left: 34px; }
+.cb-card.multi.is-image { padding-left: var(--space-3); }
+
+/* 图片卡片：网格里的一列，固定 148px 高，cover 居中裁切 */
+.cb-card.is-image { grid-column: span 1; padding: var(--space-3); gap: var(--space-3); }
+.cb-img {
+  position: relative;
+  width: 100%; height: 148px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--color-bg-tertiary);
+}
+.cb-img-el { display: block; width: 100%; height: 100%; object-fit: cover; }
+.cb-img-ph {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--color-text-disabled);
+}
+.cb-img-path {
+  font-size: var(--text-2xs); color: var(--color-text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* 文本卡片：默认 3 行，超过就给「展开全文」 */
+.cb-text {
+  font-size: var(--text-md); line-height: 1.55;
+  color: var(--color-text-primary);
+  word-break: break-word;
+  white-space: pre-wrap;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.cb-text.is-open { display: block; -webkit-line-clamp: unset; overflow: visible; }
 
-.clipboard-list {
-  flex: 1; overflow-y: auto; padding: var(--space-4);
+/* 代码 / JSON 预览：hljs 上色 + 固定高度，底部渐隐提示还有内容 */
+.cb-code {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 104px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, #000 72%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 72%, transparent 100%);
+}
+.cb-code.is-open {
+  max-height: 420px;
+  overflow: auto;
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 
-.clipboard-item {
-  position: relative;
-  display: flex; align-items: flex-start; gap: 10px;
-  padding: 10px var(--space-5); border-radius: var(--radius-md);
-  cursor: pointer; transition: background-color var(--transition-fast);
+.cb-expand {
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  align-self: flex-start; padding: 0;
+  border: 0; background: none; cursor: pointer;
+  font-size: var(--text-xs); font-family: inherit;
+  color: var(--color-accent);
 }
-/* hover 与选中必须用不同强度：原来两者都是「淡蓝底 + 1px 蓝 outline」，
-   鼠标划过一整列时每条都像被选中。现在 hover 只给中性底色。 */
-.clipboard-item:hover { background: var(--color-bg-hover); }
-/* 选中态与 .qd-row.active 同一套：--color-select-bg 实底 + 3px 左标记。
-   outline 是「焦点环」的语言，不该拿来表达列表当前项。 */
-.clipboard-item.selected { background: var(--color-select-bg); }
-.clipboard-item.selected::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 16px;
-  border-radius: var(--radius-full);
-  background: var(--color-accent);
-}
+.cb-expand:hover { text-decoration: underline; }
+.cb-expand-caret { transition: transform var(--transition-fast); }
+.cb-expand-caret.up { transform: rotate(180deg); }
 
-.pin-btn {
-  flex-shrink: 0; margin-top: 3px;
-  background: none; border: none; cursor: pointer;
-  padding: var(--space-1); border-radius: var(--radius-sm);
-  color: var(--color-text-disabled); opacity: 0;
+/* 文件条目 */
+.cb-file { display: flex; align-items: flex-start; gap: var(--space-3); }
+.cb-file-icon { flex-shrink: 0; margin-top: 2px; color: var(--color-accent); }
+.cb-file-paths {
+  flex: 1; min-width: 0;
+  font-size: var(--text-md); color: var(--color-text-secondary); line-height: 1.5;
+  word-break: break-all; white-space: pre-wrap;
+}
+.cb-file-reveal {
+  flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0;
+  border: none; border-radius: var(--radius-sm); background: none;
+  color: var(--color-text-muted); cursor: pointer; opacity: 0;
+  transition: opacity var(--transition-fast), background-color var(--transition-fast), color var(--transition-fast);
+}
+.cb-card:hover .cb-file-reveal { opacity: 1; }
+.cb-file-reveal:hover { color: var(--color-accent); background: var(--color-accent-bg); }
+.cb-file-reveal:disabled { opacity: 0.4; cursor: default; }
+
+/* ---- 元数据：图标 + 提亮一档的次要色 ---- */
+.cb-meta { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; min-width: 0; }
+.cb-meta-item {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  font-size: var(--text-xs); color: var(--color-text-muted);
+  min-width: 0;
+}
+.cb-meta-src { max-width: 62%; }
+.cb-meta-src-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cb-meta-count { color: var(--color-text-secondary); }
+.cb-meta-lang {
+  font-family: var(--font-mono); font-size: var(--text-2xs);
+  letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--color-accent); opacity: 0.85;
+}
+/* 屏蔽来源：hover 才出现的极轻量按钮 */
+.cb-source-block {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; border: 0; background: transparent;
+  color: var(--color-text-muted); cursor: pointer; opacity: 0;
   transition: opacity var(--transition-fast), color var(--transition-fast);
-  display: flex; align-items: center; justify-content: center;
 }
-.clipboard-item:hover .pin-btn,
-.clipboard-item.selected .pin-btn { opacity: 0.4; }
-.pin-btn:hover { opacity: 0.8 !important; }
-.pin-btn.pinned {
-  opacity: 0.9; color: var(--color-star);
-}
-.pin-btn.pinned:hover { opacity: 1 !important; }
+.cb-card:hover .cb-source-block, .cb-source-block:focus-visible { opacity: 1; }
+.cb-source-block:hover { color: var(--color-danger); }
 
+/* ---- 悬停操作栏 ----
+   压在卡片右上角、半透明浮层：以前置顶/删除缩在内容行尾部，鼠标划过时
+   还要横向找一遍；现在固定一个位置，且带 title 说明。 */
+.cb-actions {
+  position: absolute; top: 6px; right: 6px; z-index: 2;
+  display: flex; align-items: center; gap: 1px;
+  padding: 2px;
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  transform: translateY(-2px);
+  pointer-events: none;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+.cb-card:hover .cb-actions,
+.cb-card:focus-within .cb-actions,
+.cb-card.selected .cb-actions {
+  opacity: 1; transform: none; pointer-events: auto;
+}
+.cb-act {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; padding: 0;
+  border: 0; border-radius: var(--radius-xs);
+  background: transparent; color: var(--color-text-muted); cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+.cb-act:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.cb-act.on { color: var(--color-star); }
+.cb-act.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+
+/* 收藏标记：操作栏收起时也能看出这条收藏过；悬停后让位给操作栏 */
+.cb-pin-flag {
+  position: absolute; top: 8px; right: 9px;
+  display: flex; color: var(--color-star); opacity: 0.9;
+  pointer-events: none;
+}
+.cb-card:hover .cb-pin-flag { opacity: 0; }
+
+/* 下拉浮层的定位参照物：页头「更多」/ 标签「更多」/ 来源 / 条目「更多」共用 */
 .save-wrap { position: relative; display: inline-flex; }
+
 .save-menu {
   position: absolute; top: calc(100% + 4px); right: 0; z-index: var(--z-dropdown);
   min-width: 132px; padding: var(--space-2);
@@ -1527,91 +2064,24 @@ onUnmounted(() => {
   color: var(--color-text-secondary); text-align: left;
 }
 .save-menu-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.delete-btn {
-  flex-shrink: 0; margin-top: 3px;
-  background: none; border: none; cursor: pointer;
-  padding: var(--space-1); border-radius: var(--radius-sm);
-  color: var(--color-text-disabled); opacity: 0;
-  transition: opacity var(--transition-fast), color var(--transition-fast);
-  display: flex; align-items: center; justify-content: center;
-}
-.clipboard-item:hover .delete-btn,
-.clipboard-item.selected .delete-btn { opacity: 0.4; }
-.delete-btn:hover { opacity: 0.8 !important; color: var(--color-danger); }
-
-.item-content { flex: 1; min-width: 0; }
-.item-text {
-  font-size: var(--text-md); color: var(--color-text-primary); line-height: 1.5;
-  word-break: break-all; margin-bottom: var(--space-2);
-}
-.item-meta { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
-.item-time { font-size: var(--text-xs); color: var(--color-text-disabled); }
-.item-source { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-xs); color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px var(--space-3); border-radius: var(--radius-xs); }
-.item-source-block { display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: var(--color-text-muted); cursor: pointer; opacity: 0; transition: opacity var(--transition-fast), color var(--transition-fast); }
-.clipboard-item:hover .item-source-block, .item-source-block:focus-visible { opacity: 1; }
-.item-source-block:hover { color: var(--color-danger); }
-
-/* 来源筛选下拉：与时间分段同高，融入同一行 */
-.cb-source-select {
-  height: 22px; max-width: 180px; padding: 0 var(--space-2);
-  border: 1px solid var(--color-border); border-radius: var(--radius-full);
-  background: var(--color-bg-tertiary); color: var(--color-text-muted);
-  font-size: var(--text-xs); font-family: inherit; cursor: pointer; flex-shrink: 0;
-}
-.cb-source-select:focus { color: var(--color-accent); border-color: var(--color-accent); outline: none; }
-.item-count { font-size: var(--text-xs); color: var(--color-accent); }
-
-.clipboard-item.is-image { align-items: flex-start; padding: var(--space-4) var(--space-5); }
-.image-thumb-wrap {
-  width: 100%; max-width: 300px; border-radius: var(--radius-sm); overflow: hidden;
-  margin-bottom: var(--space-3); border: 1px solid var(--color-border);
-}
-.image-thumb {
-  display: block; width: 100%; height: auto;
-  max-height: 180px; object-fit: contain;
-  background: var(--color-bg-primary);
-}
-.image-placeholder {
-  width: 160px; height: 100px; display: flex; align-items: center; justify-content: center;
-  background: var(--color-card-bg); border-radius: var(--radius-sm); margin-bottom: var(--space-3);
-  border: 1px solid var(--card-border-color); color: var(--color-text-disabled);
-}
-
-.file-entry {
-  display: flex; align-items: flex-start; gap: var(--space-4);
-  margin-bottom: var(--space-2);
-}
-.file-entry--top { margin-top: var(--space-3); }
-.file-icon { flex-shrink: 0; margin-top: var(--space-1); color: var(--color-accent); }
-.file-paths {
-  flex: 1; min-width: 0;
-  font-size: var(--text-sm); color: var(--color-text-secondary); line-height: 1.5;
-  word-break: break-all; white-space: pre-wrap;
-}
-.file-paths--sm { font-size: var(--text-xs); }
-/* 在资源管理器定位：贴在路径右侧，hover 条目才显出来，不抢视觉 */
-.file-reveal {
-  flex-shrink: 0; display: flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; padding: 0;
-  border: none; border-radius: var(--radius-sm); background: none;
-  color: var(--color-text-disabled); cursor: pointer; opacity: 0;
-  transition: opacity var(--transition-fast), background-color var(--transition-fast), color var(--transition-fast);
-}
-.clipboard-item:hover .file-reveal { opacity: 1; }
-.file-reveal:hover { color: var(--color-accent); background: var(--color-accent-bg); }
-.file-reveal:disabled { opacity: 0.4; cursor: default; }
 
 .clipboard-empty {
+  grid-column: 1 / -1;
   display: flex; flex-direction: column; align-items: center;
-  justify-content: center; height: 100%; color: var(--color-text-disabled);
+  justify-content: center; height: 100%; color: var(--color-text-muted);
 }
 .clipboard-empty .empty-icon {
-  padding: var(--space-5);
-  box-sizing: content-box;
+  width: 44px;
+  height: 44px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 0 var(--color-hairline);
   margin-bottom: var(--space-5);
 }
 .clipboard-empty .empty-text { font-size: var(--text-md); color: var(--color-text-secondary); }
@@ -1643,22 +2113,8 @@ onUnmounted(() => {
 .clipboard-pagination .page-btn:hover:not(:disabled) { background: var(--color-bg-active); color: var(--color-text-primary); }
 .clipboard-pagination .page-btn:disabled { opacity: 0.35; cursor: default; }
 .clipboard-pagination .page-btn.active { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
-.clipboard-pagination .page-ellipsis { color: var(--color-text-disabled); font-size: var(--text-xs); width: 18px; text-align: center; }
+.clipboard-pagination .page-ellipsis { color: var(--color-text-muted); font-size: var(--text-xs); width: 18px; text-align: center; }
 .clipboard-pagination .page-total { margin-left: var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); }
-
-/* 备注按钮 */
-.note-btn {
-  flex-shrink: 0; margin-top: 3px;
-  background: none; border: none; cursor: pointer;
-  padding: var(--space-1); border-radius: var(--radius-sm);
-  color: var(--color-text-disabled); opacity: 0;
-  transition: opacity var(--transition-fast), color var(--transition-fast);
-  display: flex; align-items: center; justify-content: center;
-}
-.clipboard-item:hover .note-btn,
-.clipboard-item.selected .note-btn { opacity: 0.4; }
-.note-btn:hover { opacity: 0.8 !important; color: var(--color-accent); }
-.note-btn.note-editing { opacity: 1 !important; color: var(--color-accent); }
 
 /* 备注编辑弹窗 */
 .note-editor-mask {
@@ -1754,7 +2210,7 @@ onUnmounted(() => {
   color: var(--color-text-muted); background: var(--color-bg-tertiary);
   border-radius: var(--radius-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.cb-queue-more { font-size: var(--text-2xs); color: var(--color-text-disabled); }
+.cb-queue-more { font-size: var(--text-2xs); color: var(--color-text-muted); }
 .cb-queue-actions { display: flex; align-items: center; gap: var(--space-1); flex-shrink: 0; }
 .cb-queue-actions .qd-icon-btn { width: 24px; height: 24px; }
 
@@ -1763,10 +2219,30 @@ onUnmounted(() => {
 .clipboard-panel.compact .cb-queue-title { display: none; }
 .clipboard-panel.compact .cb-queue-chip { max-width: 88px; }
 
-/* 多选复选框：放在条目最左侧，容器上的 @click.stop 拦住条目本身的复制动作。 */
+/* 多选复选框：压在卡片左上角，外层 @click.stop 拦住条目本身的复制动作。
+   给一层实底是为了在图片卡片上也看得清（图片底色不可控）。 */
 .cb-check {
-  flex-shrink: 0; margin-top: 3px; display: flex; align-items: center;
+  position: absolute; top: 8px; left: 8px; z-index: 3;
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px;
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
   cursor: pointer;
 }
+.cb-check input { margin: 0; cursor: pointer; }
+
+/* ---- 浮窗（compact）适配 ----
+   480px 宽放不下多列网格，也不该把一张截图撑成满屏高：
+   单列 + 固定高度的图片条，仍然比原来的自由高度整齐。 */
+.clipboard-panel.compact .cb-filters { padding: var(--space-3) var(--space-5); gap: var(--space-3); }
+.clipboard-panel.compact .cb-filter-types { gap: var(--space-2); }
+.clipboard-panel.compact .cb-select-label { display: none; }
+.clipboard-panel.compact .clipboard-list { grid-template-columns: 1fr; padding: var(--space-3); gap: var(--space-3); }
+.clipboard-panel.compact .cb-card.is-image { grid-column: 1 / -1; }
+.clipboard-panel.compact .cb-img { height: 120px; }
+.clipboard-panel.compact .cb-text { -webkit-line-clamp: 2; }
+.clipboard-panel.compact .cb-code { max-height: 72px; }
+.clipboard-panel.compact .cb-batch { padding: 4px var(--space-5); }
 </style>
 

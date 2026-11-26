@@ -86,7 +86,7 @@ onMounted(loadEverything)
     </div>
   </div>
 
-  <slot v-else :redetect="evRedetect" :reload="loadEverything" />
+  <slot v-else :redetect="evRedetect" :reload="loadEverything" :status="evStatus" />
 </template>
 
 <style scoped>

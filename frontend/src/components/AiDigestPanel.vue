@@ -96,7 +96,7 @@ const { t } = useI18n()
   max-height: 180px; overflow: auto;
 }
 
-.ai-digest-empty { font-size: var(--text-sm); color: var(--color-text-disabled); padding: var(--space-1) 0 var(--space-3); }
+.ai-digest-empty { font-size: var(--text-sm); color: var(--color-text-muted); padding: var(--space-1) 0 var(--space-3); }
 
 .ai-digest-gen {
   font-size: var(--text-sm); font-family: inherit; padding: var(--space-2) 10px; cursor: pointer;
@@ -106,9 +106,9 @@ const { t } = useI18n()
 
 .ai-digest-gen:disabled { opacity: .55; cursor: default; }
 
-.ai-digest-hint { margin: var(--space-3) 0 var(--space-2); font-size: var(--text-xs); color: var(--color-text-disabled); line-height: 1.4; }
+.ai-digest-hint { margin: var(--space-3) 0 var(--space-2); font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.4; }
 
-.ai-digest-sub { padding: var(--space-4) 10px var(--space-2); font-size: var(--text-xs); color: var(--color-text-disabled); }
+.ai-digest-sub { padding: var(--space-4) 10px var(--space-2); font-size: var(--text-xs); color: var(--color-text-muted); }
 
 .ai-digest-list { overflow-y: auto; padding: 0 var(--space-3) var(--space-4); }
 
@@ -121,7 +121,7 @@ const { t } = useI18n()
 
 .ai-digest-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 
-.ai-digest-n { flex-shrink: 0; width: 16px; color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
+.ai-digest-n { flex-shrink: 0; width: 16px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 
 .ai-digest-q { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

@@ -208,7 +208,7 @@ const startedClock = computed(() => {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   font-size: var(--text-sm); font-family: inherit;
   cursor: pointer;
   transition: color var(--transition-fast), border-color var(--transition-fast);
@@ -230,7 +230,7 @@ const startedClock = computed(() => {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   font-size: var(--text-sm); font-family: inherit;
   cursor: pointer;
   transition: color var(--transition-fast), border-color var(--transition-fast);

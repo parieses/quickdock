@@ -205,6 +205,10 @@ function onSshCwd(ev: Event) {
 }
 
 let offShown: (() => void) | null = null
+let offConnect: (() => void) | null = null
+// 命令面板可能在窗口刚创建、主机清单还没回来时就发来连接请求：
+// 先记下 id，load() 完成后再补偿一次，否则这次点击就静默丢了。
+let pendingConnectId = ''
 
 const tree = computed(() => buildSshTree(hosts.value))
 
@@ -797,6 +801,17 @@ onMounted(async () => {
   loadShellIntegration()
   // OSC 7 目录跟随：订阅 SshTerminal 发出的自定义 DOM 事件（另一组实现）。
   window.addEventListener('quickdock:ssh:cwd', onSshCwd)
+  // 命令面板选中某台主机：后端已把窗口 Show 出来，这里只负责连上。
+  // 走 selectHost 而不是另写一条连接路径——点树上的主机与从面板进来必须同一条逻辑，
+  // 否则「已有标签就聚焦」这类行为只会在其中一处生效。
+  offConnect = Events.On('quickdock:ssh:connect', (ev: any) => {
+    const raw = ev?.data ?? ev
+    const id = typeof raw === 'string' ? raw : (raw?.hostId || '')
+    if (!id) return
+    const h = hosts.value.find(x => x.id === id)
+    if (h) void selectHost(h)
+    else pendingConnectId = id
+  })
   offShown = Events.On('quickdock:ssh:shown', () => {
     if (loading.value) return
     void (async () => {
@@ -810,10 +825,17 @@ onMounted(async () => {
   await load()
   await loadSessions()
   restoreTabs()
+  if (pendingConnectId) {
+    const id = pendingConnectId
+    pendingConnectId = ''
+    const h = hosts.value.find(x => x.id === id)
+    if (h) void selectHost(h)
+  }
 })
 
 onBeforeUnmount(() => {
   offShown?.()
+  offConnect?.()
   offShown = null
   window.removeEventListener('quickdock:ssh:cwd', onSshCwd)
 })
@@ -1288,7 +1310,7 @@ defineExpose({
 }
 
 .ssh-welcome-icon {
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 .ssh-welcome-text {

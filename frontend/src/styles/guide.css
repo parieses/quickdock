@@ -180,7 +180,7 @@
 /* 按钮内附带的裸地址：比标签更弱一级，让「首次使用教程」仍是可读的主体，
    同时把地址明写出来（用户可以在另一台机器上照着敲）。等宽字体避免字母挤在一起。 */
 .qd-guide-link-url {
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   font-size: var(--text-xs);
   font-family: var(--font-mono);
   

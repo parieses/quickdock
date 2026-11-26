@@ -201,14 +201,14 @@ onMounted(() => nextTick(scrollBottom))
   flex: 1 1 180px; min-width: 140px; height: 28px;
   display: flex; align-items: center; gap: 5px; padding: 0 var(--space-4);
   background: var(--color-bg-primary); border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm); color: var(--color-text-disabled);
+  border-radius: var(--radius-sm); color: var(--color-text-muted);
 }
 .rv-search:focus-within { border-color: var(--color-border-focus-soft); }
 .rv-input {
   flex: 1; min-width: 0; height: 100%; border: none; outline: none; background: transparent;
   font-size: var(--text-sm); font-family: inherit; color: var(--color-text-primary);
 }
-.rv-hits { font-size: var(--text-2xs); color: var(--color-text-disabled); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.rv-hits { font-size: var(--text-2xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .rv-nav {
   flex-shrink: 0; width: 16px; height: 16px; line-height: 1; padding: 0; cursor: pointer;
   border: none; border-radius: var(--radius-xs); background: var(--color-bg-tertiary);
@@ -229,7 +229,7 @@ onMounted(() => nextTick(scrollBottom))
   text-align: center; background: var(--color-danger); color: var(--color-danger-text);
 }
 .rv-btn.active .rv-badge { background: var(--color-bg-primary); color: var(--color-danger); }
-.rv-count { font-size: var(--text-2xs); color: var(--color-text-disabled); margin-left: auto; font-variant-numeric: tabular-nums; }
+.rv-count { font-size: var(--text-2xs); color: var(--color-text-muted); margin-left: auto; font-variant-numeric: tabular-nums; }
 
 /* position: relative 是「上/下」按 offsetTop 定位的前提 */
 .rv-body {
@@ -247,10 +247,10 @@ onMounted(() => nextTick(scrollBottom))
 .rv-line.error { color: var(--color-danger); box-shadow: inset 2px 0 0 var(--color-danger); background: var(--color-danger-bg); }
 .rv-line.warn { color: var(--color-warning); box-shadow: inset 2px 0 0 var(--color-warning); }
 .rv-no {
-  flex-shrink: 0; width: 3.2em; text-align: right; color: var(--color-text-disabled);
+  flex-shrink: 0; width: 3.2em; text-align: right; color: var(--color-text-muted);
   user-select: none; font-variant-numeric: tabular-nums;
 }
 .rv-txt { flex: 1; min-width: 0; }
 .rv-hit { background: var(--color-accent); color: var(--color-accent-text); border-radius: var(--radius-2xs); }
-.rv-trunc { font-size: var(--text-2xs); color: var(--color-text-disabled); }
+.rv-trunc { font-size: var(--text-2xs); color: var(--color-text-muted); }
 </style>

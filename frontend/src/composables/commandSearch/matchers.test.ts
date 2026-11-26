@@ -455,3 +455,41 @@ describe('ranking', () => {
     expect(groups[0].results.map(r => r.label)).toEqual(['a', 'b'])
   })
 })
+
+// Git 仓库检索：与笔记/待办同属「跳到一个具体对象」，锁三件容易写错的事——
+// 归组、按路径兜底命中、同名仓库按 path 去重。
+describe('Git 仓库检索', () => {
+  const repo = (path: string, name: string) => ({
+    repo: { path, name },
+    nameLC: name.toLowerCase(),
+    pathLC: path.toLowerCase(),
+  })
+  const lcWith = (repos: ReturnType<typeof repo>[]): LcIndex =>
+    ({ items: [], notes: [], apps: [], sys: [], repos })
+
+  it('按仓库名命中，结果带 repoPath', () => {
+    const ctx = makeCtx({
+      q: 'quickdock', qLC: 'quickdock',
+      lc: lcWith([repo('D://project//quickdock-v3', 'quickdock-v3')]),
+    })
+    const g = groupOf(runMatchOnly(ctx), 'repo')
+    expect(g?.results.length).toBe(1)
+    expect(g?.results[0].repoPath).toBe('D://project//quickdock-v3')
+  })
+
+  it('仓库名对不上时按路径命中', () => {
+    const ctx = makeCtx({
+      q: 'shop', qLC: 'shop',
+      lc: lcWith([repo('D://project//shop//Backend', 'backend')]),
+    })
+    expect(groupOf(runMatchOnly(ctx), 'repo')?.results.length).toBe(1)
+  })
+
+  it('同名仓库按 path 去重，不会互相吞掉', () => {
+    const ctx = makeCtx({
+      q: 'api', qLC: 'api',
+      lc: lcWith([repo('D://a//api', 'api'), repo('D://b//api', 'api')]),
+    })
+    expect(groupOf(runMatchOnly(ctx), 'repo')?.results.length).toBe(2)
+  })
+})

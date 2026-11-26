@@ -1038,7 +1038,7 @@ onBeforeUnmount(() => {
 .batch-x {
   display: flex;
   padding: var(--space-2);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   background: none;
   border: none;
   border-radius: var(--radius-xs);
@@ -1581,7 +1581,7 @@ onBeforeUnmount(() => {
 }
 
 .batch-badge[data-status='pending'] {
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
   border-color: var(--color-border);
 }

@@ -11,7 +11,7 @@ export interface CreateField {
   label: string
   // checkbox 的值统一用字符串 '1' / '0'：整张表单的 values 是 Record<string,string>，
   // 单独给布尔开一条类型会让每个消费方都要再判断一次。
-  type: 'text' | 'select' | 'textarea' | 'checkbox'
+  type: 'text' | 'password' | 'select' | 'textarea' | 'checkbox'
   options?: { label: string; value: string }[]
   placeholder?: string
   default?: string
@@ -116,6 +116,15 @@ function onKeydown(e: KeyboardEvent) {
                 class="field-input"
                 @keydown.enter="onConfirm"
               />
+              <input
+                v-else-if="f.type === 'password'"
+                v-model="values[f.key]"
+                type="password"
+                autocomplete="new-password"
+                :placeholder="f.placeholder ?? ''"
+                class="field-input"
+                @keydown.enter="onConfirm"
+              />
               <textarea
                 v-else-if="f.type === 'textarea'"
                 v-model="values[f.key]"
@@ -173,7 +182,7 @@ function onKeydown(e: KeyboardEvent) {
   font-size: var(--text-base); font-weight: 600; color: var(--color-text-primary);
 }
 .dialog-close {
-  background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
+  background: none; border: none; color: var(--color-text-muted); cursor: pointer;
   display: flex; padding: 3px; border-radius: var(--radius-xs); transition: background-color 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s;
 }
 .dialog-close:hover { color: var(--color-text-primary); background: var(--color-bg-active); }

@@ -180,7 +180,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   display: flex; align-items: center; gap: var(--space-3);
   padding: var(--space-4) 10px;
   border-bottom: 1px solid var(--color-border);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 .ap-search input {
   flex: 1; min-width: 0;
@@ -192,7 +192,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 .ap-hint {
   display: flex; align-items: center; gap: var(--space-3);
   padding: 14px 10px; margin: 0;
-  font-size: var(--text-sm); color: var(--color-text-disabled);
+  font-size: var(--text-sm); color: var(--color-text-muted);
 }
 .ap-item {
   display: flex; align-items: center; gap: var(--space-4);
@@ -204,12 +204,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 }
 .ap-item:hover { background: var(--color-bg-hover); }
 .ap-icon { width: 16px; height: 16px; object-fit: contain; flex-shrink: 0; }
-.ap-icon-fallback { color: var(--color-text-disabled); }
+.ap-icon-fallback { color: var(--color-text-muted); }
 .ap-name { flex-shrink: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ap-path {
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: var(--color-text-disabled); font-size: var(--text-xs);
+  color: var(--color-text-muted); font-size: var(--text-xs);
 }
 .ap-spin { animation: ap-spin 1s linear infinite; }
 @keyframes ap-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

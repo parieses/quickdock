@@ -447,7 +447,7 @@ function matchLabel(r: ClipboardRule): string {
 /* 与 settings.css 的 .section 对齐（同宽、同段间距），合并进「剪贴板」页后视觉连续 */
 .cr-page { width: 100%; max-width: var(--settings-max); }
 .page-title { margin: 0 0 var(--space-2); font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
-.cr-desc { margin: 0 0 var(--space-6); font-size: var(--text-sm); color: var(--color-text-disabled); line-height: 1.6; }
+.cr-desc { margin: 0 0 var(--space-6); font-size: var(--text-sm); color: var(--color-text-muted); line-height: 1.6; }
 
 /* 总开关条：开着时用强调色底，一眼看出"规则现在就生效" */
 .cr-global {
@@ -481,7 +481,7 @@ function matchLabel(r: ClipboardRule): string {
 .cr-check input { margin-top: var(--space-1); }
 .cr-check span { display: flex; flex-direction: column; gap: var(--space-1); }
 .cr-check-title { font-size: var(--text-md); color: var(--color-text-secondary); }
-.cr-check-hint { font-size: var(--text-xs); color: var(--color-text-disabled); }
+.cr-check-hint { font-size: var(--text-xs); color: var(--color-text-muted); }
 
 .cr-test { margin-top: var(--space-5); }
 .cr-test-input {
@@ -498,7 +498,7 @@ function matchLabel(r: ClipboardRule): string {
 }
 .cr-test-input:focus { outline: none; border-color: var(--color-border-focus-soft); }
 .cr-test-actions { display: flex; align-items: center; gap: var(--space-4); margin-top: var(--space-4); }
-.cr-test-state { font-size: var(--text-sm); color: var(--color-text-disabled); }
+.cr-test-state { font-size: var(--text-sm); color: var(--color-text-muted); }
 .cr-test-state.matched { color: var(--color-success); }
 .cr-test-state.nomatch { color: var(--color-warning); }
 .cr-test-out {
@@ -574,7 +574,7 @@ function matchLabel(r: ClipboardRule): string {
   height: 24px;
   border: none;
   background: transparent;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: color var(--transition-fast), background-color var(--transition-fast);
@@ -589,7 +589,7 @@ function matchLabel(r: ClipboardRule): string {
   margin-top: var(--space-8); padding-top: var(--space-5);
   border-top: 1px solid var(--color-border);
 }
-.cr-capture-hint { margin: 0 0 var(--space-5); font-size: var(--text-xs); color: var(--color-text-disabled); line-height: 1.6; }
+.cr-capture-hint { margin: 0 0 var(--space-5); font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.6; }
 .cr-ignore-add { display: flex; gap: var(--space-4); }
 .cr-ignore-add .field-input { flex: 1; min-width: 0; }
 .cr-ignore-list { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-4); }
@@ -602,7 +602,7 @@ function matchLabel(r: ClipboardRule): string {
 .cr-ignore-del {
   display: inline-flex; align-items: center; justify-content: center;
   width: 16px; height: 16px; padding: 0; border: none; border-radius: var(--radius-xs);
-  background: transparent; color: var(--color-text-disabled); cursor: pointer;
+  background: transparent; color: var(--color-text-muted); cursor: pointer;
 }
 .cr-ignore-del:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 .cr-pause-row { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }

@@ -158,7 +158,7 @@ const group = computed(() => {
 .qd-team > summary:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .qd-team-chev {
   margin-left: auto; flex: 0 0 auto;
-  color: var(--color-text-disabled); transition: transform var(--transition-fast);
+  color: var(--color-text-muted); transition: transform var(--transition-fast);
 }
 .qd-team[open] > summary .qd-team-chev { transform: rotate(180deg); }
 /* 折叠条上的组进度：次要色小字，不喧宾夺主，但收起时也一眼能看到进度。 */
@@ -166,7 +166,7 @@ const group = computed(() => {
   display: inline-flex; align-items: center; gap: 3px;
   font-size: var(--text-xs); color: var(--color-text-muted);
 }
-.qd-team-progress-sep { color: var(--color-text-disabled); }
+.qd-team-progress-sep { color: var(--color-text-muted); }
 .qd-team-progress-elapsed { font-family: var(--font-mono); }
 /* 展开后把成员卡包成一个整体面板：外壳用 bg-secondary（比成员卡的 card-bg
    暗一档），避免和卡片同一层颜色糊在一起。 */

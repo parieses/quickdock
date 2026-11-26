@@ -15,6 +15,8 @@ type LockStatusView struct {
 	RetryAfterSec int `json:"retryAfterSec"`
 	// PasswordLength 密码字符数，锁层据此「输满即自动解锁」；0 表示未知（旧数据）。
 	PasswordLength int `json:"passwordLength"`
+	// AutoLockMinutes 空闲自动锁定的分钟数；0 表示关闭。
+	AutoLockMinutes int `json:"autoLockMinutes"`
 }
 
 func lockStatusView() LockStatusView {
@@ -23,10 +25,11 @@ func lockStatusView() LockStatusView {
 		sec = int(wait.Seconds() + 0.999) // 向上取整：剩 0.2s 也显示 1s，避免显示 0 却仍被拒
 	}
 	return LockStatusView{
-		HasPassword:    lock.HasPassword(),
-		Locked:         lock.IsLocked(),
-		RetryAfterSec:  sec,
-		PasswordLength: lock.PasswordLength(),
+		HasPassword:     lock.HasPassword(),
+		Locked:          lock.IsLocked(),
+		RetryAfterSec:   sec,
+		PasswordLength:  lock.PasswordLength(),
+		AutoLockMinutes: lock.AutoLockMinutes(),
 	}
 }
 
@@ -87,6 +90,16 @@ func (a *AppService) LockNow() *ApiResult {
 		return FailMsg("尚未设置启动密码")
 	}
 	lock.Lock()
+	return Ok(lockStatusView())
+}
+
+// SetAutoLock 设置空闲自动锁定的分钟数（0 = 关闭）。
+//
+// 计时在后端：前端关掉窗口、切到后台都不会暂停它，也不给调用方绕过退避的机会。
+func (a *AppService) SetAutoLock(minutes int) *ApiResult {
+	if err := lock.SetAutoLockMinutes(minutes); err != nil {
+		return Fail(err)
+	}
 	return Ok(lockStatusView())
 }
 

@@ -9,8 +9,13 @@
  * 聊天区那排缩略图显示的是同一张。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlarmClock, ArrowUp, ChevronDown, Folder, FolderOpen, Image as ImageIcon, Link2, Plus, X } from '@lucide/vue'
+import {
+  AlarmClock, AlertCircle, ArrowUp, Braces, CheckCircle2, ChevronDown, ClipboardList, Code,
+  FileText, Folder, FolderOpen, History, Image as ImageIcon, Info, Languages, Link2, ListTree,
+  Plus, Sparkles, Wrench, X,
+} from '@lucide/vue'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { AIConnector, AIMentionItem, AIPrompt, AISkill, AISpace } from '../types/ai'
 import type { PendingImage } from '../types'
@@ -124,6 +129,23 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+/**
+ * 示例提示词的代表图标：按 i18n key 固定映射。
+ * 文案由 i18n 决定，不能从渲染后的文字里猜图标；没列到的 key 用 Sparkles 兜底。
+ */
+const TIP_ICONS: Record<string, Component> = {
+  aiHeroTip1: FileText,
+  aiHeroTip2: AlertCircle,
+  aiHeroTip3: ListTree,
+  aiHeroTip4: Braces,
+  aiHeroTip5: History,
+  aiHeroTip6: CheckCircle2,
+  aiHeroTip7: Wrench,
+  aiHeroTip8: ClipboardList,
+  aiHeroTip9: Code,
+  aiHeroTip10: Languages,
+}
 
 // 落地页输入框：父组件在「新建任务 / 填示例」时要把焦点放回来，所以对外暴露 focus()；
 // 技能胶囊是输入框内部的行内节点，插入也只能由富输入框自己完成。
@@ -365,17 +387,17 @@ onBeforeUnmount(() => {
             <!-- 当前权限：落地页也能切，第一句就按这个口径执行 -->
             <AiPermissionBadge :level="props.permissionLevel" @change="emit('change-permission', $event)" />
             <button v-if="props.allowFileImage" class="ai-tool-btn" :title="t('aiAttachImage')" @click="emit('open-file-picker')">
-              <ImageIcon :size="16" />
+              <ImageIcon :size="17" />
             </button>
             <button v-if="props.allowUrlImage" class="ai-tool-btn" :title="t('aiAddImageUrl')" @click="emit('toggle-url')">
-              <Link2 :size="16" />
+              <Link2 :size="17" />
             </button>
             <AiSendButton
               :disabled="!props.hasKey || (!props.canSend && !props.attachments.length && !props.attachedFiles.length)"
               :title="t('send')"
               @click="emit('send')"
             >
-              <ArrowUp :size="16" />
+              <ArrowUp :size="18" />
             </AiSendButton>
           </div>
         </div>
@@ -408,8 +430,12 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <!-- 产物去向：既是说明也是「空间是什么」的解释——比一个空下拉好懂 -->
-      <p class="ai-hero-out">{{ props.outHint }}</p>
+      <!-- 产物去向：既是说明也是「空间是什么」的解释——比一个空下拉好懂。
+           前面挂一枚 ⓘ，避免它被当成普通灰色小字略过。 -->
+      <p class="ai-hero-out">
+        <Info :size="12" class="ai-hero-out-ico" />
+        <span>{{ props.outHint }}</span>
+      </p>
 
       <p v-if="!props.hasKey" class="ai-hero-needkey">
         {{ t('aiNeedKey') }}
@@ -422,7 +448,8 @@ onBeforeUnmount(() => {
       </div>
       <div class="ai-hero-tips">
         <button v-for="k in props.heroTips" :key="k" class="ai-hero-tip" @click="emit('fill-tip', k)">
-          {{ t(k) }}
+          <component :is="TIP_ICONS[k] || Sparkles" :size="14" class="ai-hero-tip-ico" />
+          <span class="ai-hero-tip-text">{{ t(k) }}</span>
           <ArrowUp :size="11" class="ai-hero-tip-icon" />
         </button>
       </div>
@@ -463,7 +490,8 @@ onBeforeUnmount(() => {
    所以整排连同它的 pill 样式一起删掉了 —— 标题下面直接是输入框。 */
 .ai-hero-box {
   width: 100%;
-  border: 1px solid var(--color-border);
+  /* 底色与页面只差两档，1px 用 border 而不是 border-light 时边界几乎看不见 */
+  border: 1px solid var(--color-border-light);
   border-radius: var(--radius-lg);
   background: var(--color-bg-tertiary);
   padding: 10px var(--space-5) var(--space-4);
@@ -483,7 +511,7 @@ onBeforeUnmount(() => {
   border: none;
   border-radius: 50%;
   background: transparent;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
@@ -491,10 +519,10 @@ onBeforeUnmount(() => {
 .ai-hero-plus:hover,
 .ai-hero-plus.is-open { background: var(--color-bg-active); color: var(--color-text-primary); }
 
-/* 聚焦不再把整圈边框刷成强调色：这么大一个输入盒，亮蓝边框会盖住页面里
-   所有真正的强调元素（主按钮、选中项）。只换成中性一档边框，不加外环。 */
+/* 聚焦时整圈换成强调蓝：输入框是这一页唯一的主操作，边框是它最强的一处提示。
+   只换 1px 边框色、不加外环——这么大一个盒子加 glow 会盖住页面里其他强调元素。 */
 .ai-hero-box:focus-within {
-  border-color: var(--color-border-focus-soft);
+  border-color: var(--color-accent);
 }
 
 /* 富输入框（AiRichInput）在落地页用大一号的字，与原来那个 textarea 一致 */
@@ -567,7 +595,8 @@ onBeforeUnmount(() => {
   border: 1px solid transparent;
   border-radius: var(--radius-full);
   background: transparent;
-  color: var(--color-text-muted);
+  /* 与模型胶囊、权限徽标同档：底栏一排都用 secondary，muted 在深底上读不出来 */
+  color: var(--color-text-secondary);
   font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
@@ -660,12 +689,19 @@ onBeforeUnmount(() => {
   /* 产物去向是「文件写到哪里」的关键信息：左对齐贴输入框左边缘，
      不跟着 .ai-hero-inner 的 align-items:center 缩成一小撮居中小字。 */
   align-self: stretch;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  /* 与输入框拉开一点：紧贴下沿时它像是输入框的一部分，容易被当成占位说明略过 */
+  margin-top: var(--space-1);
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
   text-align: left;
   line-height: 1.5;
   word-break: break-all;
 }
+
+.ai-hero-out-ico { flex: none; margin-top: 2px; color: var(--color-text-muted); }
 
 /* 缺 API Key：橙底 + 橙边 + 橙字 + 橙实心按钮，四层同色叠在深底上像贴了块
    膏药，把落地页的视觉重心从输入框拽走。降饱和后只留一颗 6px 语义点，
@@ -705,7 +741,15 @@ onBeforeUnmount(() => {
 }
 .ai-hero-needkey .ai-go-settings:hover { background: var(--color-bg-active); }
 
-.ai-hero-tips { width: 100%; display: flex; flex-direction: column; gap: var(--space-4); margin-top: var(--space-2); }
+/* 两列卡片：胶囊状看着像分类标签，用户不会想到点一下就能执行；
+   卡片自带代表图标 + 右上斜箭头（= 填入输入框），悬停上浮 1px。 */
+.ai-hero-tips {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
 
 /* 示例区头部：左标签 + 右侧「换一批」（点击重新随机一批示例）。
    与底栏同款小胶囊视觉语言，整页输入框上下风格统一。 */
@@ -719,7 +763,7 @@ onBeforeUnmount(() => {
 
 .ai-hero-tips-label {
   font-size: var(--text-xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   flex-shrink: 0;
 }
 
@@ -739,24 +783,32 @@ onBeforeUnmount(() => {
 .ai-hero-tips-shuffle:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
 
 .ai-hero-tip {
-  display: inline-flex; align-items: center; gap: var(--space-3);
-  align-self: flex-start;
-  max-width: 100%;
-  padding: 7px var(--space-5);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 9px var(--space-4);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  background: transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
-  font-size: var(--text-md); font-family: inherit; text-align: left;
+  font-size: var(--text-sm); font-family: inherit; text-align: left;
   cursor: pointer;
-  transition: color var(--transition-fast), border-color var(--transition-fast);
+  transition: color var(--transition-fast), border-color var(--transition-fast),
+    background-color var(--transition-fast), transform var(--transition-fast);
 }
 
 .ai-hero-tip:hover {
   color: var(--color-text-primary);
-  border-color: var(--color-accent-border-strong);
-  background: var(--color-bg-tertiary);
+  border-color: var(--color-accent);
+  background: var(--color-bg-hover);
+  transform: translateY(-1px);
 }
 
-.ai-hero-tip-icon { transform: rotate(45deg); opacity: 0.55; flex-shrink: 0; }
+.ai-hero-tip-ico { flex: none; color: var(--color-text-muted); }
+.ai-hero-tip:hover .ai-hero-tip-ico { color: var(--color-accent); }
+/* 卡片宽度固定，长文案单行省略：两列等高才不会一条高一条矮 */
+.ai-hero-tip-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-hero-tip-icon { flex-shrink: 0; transform: rotate(45deg); opacity: 0.55; }
+.ai-hero-tip:hover .ai-hero-tip-icon { opacity: 1; }
 </style>

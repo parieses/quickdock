@@ -22,6 +22,7 @@ import {
   Plus, FolderPlus, RefreshCw, Trash2, Loader2, Settings2, X,
   Search, Sparkles, FileText, FileSpreadsheet, File as FileIcon, Send, Square, AlertCircle, Info,
   Layers, Pencil, PanelRight, ChevronDown, ChevronUp, Eraser,
+  ListTree, Lightbulb, MessageSquare, Quote, CornerDownLeft,
 } from '@lucide/vue'
 import QdModal from './QdModal.vue'
 import QdTabs from './QdTabs.vue'
@@ -150,6 +151,8 @@ interface AskMessage {
   text: string
   citations?: SearchHit[]
   pending?: boolean
+  /** 这句回答对应的问题原文：点引用时用它给右栏片段做高亮。 */
+  question?: string
 }
 
 const sources = ref<KBSource[]>([])
@@ -205,6 +208,8 @@ const searchFallback = ref(false)
 // 是最高频的操作，一切换就会把结果列表顶掉，那是布局问题不是功能问题。
 const previewOpen = ref(false)
 const activeChunkId = ref('')
+// 右栏片段要高亮的词：检索时是 query，点引用时是那条回答的问题原文。
+const previewHighlight = ref('')
 const expandedChunks = ref<string[]>([])
 const previewListEl = ref<HTMLElement | null>(null)
 
@@ -233,6 +238,67 @@ const currentLibrary = computed(() => libraries.value.find(l => l.id === libId.v
 const stats = computed<KBStats>(() => status.value?.stats ?? {
   sources: 0, ready: 0, failed: 0, missing: 0, stale: 0, chunks: 0, vecChunks: 0, totalChars: 0,
 })
+
+// ---- 中栏默认态（选中文档但还没检索时） ----
+// 不做 AI 摘要：摘要需要新增后端字段并缓存，库里还没有这份数据。
+// 换成三块**真实**信息——文档元信息、章节结构、开头原文——同样能回答
+// 「这是什么文档、该从哪问起」，而且不用编造内容。
+const chunkHeadings = computed(() => {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const c of chunks.value) {
+    const h = c.heading?.trim()
+    if (!h || seen.has(h)) continue
+    seen.add(h)
+    out.push(h)
+    if (out.length >= 6) break
+  }
+  return out
+})
+const openingChunk = computed(() => chunks.value[0] || null)
+
+// 问答范围：选中文档后默认「只问这篇」，也可以在问答框上方切回整库。
+// 后端 AskKB 的 sourceId 就是为这个场景留的（vec 层按 SourceID 过滤）。
+const askScope = ref<'doc' | 'lib'>('lib')
+watch(selectedId, (id, prev) => {
+  if (!id) askScope.value = 'lib'
+  else if (!prev) askScope.value = 'doc'
+})
+const scopeSourceId = computed(() => (askScope.value === 'doc' ? selectedId.value : ''))
+
+const suggestedPrompts = computed(() => {
+  if (!selectedSource.value) return []
+  const out = [t('kbPromptSummary'), t('kbPromptKeywords'), t('kbPromptTodo')]
+  const h = chunkHeadings.value[0]
+  if (h) out.push(t('kbPromptHeading', { h: h.length > 18 ? h.slice(0, 18) + '…' : h }))
+  else {
+    const page = chunks.value.find(c => c.page)?.page
+    if (page) out.push(t('kbPromptPage', { n: page }))
+  }
+  return out
+})
+
+function humanSize(n?: number) {
+  if (!n || n <= 0) return ''
+  if (n < 1024) return n + ' B'
+  if (n < 1024 * 1024) return (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB'
+  return (n / 1048576).toFixed(1) + ' MB'
+}
+
+function relTime(ts?: number) {
+  if (!ts) return ''
+  const sec = Math.max(0, Math.floor(Date.now() / 1000 - ts))
+  if (sec < 60) return t('kbAgoJust')
+  if (sec < 3600) return t('kbAgoMin', { n: Math.floor(sec / 60) })
+  if (sec < 86400) return t('kbAgoHour', { n: Math.floor(sec / 3600) })
+  if (sec < 86400 * 7) return t('kbAgoDay', { n: Math.floor(sec / 86400) })
+  return new Date(ts * 1000).toLocaleDateString()
+}
+
+function excerpt(text: string) {
+  const flat = (text || '').replace(/\s+/g, ' ').trim()
+  return flat.length > 220 ? flat.slice(0, 220) + '…' : flat
+}
 
 const subtitle = computed(() => {
   const lib = currentLibrary.value
@@ -539,6 +605,7 @@ async function selectDoc(src: KBSource) {
   }
   selectedId.value = src.id
   activeChunkId.value = ''
+  previewHighlight.value = ''
   previewOpen.value = true
   await loadChunksFor(src.id)
 }
@@ -565,13 +632,15 @@ async function loadChunksFor(id: string) {
 
 // 点检索结果：抽屉打开该文档并滚到具体那一段。
 // 同一份文档已经在抽屉里就不重复拉 —— 连点五条命中只该有零次请求。
-async function openHit(h: SearchHit) {
+async function openHit(h: SearchHit, hl?: string) {
   const src = sources.value.find(s => s.id === h.sourceId)
   if (!src) {
     // 命中来源不在当前库（多半是切库后的旧结果，或文档已移除）：明确提示，别静默失败。
     toast.error(t('kbHitSourceGone'))
     return
   }
+  // 高亮词随入口变化：从检索来就是搜索词，从回答引用来就是问题原文。
+  previewHighlight.value = hl ?? query.value.trim()
   activeChunkId.value = h.chunkId
   previewOpen.value = true
   if (selectedId.value !== src.id || !chunks.value.length) {
@@ -580,6 +649,28 @@ async function openHit(h: SearchHit) {
   }
   await nextTick()
   scrollToActiveChunk()
+}
+
+// 回答里的引用：带上那条回答的问题，右栏同时高亮它。
+function openCitation(c: SearchHit, m: AskMessage) {
+  void openHit(c, m.question ?? '')
+}
+
+// 概览里的章节：跳到该标题的第一段。
+function openHeading(heading: string) {
+  const c = chunks.value.find(x => (x.heading || '').trim() === heading)
+  if (!c) return
+  activeChunkId.value = c.id
+  previewHighlight.value = ''
+  previewOpen.value = true
+  void nextTick(scrollToActiveChunk)
+}
+
+// 点整张片段卡也能展开/收起；先拖选了文字就不切，避免想复制却把卡片折叠了。
+function onChunkClick(c: KBChunk) {
+  const sel = window.getSelection?.()
+  if (sel && sel.toString().trim()) return
+  toggleChunk(c.id)
 }
 
 function scrollToActiveChunk() {
@@ -687,11 +778,19 @@ function scrollAskToBottom() {
   })
 }
 
+// 从概览的推荐问题/提问框进来：切到问答页并立即发送。
+function askQuestion(text: string) {
+  const q = text.trim()
+  if (!q || asking.value) return
+  question.value = q
+  void sendQuestion()
+}
+
 async function sendQuestion() {
   const q = question.value.trim()
   if (!q || asking.value) return
   messages.value.push({ role: 'user', text: q })
-  const reply: AskMessage = { role: 'assistant', text: '', pending: true }
+  const reply: AskMessage = { role: 'assistant', text: '', pending: true, question: q }
   messages.value.push(reply)
   question.value = ''
   asking.value = true
@@ -700,12 +799,18 @@ async function sendQuestion() {
 
   try {
     const res = unwrap<{ answer: string; citations: SearchHit[] }>(
-      await AskKB({ question: q, sourceId: '', libraryId: libId.value, streamId: STREAM_ID, topN: settings.topN }),
+      await AskKB({ question: q, sourceId: scopeSourceId.value, libraryId: libId.value, streamId: STREAM_ID, topN: settings.topN }),
     )
     reply.pending = false
     reply.text = res?.answer || ''
     reply.citations = res?.citations ?? []
     if (!reply.text) reply.text = t('kbAskNoHit')
+    // 「答案 → 原文」闭环：限定在单篇文档提问时，回答一落地就把右栏跳到第一条引用，
+    // 用户不用自己去点引用再找段落。整库问答不抢这一下——引用可能来自别的文档。
+    const first = reply.citations[0]
+    if (first && askScope.value === 'doc' && first.sourceId === selectedId.value) {
+      void openHit(first, q)
+    }
   } catch (e) {
     reply.pending = false
     reply.text = getErrorMessage(e)
@@ -777,10 +882,16 @@ function statusKey(s: string) {
   }
 }
 
-function docMeta(s: KBSource) {
+// 左栏一行的第二行：段数（或失败原因）+ 体积 + 更新时间。
+// 以前只有段数，用户想确认「导入的是不是最新那版」时无从判断。
+function docMetaLine(s: KBSource) {
   if (s.status === 'failed' && s.err) return s.err
-  if (s.chunkCount > 0) return t('kbChunkCount', { n: s.chunkCount })
-  return t(statusKey(s.status))
+  const parts = [
+    s.chunkCount > 0 ? t('kbChunkCount', { n: s.chunkCount }) : t(statusKey(s.status)),
+    humanSize(s.size),
+    relTime(s.mtime),
+  ].filter(Boolean)
+  return parts.join(' · ')
 }
 
 // 高亮切片缓存：computed 只在 hits / query 变化时重算一次。
@@ -795,6 +906,19 @@ const hitPartsMap = computed(() => {
 
 function hitParts(h: SearchHit) {
   return hitPartsMap.value.get(h) ?? highlightParts(h.text, query.value.trim())
+}
+
+// 右栏片段的同一套高亮：用 previewHighlight（搜索词 / 引用问题），
+// 按片段 id 缓存，避免索引进度事件把整列长文本重算。
+const chunkPartsMap = computed(() => {
+  const m = new Map<string, { t: string; hit: boolean }[]>()
+  const q = previewHighlight.value
+  for (const c of chunks.value) m.set(c.id, highlightParts(c.text, q))
+  return m
+})
+
+function chunkParts(c: KBChunk) {
+  return chunkPartsMap.value.get(c.id) ?? [{ t: c.text, hit: false }]
 }
 
 const unsubscribers: Array<() => void> = []
@@ -970,7 +1094,7 @@ onScopeDispose(() => {
             <component :is="iconFor(s.ext)" :size="15" class="kb-doc-icon" />
             <span class="kb-doc-main">
               <span class="kb-doc-name">{{ s.name }}</span>
-              <span class="kb-doc-meta" :class="{ bad: s.status === 'failed' }">{{ docMeta(s) }}</span>
+              <span class="kb-doc-meta" :class="{ bad: s.status === 'failed' }">{{ docMetaLine(s) }}</span>
             </span>
             <span class="kb-doc-actions">
               <span v-key-click class="kb-doc-reindex" :title="t('kbReindex')" :aria-label="t('kbReindex')" @click="reindexOne(s, $event)">
@@ -980,7 +1104,14 @@ onScopeDispose(() => {
                 <Trash2 :size="12" />
               </span>
             </span>
-            <span class="kb-dot" :class="'st-' + s.status"></span>
+            <!-- 状态点的 title 说明它是什么颜色；解析/切分/建向量时改成呼吸动画，
+                 静态圆点看不出「正在干活」，只能看出「有个橙点」。 -->
+            <span
+              class="kb-dot"
+              :class="['st-' + s.status, { 'is-busy': isRunningStage(s.status) }]"
+              :title="t(statusKey(s.status))"
+              :aria-label="t(statusKey(s.status))"
+            ></span>
           </button>
         </div>
       </aside>
@@ -989,7 +1120,12 @@ onScopeDispose(() => {
         <div class="kb-tabbar">
           <QdTabs v-model="tab" :tabs="kbTabs">
             <template #tab="{ tab: item }">
-              <component :is="item.id === 'search' ? Search : Sparkles" :size="13" />
+              <component
+                :is="item.id === 'search' ? Search : Sparkles"
+                :size="13"
+                class="kb-tab-icon"
+                :class="{ 'kb-tab-ai': item.id === 'ask' }"
+              />
               {{ item.label }}
             </template>
           </QdTabs>
@@ -1035,6 +1171,77 @@ onScopeDispose(() => {
 
           <div class="kb-scroll">
             <div class="kb-pane-inner">
+              <!-- 默认态：选中文档后不把中栏空着。
+                   三块都是真实数据（元信息 / 章节 / 开头原文），不做假的 AI 摘要。 -->
+              <div v-if="!searched" class="kb-overview">
+                <template v-if="selectedSource">
+                  <div class="kb-ov-head">
+                    <component :is="iconFor(selectedSource.ext)" :size="18" class="kb-ov-icon" />
+                    <div class="kb-ov-title">
+                      <span class="kb-ov-name" :title="selectedSource.path">{{ selectedSource.name }}</span>
+                      <span class="kb-ov-meta">
+                        <span>{{ t('kbChunkCount', { n: selectedSource.chunkCount }) }}</span>
+                        <template v-if="humanSize(selectedSource.size)">
+                          <span class="kb-ov-sep">·</span><span>{{ humanSize(selectedSource.size) }}</span>
+                        </template>
+                        <template v-if="selectedSource.pageCount">
+                          <span class="kb-ov-sep">·</span><span>{{ t('kbPageCount', { n: selectedSource.pageCount }) }}</span>
+                        </template>
+                        <template v-if="relTime(selectedSource.mtime)">
+                          <span class="kb-ov-sep">·</span><span>{{ relTime(selectedSource.mtime) }}</span>
+                        </template>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div class="kb-ov-ask">
+                    <MessageSquare :size="14" class="kb-ov-ask-icon" />
+                    <input
+                      v-model="question"
+                      class="kb-ov-ask-input"
+                      :placeholder="t('kbOverviewAskPlaceholder', { name: selectedSource.name })"
+                      spellcheck="false"
+                      @keydown.enter.prevent="askQuestion(question)"
+                    />
+                    <button
+                      class="kb-ov-ask-send"
+                      :disabled="asking || !question.trim()"
+                      :title="t('kbAskSend')"
+                      @click="askQuestion(question)"
+                    >
+                      <CornerDownLeft :size="13" />
+                    </button>
+                  </div>
+
+                  <div v-if="suggestedPrompts.length" class="kb-ov-block">
+                    <div class="kb-ov-label"><Lightbulb :size="12" />{{ t('kbOverviewPrompts') }}</div>
+                    <div class="kb-ov-prompts">
+                      <button v-for="p in suggestedPrompts" :key="p" class="kb-ov-prompt" @click="askQuestion(p)">{{ p }}</button>
+                    </div>
+                  </div>
+
+                  <div v-if="chunkHeadings.length" class="kb-ov-block">
+                    <div class="kb-ov-label"><ListTree :size="12" />{{ t('kbOverviewStructure') }}</div>
+                    <div class="kb-ov-outline">
+                      <button v-for="h in chunkHeadings" :key="h" class="kb-ov-heading" :title="h" @click="openHeading(h)">
+                        {{ h }}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div v-if="openingChunk" class="kb-ov-block">
+                    <div class="kb-ov-label"><Quote :size="12" />{{ t('kbOverviewOpening') }}</div>
+                    <p class="kb-ov-excerpt">{{ excerpt(openingChunk.text) }}</p>
+                  </div>
+                </template>
+
+                <div v-else class="kb-empty kb-ov-none">
+                  <BookOpen :size="22" />
+                  <p class="kb-empty-title">{{ t('kbOverviewPick') }}</p>
+                  <p class="kb-empty-desc">{{ t('kbOverviewPickHint') }}</p>
+                </div>
+              </div>
+
               <div v-if="searched && !hits.length && !searching" class="kb-empty">
                 <Search :size="22" />
                 <p class="kb-empty-title">{{ t('kbSearchEmpty') }}</p>
@@ -1072,6 +1279,10 @@ onScopeDispose(() => {
               <Sparkles :size="22" />
               <p class="kb-empty-title">{{ t('kbAskEmptyTitle') }}</p>
               <p class="kb-empty-desc">{{ t('kbAskEmptyDesc') }}</p>
+              <!-- 空对话也给出可点的问题，省掉「第一句问什么」的停顿 -->
+              <div v-if="suggestedPrompts.length" class="kb-ov-prompts kb-ask-prompts">
+                <button v-for="p in suggestedPrompts" :key="p" class="kb-ov-prompt" @click="askQuestion(p)">{{ p }}</button>
+              </div>
             </div>
             <div v-for="(m, i) in messages" :key="i" class="kb-msg" :class="m.role">
               <div class="kb-msg-body">
@@ -1086,7 +1297,7 @@ onScopeDispose(() => {
                   v-for="(c, ci) in m.citations"
                   :key="c.chunkId"
                   class="kb-cite"
-                  @click="openHit(c)"
+                  @click="openCitation(c, m)"
                 >
                   [#{{ ci + 1 }}] {{ c.sourceName }}<template v-if="c.page"> · {{ t('kbPageNo', { n: c.page }) }}</template>
                 </button>
@@ -1094,6 +1305,25 @@ onScopeDispose(() => {
             </div>
           </div>
           <div class="kb-ask-box">
+            <!-- 问答范围：默认「只问当前文档」，也能一键切回整库。
+                 不显式标出来的话，用户会以为问的是全部文档（或反过来）。 -->
+            <div class="kb-pane-inner kb-scope-row">
+              <span class="kb-scope-label">{{ t('kbAskScope') }}</span>
+              <button
+                class="kb-scope-chip"
+                :class="{ active: askScope === 'doc' }"
+                :disabled="!selectedSource"
+                :title="selectedSource?.name"
+                @click="askScope = 'doc'"
+              >
+                <FileText :size="11" />
+                <span class="kb-scope-name">{{ selectedSource?.name || t('kbAskScopeNone') }}</span>
+              </button>
+              <button class="kb-scope-chip" :class="{ active: askScope === 'lib' }" @click="askScope = 'lib'">
+                <Layers :size="11" />
+                {{ t('kbAskScopeLib') }}
+              </button>
+            </div>
             <div class="kb-pane-inner kb-ask-inner">
               <textarea
                 v-model="question"
@@ -1117,7 +1347,8 @@ onScopeDispose(() => {
           <component :is="iconFor(selectedSource?.ext || '')" :size="14" class="kb-preview-icon" />
           <span class="kb-preview-name" :title="selectedSource?.path">{{ selectedSource?.name || t('kbTabChunks') }}</span>
           <span v-if="chunks.length" class="kb-preview-count">{{ t('kbChunkCount', { n: chunks.length }) }}</span>
-          <button class="qd-icon-btn" :title="t('kbClosePreview')" @click="previewOpen = false">
+          <span v-if="chunks.length" class="kb-preview-sep" />
+          <button class="qd-icon-btn kb-preview-close" :title="t('kbClosePreview')" @click="previewOpen = false">
             <X :size="14" />
           </button>
         </div>
@@ -1143,16 +1374,26 @@ onScopeDispose(() => {
             class="kb-chunk"
             :class="{ active: activeChunkId === c.id }"
             :data-chunk="c.id"
+            @click="onChunkClick(c)"
           >
             <div class="kb-chunk-head">
               <span class="kb-chunk-idx">#{{ c.idx + 1 }}</span>
               <span v-if="c.page" class="kb-chunk-pos">{{ t('kbPageNo', { n: c.page }) }}</span>
               <span v-else-if="c.heading" class="kb-chunk-pos">{{ c.heading }}</span>
-              <span class="kb-chunk-size">{{ c.charCount }}</span>
-              <span v-if="c.hasVec" class="kb-tag vec">{{ t('kbHitVec') }}</span>
+              <!-- 向量标记收成一个弱化的小图标：518 字、语义这些是排查信息，
+                   不该和正文抢注意力，悬停才给解释。 -->
+              <span v-if="c.hasVec" class="kb-chunk-vec" :title="t('kbChunkVecHint')">
+                <Sparkles :size="10" />
+              </span>
+              <span class="kb-chunk-size" :title="t('kbChunkChars', { n: c.charCount })">{{ t('kbChunkChars', { n: c.charCount }) }}</span>
             </div>
-            <p class="kb-chunk-text" :class="{ open: isChunkExpanded(c.id) }">{{ c.text }}</p>
-            <button v-if="c.text.length > 200" class="kb-chunk-more" @click="toggleChunk(c.id)">
+            <p class="kb-chunk-text" :class="{ open: isChunkExpanded(c.id) }">
+              <template v-for="(part, i) in chunkParts(c)" :key="i">
+                <mark v-if="part.hit" class="kb-mark">{{ part.t }}</mark>
+                <template v-else>{{ part.t }}</template>
+              </template>
+            </p>
+            <button v-if="c.text.length > 200" class="kb-chunk-more" @click.stop="toggleChunk(c.id)">
               <component :is="isChunkExpanded(c.id) ? ChevronUp : ChevronDown" :size="12" />
               {{ isChunkExpanded(c.id) ? t('kbChunkCollapse') : t('kbChunkExpand') }}
             </button>
@@ -1538,6 +1779,21 @@ onScopeDispose(() => {
 .kb-dot.st-parsing,
 .kb-dot.st-chunking { background: var(--color-accent); }
 
+/* 正在索引的文档：点会呼吸。静态蓝点看不出「在跑」，只像「有个状态」。
+   动画只改透明度和缩放，不动颜色，和右侧进度条是一套语言。 */
+.kb-dot.is-busy {
+  animation: kb-dot-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes kb-dot-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kb-dot.is-busy { animation: none; }
+}
+
 /* ---- 中栏 ---- */
 .kb-main {
   flex: 1;
@@ -1555,6 +1811,31 @@ onScopeDispose(() => {
   padding: 0 var(--space-4);
   border-bottom: 1px solid var(--color-hairline);
 }
+
+/* 分段控制器：外面是凹槽，选中项是浮起来的一块。
+   原来只是一圈细边 + 淡蓝底，两个词看起来像并排的文字按钮，分不出当前在哪。 */
+.kb-tabbar :deep(.qd-tabs.is-segmented) {
+  padding: 2px;
+  border-color: transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+}
+
+.kb-tabbar :deep(.qd-tab) {
+  min-height: 26px;
+  padding: 0 var(--space-5);
+}
+
+.kb-tabbar :deep(.qd-tab[aria-selected='true']) {
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.kb-tab-icon { flex-shrink: 0; }
+/* 问答是 AI 能力：图标常驻主题色，选中时更亮一点，作为「这里能对话」的提示 */
+.kb-tab-ai { color: var(--color-accent); opacity: 0.75; }
+.kb-tabbar :deep(.qd-tab[aria-selected='true']) .kb-tab-ai { opacity: 1; }
 
 .kb-tabs-right {
   display: flex;
@@ -1844,6 +2125,53 @@ onScopeDispose(() => {
   border-top: 1px solid var(--color-hairline);
 }
 
+/* 问答范围：一行胶囊。默认指向当前文档，点另一个切回整库。 */
+.kb-scope-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.kb-scope-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.kb-scope-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 240px;
+  height: 22px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.kb-scope-chip:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
+
+.kb-scope-chip.active {
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+}
+
+.kb-scope-chip:disabled { opacity: 0.45; cursor: default; }
+
+.kb-scope-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .kb-ask-inner {
   display: flex;
   align-items: flex-end;
@@ -1884,7 +2212,8 @@ onScopeDispose(() => {
   flex-direction: column;
   width: clamp(300px, 32%, 420px);
   flex-shrink: 0;
-  border-left: 1px solid var(--color-border);
+  /* 与中栏的分界：--color-border 在深色下几乎等于底色，亮一档才看得见 */
+  border-left: 1px solid var(--color-border-light);
   background: var(--color-bg-secondary);
 }
 
@@ -1913,12 +2242,26 @@ onScopeDispose(() => {
   white-space: nowrap;
 }
 
+/* 「6 段」和关闭按钮原来只隔 6px，点关变点段。中间加一条分隔线并把间距拉开，
+   计数也收进浅底胶囊，不再是贴着 X 的一串小字。 */
 .kb-preview-count {
   flex-shrink: 0;
-  font-size: var(--text-xs);
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
   color: var(--color-text-muted);
+  font-size: var(--text-2xs);
   font-variant-numeric: tabular-nums;
 }
+
+.kb-preview-sep {
+  flex-shrink: 0;
+  width: 1px;
+  height: 14px;
+  background: var(--color-border-light);
+}
+
+.kb-preview-close { margin-left: var(--space-1); }
 
 .kb-preview-tools {
   display: flex;
@@ -1935,19 +2278,27 @@ onScopeDispose(() => {
   padding: var(--space-4) var(--space-4) var(--space-6);
 }
 
+/* 片段做成独立卡片：底色一档 + 1px 边 + 圆角。以前所有片段铺在同一个面板上，
+   只有一条透明边框，六段连读像一张长纸，很难看出「一段到哪结束」。 */
 .kb-chunk {
-  padding: var(--space-4) var(--space-4);
+  padding: var(--space-4);
   margin-bottom: var(--space-3);
-  border: 1px solid transparent;
+  border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
-  background: var(--color-bg-tertiary);
+  background: var(--color-card-bg);
+  cursor: pointer;
   scroll-margin: var(--space-4) 0;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
-/* 从检索结果跳过来的那一段。用边框 + 底色一起标，只改底色在深色主题下几乎看不出。 */
+.kb-chunk:hover { border-color: var(--color-border-light); }
+
+/* 从检索结果/回答引用跳过来的那一段：左边一条实心竖条 + 淡底。
+   只改底色在深色主题下几乎看不出，光靠边框又会被其它卡片的边淹没。 */
 .kb-chunk.active {
   border-color: var(--color-accent);
   background: var(--color-accent-bg);
+  box-shadow: inset 3px 0 0 var(--color-accent);
 }
 
 .kb-chunk-head {
@@ -1965,14 +2316,31 @@ onScopeDispose(() => {
 }
 
 .kb-chunk-pos {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-active);
+  color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* 语义标记：弱化成一个淡色小图标，悬停给解释。
+   以前是一枚蓝色「语义」标签，和正文同屏时比内容还显眼。 */
+.kb-chunk-vec {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.kb-chunk-vec:hover { color: var(--color-accent); }
+
 .kb-chunk-size {
   margin-left: auto;
   flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1997,24 +2365,220 @@ onScopeDispose(() => {
   -webkit-line-clamp: unset;
 }
 
+/* 展开全文：幽灵按钮。之前是裸文字 + 默认蓝，看着像正文里的一个链接，
+   读者不知道它属于这张卡片。 */
 .kb-chunk-more {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
-  margin-top: var(--space-2);
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--color-accent);
+  gap: var(--space-2);
+  height: 22px;
+  margin-top: var(--space-3);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
   font-family: inherit;
-  font-size: var(--text-xs);
+  font-size: var(--text-2xs);
   cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .kb-chunk-more:hover {
-  color: var(--color-accent-hover);
-  text-decoration: underline;
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+  text-decoration: none;
 }
+
+/* ---- 中栏默认态（文档概览） ---- */
+.kb-overview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding-top: var(--space-2);
+}
+
+.kb-ov-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.kb-ov-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--color-accent);
+}
+
+.kb-ov-title {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.kb-ov-name {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-ov-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.kb-ov-sep { color: var(--color-text-muted); }
+
+/* 概览里的提问框：和问答页的输入框同构，但更矮，避免和上方检索框叠成两块大输入区 */
+.kb-ov-ask {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.kb-ov-ask:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-bg);
+}
+
+.kb-ov-ask-icon {
+  flex-shrink: 0;
+  color: var(--color-accent);
+}
+
+.kb-ov-ask-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+}
+
+.kb-ov-ask-input::placeholder { color: var(--color-text-disabled); }
+
+.kb-ov-ask-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+.kb-ov-ask-send:hover:not(:disabled) {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.kb-ov-ask-send:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.kb-ov-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.kb-ov-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.kb-ov-prompts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.kb-ov-prompt {
+  padding: 5px 11px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: var(--color-card-bg);
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.kb-ov-prompt:hover {
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+}
+
+/* 章节列表：像目录一样一列，点一条跳到右栏对应片段 */
+.kb-ov-outline {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--color-border-light);
+  padding-left: var(--space-4);
+  gap: var(--space-1);
+}
+
+.kb-ov-heading {
+  padding: 3px 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-ov-heading:hover { color: var(--color-accent); }
+
+.kb-ov-excerpt {
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.kb-ov-none { padding: var(--space-10) var(--space-6); }
+
+/* 问答空态里的推荐问题：和概览共用一套胶囊，只多一层上边距 */
+.kb-ask-prompts { margin-top: var(--space-3); max-width: 560px; }
 
 /* ---- 空态与提示 ---- */
 .kb-empty,
@@ -2024,7 +2588,7 @@ onScopeDispose(() => {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-10) var(--space-6);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   text-align: center;
 }
 

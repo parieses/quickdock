@@ -12,7 +12,7 @@
 // 先被哪个 matcher 认领，就只出现在那个分组里。MATCHERS 的数组顺序即执行顺序，
 // 与原先的内联顺序逐条对齐，不要随意重排。
 
-import { Puzzle, Play, Power, Gauge, ListChecks, FolderKanban, FolderOpen, FileText } from '@lucide/vue'
+import { Puzzle, Play, Power, Gauge, ListChecks, FolderKanban, FolderOpen, FileText, GitBranch, SquareTerminal } from '@lucide/vue'
 import { commandTitle, pluginName } from '../../utils/localize'
 import { evaluate, format, convertExpression } from '../../utils/calc'
 import type { CollectionItem, EnvRuntimeInfo, EnvServiceStatus } from '../../types'
@@ -318,6 +318,75 @@ export function matchTodos(ctx: MatchCtx): MatchOutcome | null {
   todoResults.sort((a, b) => (b.score || 0) - (a.score || 0))
   if (todoResults.length === 0) return null
   return { groups: [{ type: 'todo', label: ctx.t('cmdGroupTodos'), results: todoResults }] }
+}
+
+// 4.5 Git 仓库：按仓库名 / 路径命中，回车切到 Git 页并停在该仓库。
+//
+// 与 notes / todos 同级：这类结果的意义是「跳到一个具体对象」，不是启动程序。
+// 去重键用 path 而不是 name —— 两个不同目录可以有同名项目，按名字做键会让
+// 后一个仓库在搜索里彻底消失；展示仍用 name，用户记的是项目名不是绝对路径。
+export function matchRepos(ctx: MatchCtx): MatchOutcome | null {
+  const { qLC, seen } = ctx
+  const rows: SearchResult[] = []
+
+  for (const e of ctx.lc.repos || []) {
+    const r = e.repo
+    const key = 'repo:' + r.path
+    if (seen.has(key)) continue
+    const score =
+      e.nameLC === qLC ? 100
+        : e.nameLC.startsWith(qLC) ? 75
+          : e.nameLC.includes(qLC) || e.pathLC.includes(qLC) ? 60
+            : ctx.pinyinMatch(r.name, qLC, key) ? 50 : 0
+    if (!score) continue
+    seen.add(key)
+    rows.push({
+      type: 'repo',
+      label: r.name,
+      desc: r.path,
+      icon: GitBranch,
+      repoPath: r.path,
+      score,
+    })
+  }
+
+  rows.sort((a, b) => (b.score || 0) - (a.score || 0))
+  if (rows.length === 0) return null
+  return { groups: [{ type: 'repo', label: ctx.t('cmdGroupRepos'), results: rows }] }
+}
+
+// 4.6 SSH 主机：按主机名 / user@host:port 命中，回车打开终端并直连。
+//
+// 副标题用 user@host:port 而不是一句固定说明：同名主机（测试/生产各一台）只能
+// 靠地址区分，用户自己也是这么认的。
+export function matchSshHosts(ctx: MatchCtx): MatchOutcome | null {
+  const { qLC, seen } = ctx
+  const rows: SearchResult[] = []
+
+  for (const e of ctx.lc.sshHosts || []) {
+    const h = e.host
+    const key = 'ssh:' + h.id
+    if (seen.has(key)) continue
+    const score =
+      e.nameLC === qLC ? 100
+        : e.nameLC.startsWith(qLC) ? 75
+          : e.nameLC.includes(qLC) || e.targetLC.includes(qLC) ? 60
+            : ctx.pinyinMatch(h.name, qLC, key) ? 50 : 0
+    if (!score) continue
+    seen.add(key)
+    rows.push({
+      type: 'ssh',
+      label: h.name,
+      desc: h.user ? `${h.user}@${h.host}:${h.port}` : `${h.host}:${h.port}`,
+      icon: SquareTerminal,
+      sshHostId: h.id,
+      score,
+    })
+  }
+
+  rows.sort((a, b) => (b.score || 0) - (a.score || 0))
+  if (rows.length === 0) return null
+  return { groups: [{ type: 'ssh', label: ctx.t('cmdGroupSsh'), results: rows }] }
 }
 
 // 5. 已安装应用
@@ -696,6 +765,8 @@ export const MATCHERS: Matcher[] = [
   matchQuicklinkInline,
   matchNotes,
   matchTodos,
+  matchRepos,
+  matchSshHosts,
   matchApps,
   matchSystem,
   matchCreate,

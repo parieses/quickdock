@@ -6,7 +6,8 @@ import {
   Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, X,
   MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle, ExternalLink,
   Check, Bookmark, PanelLeft, PanelRight, Volume2, VolumeX, Volume1, Wifi, WifiOff, XCircle,
-  Monitor, RefreshCw, Keyboard, ScrollText, Maximize2, ListChecks, BookOpen, Download, Database, Timer
+  Monitor, RefreshCw, Keyboard, ScrollText, Maximize2, ListChecks, BookOpen, Download, Database, Timer,
+  ListOrdered, ShieldCheck, History, Wrench, Bell, Info, Bot
 } from '@lucide/vue'
 import { HidePaletteWindow, GetLastCopiedText, CaptureSelection, CaptureFullScreen, OpenNoteFromPalette, OpenTodoFromPalette, NavigateMainWindow } from '../../bindings/quickdock/services/appservice'
 import { CreateSnapshot } from '../../bindings/quickdock/services/snapshot/snapshotservice'
@@ -52,7 +53,7 @@ import FilePreviewPane from './FilePreviewPane.vue'
 // 逐字重复的 SearchResult / ResultType，新增类型时两边不同步，于是每次加一种结果
 // 类型都在编译期炸一次（本次加 nav 就这样炸的）。
 import type {
-  CmdNote, CmdTodo, CmdScene, CmdCollection, InstalledApp, RecentEntry, ResultType, SearchResult, SystemCmd,
+  CmdNote, CmdTodo, CmdRepo, CmdSshHost, CmdScene, CmdCollection, InstalledApp, RecentEntry, ResultType, SearchResult, SystemCmd,
 } from '../composables/useCommandSearch'
 
 const { t } = useI18n()
@@ -234,9 +235,11 @@ const inlineQuicklink = ref<CollectionItem | null>(null)
 const inlineQuery = ref('')
 const inlineInputRef = ref<HTMLInputElement | null>(null)
 const notes = ref<CmdNote[]>([])
-// 场景 / 集合本地池（面板浮窗与主窗口不共享 Pinia，由 usePaletteData 单独拉）
+// 场景 / 集合 / Git 仓库本地池（面板浮窗与主窗口不共享 Pinia，由 usePaletteData 单独拉）
 const scenes = ref<CmdScene[]>([])
 const collections = ref<CmdCollection[]>([])
+const repos = ref<CmdRepo[]>([])
+const sshHosts = ref<CmdSshHost[]>([])
 // 新建动作的内联标题输入态：与 inlineQuicklink 同构，但提交时是「创建」而非「打开」
 const inlineCreateKind = ref<'note' | 'todo' | null>(null)
 const inlineCreateTitle = ref('')
@@ -366,6 +369,37 @@ const systemCommands = computed<SystemCmd[]>(() => [
       emitToMain('palette:locate', { page: 'notes', target: 'recent-edited', kind: 'note', id: 'recent-edited' })
       await gotoMainPage('notes')
     } },
+
+  // ---- 设置直达 ----
+  // 设置里有十几个分区，「打开设置 → 在左栏里翻」要多花两步，而这一步是纯找路。
+  // label 直接复用分区标题的 i18n key（不翻译第二遍，两处文案不会漂移）；
+  // desc 统一一句——分区的详细说明已经在设置页里写着，面板里再写一遍只会过期。
+  { id: 'set-preferences', label: t('preferences'), desc: t('cmdOpenSettingsDesc'), keywords: ['设置', '偏好', '外观', '主题', '语言', 'preferences', 'shezhi', 'pianhao', 'waiguan'], icon: Palette,
+    action: async () => { openSettingsPage('preferences') } },
+  { id: 'set-navigation', label: t('navSettings'), desc: t('cmdOpenSettingsDesc'), keywords: ['导航', '侧栏', '排序', '隐藏', 'navigation', 'daohang', 'cezhilan'], icon: ListOrdered,
+    action: async () => { openSettingsPage('navigation') } },
+  { id: 'set-hotkeys', label: t('hotkeySettings'), desc: t('cmdOpenSettingsDesc'), keywords: ['快捷键', '热键', 'hotkey', 'shortcut', 'kuaijiejian', 'rejian'], icon: Keyboard,
+    action: async () => { openSettingsPage('hotkeys') } },
+  { id: 'set-security', label: t('securityTitle'), desc: t('cmdOpenSettingsDesc'), keywords: ['安全', '启动密码', '锁', 'security', 'anquan', 'mima'], icon: ShieldCheck,
+    action: async () => { openSettingsPage('security') } },
+  { id: 'set-clipboard', label: t('clipboard'), desc: t('cmdOpenSettingsDesc'), keywords: ['剪贴板', '历史', '保留', 'clipboard', 'jiantieban', 'lishi'], icon: Clipboard,
+    action: async () => { openSettingsPage('clipboard') } },
+  { id: 'set-backup', label: t('setBackup'), desc: t('cmdOpenSettingsDesc'), keywords: ['备份', '快照', '同步', 'backup', 'beifen', 'kuaizhao'], icon: Database,
+    action: async () => { openSettingsPage('backup') } },
+  { id: 'set-history', label: t('setHistory'), desc: t('cmdOpenSettingsDesc'), keywords: ['历史', '动态', '回收站', 'history', 'lishi', 'huishouzhan'], icon: History,
+    action: async () => { openSettingsPage('history') } },
+  { id: 'set-tools', label: t('openTool'), desc: t('cmdOpenSettingsDesc'), keywords: ['工具', 'tools', 'gongju'], icon: Wrench,
+    action: async () => { openSettingsPage('tools') } },
+  { id: 'set-winmgr', label: t('winmgr'), desc: t('cmdOpenSettingsDesc'), keywords: ['窗口', '排版', '分屏', 'winmgr', 'window', 'chuangkou', 'paiban'], icon: Monitor,
+    action: async () => { openSettingsPage('winmgr') } },
+  { id: 'set-notify', label: t('mon_nf_title'), desc: t('cmdOpenSettingsDesc'), keywords: ['通知', '提醒', 'notify', 'notification', 'tongzhi', 'tixing'], icon: Bell,
+    action: async () => { openSettingsPage('notify') } },
+  { id: 'set-ai', label: t('navAi'), desc: t('cmdOpenSettingsDesc'), keywords: ['ai', '模型', '档案', '额度', 'moxing', 'dangan'], icon: Bot,
+    action: async () => { openSettingsPage('ai') } },
+  { id: 'set-logs', label: t('navLogs'), desc: t('cmdOpenSettingsDesc'), keywords: ['日志', 'logs', 'rizhi'], icon: ScrollText,
+    action: async () => { openSettingsPage('logs') } },
+  { id: 'set-about', label: t('aboutDesc'), desc: t('cmdOpenSettingsDesc'), keywords: ['关于', '版本', '许可', 'about', 'version', 'guanyu', 'banben'], icon: Info,
+    action: async () => { openSettingsPage('about') } },
 ])
 
 // 业务命令落到主窗口：面板是独立浮窗，不共享主窗口的 Pinia / bridge ref，
@@ -427,7 +461,7 @@ const {
   groupedResults, recentResults, displayGroups, displayFlat,
   previewResult, recentCache, flushSearch, RECENT_VISIBLE, recentExpanded, toggleRecentExpanded
 } = useCommandSearch({
-  items, installedApps, notes, scenes, collections, systemCommands, query, selectedIndex,
+  items, installedApps, notes, scenes, collections, repos, sshHosts, systemCommands, query, selectedIndex,
   pluginCmdIndex, clipboardUrlSource,
   frecencyScore, frecencyTick, calcPluginScore,
   pinyinMatch, appIcon, getAppAliases, itemIcon, t, pluginIcons,
@@ -684,6 +718,8 @@ const { loadPluginIndex, rebuildAppIndex, loadPaletteData, refreshRecentCache } 
   notes,
   scenes,
   collections,
+  repos,
+  sshHosts,
   installedPlugins,
   pluginCmdIndex,
   pluginIcons,
@@ -1086,7 +1122,7 @@ onUnmounted(() => {
     </div>
 
     <div v-if="displayGroups.length === 0 && !inlineQuicklink && !inlineCreateKind" class="palette-empty">
-      <Search :size="28" class="empty-icon" />
+      <Search :size="20" class="empty-icon" />
       <p class="empty-title">{{ t('cmdEmptyTitle') }}</p>
       <p class="empty-desc">{{ t('cmdEmptyDesc') }}</p>
     </div>
@@ -1272,7 +1308,7 @@ onUnmounted(() => {
   font-size: var(--text-2xs);
   font-weight: 500;
   letter-spacing: 0;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
   padding: 1px 7px;
   border-radius: var(--radius-full);
@@ -1354,7 +1390,21 @@ onUnmounted(() => {
   flex: 1; display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: var(--space-4); padding: var(--space-9);
 }
-.empty-icon { color: var(--color-text-disabled); margin-bottom: var(--space-2); }
+/* 空态图标：44 方底 + 细边，与各页空状态同一套语汇（浮层里也一样） */
+.empty-icon {
+  width: 44px;
+  height: 44px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 0 var(--color-hairline);
+  margin-bottom: var(--space-3);
+}
 .empty-title { font-size: var(--text-base); font-weight: 500; color: var(--color-text-secondary); margin: 0; }
 .empty-desc { font-size: var(--text-sm); color: var(--color-text-muted); margin: 0; text-align: center; max-width: 360px; line-height: 1.5; }
 
@@ -1552,7 +1602,7 @@ onUnmounted(() => {
 .plugin-detach-btn {
   display: flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border: none; border-radius: var(--radius-sm);
-  background: transparent; color: var(--color-text-disabled); cursor: pointer;
+  background: transparent; color: var(--color-text-muted); cursor: pointer;
   --wails-draggable: no-drag;
   transition: background 0.12s, color 0.12s;
 }
@@ -1563,7 +1613,7 @@ onUnmounted(() => {
 
 .palette-plugin-status {
   flex: 1; display: flex; align-items: center; justify-content: center;
-  font-size: var(--text-md); color: var(--color-text-disabled); user-select: none;
+  font-size: var(--text-md); color: var(--color-text-muted); user-select: none;
 }
 .palette-plugin-error { color: var(--color-danger); padding: 0 var(--space-8); text-align: center; line-height: 1.6; }
 

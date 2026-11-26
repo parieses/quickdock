@@ -468,7 +468,7 @@ void n // 保留 i18n 的数字格式化入口，后续要按语言显示千分�
   margin: var(--space-3) 0 0;
   font-size: var(--text-xs);
   line-height: 1.6;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 .ctx-foot {

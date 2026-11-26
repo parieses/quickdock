@@ -18,6 +18,13 @@ const emit = defineEmits<{
   (e: 'model-change'): void
 }>()
 
+/** 没填显示名时，模型 id 常是 provider/model 的长串：只留最后一段，
+ *  完整值仍在 option 的 value 与 title 里。 */
+function shortModel(m: string): string {
+  const seg = (m || '').split('/').filter(Boolean)
+  return seg.length ? seg[seg.length - 1] : m
+}
+
 function onChange(e: Event) {
   const v = (e.target as HTMLSelectElement).value
   emit('update:active', v)
@@ -33,7 +40,7 @@ function onChange(e: Event) {
     :title="title"
     @change="onChange"
   >
-    <option v-for="p in profiles" :key="p.id" :value="p.id">{{ p.name || p.model }}</option>
+    <option v-for="p in profiles" :key="p.id" :value="p.id">{{ p.name || shortModel(p.model) }}</option>
   </select>
 </template>
 
@@ -56,7 +63,8 @@ function onChange(e: Event) {
 .ai-bit-model.is-ghost {
   border: 1px solid transparent;
   background: transparent;
-  color: var(--color-text-muted);
+  /* 底栏这一排原来用 text-muted，在深色底上几乎看不清是「可点」的 */
+  color: var(--color-text-secondary);
 }
 .ai-bit-model.is-ghost:hover {
   color: var(--color-text-primary);

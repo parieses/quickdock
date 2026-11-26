@@ -1055,7 +1055,7 @@ onBeforeUnmount(() => {
 .trace-child-task-head:hover { background: var(--color-bg-hover); }
 .trace-child-task-arrow {
   flex-shrink: 0;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   transition: transform var(--transition-fast);
 }
 /* 状态色点：单一信源。徽标只补文字，不再重复上色。 */
@@ -1223,7 +1223,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.trace-event.is-empty { color: var(--color-text-disabled); }
+.trace-event.is-empty { color: var(--color-text-muted); }
 
 /* 时间线：一步一张卡片，左侧序号 + 竖线串成执行顺序。
    与旧 trace-events 的区别是「一条事件一行」变成「一个动作一张卡」——
@@ -1333,7 +1333,7 @@ onBeforeUnmount(() => {
 .trace-step-hidden {
   padding: var(--space-1) 0 var(--space-1) 28px;
   font-size: var(--text-2xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 /* 尊重系统的「减少动态效果」：箭头旋转与透明度过渡一并关掉。

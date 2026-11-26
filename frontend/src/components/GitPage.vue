@@ -5,19 +5,22 @@ import GitDialogs from './GitDialogs.vue'
  *
  *   ┌ 工具栏：仓库名 + 路径 ────────────── [Fetch][Pull][刷新] ┐
  *   ├────────────┬──────────────────────────────────────────────┤
- *   │ 仓库        │ 摘要 │ 分支/标签 │ 作者 │ 时间   ← 列表表头   │
- *   │ 本地分支     │ ● 提交行 ……                                  │
+ *   │ 仓库        │ 提交 · 分支 · 作者 · 时间   ← 列表表头           │
+ *   │ 本地分支     │ ● 单行提交（参照 GitLens：一行 28px）             │
  *   │ 远程分支     ├──────────────────────────────────────────────┤
  *   │ 标签        │ 改动文件（状态/路径/+N −N） │ 逐行 diff        │
  *   ├────────────┴──────────────────────────────────────────────┤
  *   │ 状态栏：分支 ↑1↓2 · 3 处改动 · E:\pp\quickdock             │
  *   └───────────────────────────────────────────────────────────┘
  *
- * 三个「为什么这样做」：
+ * 四个「为什么这样做」：
  *   1. 提交列表要有表头。没有表头时作者名与时间挤在摘要后面，用户得靠猜哪一列是什么。
  *   2. 详情是左右分栏而不是上下堆叠：文件清单与 diff 是「索引 → 内容」的关系，
  *      并排才能一边点文件一边看内容；上下堆叠时点一个文件得往下滚才能看到结果。
  *   3. 中部可拖动：看历史时想多看提交，看 diff 时想多看代码，比例只能由用户定。
+ *   4. 不画分支图：git 的 ASCII 图形里纯连线的 / \ 行没有 hash，解析时被丢弃，
+ *      剩下的几根竖线既表达不了分叉，又在双行行距里碎成一截一截。
+ *      分支归属交给行内 refs 标签和左侧分支树，比一排断线更准。
  *
  * 写操作的入口分两类：常驻按钮只放高频安全动作（Fetch / Pull / Push / 提交），
  * 其余（丢弃、忽略、停止跟踪、打标签、回滚、分支增删改）走右键——低频且会改磁盘的操作
@@ -59,8 +62,8 @@ import { SelectSavePath } from '../../bindings/quickdock/services/appservice'
 import {
   FolderGit2, Plus, RefreshCw, Download, ArrowDownToLine, Upload, GitBranch,
   Users, X, Loader2, Tag, ChevronDown, ChevronRight, FileText, Check, CloudDownload,
-  FileDiff, Sparkles, Archive, KeyRound, History, Copy, Trash2, Eye,
-  Search, AlertTriangle, Link2, PanelLeft, List, ListTree, Folder, Columns2, Rows3, Boxes,
+  FileDiff, Sparkles, Archive, KeyRound, History, Copy, Trash2, Eye, Pencil, Minus,
+  Search, AlertTriangle, Link2, PanelLeft, List, ListTree, Folder, Columns2, Rows3, Boxes, MoreHorizontal,
   ArrowUp, ArrowDown,
 } from '@lucide/vue'
 
@@ -76,8 +79,10 @@ interface RepoStatus {
 interface BranchInfo { name: string; current: boolean; remote: boolean; tag?: boolean; ahead: number; behind: number }
 interface BranchSet { local: BranchInfo[]; remote: BranchInfo[]; tags: BranchInfo[] }
 interface Commit {
-  hash: string; short: string; author: string; email: string
+  hash: string; parents?: string[]; short: string; author: string; email: string
   ts: number; subject: string; refs: string; graph: string
+  /** 是否在当前分支（HEAD）上，后端标好带回；「当前分支」视图靠它筛 */
+  onHead?: boolean
 }
 interface CommitDetail { hash: string; files: FileStat[] | null; diff: string }
 interface WorkFile { status: string; path: string; orig?: string; desc: string; add: number; del: number }
@@ -206,6 +211,30 @@ const histQuery = ref('')
 const searchResults = ref<Commit[] | null>(null) // 非空 = 处于全历史搜索结果模式
 const searching = ref(false)
 
+// ---- 历史范围：当前分支 / 全部 ----
+// 后端一次 --all 拿回混排的提交，每条都带 onHead 标记；切换只做内存筛选，
+// 不回后端、不让列表闪一下。默认「当前分支」——git 自己的 log 就是这个视角，
+// 想看别的分支的活才切「全部」。
+const SCOPE_KEY = 'quickdock.git.logScope'
+function recallScope(): 'current' | 'all' {
+  try { return localStorage.getItem(SCOPE_KEY) === 'all' ? 'all' : 'current' } catch { return 'current' }
+}
+const logScope = ref<'current' | 'all'>(recallScope())
+function setLogScope(v: 'current' | 'all') {
+  if (logScope.value === v) return
+  logScope.value = v
+  try { localStorage.setItem(SCOPE_KEY, v) } catch { /* 记不住就算了，本次切换仍然生效 */ }
+}
+/** 后端一条都没标（detached HEAD / 空仓库 / 老进程）时不筛，否则列表会空成一片。 */
+const headMarked = computed(() => commits.value.some(c => c.onHead))
+/** 范围过滤后的基准集合。搜索结果、文件历史本身已是子集，不再二次筛。 */
+const scopedCommits = computed(() => {
+  const base = baseCommits.value
+  if (logScope.value !== 'current' || fileHist.value || searchResults.value) return base
+  if (!headMarked.value) return base
+  return base.filter(c => c.onHead)
+})
+
 // ---- 远端管理 ----
 const remoteOpen = ref(false)
 const remotes = ref<RemoteEntry[]>([])
@@ -214,6 +243,14 @@ const newRemote = reactive({ name: '', url: '' })
 
 // ---- 左栏收起（看长 diff 时把横向空间让出来） ----
 const sideOpen = ref(true)
+
+// ---- 工具栏 ⋯ 菜单：远端 / 子模块 / SSH 三个低频入口 ----
+const moreOpen = ref(false)
+function closeMore() { moreOpen.value = false }
+watch(moreOpen, (v) => {
+  if (v) document.addEventListener('click', closeMore)
+  else document.removeEventListener('click', closeMore)
+})
 
 // ---- 多选：Ctrl 点逐个加减、Shift 点选一段，批量暂存 / 丢弃 ----
 // 键必须带组前缀：同一个文件可能同时出现在「已暂存」和「未暂存」两组（部分暂存），
@@ -230,6 +267,8 @@ const pickedCount = computed(() => pickedStaged.value.length + pickedUnstaged.va
 // ---- 文件列表视图：树形（按目录分组，默认）/ 平铺 ----
 const treeMode = ref(true)
 const closedDirs = ref<Set<string>>(new Set())
+// 提交详情里文件列可收起：并排 diff 需要横向空间时把这一列让出来
+const filesCollapsed = ref(false)
 
 // ---- diff 视图：统一（默认）/ 左右并排 ----
 const diffSide = ref(false)
@@ -260,23 +299,139 @@ const commitHint = computed(() => {
   return stagedFiles.value.length ? t('git_commit_hint', { n: stagedFiles.value.length }) : t('git_commit_need_staged')
 })
 
+/** 按钮为什么按不了：灰按钮不说话时，用户只能猜是「没选文件」还是「没写信息」。 */
+const commitBlockReason = computed(() => {
+  if (committing.value) return ''
+  if (amendMode.value) {
+    return stagedFiles.value.length || commitMsg.value.trim() ? '' : t('git_amend_need_any')
+  }
+  if (!stagedFiles.value.length) return t('git_commit_need_staged')
+  if (!commitMsg.value.trim()) return t('git_commit_need_msg')
+  return ''
+})
+
 /** 筛选只在内存里做：历史上限 200 条，再问一次 git 不会更准，还会让列表闪。 */
 const shownCommits = computed(() => {
+  const base = scopedCommits.value
   const q = histQuery.value.trim().toLowerCase()
-  if (!q) return baseCommits.value
-  return baseCommits.value.filter(c =>
+  if (!q) return base
+  return base.filter(c =>
     c.subject.toLowerCase().includes(q) ||
     c.author.toLowerCase().includes(q) ||
     c.hash.toLowerCase().startsWith(q) ||
     (c.refs || '').toLowerCase().includes(q))
 })
 
-/** graph 列宽按最长前缀算：每行各算各的会让摘要文字左边缘参差（见模板注释）。 */
-const graphCh = computed(() => {
-  let n = 2
-  for (const c of shownCommits.value) n = Math.max(n, c.graph.length)
-  return Math.min(n + 1, 14) // 封顶：分支多到线占半屏时，摘要才是要读的东西
+/* ---- 提交图 ----
+ * 不用 git 的 ASCII 图：`--graph` 里纯连线的 "/" "\" 行没有 hash，解析时被丢弃，
+ * 渲染出来只剩几根互不相连的竖线。这里改用每次提交的父 hash 自己排 lane：
+ * 每条 lane 记一个「下一个期待的提交」，走一遍就得到节点位置与连线。
+ *
+ * 只在完整历史上画图：筛选、全历史搜索、单文件历史拿到的都是子集，父提交大多不在
+ * 列表里，硬画只会是一排悬空的线头，所以这几种状态直接收起图形列。
+ */
+const showGraph = computed(() => !fileHist.value && !histQuery.value.trim() && !searchResults.value)
+
+/** 「当前分支」视图只连第一父：merge 进来的那条分支的提交都被筛掉了，
+   照旧往右开 lane 只会留下一排悬空到列表底部的线头。 */
+const firstParentOnly = computed(() => logScope.value === 'current' && !fileHist.value && !searchResults.value)
+
+const LANE_W = 12            // 单条 lane 宽（含线间距）
+const ROW_H = 100            // SVG 纵向用 0-100 归一化，实际高度随行高走
+const CY = ROW_H / 2
+const LANE_COLORS = 6
+const laneX = (l: number) => l * LANE_W + LANE_W / 2
+
+interface GraphPath { d: string; color: number }
+interface GraphRow {
+  lane: number
+  color: number
+  merge: boolean
+  x: number
+  paths: GraphPath[]
+}
+
+/** 自上而下一遍扫完：每行拿到节点所在 lane、颜色，以及要画的线段。
+ *  竖线用 V 一次到底，合并/汇入用三次贝塞尔，圆点最后画上去盖住穿过的线。
+ *  配色按 lane 序号固定：lane 空出来再被新分支占用时，颜色不会跟着变——
+ *  否则同一列会「上半截紫、下半截蓝」，看着像线断了。 */
+const graphData = computed<{ rows: GraphRow[]; width: number }>(() => {
+  const lanes: (string | null)[] = []   // lane → 它正在等的提交
+  const colorOf = (k: number) => k % LANE_COLORS
+  let maxLanes = 0
+  let prevActive: number[] = []
+  const rows: GraphRow[] = []
+
+  const alloc = () => {
+    const free = lanes.indexOf(null)
+    if (free >= 0) return free
+    lanes.push(null)
+    return lanes.length - 1
+  }
+
+  for (const c of shownCommits.value) {
+    let li = lanes.indexOf(c.hash)
+    if (li < 0) li = alloc()
+    const color = colorOf(li)
+    const x = laneX(li)
+    const paths: GraphPath[] = []
+
+    // 同一提交被多条 lane 同时等待（合并后重复出现）：其余 lane 在本行并回节点
+    const converge: number[] = []
+    for (let k = li + 1; k < lanes.length; k++) {
+      if (lanes[k] === c.hash) { converge.push(k); lanes[k] = null }
+    }
+
+    // 从上一行下来的线：节点 lane 画到中点，其余贯穿整行
+    for (const k of prevActive) {
+      if (k === li || converge.includes(k)) continue
+      paths.push({ d: `M${laneX(k)} 0V${ROW_H}`, color: colorOf(k) })
+    }
+    if (prevActive.includes(li)) paths.push({ d: `M${x} 0V${CY}`, color })
+    for (const k of converge) {
+      const kx = laneX(k)
+      paths.push({ d: `M${kx} 0C${kx} ${CY - 8} ${x} ${CY - 10} ${x} ${CY}`, color: colorOf(k) })
+    }
+
+    // 节点向下：第一个父沿用本 lane；父已被别的 lane 等着就弯过去；其余父各开一条
+    const parents = c.parents || []
+    let down = false
+    const p0 = parents[0]
+    if (p0) {
+      const dup = lanes.findIndex((h, k) => h === p0 && k !== li)
+      if (dup >= 0) {
+        const dx = laneX(dup)
+        paths.push({ d: `M${x} ${CY}C${x} ${CY + 10} ${dx} ${CY + 12} ${dx} ${ROW_H}`, color: colorOf(dup) })
+        lanes[li] = null
+      } else {
+        lanes[li] = p0
+        down = true
+      }
+    } else {
+      lanes[li] = null
+    }
+    for (const p of firstParentOnly.value ? [] : parents.slice(1)) {
+      let j = lanes.indexOf(p)
+      if (j < 0) { j = alloc(); lanes[j] = p }
+      const jx = laneX(j)
+      paths.push({ d: `M${x} ${CY}C${x} ${CY + 10} ${jx} ${CY + 12} ${jx} ${ROW_H}`, color: colorOf(j) })
+    }
+    if (down) paths.push({ d: `M${x} ${CY}V${ROW_H}`, color })
+
+    rows.push({ lane: li, color, merge: parents.length > 1, x, paths })
+
+    // 行末收缩尾部空 lane，图宽才不会越滚越大
+    while (lanes.length && lanes[lanes.length - 1] === null) lanes.pop()
+    maxLanes = Math.max(maxLanes, lanes.length, li + 1, converge.length ? converge[converge.length - 1] + 1 : 0)
+    prevActive = lanes.map((h, k) => (h !== null ? k : -1)).filter(k => k >= 0)
+  }
+  return { rows, width: maxLanes ? maxLanes * LANE_W + 4 : 0 }
 })
+
+const graphRows = computed(() => graphData.value.rows)
+const graphWidth = computed(() => (showGraph.value ? graphData.value.width : 0))
+/** lane 配色走 CSS 变量，深浅主题各一套（见 .git-main 上的 --git-lane-*）。 */
+const laneVar = (c: number) => `var(--git-lane-${(c % LANE_COLORS) + 1})`
 
 // ---- 加载 ----
 
@@ -659,6 +814,8 @@ function openWorktree() {
 
 function selectWorkFile(f: WorkFile) {
   const p = f.path
+  // 左栏常驻：点工作区文件就把右侧拉回工作区 diff，别让上面选中的提交继续占着
+  worktreeMode.value = true
   selectedFile.value = selectedFile.value === p ? '' : p
 }
 
@@ -769,6 +926,69 @@ async function unstageAll() {
   } finally {
     busy.value = ''
   }
+}
+
+/** 全部丢弃：把未暂存的整批改动退回上次提交。比逐条勾选再丢弃快，
+ *  但也是这一页最危险的一步，所以走同一个确认弹窗，不省这一步。 */
+function confirmDiscardAll() {
+  const files = unstagedFiles.value.map(f => f.path)
+  if (!files.length || busy.value) return
+  askConfirm(
+    t('git_discard_all_confirm', { n: files.length }),
+    () => void runGitOp(() => GitDiscardChanges(activePath.value, files, true)),
+    [t('git_ctx_discard_detail_mod')],
+  )
+}
+
+// ---- 拖拽暂存：未暂存行拖到「已暂存」组头 = add，反向拖 = reset ----
+//
+// 只在两组之间搬，不接受从资源管理器拖文件进来（那是「新增文件」，语义不同，
+// 且 WebView2 拿不到真实路径）。组头做投放区而不是整组：整组范围太大，
+// 拖到一半就触发，反而容易误操作。
+const dragFrom = ref<'' | 'staged' | 'unstaged'>('')
+const dragPath = ref('')
+const dropOn = ref<'' | 'staged' | 'unstaged'>('')
+
+function onFileDragStart(e: DragEvent, f: WorkFile, from: 'staged' | 'unstaged') {
+  dragFrom.value = from
+  dragPath.value = f.path
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    // 必须写一份数据，否则部分环境下 dragstart 直接被浏览器取消
+    e.dataTransfer.setData('text/plain', f.path)
+  }
+}
+
+function onFileDragEnd() {
+  dragFrom.value = ''
+  dragPath.value = ''
+  dropOn.value = ''
+}
+
+function onGroupDragOver(e: DragEvent, group: 'staged' | 'unstaged') {
+  if (!dragFrom.value || dragFrom.value === group || !activePath.value || busy.value) return
+  e.preventDefault() // 不 preventDefault 就不会触发 drop
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  dropOn.value = group
+}
+
+/** 组头里还有文字和按钮，鼠标在子元素间移动会不停触发 dragleave：
+ *  只有真正离开组头本身才清掉高亮，否则投放区会一闪一闪。 */
+function onGroupDragLeave(e: DragEvent) {
+  const el = e.currentTarget as HTMLElement | null
+  const to = e.relatedTarget as Node | null
+  if (el && to && el.contains(to)) return
+  dropOn.value = ''
+}
+
+function onGroupDrop(e: DragEvent, group: 'staged' | 'unstaged') {
+  e.preventDefault()
+  const path = dragPath.value
+  const from = dragFrom.value
+  onFileDragEnd()
+  if (!path || !from || from === group || busy.value) return
+  if (group === 'staged') void runGitOp(() => GitStage(activePath.value, [path]))
+  else void runGitOp(() => GitUnstage(activePath.value, [path]))
 }
 
 // ---- 提交 ----
@@ -1819,6 +2039,117 @@ function startSplit(e: MouseEvent) {
   document.body.style.userSelect = 'none'
 }
 
+// ---- 工作区两组的高度分配 ----
+/** 默认比例：已暂存 62%。暂存区是"马上要提交的那几条"，看得全才敢按提交；
+ *  未暂存那边多是刚改完还没整理的，往下翻一翻很正常。 */
+const WT_PCT_DEFAULT = 62
+/** 上半区「已暂存」占的百分比；下半区吃剩下的。 */
+const wtPct = ref(WT_PCT_DEFAULT)
+const wtPanesEl = ref<HTMLElement | null>(null)
+
+/** 拖两组的中间那条：按位移换算成百分比，容器高度在 mousedown 时量一次就够了。 */
+function startWtSplit(e: MouseEvent) {
+  e.preventDefault()
+  const h = wtPanesEl.value?.getBoundingClientRect().height || 0
+  if (h <= 0) return
+  const startY = e.clientY
+  const startPct = wtPct.value
+  const move = (ev: MouseEvent) => {
+    const pct = startPct + ((ev.clientY - startY) / h) * 100
+    // 22% / 78%：两边都还留得住一条组头 + 至少一行文件
+    wtPct.value = Math.min(78, Math.max(22, pct))
+  }
+  const up = () => {
+    window.removeEventListener('mousemove', move)
+    window.removeEventListener('mouseup', up)
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+  }
+  window.addEventListener('mousemove', move)
+  window.addEventListener('mouseup', up)
+  document.body.style.cursor = 'row-resize'
+  document.body.style.userSelect = 'none'
+}
+
+// ---- 列宽拖动（仓库栏 / 工作区栏 / 文件清单）----
+// 宽度记在 localStorage：它只是「这台机器上这个面板多宽」，不是仓库数据，没必要进后端。
+type ColKey = 'side' | 'wt' | 'files'
+
+const COL_MIN = 140
+const COL_MAX = 600
+/** 弹性列（提交列表 / diff）的可读下限：再窄连摘要、代码行都放不下。 */
+const COL_FLEX_MIN = 320
+const COL_CONF: Record<ColKey, { key: string; cssVar: string; cap: number }> = {
+  side: { key: 'quickdock.git.sideWidth', cssVar: '--side-w', cap: 480 },
+  wt: { key: 'quickdock.git.wtWidth', cssVar: '--wt-w', cap: 520 },
+  files: { key: 'quickdock.git.filesWidth', cssVar: '--files-w', cap: 560 },
+}
+
+/** 0 表示「没拖过」：此时不出 inline 变量，宽度交给样式表与窄屏媒体查询。 */
+function readColW(k: ColKey): number {
+  try {
+    const n = parseInt(localStorage.getItem(COL_CONF[k].key) || '', 10)
+    return n >= COL_MIN && n <= COL_MAX ? n : 0
+  } catch { return 0 }   // 隐私模式下 localStorage 读写都会抛，用默认值即可
+}
+
+const colW = reactive<Record<ColKey, number>>({
+  side: readColW('side'), wt: readColW('wt'), files: readColW('files'),
+})
+const sideEl = ref<HTMLElement | null>(null)
+const wtEl = ref<HTMLElement | null>(null)
+const filesEl = ref<HTMLElement | null>(null)
+const dragCol = ref<'' | ColKey>('')
+
+const colWidthStyle = computed(() => {
+  const s: Record<string, string> = {}
+  for (const k of Object.keys(colW) as ColKey[]) {
+    if (colW[k]) s[COL_CONF[k].cssVar] = colW[k] + 'px'
+  }
+  return s
+})
+
+function colEl(k: ColKey) {
+  return k === 'side' ? sideEl.value : k === 'wt' ? wtEl.value : filesEl.value
+}
+
+function startColSplit(e: MouseEvent, which: ColKey) {
+  const el = colEl(which)
+  if (!el) return
+  const conf = COL_CONF[which]
+  const startX = e.clientX
+  const startW = el.getBoundingClientRect().width
+  // 这三栏右边都只有一个弹性列（.git-main / .detail-diff），本列加宽多少，它就窄多少。
+  // 所以上限 = 起始宽 + 弹性列还能让出的宽度，比按父容器比例估算准得多——
+  // 后者没算中间那几列的固定宽度，窗口不宽时会算出「一拖就把主区挤没」的上限。
+  const flex = el.parentElement?.lastElementChild as HTMLElement | null
+  const flexW = flex ? flex.getBoundingClientRect().width : 480
+  const grow = Math.max(0, flexW - COL_FLEX_MIN)
+  const max = Math.max(COL_MIN + 40, Math.min(conf.cap, startW + grow))
+  dragCol.value = which
+  const move = (ev: MouseEvent) => {
+    colW[which] = Math.round(Math.min(max, Math.max(COL_MIN, startW + ev.clientX - startX)))
+  }
+  const up = () => {
+    window.removeEventListener('mousemove', move)
+    window.removeEventListener('mouseup', up)
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+    dragCol.value = ''
+    try { localStorage.setItem(conf.key, String(colW[which])) } catch { /* 存不下就算了，本次拖动仍然生效 */ }
+  }
+  window.addEventListener('mousemove', move)
+  window.addEventListener('mouseup', up)
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+}
+
+/** 双击分隔条回到样式表的默认宽度（窄屏另有默认值，所以是「清掉自定义」而不是写死 240）。 */
+function resetColSplit(which: ColKey) {
+  colW[which] = 0
+  try { localStorage.removeItem(COL_CONF[which].key) } catch { /* 同上 */ }
+}
+
 // ---- 展示辅助 ----
 
 function fmtTime(ts: number): string {
@@ -1860,13 +2191,6 @@ function refMore(refs: string): number {
   return Math.max(0, refList(refs).length - 2)
 }
 
-/** 作者头像：没有邮箱哈希可用，取名字首字母 + 按名字定一个三色循环的底色，
- *  让作者列可扫（同一个人同色），也不再是一整列灰字。 */
-function avatarCls(name: string): string {
-  let n = 0
-  for (let i = 0; i < name.length; i++) n = (n + name.charCodeAt(i)) % 997
-  return `av${n % 3}`
-}
 
 function statusColor(code: string): string {
   if (code === '??') return 'new'
@@ -2019,6 +2343,29 @@ function toggleDir(key: string) {
   closedDirs.value = next
 }
 
+/** 目录行上的「+ / −」：把该目录下的整批文件一次 add / reset。
+ *  目录可能有几十个文件，逐个勾太慢；这也是「悬停即见」最值的两个位置之一。 */
+function dirPathOfRow(key: string) {
+  const i = key.indexOf('d:')
+  return i >= 0 ? key.slice(i + 2) : ''
+}
+
+function stageDirRow(row: TreeRow<WorkFile>) {
+  const dir = dirPathOfRow(row.key)
+  if (!dir || busy.value) return
+  const files = unstagedFiles.value.filter(f => f.path.startsWith(dir + '/')).map(f => f.path)
+  if (!files.length) return
+  void runGitOp(() => GitStage(activePath.value, files))
+}
+
+function unstageDirRow(row: TreeRow<WorkFile>) {
+  const dir = dirPathOfRow(row.key)
+  if (!dir || busy.value) return
+  const files = stagedFiles.value.filter(f => f.path.startsWith(dir + '/')).map(f => f.path)
+  if (!files.length) return
+  void runGitOp(() => GitUnstage(activePath.value, files))
+}
+
 /** 平铺模式的同等形状：模板只认 TreeRow，不用为两种视图写两套 DOM。 */
 function flatRows<T>(files: T[], prefix: string, pathOf: (f: T) => string): TreeRow<T>[] {
   return files.map(f => ({
@@ -2152,7 +2499,7 @@ onMounted(async () => {
   await Promise.all([loadRepos(), checkGitEnv()])
   await loadRepo()
 })
-onUnmounted(() => { document.body.style.cursor = ''; document.body.style.userSelect = '' })
+onUnmounted(() => { document.body.style.cursor = ''; document.body.style.userSelect = ''; document.removeEventListener('click', closeMore) })
 
 // ===== PREVIEW-ONLY（截图预览用：浏览器里没有 Wails 桥，加 ?preview=1 注入假数据以便 chrome headless 截图调样式；仅 DEV 生效，保留供后续视觉迭代）=====
 const PREVIEW = import.meta.env.DEV && window.location.search.includes('preview=1')
@@ -2364,26 +2711,31 @@ const dialogCtx = reactive({
             <Loader2 v-if="busy === 'pull'" :size="13" />
             <ArrowDownToLine v-else :size="13" />
             {{ t('git_pull') }}
-            <span v-if="status?.behind" class="btn-badge">{{ status.behind }}</span>
+            <span v-if="status?.behind" class="btn-badge"><ArrowDown :size="9" />{{ status.behind }}</span>
           </button>
           <button class="qd-btn qd-btn-ghost" :class="{ 'is-spinning': loading }" :disabled="!activePath || loading"
                   :title="t('git_history')" @click="loadRepo()">
             <RefreshCw :size="13" />
           </button>
-          <!-- 远端管理：多远端（origin + upstream）与地址改错，都只能在这里改 -->
-          <button class="qd-btn qd-btn-ghost" :title="t('git_remotes')" :disabled="!activePath"
-                  @click="openRemotes">
-            <Link2 :size="13" />
-          </button>
-          <!-- 子模块：数量少但「clone 后目录是空的」最容易让人以为仓库坏了 -->
-          <button class="qd-btn qd-btn-ghost" :title="t('git_submodules')" :disabled="!activePath"
-                  @click="openSubmodules">
-            <Boxes :size="13" />
-          </button>
-          <!-- SSH 密钥：生成/写 config/测连通都在这一个入口里，用完即走 -->
-          <button class="qd-btn qd-btn-ghost" :title="t('git_ssh')" @click="openSSH">
-            <KeyRound :size="13" />
-          </button>
+          <!-- 低频入口收进 ⋯：远端 / 子模块 / SSH 原来和 Fetch 平级排成一排，
+               图标大小不一、又没有文字，一行里看不出哪些是同一类动作。 -->
+          <div class="bar-more">
+            <button class="qd-btn qd-btn-ghost" :class="{ on: moreOpen }" :title="t('git_more')"
+                    :disabled="!activePath" :aria-expanded="moreOpen" @click.stop="moreOpen = !moreOpen">
+              <MoreHorizontal :size="14" />
+            </button>
+            <div v-if="moreOpen" class="bar-more-menu" @click.stop>
+              <button class="bm-item" @click="openRemotes(); moreOpen = false">
+                <Link2 :size="13" />{{ t('git_remotes') }}
+              </button>
+              <button class="bm-item" @click="openSubmodules(); moreOpen = false">
+                <Boxes :size="13" />{{ t('git_submodules') }}
+              </button>
+              <button class="bm-item" @click="openSSH(); moreOpen = false">
+                <KeyRound :size="13" />{{ t('git_ssh') }}
+              </button>
+            </div>
+          </div>
         </div>
         <span class="qd-action-sep"></span>
         <!-- 推送是这一页唯一「会改动远端」的主操作，给实心主按钮；
@@ -2394,7 +2746,7 @@ const dialogCtx = reactive({
           <Loader2 v-if="busy === 'push'" :size="13" />
           <Upload v-else :size="13" />
           {{ t('git_push') }}
-          <span v-if="status?.ahead" class="btn-badge">{{ status.ahead }}</span>
+          <span v-if="status?.ahead" class="btn-badge"><ArrowUp :size="9" />{{ status.ahead }}</span>
         </button>
       </div>
     </header>
@@ -2415,9 +2767,11 @@ const dialogCtx = reactive({
 
     <p v-if="error" class="git-error">{{ error }}</p>
 
-    <div class="git-body">
+    <!-- 三列宽度都走 CSS 变量：没拖过时变量为空，宽度由样式表给（含窄屏媒体查询），
+         拖过一次之后 inline 变量优先，用户的选择才不会被响应式规则悄悄改回去。 -->
+    <div class="git-body" :style="colWidthStyle">
       <!-- 左栏：仓库 / 分支 / 远程 / 标签 / 贮藏 五组 -->
-      <aside :class="['git-side', { collapsed: !sideOpen }]">
+      <aside ref="sideEl" :class="['git-side', { collapsed: !sideOpen }]">
         <div class="grp">
           <div class="grp-head">
             <button class="grp-toggle" @click="groupToggle('repos')">
@@ -2537,22 +2891,203 @@ const dialogCtx = reactive({
         </template>
       </aside>
 
-      <!-- 右栏：提交表 + 详情。graph 列宽算在整栏上，表头与数据行才能吃同一个值。 -->
-      <section ref="mainEl" class="git-main" :style="{ '--graph-ch': graphCh + 'ch' }">
-        <!-- 工作区入口横在最上面：未提交的改动是「现在要处理的事」，
-             排在历史列表里当一行会让人以为它也是一次提交。 -->
-        <button v-if="activePath" :class="['wt-bar', { active: worktreeMode, dirty: changeCount > 0 }]"
-                @click="openWorktree">
-          <FileDiff :size="13" class="wt-ic" />
+      <!-- 列分隔：左栏 ↔ 工作区。折叠左栏时它随左栏一起消失，不留一条悬空的线。 -->
+      <div v-if="sideOpen" class="vsplit" :class="{ dragging: dragCol === 'side' }"
+           role="separator" aria-orientation="vertical" :title="t('git_resize_col')"
+           @mousedown.prevent="startColSplit($event, 'side')"
+           @dblclick="resetColSplit('side')"></div>
+
+      <!-- 工作区栏：常驻左侧独立一列。
+           以前工作区（已暂存 / 未暂存 + 提交框）和提交详情共用右下角那块区域，
+           点开就像一张抽屉盖在历史上，diff 只剩一个角。现在固定成第三列：
+           左 = 仓库 / 分支，中 = 工作区改动，右 = 历史 + diff，互不遮挡。 -->
+      <aside v-if="activePath" ref="wtEl" class="git-wt">
+        <div class="wt-head">
+          <FileDiff :size="13" class="wt-ic" :class="{ clean: !changeCount }" />
           <span class="wt-name">{{ t('git_worktree') }}</span>
           <span v-if="changeCount" class="wt-n">{{ changeCount }}</span>
-          <span class="wt-sub">
-            <template v-if="stagedFiles.length">{{ t('git_staged_n', { n: stagedFiles.length }) }}</template>
-            <template v-else-if="unstagedFiles.length">{{ t('git_unstaged_n', { n: unstagedFiles.length }) }}</template>
-            <template v-else>{{ t('git_clean') }}</template>
-          </span>
-          <ChevronRight :size="12" class="wt-arrow" />
-        </button>
+          <!-- 树 / 平铺是整栏的视图设置，不属于「已暂存」这一组 -->
+          <button class="pane-ic" :title="t('git_tree_toggle')" @click="treeMode = !treeMode">
+            <List v-if="treeMode" :size="11" />
+            <ListTree v-else :size="11" />
+          </button>
+          <button class="wt-all" :class="{ on: worktreeMode }" :title="t('git_worktree_diff')"
+                  @click="openWorktree">{{ t('git_all_changes') }}</button>
+        </div>
+
+        <!-- 两组常驻：干净时也照原样摆「已暂存 / 未暂存」两条组头，各自下面一行灰字。
+             之前试过把干净态收成一块居中空态，结果是整栏一大片深色里孤零零一个勾，
+             比两行组头更空；组头本身也是「拖到这里 add / reset」的投放区，收起来等于
+             把一个持续可用的入口藏掉了。 -->
+        <div ref="wtPanesEl" class="wt-panes" :style="{ '--wt-top': wtPct + '%' }">
+          <!-- 已暂存：上半区，高度由中间那条分隔条决定；内容超了就在自己的框内滚 -->
+          <div class="wt-pane wt-pane-top">
+          <!-- 组头同时是拖放投放区：把文件从另一组拖过来即可 add / reset。
+               整组做投放区范围太大，拖到一半就触发，所以只认组头这一条。 -->
+          <div class="pane-head" :class="{ 'drop-on': dropOn === 'staged' }"
+               @dragover="onGroupDragOver($event, 'staged')"
+               @dragleave="onGroupDragLeave"
+               @drop="onGroupDrop($event, 'staged')">
+            <!-- 组头只留「状态点 + 名称 + 数量」：原来的 FileText 图标两组一模一样，
+                 说了等于没说。实心点 = 已加入暂存区，空心点 = 还没加。 -->
+            <span class="grp-dot on"></span>
+            <span class="pane-name">{{ t('git_staged') }}</span>
+            <span v-if="stagedFiles.length" class="pane-n">{{ stagedFiles.length }}</span>
+            <button v-if="stagedFiles.length" class="pane-act" :disabled="!!busy" @click="unstageAll">
+              {{ t('git_unstage_all') }}
+            </button>
+          </div>
+          <ul v-if="stagedFiles.length" class="file-rows wt-rows"
+              @dragover="onGroupDragOver($event, 'staged')" @dragleave="onGroupDragLeave"
+              @drop="onGroupDrop($event, 'staged')">
+            <template v-for="row in stagedRows" :key="row.key">
+              <li v-key-click v-if="row.dir" class="tree-dir"
+                  :style="{ paddingLeft: 10 + row.depth * 12 + 'px' }" @click="toggleDir(row.key)">
+                <ChevronDown v-if="!closedDirs.has(row.key)" :size="10" />
+                <ChevronRight v-else :size="10" />
+                <Folder :size="11" class="td-ic" />
+                <span class="td-name">{{ row.name }}</span>
+                <button class="file-quick" :title="t('git_unstage')" :disabled="!!busy"
+                        @click.stop="unstageDirRow(row)"><Minus :size="11" /></button>
+              </li>
+              <li v-key-click v-else-if="row.file"
+                  :class="['file-row', { active: worktreeMode && selectedFile === row.file!.path, picked: picked.has('s:' + row.file!.path) }]"
+                  :style="{ paddingLeft: 10 + row.depth * 12 + 'px' }"
+                  :title="row.file!.path" tabindex="0" draggable="true"
+                  @dragstart="onFileDragStart($event, row.file!, 'staged')" @dragend="onFileDragEnd"
+                  @click="onFileClick($event, row.file!, 'staged')"
+                  @contextmenu.prevent="openFileCtx($event, row.file!, 'staged')"
+                  @keydown.menu.prevent="openFileCtx($event, row.file!, 'staged')"
+                  @keydown.shift.f10.prevent="openFileCtx($event, row.file!, 'staged')">
+                <input class="stage-box" type="checkbox" :checked="true" :disabled="busy === 'stage'"
+                       :title="t('git_unstage')" @click.stop="toggleStage(row.file!, true)" />
+                <span :class="['file-badge', statusColor(row.file!.status)]">{{ row.file!.status || 'M' }}</span>
+                <span class="file-path">{{ row.name }}</span>
+                <span v-if="row.file!.add || row.file!.del" class="file-num">
+                  <b v-if="row.file!.add" class="add">+{{ row.file!.add }}</b>
+                  <b v-if="row.file!.del" class="del">−{{ row.file!.del }}</b>
+                </span>
+                <button class="file-quick" :title="t('git_unstage')" :disabled="busy === 'stage'"
+                        @click.stop="toggleStage(row.file!, true)"><Minus :size="11" /></button>
+              </li>
+            </template>
+          </ul>
+          <p v-else class="file-state">{{ t('git_nothing_staged') }}</p>
+          </div>
+
+          <!-- 两组之间的分隔条：拖动改上半区高度，双击回到默认比例 -->
+          <div class="splitter" role="separator" aria-orientation="horizontal"
+               :title="t('git_resize_wt')" @mousedown.prevent="startWtSplit"
+               @dblclick="wtPct = WT_PCT_DEFAULT"></div>
+
+          <!-- 未暂存：下半区，吃剩下的高度 -->
+          <div class="wt-pane wt-pane-bottom">
+          <div class="pane-head" :class="{ 'drop-on': dropOn === 'unstaged' }"
+               @dragover="onGroupDragOver($event, 'unstaged')"
+               @dragleave="onGroupDragLeave"
+               @drop="onGroupDrop($event, 'unstaged')">
+            <span class="grp-dot"></span>
+            <span class="pane-name">{{ t('git_unstaged') }}</span>
+            <span v-if="unstagedFiles.length" class="pane-n">{{ unstagedFiles.length }}</span>
+            <button v-if="unstagedFiles.length" class="pane-act" :disabled="!!busy" @click="stageAll">
+              {{ t('git_stage_all') }}
+            </button>
+            <button v-if="unstagedFiles.length" class="pane-ic danger" :title="t('git_discard_all')"
+                    :disabled="!!busy" @click="confirmDiscardAll"><Trash2 :size="11" /></button>
+          </div>
+          <ul v-if="unstagedFiles.length" class="file-rows wt-rows"
+              @dragover="onGroupDragOver($event, 'unstaged')" @dragleave="onGroupDragLeave"
+              @drop="onGroupDrop($event, 'unstaged')">
+            <template v-for="row in unstagedRows" :key="row.key">
+              <li v-key-click v-if="row.dir" class="tree-dir"
+                  :style="{ paddingLeft: 10 + row.depth * 12 + 'px' }" @click="toggleDir(row.key)">
+                <ChevronDown v-if="!closedDirs.has(row.key)" :size="10" />
+                <ChevronRight v-else :size="10" />
+                <Folder :size="11" class="td-ic" />
+                <span class="td-name">{{ row.name }}</span>
+                <button class="file-quick" :title="t('git_stage')" :disabled="!!busy"
+                        @click.stop="stageDirRow(row)"><Plus :size="11" /></button>
+              </li>
+              <li v-key-click v-else-if="row.file"
+                  :class="['file-row', { active: worktreeMode && selectedFile === row.file!.path, picked: picked.has('u:' + row.file!.path) }]"
+                  :style="{ paddingLeft: 10 + row.depth * 12 + 'px' }"
+                  :title="row.file!.path" tabindex="0" draggable="true"
+                  @dragstart="onFileDragStart($event, row.file!, 'unstaged')" @dragend="onFileDragEnd"
+                  @click="onFileClick($event, row.file!, 'unstaged')"
+                  @contextmenu.prevent="openFileCtx($event, row.file!, 'unstaged')"
+                  @keydown.menu.prevent="openFileCtx($event, row.file!, 'unstaged')"
+                  @keydown.shift.f10.prevent="openFileCtx($event, row.file!, 'unstaged')">
+                <input class="stage-box" type="checkbox" :checked="false" :disabled="busy === 'stage'"
+                       :title="t('git_stage')" @click.stop="toggleStage(row.file!, false)" />
+                <span :class="['file-badge', statusColor(row.file!.status)]">{{ row.file!.status || 'M' }}</span>
+                <span class="file-path">{{ row.name }}</span>
+                <span v-if="row.file!.add || row.file!.del" class="file-num">
+                  <b v-if="row.file!.add" class="add">+{{ row.file!.add }}</b>
+                  <b v-if="row.file!.del" class="del">−{{ row.file!.del }}</b>
+                </span>
+                <button class="file-quick" :title="t('git_stage')" :disabled="busy === 'stage'"
+                        @click.stop="toggleStage(row.file!, false)"><Plus :size="11" /></button>
+              </li>
+            </template>
+          </ul>
+          <p v-else class="file-state">{{ t('git_worktree_empty') }}</p>
+          </div>
+        </div>
+
+        <!-- 多选浮条：Ctrl/⌘ 点选、Shift 连选后出现，贴在文件区底部，滚多远都在手边 -->
+        <div v-if="pickedCount" class="pick-bar">
+          <span class="pb-n">{{ t('git_picked_n', { n: pickedCount }) }}</span>
+          <button v-if="pickedUnstaged.length" class="pb-btn" :disabled="!!busy" @click="stagePicked">
+            {{ t('git_stage_picked') }}
+          </button>
+          <button v-if="pickedStaged.length" class="pb-btn" :disabled="!!busy" @click="unstagePicked">
+            {{ t('git_unstage_picked') }}
+          </button>
+          <button class="pb-btn danger" :disabled="!!busy" @click="confirmDiscardPicked">
+            {{ t('git_ctx_discard') }}
+          </button>
+          <button class="pb-x" :title="t('git_picked_clear')" @click="clearPicked">
+            <X :size="12" />
+          </button>
+        </div>
+
+        <!-- 提交面板：跟着工作区走，固定在左栏底部 -->
+        <div v-if="worktree" class="commit-box">
+          <div class="cb-head">
+            <span class="cb-label">{{ t('git_commit_msg') }}</span>
+            <button class="cb-mini" :class="{ 'is-on': amendMode }"
+                    :title="t('git_amend_title')" @click="amendMode = !amendMode">
+              <Pencil :size="11" />
+            </button>
+            <button class="cb-mini" :class="{ 'is-spinning': aiWriting }"
+                    :disabled="aiWriting || !changeCount" :title="t('git_ai_hint')" @click="aiCommitMessage">
+              <Loader2 v-if="aiWriting" :size="11" />
+              <Sparkles v-else :size="11" />
+            </button>
+          </div>
+          <textarea v-model="commitMsg" class="cb-input" rows="3"
+                    :placeholder="amendMode ? t('git_amend_ph') : t('git_commit_ph')"
+                    @keydown.ctrl.enter.prevent="doCommit" @keydown.meta.enter.prevent="doCommit"></textarea>
+          <div class="cb-foot">
+            <span class="cb-hint">{{ commitHint }}</span>
+            <button class="qd-btn qd-btn-primary" :class="{ 'is-spinning': committing }"
+                    :disabled="!canCommit" :title="commitBlockReason" @click="doCommit">
+              <Loader2 v-if="committing" :size="12" />
+              <Check v-else :size="12" />
+              {{ amendMode ? t('git_amend_btn') : t('git_commit_btn') }}
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- 列分隔：工作区 ↔ 提交区。没有打开的仓库时工作区栏不存在，这条也一起收掉。 -->
+      <div v-if="activePath" class="vsplit" :class="{ dragging: dragCol === 'wt' }"
+           role="separator" aria-orientation="vertical" :title="t('git_resize_col')"
+           @mousedown.prevent="startColSplit($event, 'wt')"
+           @dblclick="resetColSplit('wt')"></div>
+
+      <!-- 右栏：提交表 + 详情。 -->
+      <section ref="mainEl" class="git-main">
 
         <!-- 文件历史横幅：列表内容被换成了「这个文件的提交」，必须有个明确出口 -->
         <div v-if="fileHist" class="fh-bar">
@@ -2565,6 +3100,12 @@ const dialogCtx = reactive({
 
         <!-- 提交筛选：输入即过滤已载入的 200 条；回车升格为全历史搜索（问 git 本身，覆盖所有分支） -->
         <div v-if="activePath" class="hist-bar">
+          <div class="hb-scope">
+            <button :class="{ on: logScope === 'current' }" :title="t('git_scope_current_hint')"
+                    @click="setLogScope('current')">{{ t('git_scope_current') }}</button>
+            <button :class="{ on: logScope === 'all' }" :title="t('git_scope_all_hint')"
+                    @click="setLogScope('all')">{{ t('git_scope_all') }}</button>
+          </div>
           <Search :size="11" class="hb-ic" />
           <input v-model="histQuery" class="hb-input" spellcheck="false"
                  :placeholder="t('gitFilterPhMin2')" :title="t('git_search_hint')"
@@ -2575,15 +3116,16 @@ const dialogCtx = reactive({
           <span v-if="searching" class="hb-mode"><Loader2 :size="10" class="spin" />{{ t('loading') }}</span>
           <span v-else-if="searchResults" class="hb-mode">{{ t('git_search_all') }}</span>
           <span class="hb-n">
-            {{ shownCommits.length }}<template v-if="histQuery">/{{ baseCommits.length }}</template>
+            {{ shownCommits.length }}<template v-if="histQuery">/{{ scopedCommits.length }}</template>
           </span>
         </div>
 
-        <div class="commit-head">
-          <span class="col-graph"></span>
-          <span class="col-subject">{{ t('git_col_subject') }}</span>
-          <span class="col-author">{{ t('git_col_author') }}</span>
-          <span class="col-date">{{ t('git_col_date') }}</span>
+        <div class="commit-head" :style="showGraph ? { '--graph-w': graphWidth + 'px' } : null">
+          <span v-if="showGraph" class="col-graph"></span>
+          <span class="commit-head-main">
+            <span>{{ t('git_col_subject') }}</span>
+            <span class="ch-time">{{ t('git_col_date') }}</span>
+          </span>
         </div>
 
         <div class="commit-scroll" :style="{ flexBasis: listPct + '%' }">
@@ -2608,26 +3150,33 @@ const dialogCtx = reactive({
           <p v-else-if="!shownCommits.length" class="pane-state">{{ t('git_history_empty') }}</p>
 
           <ul v-else class="commit-list">
-            <li v-key-click v-for="c in shownCommits" :key="c.hash"
+            <li v-key-click v-for="(c, gi) in shownCommits" :key="c.hash"
                 :class="['commit-item', { active: c.hash === selectedHash }]" tabindex="0"
+                :style="showGraph ? { '--graph-w': graphWidth + 'px' } : null"
                 @click="selectCommit(c)" @contextmenu.prevent="openCommitCtx($event, c)"
                 @keydown.menu.prevent="openCommitCtx($event, c)"
                 @keydown.shift.f10.prevent="openCommitCtx($event, c)">
-              <!-- graph 用等宽字体原样渲染：SourceTree 的分支线就是这套字符，不解析反而更准 -->
-              <span class="col-graph commit-graph">{{ c.graph }}</span>
-              <!-- 分支/标签徽章跟着摘要走：refs 只有被分支或标签指向的提交才有，
-                   独立成一列时八成行是空白，摘要反被压窄；贴在这里宽度跟内容走。 -->
-              <span class="col-subject commit-subject">
+              <!-- 提交图：SVG 只画线（viewBox 纵向归一化到 0-100，随行高自适应），
+                   圆点用绝对定位的 span——preserveAspectRatio=none 会把 SVG 里的圆压成椭圆。 -->
+              <span v-if="showGraph" class="col-graph">
+                <svg class="commit-graph" :viewBox="`0 0 ${graphWidth} ${ROW_H}`" preserveAspectRatio="none" aria-hidden="true">
+                  <path v-for="(p, pi) in (graphRows[gi]?.paths || [])" :key="pi"
+                        :d="p.d" :stroke="laneVar(p.color)" stroke-width="1.3"
+                        fill="none" stroke-linecap="round" vector-effect="non-scaling-stroke" />
+                </svg>
+                <span v-if="graphRows[gi]" class="commit-dot" :class="{ merge: graphRows[gi].merge }"
+                      :style="{ left: graphRows[gi].x + 'px', color: laneVar(graphRows[gi].color) }"></span>
+              </span>
+              <!-- 单行：摘要 · 分支标记 · 作者 · 时间。参照 GitLens，行高压到 28px，
+                   一屏能多看一倍提交；作者靠右，竖着扫不会因为摘要长短来回跳。 -->
+              <span class="commit-core">
                 <span class="subject-text" :title="c.subject">{{ c.subject }}</span>
                 <span v-for="r in refList(c.refs).slice(0, 2)" :key="r"
                       :class="['ref', `ref-${refKind(r)}`]" :title="refText(r)">{{ refText(r) }}</span>
                 <span v-if="refMore(c.refs)" class="ref ref-more" :title="c.refs">+{{ refMore(c.refs) }}</span>
-              </span>
-              <span class="col-author commit-author">
-                <span :class="['avatar', avatarCls(c.author)]">{{ (c.author || '?').slice(0, 1).toUpperCase() }}</span>
                 <span class="author-name">{{ c.author }}</span>
+                <span class="commit-time">{{ fmtTime(c.ts) }}</span>
               </span>
-              <span class="col-date commit-time">{{ fmtTime(c.ts) }}</span>
             </li>
           </ul>
         </div>
@@ -2638,105 +3187,9 @@ const dialogCtx = reactive({
 
         <div class="detail-wrap">
           <div class="detail">
-            <!-- 左：工作区是「已暂存 / 未暂存」两组（勾选框就是 git add），提交详情是一组 -->
-            <div v-if="worktreeMode" class="detail-files wt-files">
-              <div class="pane-head sticky">
-                <FileText :size="12" />
-                <span>{{ t('git_staged') }}</span>
-                <span class="pane-n">{{ stagedFiles.length }}</span>
-                <button class="pane-ic" :title="t('git_tree_toggle')" @click="treeMode = !treeMode">
-                  <List v-if="treeMode" :size="11" />
-                  <ListTree v-else :size="11" />
-                </button>
-                <button v-if="stagedFiles.length" class="pane-act" :disabled="!!busy" @click="unstageAll">
-                  {{ t('git_unstage_all') }}
-                </button>
-              </div>
-              <ul v-if="stagedFiles.length" class="file-rows wt-rows">
-                <template v-for="row in stagedRows" :key="row.key">
-                  <li v-key-click v-if="row.dir" class="tree-dir"
-                      :style="{ paddingLeft: 12 + row.depth * 12 + 'px' }" @click="toggleDir(row.key)">
-                    <ChevronDown v-if="!closedDirs.has(row.key)" :size="10" />
-                    <ChevronRight v-else :size="10" />
-                    <Folder :size="11" class="td-ic" />
-                    <span class="td-name">{{ row.name }}</span>
-                  </li>
-                  <li v-key-click v-else-if="row.file"
-                      :class="['file-row', { active: selectedFile === row.file!.path, picked: picked.has('s:' + row.file!.path) }]"
-                      :style="{ paddingLeft: 12 + row.depth * 12 + 'px' }"
-                      :title="row.file!.path" tabindex="0" @click="onFileClick($event, row.file!, 'staged')"
-                      @contextmenu.prevent="openFileCtx($event, row.file!, 'staged')"
-                      @keydown.menu.prevent="openFileCtx($event, row.file!, 'staged')"
-                      @keydown.shift.f10.prevent="openFileCtx($event, row.file!, 'staged')">
-                    <input class="stage-box" type="checkbox" :checked="true" :disabled="busy === 'stage'"
-                           :title="t('git_unstage')" @click.stop="toggleStage(row.file!, true)" />
-                    <span :class="['file-badge', statusColor(row.file!.status)]">{{ row.file!.status || 'M' }}</span>
-                    <span class="file-path">{{ row.name }}</span>
-                    <span v-if="row.file!.add || row.file!.del" class="file-num">
-                      <b v-if="row.file!.add" class="add">+{{ row.file!.add }}</b>
-                      <b v-if="row.file!.del" class="del">−{{ row.file!.del }}</b>
-                    </span>
-                  </li>
-                </template>
-              </ul>
-              <p v-else class="file-state">{{ t('git_nothing_staged') }}</p>
-
-              <div class="pane-head sticky">
-                <FileText :size="12" />
-                <span>{{ t('git_unstaged') }}</span>
-                <span class="pane-n">{{ unstagedFiles.length }}</span>
-                <button v-if="unstagedFiles.length" class="pane-act" :disabled="!!busy" @click="stageAll">
-                  {{ t('git_stage_all') }}
-                </button>
-              </div>
-              <ul v-if="unstagedFiles.length" class="file-rows wt-rows">
-                <template v-for="row in unstagedRows" :key="row.key">
-                  <li v-key-click v-if="row.dir" class="tree-dir"
-                      :style="{ paddingLeft: 12 + row.depth * 12 + 'px' }" @click="toggleDir(row.key)">
-                    <ChevronDown v-if="!closedDirs.has(row.key)" :size="10" />
-                    <ChevronRight v-else :size="10" />
-                    <Folder :size="11" class="td-ic" />
-                    <span class="td-name">{{ row.name }}</span>
-                  </li>
-                  <li v-key-click v-else-if="row.file"
-                      :class="['file-row', { active: selectedFile === row.file!.path, picked: picked.has('u:' + row.file!.path) }]"
-                      :style="{ paddingLeft: 12 + row.depth * 12 + 'px' }"
-                      :title="row.file!.path" tabindex="0" @click="onFileClick($event, row.file!, 'unstaged')"
-                      @contextmenu.prevent="openFileCtx($event, row.file!, 'unstaged')"
-                      @keydown.menu.prevent="openFileCtx($event, row.file!, 'unstaged')"
-                      @keydown.shift.f10.prevent="openFileCtx($event, row.file!, 'unstaged')">
-                    <input class="stage-box" type="checkbox" :checked="false" :disabled="busy === 'stage'"
-                           :title="t('git_stage')" @click.stop="toggleStage(row.file!, false)" />
-                    <span :class="['file-badge', statusColor(row.file!.status)]">{{ row.file!.status || 'M' }}</span>
-                    <span class="file-path">{{ row.name }}</span>
-                    <span v-if="row.file!.add || row.file!.del" class="file-num">
-                      <b v-if="row.file!.add" class="add">+{{ row.file!.add }}</b>
-                      <b v-if="row.file!.del" class="del">−{{ row.file!.del }}</b>
-                    </span>
-                  </li>
-                </template>
-              </ul>
-              <p v-else class="file-state">{{ t('git_worktree_empty') }}</p>
-
-              <!-- 多选浮条：Ctrl/⌘ 点选、Shift 连选后出现，贴在文件区底部，滚多远都在手边 -->
-              <div v-if="pickedCount" class="pick-bar">
-                <span class="pb-n">{{ t('git_picked_n', { n: pickedCount }) }}</span>
-                <button v-if="pickedUnstaged.length" class="pb-btn" :disabled="!!busy" @click="stagePicked">
-                  {{ t('git_stage_picked') }}
-                </button>
-                <button v-if="pickedStaged.length" class="pb-btn" :disabled="!!busy" @click="unstagePicked">
-                  {{ t('git_unstage_picked') }}
-                </button>
-                <button class="pb-btn danger" :disabled="!!busy" @click="confirmDiscardPicked">
-                  {{ t('git_ctx_discard') }}
-                </button>
-                <button class="pb-x" :title="t('git_picked_clear')" @click="clearPicked">
-                  <X :size="12" />
-                </button>
-              </div>
-            </div>
-
-            <div v-else class="detail-files">
+            <!-- 工作区模式下不显示这一列：文件清单已经在左边常驻的工作区栏里，
+                 右侧整块宽度留给 diff（diff 是这一页要读的东西）。 -->
+            <div v-if="!worktreeMode && !filesCollapsed" ref="filesEl" class="detail-files">
               <div class="pane-head">
                 <FileText :size="12" />
                 <span>{{ t('git_changed_files', { n: detail?.files?.length || 0 }) }}</span>
@@ -2778,8 +3231,22 @@ const dialogCtx = reactive({
               </ul>
             </div>
 
+            <!-- 列分隔：文件清单 ↔ diff。折叠文件列时随之隐藏 -->
+            <div v-if="!worktreeMode && !filesCollapsed" class="vsplit"
+                 :class="{ dragging: dragCol === 'files' }"
+                 role="separator" aria-orientation="vertical" :title="t('git_resize_col')"
+                 @mousedown.prevent="startColSplit($event, 'files')"
+                 @dblclick="resetColSplit('files')"></div>
+
             <div class="detail-diff">
               <div class="pane-head">
+                <!-- 提交详情里文件列可折叠：并排 diff 一开就需要横向空间，
+                     收起后 diff 吃满主区宽度。按钮留在 diff 头上，收了也能立刻打开。 -->
+                <button v-if="!worktreeMode" class="pane-ic lead" :class="{ on: filesCollapsed }"
+                        :title="t('git_files_toggle')" :aria-pressed="filesCollapsed"
+                        @click="filesCollapsed = !filesCollapsed">
+                  <PanelLeft :size="11" />
+                </button>
                 <span class="diff-title" :title="selectedFile || t('git_all_changes')">
                   {{ selectedFile || t('git_all_changes') }}
                 </span>
@@ -2803,6 +3270,14 @@ const dialogCtx = reactive({
                   <div v-for="(b, bi) in sideBlocks" :key="bi" class="side-block">
                     <div v-if="b.path" class="side-file">{{ b.path }}</div>
                     <table class="side-table">
+                      <!-- 列宽必须由 colgroup 定死，不能靠单元格上的 width：
+                           table-layout: fixed 只认「第一行」的宽，而这里每个 table
+                           的首行都是 colspan=4 的 hunk 头，浏览器于是把四列均分成
+                           各 25%——两个行号列变成两条巨大的空槽，代码只剩一半宽度。
+                           colgroup 优先级高于首行单元格，行号 48px、代码平分余下宽度。 -->
+                      <colgroup>
+                        <col class="sd-col-ln" /><col /><col class="sd-col-ln" /><col />
+                      </colgroup>
                       <tbody>
                         <tr v-for="(r, i) in b.rows" :key="i" :class="['side-row', r.cls]">
                           <template v-if="r.cls === 'meta' || r.cls === 'hunk'">
@@ -2823,44 +3298,13 @@ const dialogCtx = reactive({
               </template>
               <p v-else-if="detailFailed" class="pane-state">{{ t('loadFailed') }}</p>
               <p v-else-if="worktreeMode" class="pane-state">
-                {{ changeCount ? t('git_no_diff') : t('git_clean') }}
+                {{ changeCount ? t('git_no_diff_worktree') : t('git_clean') }}
               </p>
               <p v-else-if="detailActive && detail" class="pane-state">{{ t('git_no_diff') }}</p>
               <div v-else class="pane-state diff-idle">
                 <GitBranch :size="20" />
                 <p>{{ activePath ? t('git_select_commit') : '' }}</p>
               </div>
-            </div>
-          </div>
-
-          <!-- 提交面板：只在工作区模式出现，写信息 → 提交，AI 可以代笔 -->
-          <div v-if="worktreeMode && activePath" class="commit-box">
-          <div class="cb-head">
-            <span class="cb-label">{{ t('git_commit_msg') }}</span>
-            <button class="cb-ai" :class="{ 'is-on': amendMode }"
-                    :title="t('git_amend_title')" @click="amendMode = !amendMode">
-              {{ t('git_amend_toggle') }}
-            </button>
-            <button class="cb-ai" :class="{ 'is-spinning': aiWriting }"
-                    :disabled="aiWriting || !changeCount" :title="t('git_ai_hint')" @click="aiCommitMessage">
-              <Loader2 v-if="aiWriting" :size="11" />
-              <Sparkles v-else :size="11" />
-              {{ aiWriting ? t('git_ai_writing') : t('git_ai_write') }}
-            </button>
-          </div>
-          <textarea v-model="commitMsg" class="cb-input" rows="2"
-                    :placeholder="amendMode ? t('git_amend_ph') : t('git_commit_ph')"
-                    @keydown.ctrl.enter.prevent="doCommit" @keydown.meta.enter.prevent="doCommit"></textarea>
-            <div class="cb-foot">
-              <span :class="['cb-hint', { warn: !stagedFiles.length && !(amendMode && commitMsg.trim()) }]">
-                {{ commitHint }}
-              </span>
-              <button class="qd-btn qd-btn-primary" :class="{ 'is-spinning': committing }"
-                      :disabled="!canCommit" @click="doCommit">
-                <Loader2 v-if="committing" :size="12" />
-                <Check v-else :size="12" />
-                {{ amendMode ? t('git_amend_btn') : t('git_commit_btn') }}
-              </button>
             </div>
           </div>
         </div>
@@ -2875,9 +3319,10 @@ const dialogCtx = reactive({
         <template v-if="status?.behind"><ArrowDown :size="10" /> {{ status.behind }}</template>
       </span>
       <span v-if="status?.upstream" class="st-dim">{{ t('git_upstream') }} {{ status.upstream }}</span>
-      <span :class="['st-dim', { 'st-warn': changeCount > 0 }]">
-        {{ changeCount ? t('git_changes', { n: changeCount }) : t('git_clean') }}
+      <span v-if="changeCount" class="st-dirty">
+        <span class="st-dot"></span><b>{{ changeCount }}</b>{{ t('git_changes_suffix') }}
       </span>
+      <span v-else class="st-dim">{{ t('git_clean') }}</span>
       <span v-if="busy" class="st-dim">{{ t('loading') }}</span>
       <span class="st-path" :title="activePath">{{ activePath }}</span>
     </footer>
@@ -2942,11 +3387,28 @@ const dialogCtx = reactive({
 .bar-dirty { font-size: var(--text-xs); color: var(--color-warning); flex-shrink: 0; }
 .bar-actions { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
 .bar-actions .qd-btn { height: 26px; }
+.qd-btn-ghost.on { background: var(--color-bg-hover); color: var(--color-text-primary); }
+
+/* ⋯ 菜单：远端 / 子模块 / SSH。浮层贴在按钮右下，和右键菜单同一套材质与行高。 */
+.bar-more { position: relative; }
+.bar-more-menu {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 60; min-width: 164px;
+  display: flex; flex-direction: column; gap: 1px; padding: var(--space-2);
+  background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
+}
+.bm-item {
+  display: flex; align-items: center; gap: var(--space-3);
+  height: 28px; padding: 0 var(--space-4); border: 0; border-radius: var(--radius-sm);
+  background: none; color: var(--color-text-secondary); font: inherit; font-size: var(--text-sm);
+  text-align: left; white-space: nowrap; cursor: pointer;
+}
+.bm-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .btn-badge {
-  display: inline-flex; align-items: center; justify-content: center;
+  display: inline-flex; align-items: center; justify-content: center; gap: 1px;
   min-width: 15px; height: 15px; padding: 0 3px; border-radius: var(--radius-full);
   background: var(--color-accent); color: var(--color-accent-text);
-  font-family: var(--font-mono); font-size: var(--text-2xs);
+  font-family: var(--font-mono); font-size: var(--text-2xs); line-height: 1;
 }
 /* 徽章挂在实心的主按钮上时，蓝底压蓝底会糊成一团：反成白底蓝字 */
 .qd-btn-primary .btn-badge { background: var(--color-accent-text); color: var(--color-accent); }
@@ -2975,9 +3437,11 @@ const dialogCtx = reactive({
 
 /* ---- 左栏 ---- */
 .git-side {
-  width: 240px; flex-shrink: 0; overflow-y: auto;
+  /* 宽度由 --side-w 决定，拖动时由脚本写 inline 变量；
+     没拖过时变量为空，回落到这里的默认值（窄屏另有媒体查询）。 */
+  width: var(--side-w, 240px); flex-shrink: 0; overflow-y: auto;
   padding: var(--space-2) 0 var(--space-5);
-  border-right: 1px solid var(--color-border); background: var(--color-bg-secondary);
+  background: var(--color-bg-secondary);
 }
 .git-side.collapsed { display: none; }
 .grp + .grp { margin-top: var(--space-3); }
@@ -2990,12 +3454,13 @@ const dialogCtx = reactive({
   height: 24px; padding: 0 var(--space-2);
   background: none; border: 0; cursor: pointer; font: inherit;
   font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.03em;
-  color: var(--color-text-muted); 
+  /* 折叠箭头也是「这里可以点」的唯二信号之一，别用 disabled 级灰度 */
+  color: var(--color-text-secondary);
 }
 .grp-toggle:hover { color: var(--color-text-secondary); }
 .grp-n {
   margin-left: auto; font-family: var(--font-mono); font-size: var(--text-2xs); font-weight: 400;
-  letter-spacing: 0; text-transform: none; color: var(--color-text-disabled);
+  letter-spacing: 0; text-transform: none; color: var(--color-text-muted);
 }
 .grp-act {
   display: grid; place-items: center; width: 20px; height: 20px; flex-shrink: 0;
@@ -3004,8 +3469,14 @@ const dialogCtx = reactive({
 }
 .grp-act:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 
-.grp-list { list-style: none; margin: 0; padding: 0 var(--space-2); }
-.grp-empty { padding: var(--space-2) var(--space-2) var(--space-3); font-size: var(--text-xs); color: var(--color-text-disabled); }
+/* 组内一条细引导线：分支组里「组头 → 条目」的从属关系靠缩进 + 这条线表达，
+   没有它时组头和条目左边缘几乎对齐，扫视时容易读成同级。 */
+.grp-list { list-style: none; margin: 0; padding: 0 var(--space-2) 0 var(--space-4); position: relative; }
+.grp-list::before {
+  content: ''; position: absolute; left: 9px; top: 2px; bottom: 2px;
+  width: 1px; background: var(--color-border);
+}
+.grp-empty { padding: var(--space-2) var(--space-2) var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); }
 .item {
   display: flex; align-items: center; gap: 5px;
   height: 24px; padding: 0 var(--space-2); border-radius: var(--radius-xs);
@@ -3013,8 +3484,11 @@ const dialogCtx = reactive({
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 .item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.item.current { color: var(--color-text-primary); font-weight: 600; }
-.item.dim .item-name { color: var(--color-text-muted); }
+/* 当前检出的分支：淡 accent 底 + 图标转 accent + 字重 700。
+   只加粗时在 12px 字号下几乎看不出差别，必须有底色才能一眼定位。 */
+.item.current { background: var(--color-accent-bg); color: var(--color-text-primary); font-weight: 700; }
+.item.current .item-ic { color: var(--color-accent); }
+.item.dim .item-name { color: var(--color-text-secondary); }
 /* 选中项与全站统一：淡底 + 左缘竖条 + 常规文字色。
    原来整行文字转强调色，一列仓库名里只有它发蓝，看着像链接列表。 */
 .item { position: relative; }
@@ -3029,7 +3503,7 @@ const dialogCtx = reactive({
 .item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item-cur { flex-shrink: 0; color: var(--color-accent); }
 .item-remote {
-  flex-shrink: 0; font-size: var(--text-2xs); color: var(--color-text-disabled);
+  flex-shrink: 0; font-size: var(--text-2xs); color: var(--color-text-muted);
 }
 .item-x {
   display: none; place-items: center; width: 20px; height: 20px; flex-shrink: 0;
@@ -3043,7 +3517,22 @@ const dialogCtx = reactive({
 .ab.down { color: var(--color-accent); }
 
 /* ---- 右栏 ---- */
-.git-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.git-main {
+  flex: 1; min-width: 0; display: flex; flex-direction: column;
+  /* 提交图 lane 配色：借语义色 + 三个额外色相凑够 6 条。浅色主题下要压深，
+     否则 #22d3ee 这类亮色在白底上几乎看不见（见下方 [data-theme=light] 覆盖）。 */
+  --git-lane-1: var(--color-accent);
+  --git-lane-2: var(--color-warning);
+  --git-lane-3: #a78bfa;
+  --git-lane-4: var(--color-success);
+  --git-lane-5: #f472b6;
+  --git-lane-6: #22d3ee;
+}
+[data-theme='light'] .git-main {
+  --git-lane-3: #7c3aed;
+  --git-lane-5: #db2777;
+  --git-lane-6: #0891b2;
+}
 
 /* 筛选行：紧跟工作区入口条之后。做成「一条细线」而不是输入框方框，
    是因为它属于历史列表的表头区，抢视觉权重会让上面的仓库名失焦。 */
@@ -3052,7 +3541,24 @@ const dialogCtx = reactive({
   padding: 0 var(--space-5); border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-primary);
 }
-.hb-ic { color: var(--color-text-disabled); flex-shrink: 0; }
+.hb-ic { color: var(--color-text-muted); flex-shrink: 0; }
+/* 「当前分支 / 全部」分段：历史列表的作用域开关。做成两格小药丸而不是下拉——
+   只有两个值，下拉要多点一次还挡住列表。 */
+.hb-scope {
+  flex-shrink: 0; display: inline-flex; align-items: center; gap: 1px;
+  padding: 1px; border-radius: var(--radius-xs); background: var(--color-bg-tertiary);
+}
+.hb-scope button {
+  height: 18px; padding: 0 6px; min-width: 42px; border: 0; border-radius: var(--radius-xs);
+  background: none; font: inherit; font-size: var(--text-2xs); text-align: center;
+  color: var(--color-text-muted); white-space: nowrap; cursor: pointer;
+}
+.hb-scope button:hover { color: var(--color-text-primary); }
+/* 选中格用页面底色提亮 + 一圈描边：不借 accent 色，免得跟旁边的搜索图标抢眼。 */
+.hb-scope button.on {
+  background: var(--color-bg-primary); color: var(--color-text-primary);
+  box-shadow: 0 0 0 1px var(--color-border);
+}
 .hb-input {
   flex: 1; min-width: 0; height: 100%; padding: 0;
   background: none; border: 0; outline: none;
@@ -3067,7 +3573,7 @@ const dialogCtx = reactive({
 .hb-x:hover { color: var(--color-text-primary); }
 .hb-n {
   flex-shrink: 0; font-family: var(--font-mono); font-size: var(--text-2xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 /* 「全历史」徽标：告诉用户当前列表已经不是本地 200 条的筛选结果 */
 .hb-mode {
@@ -3075,25 +3581,31 @@ const dialogCtx = reactive({
   font-size: var(--text-2xs); color: var(--color-accent);
 }
 
-/* 表头与数据行共用同一套列宽，否则两行的摘要列会错开半格。
-   没有独立的「分支」列：徽章挂在摘要单元格内（见模板注释）。 */
+/* 表头与数据行共用同一套列宽：图形列 + 内容列，时间在内容行内右对齐。
+   作者 / hash 已经下沉到第二行，再切列只会把摘要压窄。 */
 .commit-head, .commit-item {
   display: grid;
-  grid-template-columns: var(--graph-ch, 3ch) minmax(0, 1fr) 128px 74px;
-  align-items: center; gap: var(--space-4);
+  grid-template-columns: var(--graph-w, 0px) minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--space-3);
 }
 .commit-head {
-  height: 28px; padding: 0 var(--space-5); flex-shrink: 0;
+  height: 26px; padding: 0 var(--space-5); flex-shrink: 0;
   font-size: var(--text-xs); color: var(--color-text-muted);
   border-bottom: 1px solid var(--color-border); background: var(--color-bg-secondary);
 }
-.col-date { text-align: right; }
-.col-graph { font-family: var(--font-mono); }
+.commit-head-main { display: flex; align-items: center; }
+.ch-time { margin-left: auto; }
 
 .commit-scroll { flex: 0 0 auto; min-height: 0; overflow: auto; }
 .commit-list { list-style: none; margin: 0; padding: 0; }
+/* 一条提交 = 一行。参照 GitLens：摘要、分支标记、作者、时间挤在同一行，
+   行高压到 28px，一屏能多看一倍提交；作者右对齐，扫读时视线不用来回跳。
+   行与行之间不画分隔线：28px 的行高下，一条线会在整屏织出一片横纹，
+   把提交图那几条竖线切成一段一段。相邻行靠 hover / 选中底色区分。
+   表头下沿那条线保留，它是表头与内容的边界。 */
 .commit-item {
-  height: 28px; padding: 0 var(--space-5);
+  min-height: 28px; padding: 0 var(--space-5);
   font-size: var(--text-sm); cursor: pointer;
 }
 .commit-item:hover { background: var(--color-bg-hover); }
@@ -3104,102 +3616,117 @@ const dialogCtx = reactive({
   background: var(--color-select-bg);
   box-shadow: inset 3px 0 0 var(--color-accent);
 }
-/* graph 前缀必须等宽 + 保留空格，否则线会歪 */
-.commit-graph {
-  font-size: var(--text-sm); line-height: 1; color: var(--color-accent);
-  white-space: pre; overflow: hidden;
+/* 图形列铺满整行高度：SVG 才能把线从行顶连到行底。若受行 padding 限制，
+   相邻两行的线之间就会露出缺口，又回到「一截一截」的老样子。 */
+.col-graph { position: relative; align-self: stretch; min-height: 28px; }
+.commit-graph { position: absolute; inset: 0; width: 100%; height: 100%; }
+.commit-dot {
+  position: absolute; top: 50%; width: 7px; height: 7px;
+  border-radius: 50%; background: currentColor;
+  transform: translate(-50%, -50%);
 }
-/* 摘要单元格是 flex：文字先让位（shrink 1），徽章按内容宽度整颗保留（shrink 0） */
-.commit-subject {
-  display: flex; align-items: center; gap: var(--space-3);
-  min-width: 0; overflow: hidden;
-  color: var(--color-text-primary);
+/* merge 提交画成空心环，与普通提交区分；内圈用面板底色把穿过的线盖掉 */
+.commit-dot.merge {
+  width: 9px; height: 9px; background: var(--color-bg-primary);
+  border: 1.5px solid currentColor; box-sizing: border-box;
 }
+.commit-core { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* 摘要先让位（shrink 1），分支标记与时间按内容宽度整颗保留（shrink 0） */
 .subject-text {
   min-width: 0; flex: 0 1 auto;
+  color: var(--color-text-primary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ref {
-  flex: 0 0 auto; max-width: 140px;
-  font-size: var(--text-2xs); line-height: 15px; padding: 0 var(--space-3); border-radius: var(--radius-full);
+  flex: 0 0 auto; max-width: 130px;
+  font-size: var(--text-2xs); line-height: 15px; padding: 0 5px; border-radius: var(--radius-full);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-family: var(--font-mono);
 }
-.ref-branch { background: var(--color-accent); color: var(--color-accent-text); font-weight: 500; }
-.ref-remote { background: var(--color-accent-bg); color: var(--color-accent); }
+/* 分支标记用浅底胶囊（GitLens 那套）：一眼能认出「这个提交带着哪个分支」。
+   底色只用 8.5% 的 accent-bg，比实底克制，整列连起来也不抢摘要。 */
+.ref-branch { background: var(--color-accent-bg); color: var(--color-accent); font-weight: 600; }
+.ref-remote { background: var(--color-bg-tertiary); color: var(--color-accent); }
 .ref-tag { background: var(--color-warning-bg); color: var(--color-warning); }
 .ref-more { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 
-/* 作者：首字母头像 + 名字，同一个人永远同色，作者列从「一排灰字」变成可扫的列 */
-.commit-author { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
-.avatar {
-  width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0;
-  display: grid; place-items: center;
-  font-size: var(--text-2xs); font-weight: 600; line-height: 1;
-}
-.avatar.av0 { background: var(--color-accent-bg); color: var(--color-accent); }
-.avatar.av1 { background: var(--color-success-bg); color: var(--color-success); }
-.avatar.av2 { background: var(--color-warning-bg); color: var(--color-warning); }
+/* 作者靠右：摘要与分支标记留在左侧，作者与时间固定在右边缘。
+   短 hash 不进列表（GitLens 也不放）——选中后详情面板里有完整 hash，
+   右键菜单还留了「复制 hash」，行内再挂一颗只会把时间挤离右边缘。 */
 .author-name {
-  min-width: 0; font-size: var(--text-xs); color: var(--color-text-muted);
+  margin-left: auto; flex: 0 0 auto; max-width: 160px;
+  font-size: var(--text-xs); color: var(--color-text-muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .commit-time {
-  font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-disabled);
-  text-align: right; white-space: nowrap;
+  flex-shrink: 0;
+  font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--color-text-muted);
+  white-space: nowrap;
 }
 
-/* ---- 工作区入口条（在提交表上方，独立于历史列表） ---- */
-.wt-bar {
-  position: relative;
-  display: flex; align-items: center; gap: var(--space-3);
-  height: 30px; flex-shrink: 0; padding: 0 var(--space-5);
-  background: var(--color-bg-secondary); border: 0;
-  border-bottom: 1px solid var(--color-border);
-  font: inherit; font-size: var(--text-sm); color: var(--color-text-secondary);
-  text-align: left; cursor: pointer;
-  transition: background-color var(--transition-fast), color var(--transition-fast);
+/* ---- 工作区栏（第三列）：已暂存 / 未暂存 + 提交框 ---- */
+/* 常驻而不是浮层：它与右侧 diff 是同一件事的两个视角（左边挑文件、右边看内容），
+   做成抽屉就会盖住历史；固定成列以后，两边的选中状态还能互相对照。 */
+.git-wt {
+  width: var(--wt-w, 320px); flex-shrink: 0; display: flex; flex-direction: column; min-height: 0;
+  background: var(--color-bg-secondary);
 }
-.wt-bar:hover { background: var(--color-bg-hover); }
-.wt-bar.active {
-  background: var(--color-select-bg); color: var(--color-text-primary);
+.wt-head {
+  display: flex; align-items: center; gap: 5px; height: 30px; flex-shrink: 0;
+  padding: 0 var(--space-4); border-bottom: 1px solid var(--color-border);
 }
-.wt-bar.active::before {
-  content: '';
-  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-  width: 3px; height: 16px; border-radius: var(--radius-full);
-  background: var(--color-accent);
-}
-.wt-ic { flex-shrink: 0; color: var(--color-text-muted); }
-.wt-bar.dirty .wt-ic { color: var(--color-warning); }
-.wt-name { font-weight: 500; }
+.wt-ic { flex-shrink: 0; color: var(--color-warning); }
+/* 没有未提交改动时不该还是警告色：黄图标在「一切正常」的状态下读起来像出了事 */
+.wt-ic.clean { color: var(--color-text-muted); }
+.wt-name { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); }
 .wt-n {
   min-width: 16px; height: 16px; padding: 0 var(--space-2); border-radius: var(--radius-full);
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--color-warning-bg); color: var(--color-warning);
   font-family: var(--font-mono); font-size: var(--text-2xs);
 }
-.wt-sub { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-muted); }
-.wt-arrow { opacity: .45; flex-shrink: 0; }
+/* 「全部改动」：只看整份工作区 diff（不清空选中文件时的默认态） */
+.wt-all {
+  margin-left: 2px; height: 19px; padding: 0 6px; flex-shrink: 0;
+  border-radius: var(--radius-xs); border: 1px solid transparent;
+  background: none; cursor: pointer; font: inherit; font-size: var(--text-2xs);
+  color: var(--color-text-muted);
+}
+.wt-all:hover { color: var(--color-text-secondary); background: var(--color-bg-hover); }
+.wt-all.on { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent); }
 
 /* ---- 详情 + 提交面板 ---- */
 .detail-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-/* 工作区两组：整列一起滚。
+/* 工作区两组：各自一块、各自滚动，中间的分隔条拖动改上半区高度。
  *
- * 原先这里是「每组各自 max-height:44% + 组内滚动」，两组会互相挤压：暂存与未暂存
- * 都有文件时，两条 list 都被压到只剩组头，必须先拖动分隔条才能看到文件——
- * 「未暂存看不到文件列表，要拉一下才行」就是这么来的。
- * 改成整列滚动后两组按内容展开，滚一下就能到未暂存那组。 */
-.wt-files { overflow-y: auto; }
-.wt-files .wt-rows { flex: 0 0 auto; max-height: none; overflow: visible; }
-.wt-files .file-rows { flex: none; overflow: visible; }
-.wt-files .file-state { padding: 3px var(--space-4) 7px; font-size: var(--text-xs); color: var(--color-text-disabled); }
-/* 组头吸顶：滚到未暂存那组时「已暂存」的标题已经滚出去，
-   但组名是这两组的坐标系，不该跟着滚没。 */
-.pane-head.sticky { position: sticky; top: 0; z-index: 1; background: var(--color-bg-secondary); }
-.wt-rows + .pane-head { border-top: 1px solid var(--color-border); }
-/* 尺寸与外观由 style.css 的全局 input[type=checkbox] 负责，这里只管不被挤扁。 */
-.stage-box { margin: 0; flex-shrink: 0; cursor: pointer; }
+ * 走过两版：先是「每组 max-height:44% + 组内滚动」，两组都长的时候都只剩组头；
+ * 后来改成「整列一起滚」，看得全了但没法把某组临时放大，看未暂存要滚过一整段已暂存。
+ * 现在是固定比例 + 可拖：默认 62% 给已暂存（马上要提交的那几条要看得全），
+ * 剩下给未暂存；比例不合适直接拖，双击回默认。
+ * 注意 .file-rows 自带的 flex:1 / overflow-y:auto 就够用，这里不要再覆盖成
+ * flex:none + overflow:visible，否则两组会撑破自己的框。 */
+.wt-panes { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.wt-pane { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.wt-pane-top { flex: 0 0 var(--wt-top, 62%); }
+.wt-pane-bottom { flex: 1 1 0; }
+/* 组头里的空态：缩进对齐到组名的文字起点（16 padding + 7 点 + 5 gap），
+   一眼能看出「这句是在说上面那一组」；原来齐着边框，读起来像不属于任何组。 */
+.git-wt .file-state { padding: 1px var(--space-4) 10px 28px; font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.5; }
+/* 两区分隔交给中间那条 .splitter 画线，组头自己不再加 border-top（会变成双线） */
+/* 组头状态点：实心 = 已在暂存区，空心 = 还在工作区。
+   原来两组都用 FileText 图标，一模一样，等于没有信息。 */
+.grp-dot {
+  flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%;
+  border: 1.5px solid var(--color-text-muted); box-sizing: border-box;
+}
+.grp-dot.on { background: var(--color-accent); border-color: var(--color-accent); }
+/* 组名是分区标题，比别处的列表头重一档：muted 在深色底上几乎读不出「这是一组」 */
+.git-wt .pane-head { color: var(--color-text-secondary); }
+.pane-name { font-weight: 500; }
+/* 尺寸与外观由 style.css 的全局 input[type=checkbox] 负责；这里只把工作区的
+   勾选框抬到 15px——它在这一栏里是主操作（勾一下 = 一次 git add），14px 在
+   22px 行高里偏小，鼠标要瞄一下。 */
+.stage-box { margin: 0; flex-shrink: 0; width: 15px; height: 15px; cursor: pointer; }
 .pane-n { font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--color-text-muted); }
 .pane-act {
   margin-left: auto; padding: 0 var(--space-1); border: 0; background: none;
@@ -3207,6 +3734,8 @@ const dialogCtx = reactive({
 }
 .pane-act:hover:not(:disabled) { color: var(--color-accent); }
 .pane-act:disabled { opacity: .5; cursor: default; }
+/* 「全部暂存」后面紧跟的丢弃按钮不该再抢一次 auto 边距，否则两个动作被推到两端 */
+.pane-act + .pane-ic { margin-left: 0; }
 
 .commit-box {
   flex-shrink: 0; display: flex; flex-direction: column; gap: var(--space-2);
@@ -3214,21 +3743,25 @@ const dialogCtx = reactive({
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
 }
-.cb-head { display: flex; align-items: center; gap: var(--space-3); }
+.cb-head { display: flex; align-items: center; gap: var(--space-1); }
 .cb-label { font-size: var(--text-xs); color: var(--color-text-muted); }
-.cb-ai {
-  margin-left: auto; display: inline-flex; align-items: center; gap: var(--space-2);
-  height: 20px; padding: 0 7px; border-radius: var(--radius-xs);
-  border: 1px solid var(--color-border-light); background: var(--color-bg-primary);
-  color: var(--color-accent); font: inherit; font-size: var(--text-xs); cursor: pointer;
-  transition: background-color var(--transition-fast), border-color var(--transition-fast);
+/* amend / AI 代笔收成输入框右上角的两个小图标：它们都是「对这段文字做点什么」，
+   不占一行文字位置，提交框本身就能更大。悬停有 title，不靠自解释图标。 */
+.cb-mini {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0; border-radius: var(--radius-xs);
+  border: 1px solid transparent; background: none; cursor: pointer;
+  color: var(--color-text-muted);
+  transition: background-color var(--transition-fast), color var(--transition-fast);
 }
-.cb-ai:hover:not(:disabled) { background: var(--color-accent-bg); border-color: var(--color-accent-border); }
-.cb-ai:disabled { opacity: .5; cursor: default; }
-/* amend 开关是常驻按钮，选中态要与 hover 态一眼区分开 */
-.cb-ai.is-on { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent); }
+.cb-mini:first-of-type { margin-left: auto; }
+.cb-mini:hover:not(:disabled) { color: var(--color-accent); background: var(--color-accent-bg); }
+.cb-mini:disabled { opacity: .5; cursor: default; }
+/* amend 是开关，选中态要与悬停态一眼区分 */
+.cb-mini.is-on { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent); }
 .cb-input {
-  width: 100%; resize: vertical; min-height: 46px; max-height: 160px;
+  width: 100%; flex: none; height: 74px; min-height: 74px; resize: vertical;
+  max-height: 180px;
   padding: var(--space-4); border-radius: var(--radius-sm);
   border: 1px solid var(--color-border); background: var(--color-bg-primary);
   color: var(--color-text-primary); font: inherit; font-size: var(--text-sm); line-height: 1.5;
@@ -3236,32 +3769,68 @@ const dialogCtx = reactive({
 .cb-input:focus { outline: none; border-color: var(--color-border-focus-soft); }
 .cb-input::placeholder { color: var(--color-text-disabled); }
 .cb-foot { display: flex; align-items: center; gap: var(--space-3); }
-.cb-hint { font-size: var(--text-xs); color: var(--color-text-muted); }
-.cb-hint.warn { color: var(--color-warning); }
-.cb-foot .qd-btn { margin-left: auto; height: 26px; }
+/* 提示语常是整句（「暂存区为空，先勾选要提交的文件」），300px 栏里会换行，
+   给个可收缩的宽度 + 行高，别把提交按钮挤成竖排。 */
+.cb-hint { min-width: 0; font-size: var(--text-xs); line-height: 1.4; color: var(--color-text-muted); }
+.cb-foot .qd-btn { margin-left: auto; flex-shrink: 0; height: 26px; }
 
 /* ---- 拖动条 ---- */
+/* 横向分隔条：和 .vsplit 同一套——7px 命中区、1px 视觉线，上下各 -3px 收回，
+   布局占位仍是 1px。原来是 6px 实心带 + 上下两条边，等于凭空吃掉 8px 高度，
+   还在两栏之间画出一道双线。 */
 .splitter {
-  height: 6px; flex-shrink: 0; cursor: row-resize;
-  background: var(--color-bg-secondary);
-  border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border);
+  position: relative; height: 7px; flex: 0 0 7px; margin: -3px 0; z-index: 2;
+  cursor: row-resize; background: transparent;
+  transition: background-color var(--transition-fast);
+}
+.splitter::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 3px; height: 1px;
+  background: var(--color-border);
   transition: background-color var(--transition-fast);
 }
 .splitter:hover { background: var(--color-accent-bg); }
+.splitter:hover::after { background: var(--color-accent-border-strong); }
 .splitter.disabled { cursor: default; }
-.splitter.disabled:hover { background: var(--color-bg-secondary); }
+.splitter.disabled:hover { background: transparent; }
+.splitter.disabled:hover::after { background: var(--color-border); }
+
+/* 列分隔条：5px 命中区，1px 线画在正中。1px 的命中区基本拖不到，
+   但把线本身做粗又会让两栏看着像被一道沟隔开。
+   两侧各 -2px 外边距把多出来的 4px 收回去：命中区 5px，占位仍是 1px，
+   与改前 border-right 的视觉宽度一致。不收的话三列之间会凭空多出 8px 空隙，
+   整页看上去像「线变粗了」。 */
+.vsplit {
+  position: relative; width: 5px; flex: 0 0 5px; margin: 0 -2px; z-index: 2;
+  cursor: col-resize; background: transparent;
+  transition: background-color var(--transition-fast);
+}
+.vsplit::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 2px; width: 1px;
+  background: var(--color-border);
+  transition: background-color var(--transition-fast);
+}
+/* 悬停 / 拖动中透出 accent：拖的时候手在动、视线在另两栏，
+   没有这条高亮就分不清自己抓的是哪根线。 */
+.vsplit:hover, .vsplit.dragging { background: var(--color-accent-bg); }
+.vsplit:hover::after, .vsplit.dragging::after { background: var(--color-accent-border-strong); }
 
 /* ---- 详情：文件 | diff ---- */
 .detail { flex: 1; min-height: 0; display: flex; }
 .detail-files {
-  width: 248px; flex-shrink: 0; display: flex; flex-direction: column;
-  border-right: 1px solid var(--color-border); background: var(--color-bg-secondary);
+  width: var(--files-w, 248px); flex-shrink: 0; display: flex; flex-direction: column;
+  /* 分隔线交给 .vsplit 画：这列在折叠 / 工作区模式下不渲染，线留在这里会变成孤立的一条 */
+  background: var(--color-bg-secondary);
 }
 .detail-diff { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .pane-head {
   display: flex; align-items: center; gap: 5px; height: 26px; flex-shrink: 0;
   padding: 0 var(--space-4); font-size: var(--text-xs); color: var(--color-text-muted);
   border-bottom: 1px solid var(--color-border);
+}
+/* 拖到组头上方：整条变 accent 底 + 内描边，明确「松手就搬到这一组」 */
+.pane-head.drop-on {
+  background: var(--color-accent-bg); color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px var(--color-accent-border);
 }
 .file-state { padding: var(--space-5); color: var(--color-text-muted); font-size: var(--text-sm); }
 /* 详情加载失败：文案 + 重试并排，和左侧空态的灰字区分开。 */
@@ -3274,6 +3843,19 @@ const dialogCtx = reactive({
   font-size: var(--text-sm); cursor: pointer;
 }
 .file-row:hover { background: var(--color-bg-hover); }
+/* 行尾的「+ / −」：悬停才出现，和勾选框是同一个动作的两个入口。
+   勾选框在行首、目标小；整行扫过时手已经在右侧，这里点一下更快。 */
+.file-quick {
+  display: none; place-items: center; width: 18px; height: 18px; flex-shrink: 0;
+  padding: 0; border: 0; border-radius: var(--radius-xs); background: none;
+  color: var(--color-text-muted); cursor: pointer;
+}
+.file-row:hover .file-quick, .file-row:focus-within .file-quick { display: grid; }
+/* 目录行同理：一键把整个目录暂存 / 取消 */
+.tree-dir .file-quick { margin-left: auto; }
+.tree-dir:hover .file-quick, .tree-dir:focus-within .file-quick { display: grid; }
+.file-quick:hover { color: var(--color-accent); background: var(--color-accent-bg); }
+.file-quick:disabled { opacity: .5; cursor: default; }
 /* 目录行：只承担分组与折叠，不参与选中（点它折叠/展开） */
 .tree-dir {
   display: flex; align-items: center; gap: 3px; min-height: 20px;
@@ -3281,7 +3863,7 @@ const dialogCtx = reactive({
   font-size: var(--text-xs); color: var(--color-text-muted); cursor: pointer; user-select: none;
 }
 .tree-dir:hover { background: var(--color-bg-hover); }
-.td-ic { color: var(--color-text-disabled); }
+.td-ic { color: var(--color-text-muted); }
 .td-name { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-row.active { background: var(--color-select-bg); }
 /* 与全局 .qd-row.active 同一画法：select-bg 实底 + 3px accent 竖条；
@@ -3316,7 +3898,7 @@ const dialogCtx = reactive({
   font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-secondary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.diff-hash { margin-left: auto; font-family: var(--font-mono); color: var(--color-text-disabled); }
+.diff-hash { margin-left: auto; font-family: var(--font-mono); color: var(--color-text-muted); }
 .diff-reset {
   margin-left: auto; background: none; border: 0; padding: 0; cursor: pointer;
   font: inherit; font-size: var(--text-xs); color: var(--color-accent);
@@ -3332,7 +3914,7 @@ const dialogCtx = reactive({
 .diff span.add { color: var(--color-success); background: var(--color-success-bg); }
 .diff span.del { color: var(--color-danger); background: var(--color-danger-bg); }
 .diff span.hunk { color: var(--color-accent); background: var(--color-bg-tertiary); }
-.diff span.meta { color: var(--color-text-disabled); }
+.diff span.meta { color: var(--color-text-muted); }
 .diff span.trunc { color: var(--color-text-muted); }
 
 /* ---- 并排 diff ---- */
@@ -3350,10 +3932,13 @@ const dialogCtx = reactive({
   color: var(--color-text-secondary); background: var(--color-bg-tertiary);
 }
 .side-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+/* 行号列宽只能写在 col 上：见模板里的注释，首行是 colspan 行，靠 td 宽度定不下来。
+   48px 够放 6 位数行号（11px 等宽字体，扣掉左右各 8px 内边距还有 32px）。 */
+.side-table .sd-col-ln { width: 48px; }
 .side-row { line-height: 1.6; }
 .sd-ln {
-  width: 44px; padding: 0 var(--space-3); text-align: right; vertical-align: top;
-  color: var(--color-text-disabled); background: var(--color-bg-secondary);
+  padding: 0 var(--space-3); text-align: right; vertical-align: top;
+  color: var(--color-text-muted); background: var(--color-bg-secondary);
   border-right: 1px solid var(--color-border); user-select: none;
 }
 .sd-code { padding: 0 var(--space-4); white-space: pre-wrap; word-break: break-all; vertical-align: top; }
@@ -3364,7 +3949,7 @@ const dialogCtx = reactive({
 .side-table td:nth-of-type(2) { border-right: 1px solid var(--color-border); }
 .sd-full { padding: 0 var(--space-4); white-space: pre-wrap; }
 .sd-full.hunk { color: var(--color-accent); background: var(--color-bg-tertiary); }
-.sd-full.meta { color: var(--color-text-disabled); }
+.sd-full.meta { color: var(--color-text-muted); }
 
 /* ---- 多选 ---- */
 .file-row.picked { background: var(--color-select-bg); }
@@ -3374,6 +3959,11 @@ const dialogCtx = reactive({
   color: var(--color-text-muted); display: inline-flex; align-items: center;
 }
 .pane-ic:hover { color: var(--color-accent); }
+/* diff 头最左的「收起文件列」按钮：不属于右侧动作组，要抵消 margin-left:auto */
+.pane-ic.lead { margin-left: 0; margin-right: 2px; }
+.pane-ic.lead.on { color: var(--color-accent); background: var(--color-accent-bg); }
+.pane-ic.danger:hover:not(:disabled) { color: var(--color-danger); background: var(--color-danger-bg); }
+.pane-ic:disabled { opacity: .5; cursor: default; }
 .pane-ic + .pane-act { margin-left: var(--space-3); }
 .pick-bar {
   position: sticky; bottom: 8px; z-index: 3; margin: var(--space-2) var(--space-4) 0;
@@ -3406,7 +3996,7 @@ const dialogCtx = reactive({
   flex-direction: column;
 }
 .pane-state p { margin: 0; }
-.diff-idle { color: var(--color-text-disabled); }
+.diff-idle { color: var(--color-text-muted); }
 
 /* ---- 状态栏 ---- */
 .git-status {
@@ -3417,9 +4007,19 @@ const dialogCtx = reactive({
 }
 .st-branch { display: inline-flex; align-items: center; gap: var(--space-2); font-family: var(--font-mono); color: var(--color-text-secondary); }
 .st-dim { color: var(--color-text-muted); font-size: var(--text-xs); }
-.st-warn { color: var(--color-warning); }
+/* 工作区脏标记：一个发光的黄点 + 加粗数字。整句染黄时数字反而不突出，
+   圆点是「这里有未提交的东西」的固定信号，扫一眼状态栏就能发现。 */
+.st-dirty {
+  display: inline-flex; align-items: center; gap: 4px;
+  color: var(--color-warning); font-size: var(--text-xs);
+}
+.st-dirty b { font-family: var(--font-mono); font-weight: 600; font-size: var(--text-xs); }
+.st-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+  background: var(--color-warning); box-shadow: 0 0 4px var(--color-warning);
+}
 .st-path {
-  margin-left: auto; font-family: var(--font-mono); color: var(--color-text-disabled);
+  margin-left: auto; font-family: var(--font-mono); color: var(--color-text-muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
@@ -3490,12 +4090,16 @@ const dialogCtx = reactive({
 
 /* 历史版本内容 */
 
-@media (max-width: 1080px) {
-  .git-side { width: 186px; }
-  .commit-head, .commit-item { grid-template-columns: var(--graph-ch, 3ch) minmax(0, 1fr) 0 68px; }
-  .col-author { display: none; }
-  .detail-files { width: 200px; }
+/* 三栏（仓库 / 工作区 / 历史+diff）在窄屏先收两侧，diff 始终是最后让步的那个 */
+@media (max-width: 1180px) {
+  /* 只改默认值：拖过之后 inline 变量优先，用户的选择不会被响应式规则悄悄改回去 */
+  .git-body { --side-w: 190px; --wt-w: 280px; --files-w: 200px; }
   .st-path { display: none; }
+}
+@media (max-width: 940px) {
+  .git-body { --side-w: 168px; --wt-w: 248px; }
+  .author-name { max-width: 84px; }
+  .commit-time { font-size: var(--text-2xs); }
 }
 /* 窄窗：bar-left 原来 min-width:0 会被右侧 flex-shrink:0 的按钮组挤没，
    仓库名和路径缩到不可读。让工具栏换行，仓库信息独占一行，按钮组自己再换行。 */

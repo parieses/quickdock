@@ -2,10 +2,11 @@
 import { ref, inject, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../stores/workspace'
-import { Plus, Pencil, Trash2, Play, Link, Search, X } from '@lucide/vue'
+import { Plus, Pencil, Trash2, Play, Link, Search, X, ArrowLeft } from '@lucide/vue'
 import TypeIcon from './TypeIcon.vue'
 import ItemEditor from './ItemEditor.vue'
 import CreateDialog, { type CreateField } from './CreateDialog.vue'
+import { useCollectionFields } from '../composables/useCollectionFields'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { unwrap } from '../utils/api'
@@ -136,6 +137,23 @@ function handleAddItem() {
   if (!store.activeCollectionId) return
   editingItem.value = null
   showEditor.value = true
+}
+
+// ---- 未选中集合时的空状态：就地新建集合 ----
+// 右侧空状态原本只有一行「请先选择一个集合」——不给方向也不给出口，用户得自己
+// 猜该点哪一栏、或者绕到集合栏头部的 + 号。这里直接把新建入口摆在空状态里，
+// 建完立刻选中新集合（addCollection 只在「唯一集合」时自动选中，多集合场景不会）。
+const showCollectionDialog = ref(false)
+const collectionFields = useCollectionFields()
+
+async function handleCreateCollection(values: Record<string, string>) {
+  try {
+    const col = await store.addCollection(values.name, values.type, values.openStrategy || 'single', values.groupName)
+    showCollectionDialog.value = false
+    await store.selectCollection(col.id)
+  } catch (e) {
+    toast.error(t('createFailed') + ': ' + getErrorMessage(e))
+  }
 }
 
 function handleEditItem(item: CollectionItem) {
@@ -588,7 +606,14 @@ defineExpose({ flashItemById })
           </button>
         </template>
         <template v-else-if="!store.collectionsLoading">
+          <!-- 未选中集合：图标箭头指回集合栏 + 明确下一步，避免只有一行冷冰冰的提示 -->
+          <span class="qd-empty-icon qd-empty-icon-dir"><ArrowLeft :size="18" /></span>
           <p class="qd-empty-title">{{ t('selectCollectionFirst') }}</p>
+          <p class="qd-empty-hint">{{ t('selectCollectionHint') }}</p>
+          <button v-if="store.activeSceneId" class="qd-empty-cta" @click="showCollectionDialog = true">
+            <Plus :size="13" />
+            <span>{{ t('addCollection') }}</span>
+          </button>
         </template>
       </div>
     </div>
@@ -619,6 +644,15 @@ defineExpose({ flashItemById })
       @confirm="onQueryConfirm"
       @cancel="showQueryDialog = false; quickItem = null"
     />
+
+    <!-- 空状态里的「快速新建集合」：与集合栏头部 + 号共用同一套字段定义 -->
+    <CreateDialog
+      :visible="showCollectionDialog"
+      :title="t('addCollection')"
+      :fields="collectionFields"
+      @confirm="handleCreateCollection"
+      @cancel="showCollectionDialog = false"
+    />
   </section>
 </template>
 
@@ -637,6 +671,24 @@ defineExpose({ flashItemById })
   height: 20px;
   object-fit: contain;
   border-radius: var(--radius-xs);
+}
+
+/* 未选中集合的空状态：箭头轻微左右摆动，把注意力引向左侧集合栏。
+   只在 ≥901px 有意义（窄屏集合栏是抽屉，方向感不存在），因此窄屏停掉动画。 */
+.qd-empty-icon-dir {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+.qd-empty-icon-dir svg {
+  animation: qd-dir-hint 1.8s ease-in-out infinite;
+}
+@keyframes qd-dir-hint {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(-4px); }
+}
+@media (max-width: 900px), (prefers-reduced-motion: reduce) {
+  .qd-empty-icon-dir svg { animation: none; }
 }
 
 /* 打开次数徽标 */

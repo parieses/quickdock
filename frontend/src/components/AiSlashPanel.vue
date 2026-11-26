@@ -115,7 +115,7 @@ function isPicked(sk: AISkill): boolean {
 .ai-slash-foot {
   padding: var(--space-2) var(--space-3) var(--space-1);
   font-size: var(--text-2xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   border-top: 1px solid var(--color-border);
   margin-top: var(--space-1);
 }

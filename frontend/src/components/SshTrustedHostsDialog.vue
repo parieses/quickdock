@@ -161,7 +161,7 @@ function onKeydown(e: KeyboardEvent) {
             </div>
 
             <div v-else-if="!hasAny && !loadErr" class="th-empty">
-              <ShieldCheck :size="26" class="th-empty-icon" />
+              <ShieldCheck :size="20" class="th-empty-icon" />
               <p class="th-empty-text">{{ t('sshTrustedEmpty') }}</p>
             </div>
 
@@ -270,7 +270,7 @@ function onKeydown(e: KeyboardEvent) {
 .th-x {
   display: flex;
   padding: var(--space-2);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   background: none;
   border: none;
   border-radius: var(--radius-xs);
@@ -340,8 +340,19 @@ function onKeydown(e: KeyboardEvent) {
   padding: var(--space-8) var(--space-4);
 }
 
+/* 空态图标：44 方底 + 细边，与各页空状态同一套语汇 */
 .th-empty-icon {
-  color: var(--color-text-disabled);
+  width: 44px;
+  height: 44px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 0 var(--color-hairline);
 }
 
 .th-empty-text {

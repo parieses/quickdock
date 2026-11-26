@@ -37,6 +37,16 @@ const (
 	// 键盘记录最先拿到的就是它；加密只会多一层无谓判断。旧版本设过密码的用户
 	// 没有这个键，读出来是 0，前端据此退回「回车提交」的老行为。
 	settingPasswordLen = "startup_password_len"
+	// settingAutoLock 空闲多少分钟后自动锁定；0/缺失 = 不自动锁。
+	//
+	// 和密码哈希同在 app_state：换机恢复后既没有密码也没有自动锁定，
+	// 两边状态天然一致（没有密码时自动锁定本来就不生效）。
+	settingAutoLock = "startup_autolock_minutes"
+	// autoLockTick 空闲检查间隔。20 秒的精度对「10 分钟无操作」足够，
+	// 也不至于让 GetLastInputInfo 成为热路径。
+	autoLockTick = 20 * time.Second
+	// maxAutoLockMinutes 上限：一天。再长就等于没开，不如直接关掉。
+	maxAutoLockMinutes = 24 * 60
 
 	// freeAttempts 免退避的连续失败次数。
 	freeAttempts = 5
@@ -70,7 +80,9 @@ type manager struct {
 	rec []byte // 恢复码的 bcrypt 哈希
 	// pwdLen 密码字符数，供前端「输满自动解锁」；0 表示未知（旧数据 / 未设密码）。
 	pwdLen int
-	lock   bool // 是否处于锁定态
+	// autoMin 空闲自动锁定的分钟数；0 = 关闭。
+	autoMin int
+	lock    bool // 是否处于锁定态
 	// fails/until 连续失败计数与退避截止时间。只存内存：重启后清零，
 	// 否则一次遗忘的密码会把用户锁到下一次开机。
 	fails int
@@ -124,11 +136,14 @@ func Init(d *db.Database) {
 	if len(pwd) > 0 {
 		pwdLen = readPasswordLen()
 	}
+	autoMin := readAutoLock()
 	std.mu.Lock()
 	std.pwd, std.rec, std.pwdLen = pwd, rec, pwdLen
+	std.autoMin = autoMin
 	std.lock = len(pwd) > 0
 	locked := std.lock
 	std.mu.Unlock()
+	startIdleWatch()
 	if locked {
 		logger.I("[lock] 已设启动密码，进入锁定态")
 		notify(true)
@@ -234,6 +249,86 @@ func PasswordLength() int {
 	std.mu.Lock()
 	defer std.mu.Unlock()
 	return std.pwdLen
+}
+
+// readAutoLock 读取空闲自动锁定的分钟数；非法值按「关闭」处理。
+func readAutoLock() int {
+	std.mu.Lock()
+	d := std.db
+	std.mu.Unlock()
+	if d == nil {
+		return 0
+	}
+	raw, err := d.GetSetting(settingAutoLock)
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || n < 0 || n > maxAutoLockMinutes {
+		return 0
+	}
+	return n
+}
+
+// AutoLockMinutes 返回当前空闲自动锁定的分钟数；0 表示关闭。
+func AutoLockMinutes() int {
+	std.mu.Lock()
+	defer std.mu.Unlock()
+	return std.autoMin
+}
+
+// SetAutoLockMinutes 设置空闲自动锁定（0 = 关闭），立即生效并落库。
+//
+// 不要求已设密码：允许先把策略配好，等设了启动密码再自动生效——
+// 反过来（没密码就拒绝保存）会让设置项看起来时灵时不灵。
+func SetAutoLockMinutes(n int) error {
+	if n < 0 || n > maxAutoLockMinutes {
+		return fmt.Errorf("自动锁定分钟数需在 0~%d 之间", maxAutoLockMinutes)
+	}
+	std.mu.Lock()
+	d := std.db
+	std.autoMin = n
+	std.mu.Unlock()
+	if d == nil {
+		return ErrNotInitialized
+	}
+	if err := d.SetSetting(settingAutoLock, strconv.Itoa(n)); err != nil {
+		return err
+	}
+	logger.I("[lock] 空闲自动锁定已设为 %d 分钟", n)
+	return nil
+}
+
+var watchOnce sync.Once
+
+// startIdleWatch 起一个常驻协程，按系统空闲时长自动锁定。
+//
+// 用 GetLastInputInfo 而不是前端计时器：窗口最小化、切到别的应用、屏幕锁上，
+// 空闲时长都会继续增长，这才是「人离开了」的可靠信号；WebView 里的计时器
+// 在后台会被节流，也只看得到页面内的活动。
+//
+// 没有密码 / 已经锁定 / 配置为 0 时直接跳过，不做任何额外工作。
+func startIdleWatch() {
+	watchOnce.Do(func() {
+		go func() {
+			t := time.NewTicker(autoLockTick)
+			defer t.Stop()
+			for range t.C {
+				std.mu.Lock()
+				min, locked, hasPwd := std.autoMin, std.lock, len(std.pwd) > 0
+				std.mu.Unlock()
+				if min <= 0 || locked || !hasPwd {
+					continue
+				}
+				idle, ok := platform.IdleFor()
+				if !ok || idle < time.Duration(min)*time.Minute {
+					continue
+				}
+				logger.I("[lock] 空闲 %v 达到阈值（%d 分钟），自动锁定", idle.Truncate(time.Second), min)
+				Lock()
+			}
+		}()
+	})
 }
 
 // RetryAfter 返回距离可以再次尝试还差多久；0 表示可以立刻尝试。

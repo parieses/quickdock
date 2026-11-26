@@ -469,6 +469,6 @@ watch(() => props.visible, (v) => {
   margin: 0;
   font-size: var(--text-2xs);
   line-height: 1.6;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 </style>

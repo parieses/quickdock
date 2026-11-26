@@ -446,12 +446,12 @@ function openBacklink(b: BacklinkRow) {
 .elp-head-icon { color: var(--color-text-muted); flex-shrink: 0; }
 .elp-title { flex: 1; font-weight: 600; color: var(--color-text-primary); }
 .elp-loading { color: var(--color-text-muted); }
-.elp-count { color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
+.elp-count { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 /* compact：高度吃紧的宿主（笔记编辑区）专用。默认只剩一行摘要，
    展开的内容浮在正文上、不占文档流高度 —— 否则空面板也能吃掉一百多像素。 */
 .elp-compact { position: relative; }
 .elp-compact > .elp-head { padding: var(--space-2) var(--space-5); }
-.elp-hint { color: var(--color-text-disabled); font-size: var(--text-xs); }
+.elp-hint { color: var(--color-text-muted); font-size: var(--text-xs); }
 .elp-chev { flex-shrink: 0; color: var(--color-text-muted); transition: transform var(--transition-fast); }
 .elp-chev.on { transform: rotate(180deg); }
 .elp-compact.elp-open .elp-scroll {
@@ -480,7 +480,7 @@ function openBacklink(b: BacklinkRow) {
 .elp-tab { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: none; border-radius: var(--radius-xs); background: transparent; color: var(--color-text-muted); font-family: inherit; font-size: var(--text-xs); cursor: pointer; }
 .elp-tab:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .elp-tab.on { background: var(--color-accent-bg); color: var(--color-accent); }
-.elp-tab-n { color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
+.elp-tab-n { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .elp-tab.on .elp-tab-n { color: inherit; opacity: 0.7; }
 .elp-cand { display: flex; align-items: center; gap: var(--space-2); width: 100%; padding: var(--space-2) var(--space-3); border: none; background: transparent; color: var(--color-text-secondary); text-align: left; cursor: pointer; font-family: inherit; font-size: var(--text-sm); }
 .elp-cand:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
@@ -488,14 +488,14 @@ function openBacklink(b: BacklinkRow) {
 .elp-cand-type { flex-shrink: 0; color: var(--color-text-muted); }
 .elp-cand-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 次要信息（父文件夹 / 到期日 / 所属集合）：只用来区分重名，不该抢标题的宽度 */
-.elp-cand-hint { flex-shrink: 0; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-disabled); font-size: var(--text-xs); }
+.elp-cand-hint { flex-shrink: 0; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-muted); font-size: var(--text-xs); }
 /* 「正文也写了 [[...]]」角标 */
-.elp-wiki-mark { flex-shrink: 0; color: var(--color-text-disabled); font-size: var(--text-xs); }
+.elp-wiki-mark { flex-shrink: 0; color: var(--color-text-muted); font-size: var(--text-xs); }
 
 .elp-sec { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); padding-bottom: var(--space-1); color: var(--color-text-muted); font-weight: 600; }
-.elp-n { color: var(--color-text-disabled); font-weight: 500; }
-.elp-sub { margin-top: var(--space-2); color: var(--color-text-disabled); }
-.elp-empty { padding: var(--space-2) var(--space-1); color: var(--color-text-disabled); }
+.elp-n { color: var(--color-text-muted); font-weight: 500; }
+.elp-sub { margin-top: var(--space-2); color: var(--color-text-muted); }
+.elp-empty { padding: var(--space-2) var(--space-1); color: var(--color-text-muted); }
 
 .elp-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-1); border-radius: var(--radius-xs); cursor: pointer; }
 .elp-row:hover { background: var(--color-bg-hover); }

@@ -336,6 +336,23 @@ func sleepOrQuit(d time.Duration, quit <-chan struct{}) bool {
 	}
 }
 
+// elementIs 判断投放目标是哪个元素：ElementID 是主判据，ClassList 兜底
+// （不同平台上 Wails 回填的 id 可能为空）。
+func elementIs(d *application.DropTargetDetails, id, class string) bool {
+	if d == nil {
+		return false
+	}
+	if d.ElementID == id {
+		return true
+	}
+	for _, c := range d.ClassList {
+		if c == class {
+			return true
+		}
+	}
+	return false
+}
+
 //go:embed all:frontend/dist
 var assets embed.FS
 
@@ -1028,26 +1045,23 @@ func main() {
 		appService.StartEnvServicesAsync()
 	}()
 
-	// 文件置物架：只认拖到 #qd-shelf-drop 上的文件。插件页拖 zip 安装、AI 页拖图片
-	// 附件都走各自的 HTML5 通道，这些地方不能顺手把路径塞进置物架。
+	// 文件拖放：只认显式声明了 data-file-drop-target 的落点。
+	// 置物架收文件；下载页的种子 / Metalink 需要真实路径（WebView2 的 File 只给文件名），
+	// 这里只把路径转发给前端，加任务仍走页面自己的新建弹框，保存目录与高级选项照样可改。
 	mainWindow.RegisterHook(events.Common.WindowFilesDropped, func(event *application.WindowEvent) {
 		details := event.Context().DropTargetDetails()
 		if details == nil {
 			return
 		}
-		// ElementID 是主判据；ClassList 兜底，避免不同平台上 Wails 回填的 id 为空。
-		inShelf := details.ElementID == "qd-shelf-drop"
-		for _, cls := range details.ClassList {
-			if cls == "qc-drop" {
-				inShelf = true
-				break
-			}
-		}
-		if !inShelf {
-			return
-		}
 		files := event.Context().DroppedFiles()
 		if len(files) == 0 {
+			return
+		}
+		if elementIs(details, "dl-drop-target", "dl-drop") {
+			app.Event.Emit("download:files-dropped", files)
+			return
+		}
+		if !elementIs(details, "qd-shelf-drop", "qc-drop") {
 			return
 		}
 		if res := shelfSvc.AddPaths(files); res != nil && res.Code != 0 {

@@ -6,8 +6,9 @@ defineOptions({ name: KEEP_ALIVE.plugins })
 import { KEEP_ALIVE } from '../pages/keepAlive'
 import { logErr, logWarn } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, watch, inject } from 'vue'
+import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Puzzle, Power, PowerOff, Trash2, RefreshCw, RotateCcw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe, Square, Loader2, Search, DownloadCloud, X, Play } from '@lucide/vue'
+import { Puzzle, Power, PowerOff, Trash2, RefreshCw, RotateCcw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe, Square, Loader2, Search, DownloadCloud, X, Play, Terminal } from '@lucide/vue'
 
 import {
   ListPlugins,
@@ -169,6 +170,47 @@ async function openCmdList(p: PluginInfo) {
     const target = d.rows.find((r) => r.id === row.id)
     if (target && !target.paramsText) target.paramsText = JSON.stringify(params)
   }))
+}
+
+// ---- 卡片唯一入口（CTA） ----
+//
+// 每张卡片右下角只给一个按钮，按当前状态决定它是什么：未启用 → 启用（主色，
+// 「装了但没跑起来」是唯一需要用户动手的状态）；能开界面 → 打开；只有命令 →
+// 命令清单；其余不给按钮，也不硬凑一个「禁用」当主操作。
+// 判断刻意不调 canOpenPlugin：那个还带 !operating，操作进行中会让按钮文字
+// 在「打开 / 命令」之间跳一下；这里只看稳定状态，忙碌由 Loader2 表达。
+type CardCtaKind = 'open' | 'activate' | 'commands'
+interface CardCta { kind: CardCtaKind; label: string; icon: Component }
+
+const ctaMap = computed<Record<string, CardCta>>(() => {
+  const out: Record<string, CardCta> = {}
+  for (const p of plugins.value) {
+    if (!isEnabled(p)) {
+      out[p.id] = { kind: 'activate', label: t('pluginEnable'), icon: Power }
+    } else if (p.hasFrontend && (p.status === 'running' || p.status === 'registered')) {
+      out[p.id] = { kind: 'open', label: t('pluginOpen'), icon: ExternalLink }
+    } else if (p.commands && p.commands.length) {
+      out[p.id] = { kind: 'commands', label: t('pluginCtaCommands'), icon: Terminal }
+    }
+  }
+  return out
+})
+
+function onCardCta(p: PluginInfo) {
+  const cta = ctaMap.value[p.id]
+  if (!cta || operating.value.has(p.id)) return
+  if (cta.kind === 'activate') void togglePlugin(p)
+  else if (cta.kind === 'open') openPluginPage(p)
+  else void openCmdList(p)
+}
+
+// 底部那行灰字放不下时整行省略，完整内容进 title
+function cardTagsTitle(p: PluginInfo): string {
+  const parts: string[] = [`v${p.version}`]
+  if (p.category) parts.push(p.category)
+  const perms = permTags(p).map(permLabel)
+  if (perms.length) parts.push(perms.join(' / '))
+  return parts.join(' · ')
 }
 
 async function loadLogs() {
@@ -815,43 +857,53 @@ onUnmounted(() => {
           <span v-if="plugins.length" class="plugin-count">{{ plugins.length }}</span>
         </h2>
       </template>
+      <!-- 页头动作分两级：左边一组是「顺手工具」（市场 / 检查更新 / 刷新），
+           右边实心蓝只留给这一页的主操作——从文件安装。四个按钮同款描边时，
+           用户看不出先点哪个。 -->
       <div class="qd-page-actions">
-        <button :class="['qd-btn', 'qd-btn-ghost', { 'is-on': activeView === 'market' }]" @click="activeView = activeView === 'local' ? 'market' : 'local'" :title="t('pluginMarket')">
-          <Globe :size="14" />
-          <span>{{ t('pluginMarket') }}</span>
-        </button>
-        <button v-if="activeView === 'market'" class="qd-btn qd-btn-ghost" @click="openSourcesDialog">
-          <span>{{ t('pluginMarketSources') }}</span>
-        </button>
-        <button class="qd-btn" @click="selectAndInstall" :title="t('pluginInstallFromFile')" :disabled="operating.has('_install_')">
+        <div class="qd-action-group">
+          <button :class="['qd-btn', 'qd-btn-ghost', { 'is-on': activeView === 'market' }]" @click="activeView = activeView === 'local' ? 'market' : 'local'" :title="t('pluginMarket')">
+            <Globe :size="14" />
+            <span>{{ t('pluginMarket') }}</span>
+          </button>
+          <button v-if="activeView === 'market'" class="qd-btn qd-btn-ghost" @click="openSourcesDialog">
+            <span>{{ t('pluginMarketSources') }}</span>
+          </button>
+          <button class="qd-btn qd-btn-ghost" :disabled="checkingUpdates" @click="checkUpdates" :title="t('pluginCheckUpdates')">
+            <Loader2 v-if="checkingUpdates" :size="14" class="spin" />
+            <DownloadCloud v-else :size="14" />
+            <span>{{ checkingUpdates ? t('checking') : t('pluginCheckUpdates') }}</span>
+          </button>
+          <button class="qd-icon-btn" @click="reloadPlugins" :title="t('refresh')">
+            <RefreshCw :size="14" />
+          </button>
+        </div>
+        <span class="qd-action-sep"></span>
+        <button class="qd-btn qd-btn-primary" @click="selectAndInstall" :title="t('pluginInstallFromFile')" :disabled="operating.has('_install_')">
           <Loader2 v-if="operating.has('_install_')" :size="14" class="spin" />
           <Upload v-else :size="14" />
           <span>{{ operating.has('_install_') ? t('pluginInstalling') : t('pluginInstallFromFile') }}</span>
-        </button>
-        <button class="qd-btn" :disabled="checkingUpdates" @click="checkUpdates" :title="t('pluginCheckUpdates')">
-          <Loader2 v-if="checkingUpdates" :size="14" class="spin" />
-          <DownloadCloud v-else :size="14" />
-          <span>{{ checkingUpdates ? t('checking') : t('pluginCheckUpdates') }}</span>
-        </button>
-        <button class="qd-icon-btn" @click="reloadPlugins" :title="t('refresh')">
-          <RefreshCw :size="14" />
         </button>
       </div>
     </PageHeader>
 
     <div v-if="activeView === 'local'" class="plugin-local">
-    <!-- 分类 Tabs -->
+    <!-- 分类 Tabs：做成一条分段控制器（灰轨道 + 选中实块），十几个分类平铺成
+         一排小字时，选中项只靠一点淡蓝几乎找不到锚点。搜索框留在同一行最右，
+         视线不用在「筛」和「搜」之间来回跑。 -->
     <div class="plugin-categories" v-if="plugins.length > 0">
-      <button
-        :class="['cat-tab', { active: selectedCategory === '' }]"
-        @click="selectedCategory = ''"
-      >{{ t('pluginMarketAll') }} <span class="cat-count">{{ plugins.length }}</span></button>
-      <button
-        v-for="cat in categories"
-        :key="cat"
-        :class="['cat-tab', { active: selectedCategory === cat }]"
-        @click="selectedCategory = cat"
-      >{{ cat }} <span class="cat-count">{{ plugins.filter(p => p.category === cat).length }}</span></button>
+      <div class="cat-track">
+        <button
+          :class="['cat-tab', { active: selectedCategory === '' }]"
+          @click="selectedCategory = ''"
+        >{{ t('pluginMarketAll') }} <span class="cat-count">{{ plugins.length }}</span></button>
+        <button
+          v-for="cat in categories"
+          :key="cat"
+          :class="['cat-tab', { active: selectedCategory === cat }]"
+          @click="selectedCategory = cat"
+        >{{ cat }} <span class="cat-count">{{ plugins.filter(p => p.category === cat).length }}</span></button>
+      </div>
       <div class="plugin-search">
         <Search :size="12" class="plugin-search-icon" />
         <input v-model="pluginQuery" class="plugin-search-input" :placeholder="t('pluginSearchPh')" />
@@ -866,14 +918,14 @@ onUnmounted(() => {
 
     <!-- 加载失败：与空态分开，给出重试入口 -->
     <div v-else-if="loadFailed" class="plugin-empty">
-      <Puzzle :size="48" class="empty-icon" />
+      <Puzzle :size="20" class="empty-icon" />
       <p class="empty-title">{{ t('statusError') }}</p>
       <button class="qd-btn" @click="loadPlugins()">{{ t('statusRetry') }}</button>
     </div>
 
     <!-- 空状态 -->
     <div v-key-click v-else-if="plugins.length === 0" class="plugin-empty" @click="selectAndInstall">
-      <Puzzle :size="48" class="empty-icon" />
+      <Puzzle :size="20" class="empty-icon" />
       <p class="empty-title">{{ t('pluginNoPlugins') }}</p>
       <p class="empty-desc">{{ t('pluginDragToInstall') }}</p>
     </div>
@@ -882,7 +934,7 @@ onUnmounted(() => {
          搜索态沿用市场页的 pluginMarketNoResult，别再说「该分类下暂无插件」——
          没选分类时这句话是误导；图标也同步换成搜索图标。 -->
     <div v-else-if="filteredPlugins.length === 0" class="plugin-empty">
-      <component :is="pluginQuery.trim() ? Search : Puzzle" :size="48" class="empty-icon" />
+      <component :is="pluginQuery.trim() ? Search : Puzzle" :size="20" class="empty-icon" />
       <p class="empty-title">{{ pluginQuery.trim() ? t('pluginMarketNoResult') : t('pluginEmptyCategory') }}</p>
     </div>
 
@@ -894,7 +946,8 @@ onUnmounted(() => {
         :title="canOpenPlugin(p) ? t('pluginDblclickOpen') : undefined"
         @dblclick="onCardDblClick($event, p)"
       >
-        <!-- 悬停操作按钮 -->
+        <!-- 悬停快捷操作：和状态徽标共用右上角（卡片只有两百来像素宽，各占一边
+             会互相挤），鼠标进来时徽标淡出、这组图标淡入。 -->
         <div class="card-actions-top">
           <button
             :class="['action-top-btn', isEnabled(p) ? 'btn-stop-top' : 'btn-start-top']"
@@ -941,47 +994,38 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <!-- 图标区域 -->
-        <div class="card-icon-wrap">
-          <img
-            v-if="icons[p.id]"
-            :src="icons[p.id]"
-            class="card-icon-img"
-            alt=""
-          />
-          <Puzzle v-else :size="22" class="card-icon-fallback" />
-        </div>
-
-        <!-- 名称：独占整行。状态徽标挪到元信息行后，这里才有整行宽度，
-             名称不再被挤到只剩三四个字；仍超长时单行 ellipsis + 悬停看全名 -->
-        <div
-          class="card-name"
-          @mouseenter="applyOverflowTitle($event, pluginName(p, locale))"
-        >{{ pluginName(p, locale) }}</div>
-
-        <!-- 元信息行：版本 / 用量 / 状态靠右 -->
-        <div class="card-meta">
-          <span v-if="newFlags.has(p.id)" class="new-badge">{{ t('pluginNewBadge') }}</span>
-          <span class="card-version">v{{ p.version }}</span>
-          <span v-if="p.usageCount > 0" class="card-usage">
-            <Play :size="10" class="usage-icon" />
-            <span class="usage-count">{{ p.usageCount }}</span>
-          </span>
-          <span :class="['status-badge', statusBadgeClass(p)]">{{ statusLabel(p) }}</span>
-        </div>
-
-        <!-- 权限审计：装完之后仍能看到这个插件能碰什么，不必回去翻 plugin.json -->
-        <div v-if="permTags(p).length" class="card-perms">
+        <!-- 第一层：图标 + 名称 + 右上角状态。原来「名称一行、版本用量状态又一行、
+             权限标签一行、命令一行、描述两行」五层平铺，眼睛没有落点；现在固定成
+             头（谁）→ 描述（干什么）→ 脚（版本/能力 + 唯一入口）三段。 -->
+        <div class="card-head">
+          <div class="card-icon-wrap">
+            <span v-if="newFlags.has(p.id)" class="new-badge" :title="t('pluginNewBadge')">{{ t('pluginNewBadge') }}</span>
+            <img
+              v-if="icons[p.id]"
+              :src="icons[p.id]"
+              class="card-icon-img"
+              alt=""
+            />
+            <Puzzle v-else :size="22" class="card-icon-fallback" />
+          </div>
+          <div
+            class="card-name"
+            @mouseenter="applyOverflowTitle($event, pluginName(p, locale))"
+          >{{ pluginName(p, locale) }}</div>
           <span
-            v-for="tag in permTags(p)"
-            :key="tag"
-            class="perm-tag"
-            @mouseenter="applyOverflowTitle($event, permLabel(tag))"
-          >{{ permLabel(tag) }}</span>
+            :class="['status-badge', statusBadgeClass(p)]"
+            :title="statusLabel(p)"
+          ><i class="badge-dot"></i>{{ statusLabel(p) }}</span>
         </div>
+
+        <!-- 第二层：描述固定两行（无描述也占满两行高度），同一行卡片底部才齐 -->
+        <p
+          class="card-desc"
+          @mouseenter="applyOverflowTitle($event, pluginDesc(p, locale))"
+        >{{ pluginDesc(p, locale) }}</p>
 
         <!--
-          命令与热键：卡片上露触发方式 + 热键，点开看完整清单（含参数声明）。
+          命令与热键：卡片上露前两条，点开看完整清单（含参数声明）。
           取不到增强数据时 v-if 直接隐藏这一块，不抛错也不留空壳。
         -->
         <div v-key-click
@@ -991,7 +1035,7 @@ onUnmounted(() => {
           @click.stop="openCmdList(p)"
         >
           <!-- 卡片上只留「热键 + 命令标题」：触发方式（扫描/手动）是第三个文字块，
-               在 158px 的卡片里会把标题挤成单个字。触发方式并入 chip 的 title 提示。 -->
+               在窄卡片里会把标题挤成单个字。触发方式并入 chip 的 title 提示。 -->
           <span
             v-for="c in p.commands.slice(0, 2)"
             :key="c.id"
@@ -1007,12 +1051,38 @@ onUnmounted(() => {
           <span v-if="p.commands.length > 2" class="cmd-more">+{{ p.commands.length - 2 }}</span>
         </div>
 
-        <!-- 描述：固定两行（.card-desc 的 line-clamp），超出的悬停看全文 -->
-        <p
-          v-if="p.description"
-          class="card-desc"
-          @mouseenter="applyOverflowTitle($event, pluginDesc(p, locale))"
-        >{{ pluginDesc(p, locale) }}</p>
+        <!-- 第三层（贴底）：版本 / 用量 / 分类 / 权限声明做成一行灰字纯文本，
+             不再是一堆灰底小胶囊——那些胶囊把卡片切得很碎，谁也没读进去。
+             整行超长时省略，完整内容在 title 里。 -->
+        <div class="card-foot">
+          <div class="card-tags" :title="cardTagsTitle(p)">
+            <span class="card-version">v{{ p.version }}</span>
+            <span v-if="p.usageCount > 0" class="card-usage">
+              <Play :size="9" class="usage-icon" />
+              <span class="usage-count">{{ p.usageCount }}</span>
+            </span>
+            <span v-if="p.category" class="tag-sep">·</span>
+            <span v-if="p.category" class="tag-text">{{ p.category }}</span>
+            <template v-if="permTags(p).length">
+              <span class="tag-sep">·</span>
+              <span class="tag-text tag-perms">{{ permTags(p).map(permLabel).join(' / ') }}</span>
+            </template>
+          </div>
+          <!-- 唯一明确入口：可打开 → 打开；未启用 → 启用；只有命令 → 命令。
+               以前卡片上没有任何按钮，用户只能猜「点哪里」。 -->
+          <button
+            v-if="ctaMap[p.id]"
+            :class="['card-cta', { 'is-primary': ctaMap[p.id].kind === 'activate' }]"
+            :disabled="operating.has(p.id)"
+            :title="ctaMap[p.id].label"
+            @click.stop="onCardCta(p)"
+            @dblclick.stop
+          >
+            <Loader2 v-if="operating.has(p.id)" :size="11" class="spin" />
+            <component v-else :is="ctaMap[p.id].icon" :size="11" />
+            <span>{{ ctaMap[p.id].label }}</span>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -1197,78 +1267,97 @@ onUnmounted(() => {
 .plugin-loading, .plugin-empty {
   flex: 1; display: flex; flex-direction: column;
   align-items: center; justify-content: center;
-  gap: 10px; color: var(--color-text-disabled);
+  gap: 10px; color: var(--color-text-muted);
 }
 /* 空状态图标：一根细线图标直接浮在深底上，容易被读成「没加载出来」。
-   给一层方底 + 细边，它才是一个完整的标识；padding 配合 content-box，
-   图标本身的尺寸不用改（各页 28/30/36/48 都成立）。 */
+   给一层方底 + 细边，它才是一个完整的标识。
+   盒子固定 44（= .qd-empty-icon），图标一律 20：早先靠 padding + content-box
+   "适配任意尺寸"，结果 28/30/36/48 各自撑成 48~68，同屏不同页的图标底托大小不一。 */
 .empty-icon {
-  padding: 10px;
-  box-sizing: content-box;
-  opacity: 1;
+  width: 44px;
+  height: 44px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 0 var(--color-hairline);
   margin-bottom: var(--space-5);
 }
 .empty-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-secondary); margin: 0; }
 .empty-desc { font-size: var(--text-sm); margin: var(--space-3) 0 0; color: var(--color-text-muted); }
 
 /* ---- 网格 ---- */
-/* 最小列宽 158px：再窄的话一行只剩三四个汉字，名称和描述全被截断成省略号，
-   而卡片里已经没有别的信息可看。放宽后 1440 宽约 8 列，仍比列表紧凑。 */
+/* 最小列宽 210px：卡片改成「大图标 + 两行描述 + 底部一行元信息 + 右下角入口」后，
+   158px 的宽度放不下这些内容（状态徽标会把名称挤成三四个字，底部一行也会全变省略号）。
+   210px 在 1440 宽下约 6 列，仍比列表紧凑。 */
 .plugin-grid {
   flex: 1; overflow-y: auto;
   min-height: 0; /* 同上：允许网格收缩到可视高度，超出才滚动 */
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   gap: var(--space-4);
   align-content: start;
   padding: var(--space-1) 0;
 }
 
 /* ---- 插件卡片 ---- */
-/* 紧凑左对齐列表行：第一行「图标 + 名称」，状态与版本等次要信息从第二行起
-   左对齐流水排布（状态徽标靠右）。名称独占第一行剩余宽度，才不会被状态徽标
-   挤成三四个字。 */
+/* 三段式纵向布局：头（图标 + 名称 + 状态）／描述（固定两行）／脚（元信息 + 入口）。
+   卡片按 grid 行等高拉伸，脚用 margin-top:auto 贴底，同一行卡片底边自然齐。 */
 .plugin-card {
   background: var(--color-card-bg);
   border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
-  padding: var(--space-3) var(--space-4);
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  align-items: center;
-  align-content: start;
-  column-gap: var(--space-3);
-  row-gap: var(--space-1);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
   text-align: left;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
   cursor: default;
   position: relative;
   /* 同市场页 .market-card：grid item 默认 min-width:auto(=min-content)，
      置 0 后卡片才允许收缩到列宽，内容约束（见 .card-desc）才能真正生效 */
   min-width: 0;
+  /* 深色下卡片底色只比页面亮一点，静止时「贴着桌面」；hover 抬起 2px + 一圈
+     更亮的边 + 一层柔和投影，才像一个能点的东西。 */
 }
-.plugin-card:hover { border-color: var(--color-accent); box-shadow: 0 0 0 1px var(--color-accent-bg); }
+.plugin-card:hover {
+  border-color: var(--color-border-light);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+/* 运行中的绿边放在 hover 之后：悬停时边框跟着抬起变中性色，避免两种强调色打架 */
 .plugin-card.card-running { border-color: var(--color-success-border); }
+.plugin-card.card-running:hover { border-color: var(--color-success-border); }
 /* 能双击打开的卡片给出可点光标；禁用 / 无界面 / 未就绪的保持默认光标 */
 .plugin-card.card-openable { cursor: pointer; }
-
-/* 「新」角标：随 meta 走文档流，避免紧凑行里绝对定位压住图标 */
-.new-badge {
-  font-size: var(--text-2xs); line-height: 14px; font-weight: 600;
-  padding: 0 var(--space-2); border-radius: var(--radius-sm);
-  background: var(--color-accent); color: var(--color-accent-text);
-  letter-spacing: 0.5px;
+@media (prefers-reduced-motion: reduce) {
+  .plugin-card { transition: border-color var(--transition-fast), box-shadow var(--transition-fast); }
+  .plugin-card:hover { transform: none; }
 }
 
-/* 顶部操作悬停 */
+/* 「新」角标：贴在图标右上角，不占头部宽度 */
+.new-badge {
+  position: absolute; top: -5px; right: -5px;
+  font-size: 9px; line-height: 13px; font-weight: 700;
+  padding: 0 4px; border-radius: var(--radius-sm);
+  background: var(--color-accent); color: var(--color-accent-text);
+  letter-spacing: 0.3px;
+  box-shadow: 0 0 0 2px var(--color-card-bg);
+}
+
+/* 顶部操作悬停：和状态徽标同一个角，徽标淡出、图标组淡入 */
 .card-actions-top {
-  position: absolute; top: 4px; right: 4px;
-  display: flex; gap: var(--space-1); opacity: 0;
+  position: absolute; top: 6px; right: 6px;
+  display: flex; gap: 2px; opacity: 0;
+  padding: 2px; border-radius: var(--radius-sm);
+  background: var(--color-card-bg);
   transition: opacity 120ms;
+  z-index: 1;
 }
 /* 键盘用户 Tab 进按钮组时也要显形：只靠 :hover 的话 opacity:0 会把
    按钮连同全局 :focus-visible 焦点环一起藏掉，根本看不出落在哪个危险操作上。
@@ -1276,9 +1365,17 @@ onUnmounted(() => {
    随之可见；鼠标场景仍走 :hover。 */
 .plugin-card:hover .card-actions-top,
 .plugin-card:focus-within .card-actions-top { opacity: 1; }
+/* 同一角落让位：hover / 键盘焦点进来时状态徽标淡出（仍占位，名称不会重排） */
+.plugin-card:hover .status-badge,
+.plugin-card:focus-within .status-badge { opacity: 0; }
+/* 图标组比状态徽标宽（5 个 20px 按钮 ≈ 112px，徽标只有 50 左右），会压到名称
+   尾部那一段。hover 时给名称补一段右内边距让它提前省略——比让按钮盖在字上干净，
+   而且省略号本来就只影响被盖住的那几个字。 */
+.plugin-card:hover .card-name,
+.plugin-card:focus-within .card-name { padding-right: 48px; }
 .action-top-btn {
   display: flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: var(--radius-xs);
+  width: 20px; height: 20px; border-radius: var(--radius-xs);
   border: none; background: var(--color-bg-tertiary);
   color: var(--color-text-muted); cursor: pointer;
   font-size: var(--text-2xs); transition: background-color 100ms, color 100ms, border-color 100ms;
@@ -1290,25 +1387,56 @@ onUnmounted(() => {
 .action-top-btn.btn-reinstall-top:hover { color: var(--color-accent); }
 .action-top-btn.btn-uninstall-top:hover { color: var(--color-danger); }
 
-/* 图标 */
+/* ---- 第一层：头 ---- */
+.card-head { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+
+/* 图标：插件自带 PNG（各自有色），所以底板只做统一容器——同一个尺寸、
+   同一层弱底、同一圈细边，一排卡片的图标才像一组。 */
 .card-icon-wrap {
-  grid-column: 1; grid-row: 1;
-  width: 28px; height: 28px;
+  position: relative;
+  width: 38px; height: 38px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
+  border-radius: 10px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
 }
-.card-icon-img { width: 28px; height: 28px; object-fit: contain; }
+.card-icon-img { width: 26px; height: 26px; object-fit: contain; }
 .card-icon-fallback { color: var(--color-text-muted); }
 
-/* 名称：第一行独占（图标右侧整行），单行 ellipsis，悬停由 applyOverflowTitle 补全名 */
-.card-name { grid-column: 2 / -1; grid-row: 1; min-width: 0; font-size: var(--text-sm); font-weight: 500; color: var(--color-text-primary); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.card-meta { grid-column: 2 / -1; display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+/* 名称：独占头部剩余宽度，单行省略，悬停由 applyOverflowTitle 补全名 */
+.card-name {
+  flex: 1; min-width: 0;
+  font-size: var(--text-md); font-weight: 600;
+  color: var(--color-text-primary); line-height: 1.35;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* 版本号：脚部那行灰字的一员 */
 .card-version { font-size: var(--text-2xs); color: var(--color-text-muted); }
 
-/* 状态：跟在元信息行末尾靠右。不再占第一行的独立网格列 —— 那样会把名称压到
-   只剩几个字。flex-wrap 生效时它换行到下一排，仍靠右对齐。 */
-.status-badge { margin-left: auto; font-size: var(--text-2xs); padding: 0 var(--space-3); border-radius: var(--radius-md); font-weight: 500; line-height: 16px; white-space: nowrap; }
+/* 状态：带头部右上，前置一个同色小圆点——纯文字色块在深底上偏弱，
+   一个点就能让「绿=跑着 / 灰=停着」在余光里也能分辨。 */
+.status-badge {
+  flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px;
+  font-size: var(--text-2xs); padding: 0 var(--space-3);
+  border-radius: var(--radius-md); font-weight: 500;
+  line-height: 16px; white-space: nowrap;
+  transition: opacity 120ms;
+}
+.badge-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+/* 只有「真的在跑」的插件呼吸：静止插件闪动只会变成整页噪音 */
+.badge-running .badge-dot,
+.badge-starting .badge-dot { animation: badge-pulse 2.2s ease-in-out infinite; }
+@keyframes badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .badge-running .badge-dot, .badge-starting .badge-dot { animation: none; }
+}
 .badge-running { background: var(--color-success-bg); color: var(--color-success); }
-.badge-stopped { background: var(--color-border); color: var(--color-text-muted); }
+/* 未激活 / 已停止一律退回中性灰：它们是"没开"，不该和运行中抢视线 */
+.badge-stopped { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 /* disabled 是中性「被关掉」，不该和 crashed 同为红色；红色只留给真正的崩溃 */
 .badge-disabled { background: var(--color-bg-tertiary); color: var(--color-text-disabled); }
 .badge-crashed { background: var(--color-danger-bg); color: var(--color-danger); }
@@ -1316,30 +1444,9 @@ onUnmounted(() => {
 .badge-starting { background: var(--color-warning-bg); color: var(--color-warning); }
 .badge-unresponsive { background: var(--color-warning-bg); color: var(--color-warning); }
 
-/* 权限标签：与状态徽标同尺寸，但用中性底 —— 权限是"事实"不是"状态"，
-   给它们上色会和运行状态抢注意力 */
-.card-perms { grid-column: 2 / -1; display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-
-/* 每个标签最多约 8 个汉字宽，超出的截断并悬停看全文。
-   原来是 max-width:100%，一个长标签（「可执行程序白名单」）就独占整行，
-   下面的命令区和描述被推下去，卡片高矮差一截。 */
-.perm-tag {
-  font-size: var(--text-2xs);
-  line-height: 15px;
-  padding: 0 5px;
-  border-radius: var(--radius-md);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-muted);
-  max-width: 8.5em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* 命令与热键：卡片上只露前两条，完整清单在 title 里。
    热键用 kbd 的等宽感是刻意的 —— 它是「按键」而不是「标签」。 */
 .card-cmds {
-  grid-column: 2 / -1;
   display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
   max-width: 100%;
 }
@@ -1382,7 +1489,7 @@ onUnmounted(() => {
   line-height: 15px;
   padding: 0 var(--space-2);
   border-radius: var(--radius-md);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
 }
 
@@ -1391,21 +1498,67 @@ onUnmounted(() => {
 .usage-icon { font-size: var(--text-2xs); }
 .usage-count { font-family: var(--font-mono); font-weight: 500; }
 
-/* 描述：固定两行高度（12px × 1.3 × 2），卡片按行对齐；超出部分由
-   line-clamp 裁掉，鼠标移入时由 applyOverflowTitle 补上 title 看全文 */
+/* 描述：固定两行高度（14px × 1.45 × 2），无描述也占位，同一行卡片底部才齐。
+   颜色用 secondary 而不是 muted：它是卡片里唯一的「说明」，读不清就等于没有。 */
 .card-desc {
-  grid-column: 2 / -1;
-  font-size: var(--text-sm); color: var(--color-text-muted);
-  margin: 1px 0 0; line-height: 1.3;
+  margin: 0;
+  font-size: var(--text-sm); color: var(--color-text-secondary);
+  line-height: 1.45;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden;
-  min-height: 32px;
-  /* 卡片是 grid，item 默认 min-width:auto(=min-content)：
+  min-height: calc(2 * 1.45em);
+  /* 卡片是 flex item 时默认 min-width:auto(=min-content)：
      不约束 max-width，一个超长无空格词（英文描述/URL）就会把描述撑破列宽 */
   max-width: 100%;
   /* line-clamp 的省略号只加在行尾；单词本身超过一行宽时，先得让它能断行 */
   overflow-wrap: anywhere;
 }
+
+/* ---- 第三层：脚（元信息 + 唯一入口） ---- */
+/* margin-top:auto 把它顶到卡片底部：同排卡片被 grid 拉成等高后，
+   没有描述的卡片不会在下方留出一段空白再跟一个悬空按钮。 */
+.card-foot {
+  margin-top: auto;
+  padding-top: var(--space-2);
+  display: flex; align-items: center; gap: var(--space-3);
+  min-width: 0;
+}
+
+/* 一行灰字：v1.0.8 · 分类 · 权限 / 权限。原来这些是四个灰底胶囊，在窄卡上
+   把一行切成碎块；纯文本 + 点号既省空间，也让「版本」这一层退到后面。 */
+.card-tags {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 5px;
+  font-size: var(--text-2xs); color: var(--color-text-muted);
+  white-space: nowrap; overflow: hidden;
+}
+.card-tags > * { flex-shrink: 0; }
+/* 版本号必须完整（它是最短也最常被找的一项）；分类 / 权限可让位并省略 */
+.tag-perms { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.tag-sep { color: var(--color-text-muted); }
+.tag-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--color-text-muted); }
+
+/* 唯一入口：小胶囊按钮。未启用用主色（唯一需要用户动手的状态），
+   其余是中性描边——一排卡片上不该有很多个蓝按钮。 */
+.card-cta {
+  display: inline-flex; align-items: center; gap: 4px;
+  flex-shrink: 0; height: 22px; padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-2xs); font-family: inherit; font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+.card-cta:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); border-color: var(--color-accent); }
+.card-cta.is-primary {
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border-strong);
+  color: var(--color-accent);
+}
+.card-cta.is-primary:hover { background: var(--color-accent); border-color: transparent; color: var(--color-accent-text); }
+.card-cta:disabled { opacity: 0.6; cursor: default; }
 
 /* ---- 分类 Tabs ---- */
 /* 搜索框跟分类 tab 同一行靠右：装得多时先搜再筛，比先筛再翻更快 */
@@ -1416,7 +1569,7 @@ onUnmounted(() => {
   border-radius: var(--radius-sm);
 }
 .plugin-search:focus-within { border-color: var(--color-border-focus-soft); }
-.plugin-search-icon { color: var(--color-text-disabled); flex-shrink: 0; }
+.plugin-search-icon { color: var(--color-text-muted); flex-shrink: 0; }
 .plugin-search-input {
   flex: 1; min-width: 0; border: none; outline: none; background: none;
   color: var(--color-text-primary); font-size: var(--text-xs); font-family: inherit;
@@ -1424,19 +1577,31 @@ onUnmounted(() => {
 .plugin-search-input::placeholder { color: var(--color-text-disabled); }
 .plugin-search-clear {
   display: flex; padding: 0; border: none; background: none;
-  color: var(--color-text-disabled); cursor: pointer;
+  color: var(--color-text-muted); cursor: pointer;
 }
 .plugin-search-clear:hover { color: var(--color-text-primary); }
 
+/* ---- 分类 Tabs（分段控制器） ---- */
+/* 搜索框跟分类同一行靠右：装得多时先搜再筛，比先筛再翻更快。
+   分类本身收进 .cat-track 一条灰轨道里——十几个分类平铺成一排小字时，
+   选中项只靠一点淡蓝几乎找不到锚点，有轨道才像"一组单选"。 */
 .plugin-categories {
-  display: flex; gap: 3px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: var(--space-4);
   margin-bottom: 10px; flex-shrink: 0;
   padding-bottom: var(--space-4);
   border-bottom: 1px solid var(--color-border);
 }
+.cat-track {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+  padding: 3px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
 .cat-tab {
-  display: inline-flex; align-items: center; gap: 3px;
-  padding: var(--space-2) 10px; border-radius: var(--radius-sm);
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: transparent;
   color: var(--color-text-secondary);
@@ -1450,8 +1615,9 @@ onUnmounted(() => {
 }
 .cat-tab.active {
   background: var(--color-accent-bg);
-  border-color: var(--color-accent);
+  border-color: var(--color-accent-border-strong);
   color: var(--color-accent);
+  font-weight: 600;
 }
 .cat-count {
   font-size: var(--text-2xs); opacity: 0.6;
@@ -1481,7 +1647,7 @@ onUnmounted(() => {
 }
 .history-body { margin-top: var(--space-3); }
 .history-loading, .history-empty, .history-failed {
-  font-size: var(--text-xs); color: var(--color-text-disabled);
+  font-size: var(--text-xs); color: var(--color-text-muted);
   padding: var(--space-4) var(--space-1);
 }
 .history-failed { display: flex; align-items: center; gap: var(--space-3); }
@@ -1516,8 +1682,8 @@ onUnmounted(() => {
   background: var(--color-bg-tertiary); padding: 0 var(--space-3); border-radius: var(--radius-md); flex-shrink: 0;
 }
 .row-dur { color: var(--color-text-muted); font-family: var(--font-mono); flex-shrink: 0; }
-.row-time { color: var(--color-text-disabled); font-size: var(--text-2xs); margin-left: auto; flex-shrink: 0; }
-.row-caret { color: var(--color-text-disabled); flex-shrink: 0; }
+.row-time { color: var(--color-text-muted); font-size: var(--text-2xs); margin-left: auto; flex-shrink: 0; }
+.row-caret { color: var(--color-text-muted); flex-shrink: 0; }
 .exec-detail {
   padding: var(--space-3) var(--space-4) var(--space-4); margin: -2px 0 var(--space-1);
   background: var(--color-bg-primary);
@@ -1625,7 +1791,7 @@ onUnmounted(() => {
 .cmd-row-hint, .cmd-row-desc { font-size: var(--text-xs); color: var(--color-text-muted); overflow-wrap: anywhere; }
 .cmd-row-hint { font-family: var(--font-mono); }
 .cmd-row-params { display: flex; flex-direction: column; gap: 3px; }
-.cmd-row-label { font-size: var(--text-2xs); color: var(--color-text-disabled); }
+.cmd-row-label { font-size: var(--text-2xs); color: var(--color-text-muted); }
 .cmd-row-params code {
   font-family: var(--font-mono); font-size: var(--text-2xs);
   color: var(--color-text-secondary);

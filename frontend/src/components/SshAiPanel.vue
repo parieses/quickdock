@@ -556,7 +556,7 @@ function saveAsResult(e: MouseEvent) {
 }
 
 .ssh-ai-env.is-test {
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   background: var(--color-border);
 }
 
@@ -645,7 +645,7 @@ function saveAsResult(e: MouseEvent) {
   padding: var(--space-1) var(--space-1) 0;
   font-size: var(--text-xs);
   line-height: 1.4;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 /*
@@ -703,6 +703,6 @@ function saveAsResult(e: MouseEvent) {
 .ssh-ai-cmd-lock {
   padding-left: 3px;
   font-size: var(--text-xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 </style>

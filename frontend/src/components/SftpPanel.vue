@@ -1380,7 +1380,7 @@ async function copyPath(e: SftpEntry) {
 .sftp-x {
   display: flex;
   padding: var(--space-2);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   background: none;
   border: none;
   border-radius: var(--radius-xs);
@@ -1425,7 +1425,7 @@ async function copyPath(e: SftpEntry) {
 .sftp-crumb-edit {
   flex: 0 0 auto;
   font-size: var(--text-sm);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   padding: var(--space-1) 5px;
 }
 .sftp-crumb-edit:hover:not(:disabled) { color: var(--color-accent); }
@@ -1705,7 +1705,7 @@ async function copyPath(e: SftpEntry) {
 
 .ic {
   flex: 0 0 auto;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 .ic--dir {
@@ -1803,7 +1803,7 @@ async function copyPath(e: SftpEntry) {
   display: inline-flex;
   padding: var(--space-1);
   margin-left: var(--space-1);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   background: none;
   border: none;
   border-radius: var(--radius-xs);

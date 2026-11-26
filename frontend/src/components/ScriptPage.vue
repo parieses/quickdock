@@ -27,11 +27,11 @@ import { Events } from '@wailsio/runtime'
 import {
   Plus, Play, Square, Save, FolderOpen, Trash2, RefreshCw, Search, Pin, PinOff,
   FileCode2, FilePlus2, X, LoaderCircle, PackagePlus, History, Wand2, Copy,
-  Webhook, Download, Upload, Eye, EyeOff, Check, AlertTriangle, File as FileIcon,
-  Clock,
+  Webhook, Download, Import, Eye, EyeOff, Check, AlertTriangle, File as FileIcon,
+  Clock, BookOpen, ChevronDown, ChevronRight,
 } from '@lucide/vue'
 import {
-  ListScripts, GetScript, CreateScript, UpdateScript, DeleteScript, SetScriptPin,
+  ListScripts, GetScript, CreateScript, CreateScriptWithFiles, UpdateScript, DeleteScript, SetScriptPin,
   OpenScriptDir, ReadScriptFile, WriteScriptFile, CreateScriptFile, DeleteScriptFile,
   RunScript, CancelScriptRun, ListScriptRuns, GetScriptRunLog, GetScriptStats,
   InstallDeps, ListScriptEnvs, SaveScriptEnv, RevealScriptEnv, DeleteScriptEnv,
@@ -45,6 +45,9 @@ import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { useToast } from '../composables/useToast'
 import { copyToClipboard } from '../utils/clipboard'
+// 首次使用教程的地址与「设置 → 关于」「工作空间空状态」共用一份（utils/siteLinks）
+import { openExternal } from '../utils/externalLinks'
+import { SITE_GUIDE_URL } from '../utils/siteLinks'
 
 const { t } = useI18n()
 const { success: toastOK, error: toastErr, confirm: toastConfirm } = useToast()
@@ -116,6 +119,17 @@ const onlyFailed = ref(false)
 const currentId = ref('')
 const current = computed(() => scripts.value.find(s => s.id === currentId.value) || null)
 
+/** 列表至少成功拉过一次。没有它，首帧 scripts 还是空数组时会把欢迎页闪出来。 */
+const listReady = ref(false)
+/** 一条脚本都没有：左右两栏合并成全屏引导页，而不是左边喊「还没有」、右边喊「去左边选」 */
+const isEmpty = computed(() => listReady.value && scripts.value.length === 0)
+const hasFilter = computed(() => !!keyword.value.trim() || !!langFilter.value || onlyFailed.value)
+function clearFilters() {
+  keyword.value = ''
+  langFilter.value = ''
+  onlyFailed.value = false
+}
+
 const filtered = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
   let list = scripts.value.slice()
@@ -146,6 +160,8 @@ async function loadScripts(keep = true) {
     logErr('script.list', e)
     toastErr(getErrorMessage(e))
   } finally {
+    // 失败也算「拉过一次」：否则首屏会停在「左边空、右边让去左边选」的悖论里
+    listReady.value = true
     loading.value = false
   }
 }
@@ -750,6 +766,217 @@ async function doCreate() {
   }
 }
 
+// ---------- 模板 ----------
+//
+// 空状态直接给可点击的模板卡：新建弹窗要填名字、语言、入口，对第一次用的人
+// 是最难的一步；模板把这些都填好，落地就在编辑器里，只剩「改两行再运行」。
+// 走 CreateScriptWithFiles（AI 建脚本同一条后端链路）：一次落库 + 写文件，
+// 不会留下「有记录没文件」的半成品。
+interface ScriptTemplate {
+  key: string
+  nameKey: string
+  descKey: string
+  lang: string
+  entry: string
+  tags: string
+  files: Record<string, string>
+}
+
+const TEMPLATES: ScriptTemplate[] = [
+  {
+    key: 'crawler',
+    nameKey: 'scrTplCrawler',
+    descKey: 'scrTplCrawlerDesc',
+    lang: 'python',
+    entry: 'main.py',
+    tags: '',
+    files: {
+      'main.py': `# -*- coding: utf-8 -*-
+"""抓取网页标题，并把结果追加到 QD_DATA_DIR/crawl.log。
+
+依赖：requests（见同目录 requirements.txt）。首次运行前先点「安装依赖」。
+只改 URL 就能用；要抓正文时在 fetch 之后接 BeautifulSoup 即可。
+"""
+import os
+from datetime import datetime
+
+import requests
+
+URL = "https://example.com"
+
+
+def fetch_title(url: str) -> str:
+    resp = requests.get(url, timeout=15, headers={"User-Agent": "QuickDock/1.0"})
+    resp.raise_for_status()
+    resp.encoding = resp.apparent_encoding
+    if "<title>" not in resp.text:
+        return "(no title)"
+    return " ".join(resp.text.split("<title>")[1].split("</title>")[0].split())
+
+
+def main():
+    title = fetch_title(URL)
+    print(f"{datetime.now():%H:%M:%S} {URL} -> {title}")
+
+    out = os.path.join(os.environ.get("QD_DATA_DIR", "."), "crawl.log")
+    with open(out, "a", encoding="utf-8") as f:
+        f.write(f"{datetime.now().isoformat(timespec='seconds')}\\t{URL}\\t{title}\\n")
+
+
+if __name__ == "__main__":
+    main()
+`,
+      'requirements.txt': 'requests>=2.31\n',
+    },
+  },
+  {
+    key: 'clean',
+    nameKey: 'scrTplClean',
+    descKey: 'scrTplCleanDesc',
+    lang: 'shell',
+    entry: 'clean_logs.sh',
+    tags: '',
+    files: {
+      'clean_logs.sh': `#!/usr/bin/env bash
+# 清理过期日志：默认只打印计划（DRY_RUN=1），确认无误后改成 DRY_RUN=0 再跑。
+# 目录 / 天数 / 匹配规则都可用环境变量覆盖：LOG_DIR DAYS PATTERN DRY_RUN
+set -euo pipefail
+
+LOG_DIR="\${LOG_DIR:-.}"
+DAYS="\${DAYS:-7}"
+PATTERN="\${PATTERN:-*.log}"
+DRY_RUN="\${DRY_RUN:-1}"
+
+echo "扫描 \${LOG_DIR} 下超过 \${DAYS} 天的 \${PATTERN}（DRY_RUN=\${DRY_RUN}）"
+files=\$(find "\$LOG_DIR" -type f -name "\$PATTERN" -mtime +"\$DAYS" 2>/dev/null || true)
+if [ -z "\$files" ]; then
+  echo "没有需要清理的文件"
+  exit 0
+fi
+
+while IFS= read -r f; do
+  if [ "\$DRY_RUN" = "1" ]; then
+    echo "[预演] 将删除 \$f"
+  else
+    rm -f -- "\$f" && echo "已删除 \$f"
+  fi
+done <<< "\$files"
+`,
+    },
+  },
+  {
+    key: 'api',
+    nameKey: 'scrTplApi',
+    descKey: 'scrTplApiDesc',
+    lang: 'javascript',
+    entry: 'main.js',
+    tags: '',
+    files: {
+      'main.js': `// 接口巡检：状态码非 2xx 或请求失败时以退出码 1 结束，
+// 这样「运行历史」会直接标红，绑定的定时任务也能据此告警。
+const URL = process.env.CHECK_URL || 'https://example.com'
+const TIMEOUT_MS = Number(process.env.TIMEOUT_MS || 10000)
+
+async function main() {
+  const started = Date.now()
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS)
+  try {
+    const resp = await fetch(URL, { signal: ctrl.signal, redirect: 'follow' })
+    console.log(\`\${resp.status} \${resp.statusText} \${Date.now() - started}ms \${URL}\`)
+    if (!resp.ok) process.exitCode = 1
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+main().catch((e) => {
+  console.error('request failed:', e.message)
+  process.exitCode = 1
+})
+`,
+    },
+  },
+  {
+    key: 'backup',
+    nameKey: 'scrTplBackup',
+    descKey: 'scrTplBackupDesc',
+    lang: 'python',
+    entry: 'main.py',
+    tags: '',
+    files: {
+      'main.py': `# -*- coding: utf-8 -*-
+"""把目录打包成 zip 存到 QD_DATA_DIR/backup，按份数自动轮转。
+
+用环境变量覆盖：BACKUP_SRC（要备份的目录）BACKUP_KEEP（保留份数）。
+"""
+import os
+import shutil
+from datetime import datetime
+
+SRC = os.environ.get("BACKUP_SRC", ".")
+KEEP = int(os.environ.get("BACKUP_KEEP", "7"))
+
+
+def main():
+    dest_dir = os.path.join(os.environ.get("QD_DATA_DIR", "."), "backup")
+    os.makedirs(dest_dir, exist_ok=True)
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    base = os.path.join(dest_dir, f"{os.path.basename(os.path.abspath(SRC))}-{stamp}")
+    archive = shutil.make_archive(base, "zip", SRC)
+    print("backup ->", archive)
+
+    olds = sorted(
+        (os.path.join(dest_dir, f) for f in os.listdir(dest_dir) if f.endswith(".zip")),
+        key=os.path.getmtime,
+    )
+    for f in olds[:-KEEP] if len(olds) > KEEP else []:
+        os.remove(f)
+        print("rotated out", os.path.basename(f))
+
+
+if __name__ == "__main__":
+    main()
+`,
+    },
+  },
+]
+
+const creatingTpl = ref('')
+
+async function createFromTemplate(tpl: ScriptTemplate) {
+  if (creatingTpl.value) return
+  creatingTpl.value = tpl.key
+  try {
+    // 注意返回的是 { script, files, deps } 包一层，不是裸 ScriptRec
+    const data = unwrap<{ script: ScriptRec }>(await CreateScriptWithFiles({
+      id: '', name: t(tpl.nameKey), description: t(tpl.descKey), lang: tpl.lang,
+      entry: tpl.entry, interpreter: '', defaultArgs: '[]', timeoutSec: 0, concurrency: 1,
+      autoInstall: true, pinned: false, mcpAllowed: false, tags: tpl.tags,
+      sort: scripts.value.length, watchPath: '',
+    }, tpl.files))
+    const id = data?.script?.id || ''
+    await loadScripts()
+    if (id) {
+      currentId.value = ''
+      await selectScript(id)
+    }
+  } catch (e) {
+    toastErr(getErrorMessage(e))
+  } finally {
+    creatingTpl.value = ''
+  }
+}
+
+/** 首次使用教程：用系统浏览器打开，不用裸 <a>（WebView 会把整个应用导航走）。 */
+function openGuide() {
+  openExternal(SITE_GUIDE_URL).catch((e: unknown) => {
+    logErr('script.guide', e)
+    toastErr(getErrorMessage(e))
+  })
+}
+
 async function removeScript() {
   if (!current.value) return
   const bound = bindings.value.length
@@ -1043,30 +1270,42 @@ onBeforeUnmount(() => {
   <div class="scr-page">
     <PageHeader>
       <template #titles>
-        <h2 class="qd-page-title">{{ t('scr_title') }}</h2>
-        <span class="scr-count">{{ scripts.length }}</span>
+        <!-- 计数跟着标题走：放在 #titles 里会掉到第二行，变成一个孤零零的数字 -->
+        <h2 class="qd-page-title">{{ t('scr_title') }}<span class="scr-count">({{ scripts.length }})</span></h2>
       </template>
-      <div class="scr-head-actions">
+      <!-- 空状态时整条工具栏都没有意义（没有可搜/可筛/可刷新的数据），
+           只留标题 + 全屏引导页，避免出现两颗「新建」按钮 -->
+      <div v-if="scripts.length" class="scr-head-actions">
         <label class="scr-search">
           <Search :size="14" />
           <input v-model="keyword" :placeholder="t('scr_search')" />
         </label>
-        <select v-model="langFilter" class="scr-filter" :title="t('scr_allLangs')">
-          <option value="">{{ t('scr_allLangs') }}</option>
-          <option v-for="l in LANGS" :key="l" :value="l">{{ langText(l) }}</option>
-        </select>
-        <label class="scr-failonly" :title="t('scr_onlyFailed')">
-          <input v-model="onlyFailed" type="checkbox" />{{ t('scr_onlyFailed') }}
+        <!-- 语言筛选与「只看失败」统一成胶囊，宽度和高度跟搜索框齐平 -->
+        <label class="scr-pill" :class="{ on: !!langFilter }" :title="t('scr_allLangs')">
+          <span>{{ langFilter ? langText(langFilter) : t('scr_allLangs') }}</span>
+          <ChevronDown :size="12" />
+          <select v-model="langFilter" class="scr-pill-select" :aria-label="t('scr_allLangs')">
+            <option value="">{{ t('scr_allLangs') }}</option>
+            <option v-for="l in LANGS" :key="l" :value="l">{{ langText(l) }}</option>
+          </select>
         </label>
+        <button class="scr-pill" :class="{ on: onlyFailed }" :aria-pressed="onlyFailed"
+          :title="t('scr_onlyFailed')" @click="onlyFailed = !onlyFailed">
+          <AlertTriangle :size="12" />
+          <span>{{ t('scr_onlyFailed') }}</span>
+        </button>
+        <span class="scr-sep" aria-hidden="true"></span>
         <button class="scr-btn" :title="t('scr_trigger')" @click="openTrigger">
           <Webhook :size="15" />
         </button>
+        <!-- 导入 = 从磁盘拿进来。改用「进入方框的箭头」，不再是容易读成导出的向上箭头 -->
         <button class="scr-btn" :title="t('scr_import')" @click="importScript">
-          <Upload :size="15" />
+          <Import :size="15" />
         </button>
         <button class="scr-btn" :title="t('scr_refresh')" @click="loadScripts()">
           <RefreshCw :size="15" :class="{ spin: loading }" />
         </button>
+        <span class="scr-sep" aria-hidden="true"></span>
         <button class="scr-btn primary" @click="openCreate">
           <Plus :size="15" /> {{ t('scr_new') }}
         </button>
@@ -1074,14 +1313,72 @@ onBeforeUnmount(() => {
     </PageHeader>
 
     <div class="scr-body">
+      <!-- 首帧还没拉到列表：先转圈，别让「左边空 / 右边去左边选」的错误状态闪一下 -->
+      <div v-if="!listReady" class="scr-boot"><LoaderCircle :size="18" class="spin" /></div>
+
+      <!-- 一条脚本都没有：不摆两个互相指路的空框，直接合并成全屏引导页 -->
+      <div v-else-if="isEmpty" class="qd-guide scr-guide">
+        <div class="qd-guide-inner">
+          <div class="qd-guide-icon scr-guide-icon">
+            <!-- 齿轮 + 代码符号：本页的语义就是「把代码跑起来」 -->
+            <svg class="scr-guide-art" width="30" height="30" viewBox="0 0 24 24" fill="none"
+              stroke="var(--color-accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+              aria-hidden="true">
+              <g class="scr-guide-gear">
+                <circle cx="12" cy="12" r="7.2" />
+                <path d="M12 2.8v2.1M12 19.1v2.1M2.8 12h2.1M19.1 12h2.1M5.5 5.5l1.5 1.5M17 17l1.5 1.5M18.5 5.5 17 7M7 17l-1.5 1.5" />
+              </g>
+              <path d="M10.3 9.6 8.4 12l1.9 2.4" />
+              <path d="M13.7 9.6 15.6 12l-1.9 2.4" />
+            </svg>
+          </div>
+
+          <h2 class="qd-guide-title">{{ t('scrGuideTitle') }}</h2>
+          <p class="qd-guide-desc">{{ t('scrGuideDesc') }}</p>
+
+          <button class="qd-guide-cta" @click="openCreate">
+            <Plus :size="15" />
+            <span>{{ t('scrGuideCta') }}</span>
+          </button>
+
+          <p class="scr-guide-tpl-title">{{ t('scrGuideTpl') }}</p>
+          <div class="scr-tpl-grid">
+            <button
+              v-for="tpl in TEMPLATES" :key="tpl.key" class="scr-tpl"
+              :disabled="!!creatingTpl" @click="createFromTemplate(tpl)"
+            >
+              <span class="scr-tpl-head">
+                <span class="scr-tpl-lang">{{ langText(tpl.lang) }}</span>
+                <LoaderCircle v-if="creatingTpl === tpl.key" :size="12" class="spin" />
+                <ChevronRight v-else :size="12" class="scr-tpl-arrow" />
+              </span>
+              <span class="scr-tpl-name">{{ t(tpl.nameKey) }}</span>
+              <span class="scr-tpl-desc">{{ t(tpl.descKey) }}</span>
+            </button>
+          </div>
+
+          <p class="scr-guide-steps">{{ t('scrGuideSteps') }}</p>
+
+          <div class="qd-guide-footer">
+            <button class="qd-guide-link" :title="SITE_GUIDE_URL" @click="openGuide">
+              <BookOpen :size="13" />
+              {{ t('scrGuideDoc') }}
+            </button>
+            <button class="qd-guide-link" @click="importScript">
+              <Import :size="13" />
+              {{ t('scrGuideImport') }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <template v-else>
       <!-- 左：脚本列表 -->
       <aside class="scr-list">
         <div v-if="!filtered.length" class="scr-list-empty">
           <FileCode2 :size="22" />
-          <p>{{ keyword ? t('scr_noMatch') : t('scr_emptyList') }}</p>
-          <button v-if="!keyword" class="scr-btn primary sm" @click="openCreate">
-            <Plus :size="14" /> {{ t('scr_new') }}
-          </button>
+          <p>{{ t('scr_noMatch') }}</p>
+          <button v-if="hasFilter" class="scr-btn sm" @click="clearFilters">{{ t('scrClearFilters') }}</button>
         </div>
         <button
           v-for="s in filtered" :key="s.id" class="scr-item"
@@ -1116,7 +1413,7 @@ onBeforeUnmount(() => {
         <div v-if="!current" class="scr-placeholder">
           <FileCode2 :size="40" />
           <p>{{ t('scr_pickHint') }}</p>
-          <p class="scr-placeholder-sub">{{ t('scr_pickHintSub') }}</p>
+          <p class="scr-placeholder-sub">{{ filtered.length ? t('scr_pickHintSub') : t('scrNoMatchHint') }}</p>
         </div>
 
         <template v-else>
@@ -1418,6 +1715,7 @@ onBeforeUnmount(() => {
           </div>
         </template>
       </section>
+      </template>
     </div>
 
     <!-- 实时 / 历史日志 -->
@@ -1552,8 +1850,46 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .scr-page { display: flex; flex-direction: column; height: 100%; overflow: hidden; background: var(--color-bg-primary); }
-.scr-count { font-size: var(--text-xs); color: var(--color-text-muted); background: var(--color-bg-tertiary); border-radius: 10px; padding: 1px 7px; }
-.scr-head-actions { display: flex; align-items: center; gap: var(--space-2); }
+.scr-count { font-size: var(--text-sm); font-weight: 500; color: var(--color-text-muted); }
+.scr-head-actions { display: flex; align-items: center; gap: var(--space-3); }
+/* 动作组之间的细竖线：导入/刷新/新建挤在一起时，靠它分组而不是靠距离 */
+.scr-sep { width: 1px; height: 16px; flex-shrink: 0; background: var(--color-border-light); }
+
+/* ---------- 空状态引导页（骨架复用 styles/guide.css 的 .qd-guide） ---------- */
+.scr-guide-icon { width: 56px; height: 56px; }
+/* 齿轮慢转，代码符号不动：整块转起来会像加载中，只转外圈才是「机器在待命」 */
+.scr-guide-gear { transform-origin: 12px 12px; animation: scr-gear 22s linear infinite; }
+@keyframes scr-gear {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scr-guide-gear { animation: none; }
+}
+.scr-guide-tpl-title { margin: 0 0 10px; font-size: var(--text-xs); color: var(--color-text-muted); }
+.scr-guide-steps { margin: 0 0 14px; font-size: var(--text-xs); line-height: 1.6; color: var(--color-text-muted); }
+/* 200px 是这条容器的分界：640 宽的引导页放 2 列（3 列会因为余量不足掉成 3+1） */
+.scr-tpl-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-3); width: 100%; margin-bottom: 18px;
+}
+.scr-tpl {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 9px 11px; text-align: left; font-family: inherit; cursor: pointer;
+  border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  transition: border-color var(--transition-fast), background-color var(--transition-fast);
+}
+.scr-tpl:hover:not(:disabled) { border-color: var(--color-accent-border); background: var(--color-bg-hover); }
+.scr-tpl:disabled { opacity: 0.6; cursor: default; }
+.scr-tpl-head { display: flex; align-items: center; justify-content: space-between; }
+.scr-tpl-lang {
+  padding: 0 6px; line-height: 16px; border-radius: var(--radius-full);
+  background: var(--color-accent-bg); color: var(--color-accent); font-size: var(--text-2xs);
+}
+.scr-tpl-arrow { color: var(--color-text-muted); transition: color var(--transition-fast), transform var(--transition-fast); }
+.scr-tpl:hover:not(:disabled) .scr-tpl-arrow { color: var(--color-accent); transform: translateX(2px); }
+.scr-tpl-name { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); }
+.scr-tpl-desc { font-size: var(--text-xs); line-height: 1.5; color: var(--color-text-muted); }
 .scr-search { display: flex; align-items: center; gap: var(--space-2); background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 0 var(--space-3); height: 30px; color: var(--color-text-muted); }
 .scr-search input { background: transparent; border: none; outline: none; color: var(--color-text-primary); font-size: var(--text-sm); width: 150px; }
 .scr-btn { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-secondary); font-size: var(--text-sm); font-family: inherit; cursor: pointer; }
@@ -1564,8 +1900,22 @@ onBeforeUnmount(() => {
 .scr-btn.ghost { background: transparent; border-color: transparent; }
 .scr-btn:disabled { opacity: .6; cursor: default; }
 .scr-btn.ghost.active { background: var(--color-accent-bg); color: var(--color-accent); }
-.scr-filter { height: 30px; background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-text-primary); font-size: var(--text-sm); padding: 0 var(--space-2); }
-.scr-failonly { display: inline-flex; align-items: center; gap: 4px; font-size: var(--text-xs); color: var(--color-text-muted); cursor: pointer; white-space: nowrap; }
+/* 筛选胶囊：语言下拉与「只看失败」共用一套外观，替代原来的裸 select + 复选框 */
+.scr-pill {
+  position: relative; display: inline-flex; align-items: center; gap: 5px;
+  height: 30px; padding: 0 var(--space-4);
+  border: 1px solid var(--color-border); border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
+  font-size: var(--text-xs); font-family: inherit; white-space: nowrap; cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+.scr-pill:hover { color: var(--color-text-primary); border-color: var(--color-border-light); }
+.scr-pill.on { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent); }
+/* 原生 select 铺满整个胶囊（透明），点击即弹系统下拉 —— 保留键盘与无障碍行为 */
+.scr-pill-select {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  border: 0; padding: 0; margin: 0; opacity: 0; cursor: pointer; appearance: none;
+}
 .scr-args { width: 132px; height: 30px; background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-text-primary); font-size: var(--text-xs); padding: 0 var(--space-2); }
 .scr-args::placeholder { color: var(--color-text-muted); }
 .scr-search.sm { height: 26px; padding: 0 var(--space-2); }
@@ -1588,8 +1938,15 @@ onBeforeUnmount(() => {
 .scr-spark { width: 86px; height: 18px; flex-shrink: 0; opacity: .85; }
 
 .scr-body { display: flex; flex: 1 1 auto; min-height: 0; }
-.scr-list { width: 250px; flex-shrink: 0; border-right: 1px solid var(--color-border); overflow-y: auto; padding: var(--space-2); display: flex; flex-direction: column; gap: 2px; }
-.scr-list-empty { display: flex; flex-direction: column; align-items: center; gap: var(--space-3); padding: var(--space-8) var(--space-4); color: var(--color-text-muted); font-size: var(--text-sm); text-align: center; }
+.scr-boot { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--color-text-muted); }
+/* 列表栏给一档更亮的底色 + 深一档的分割线：深色下只靠 1px 边框分不开两块区域 */
+.scr-list {
+  width: 250px; flex-shrink: 0; border-right: 1px solid var(--color-border-light);
+  background: var(--color-bg-secondary);
+  overflow-y: auto; padding: var(--space-2); display: flex; flex-direction: column; gap: 2px;
+}
+.scr-list-empty { display: flex; flex-direction: column; align-items: center; gap: var(--space-3); padding: var(--space-8) var(--space-4); color: var(--color-text-secondary); font-size: var(--text-sm); text-align: center; }
+.scr-list-empty p { margin: 0; }
 .scr-item { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; text-align: left; cursor: pointer; color: var(--color-text-primary); font-family: inherit; }
 .scr-item:hover { background: var(--color-bg-hover); }
 .scr-item.active { background: var(--color-accent-bg); border-color: var(--color-accent-border); }
@@ -1605,8 +1962,10 @@ onBeforeUnmount(() => {
 .scr-item-act button:hover { color: var(--color-accent); }
 
 .scr-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
-.scr-placeholder { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); color: var(--color-text-muted); }
-.scr-placeholder-sub { font-size: var(--text-sm); }
+.scr-placeholder { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); color: var(--color-text-secondary); }
+.scr-placeholder > svg { color: var(--color-text-muted); }
+.scr-placeholder p { margin: 0; }
+.scr-placeholder-sub { font-size: var(--text-sm); color: var(--color-text-muted); }
 .scr-toolbar { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--color-border); }
 .scr-title-wrap { display: flex; flex-direction: column; min-width: 0; }
 .scr-title-wrap h3 { margin: 0; font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
@@ -1644,7 +2003,7 @@ onBeforeUnmount(() => {
 .scr-editor-err p { margin: 0; font-size: var(--text-sm); }
 .scr-editor-err-msg {
   max-width: 70%; font-size: var(--text-xs) !important; font-family: var(--font-mono);
-  color: var(--color-text-disabled); word-break: break-all;
+  color: var(--color-text-muted); word-break: break-all;
 }
 /* 未保存指示点：在文件树、代码页签、保存按钮上共用一个语义 */
 .scr-dirty-dot {

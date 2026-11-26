@@ -951,7 +951,7 @@ onUnmounted(() => {
 }
 .log-file-meta {
   font-size: var(--text-2xs); line-height: 1.4;
-  color: var(--color-text-disabled); font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted); font-variant-numeric: tabular-nums;
 }
 .log-file.active .log-file-meta { color: var(--color-accent); opacity: 0.7; }
 
@@ -968,7 +968,7 @@ onUnmounted(() => {
 
 .crash-actions { padding: var(--space-4); border-top: 1px solid var(--color-border); flex-shrink: 0; }
 .crash-actions .log-btn { width: 100%; justify-content: center; }
-.log-empty { padding: var(--space-5) var(--space-3); font-size: var(--text-sm); color: var(--color-text-disabled); }
+.log-empty { padding: var(--space-5) var(--space-3); font-size: var(--text-sm); color: var(--color-text-muted); }
 
 /* === 实时尾随 ===
    状态点刻意做成「呼吸」而不是静态圆点：尾随是一个持续进行的动作，
@@ -994,14 +994,14 @@ onUnmounted(() => {
   flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%;
   background: var(--color-success); animation: tail-pulse 1.6s ease-in-out infinite;
 }
-.tail-dot.paused { background: var(--color-text-disabled); animation: none; }
+.tail-dot.paused { background: var(--color-text-muted); animation: none; }
 @keyframes tail-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
 .tail-x {
   position: absolute; top: 5px; right: 4px;
   display: inline-flex; align-items: center; justify-content: center;
   width: 18px; height: 18px; padding: 0; border-radius: var(--radius-sm);
-  background: transparent; color: var(--color-text-disabled); border: none; cursor: pointer;
+  background: transparent; color: var(--color-text-muted); border: none; cursor: pointer;
   opacity: 0; transition: opacity var(--transition-fast), color var(--transition-fast);
 }
 .tail-tab:hover .tail-x { opacity: 1; }
@@ -1041,7 +1041,7 @@ onUnmounted(() => {
 .storage-seg--log { background: var(--color-accent); }
 .storage-seg--crash { background: var(--color-danger); }
 .storage-facts { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
-.storage-range { color: var(--color-text-disabled); }
+.storage-range { color: var(--color-text-muted); }
 .storage-legend { display: flex; gap: 10px; flex-shrink: 0; font-size: var(--text-2xs); }
 .lg { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--color-text-muted); }
 /* 小色块用 ::before 而不是再画一个元素：这里只需要一个 6px 的点 */
@@ -1098,7 +1098,7 @@ onUnmounted(() => {
 .log-toolbar-left { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; }
 .log-toolbar-right { display: flex; align-items: center; gap: var(--space-4); flex-shrink: 0; margin-left: auto; }
 .log-count {
-  font-size: var(--text-xs); color: var(--color-text-disabled);
+  font-size: var(--text-xs); color: var(--color-text-muted);
   font-variant-numeric: tabular-nums; white-space: nowrap; padding-right: var(--space-1);
 }
 .log-capped { color: var(--color-warning); }
@@ -1129,7 +1129,7 @@ onUnmounted(() => {
   display: flex; align-items: center; gap: var(--space-3);
   flex: 1 1 auto; min-width: 120px; max-width: 340px; height: 26px;
   padding: 0 9px;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-secondary);
   transition: border-color var(--transition-fast);
@@ -1198,7 +1198,7 @@ onUnmounted(() => {
   user-select: text;
 }
 /* info 是基线，不上色：一旦整屏每行都带颜色，警告和错误就失去信号意义 */
-.log-lv { font-size: var(--text-xs); font-weight: 600; text-align: center; color: var(--color-text-disabled); }
+.log-lv { font-size: var(--text-xs); font-weight: 600; text-align: center; color: var(--color-text-muted); }
 .lv-W .log-lv { color: var(--color-warning); }
 .lv-E .log-lv { color: var(--color-log-error); }
 
@@ -1219,7 +1219,7 @@ onUnmounted(() => {
   width: 20px; height: 20px;
   display: flex; align-items: center; justify-content: center; cursor: pointer;
   border: 1px solid var(--color-border); border-radius: var(--radius-xs);
-  background: var(--color-bg-secondary); color: var(--color-text-disabled);
+  background: var(--color-bg-secondary); color: var(--color-text-muted);
   opacity: 0;
   transition: opacity var(--transition-fast), color var(--transition-fast);
 }

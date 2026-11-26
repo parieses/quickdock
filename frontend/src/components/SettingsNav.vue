@@ -121,7 +121,7 @@ function restoreAll() {
 .snv-row.hidden { opacity: 0.55; }
 .snv-row.hidden .snv-name { text-decoration: line-through; }
 
-.snv-grip { color: var(--color-text-disabled); flex-shrink: 0; cursor: grab; }
+.snv-grip { color: var(--color-text-muted); flex-shrink: 0; cursor: grab; }
 .snv-icon { color: var(--color-text-secondary); flex-shrink: 0; }
 .snv-name { flex: 1; font-size: var(--text-md); color: var(--color-text-primary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .snv-eye {
@@ -141,9 +141,9 @@ function restoreAll() {
 .snv-eye:hover { color: var(--color-accent); background: var(--color-bg-active); }
 .snv-row.hidden .snv-eye { color: var(--color-text-disabled); }
 
-.snv-hint { margin: 0; font-size: var(--text-sm); color: var(--color-text-disabled); }
+.snv-hint { margin: 0; font-size: var(--text-sm); color: var(--color-text-muted); }
 .snv-actions { display: flex; gap: var(--space-4); }
-.snv-foot { margin: 0; font-size: var(--text-sm); color: var(--color-text-disabled); }
+.snv-foot { margin: 0; font-size: var(--text-sm); color: var(--color-text-muted); }
 .snv-link {
   border: none;
   background: transparent;

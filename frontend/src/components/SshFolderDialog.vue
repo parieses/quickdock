@@ -179,7 +179,7 @@ function onKeydown(e: KeyboardEvent) {
   width: 24px;
   height: 24px;
   padding: 0;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   background: none;
   border: none;
   border-radius: var(--radius-xs);

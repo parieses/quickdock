@@ -522,7 +522,7 @@ const navItems = computed<NavItemView[]>(() =>
 .nav-menu-title {
   padding: var(--space-2) var(--space-4) var(--space-3);
   font-size: var(--text-xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   border-bottom: 1px solid var(--color-border);
   margin-bottom: var(--space-2);
   white-space: nowrap;
@@ -567,7 +567,7 @@ const navItems = computed<NavItemView[]>(() =>
   height: 28px; padding: 0 11px;
   border: none;
   background: transparent;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   font-size: var(--text-sm);
   cursor: pointer;
   font-family: inherit;
@@ -584,7 +584,7 @@ const navItems = computed<NavItemView[]>(() =>
   height: 32px;
   border: none;
   background: transparent;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   cursor: pointer;
   border-radius: var(--radius-sm);
   transition: background-color var(--transition-fast), color var(--transition-fast);

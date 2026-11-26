@@ -332,7 +332,7 @@ onUnmounted(() => {
   font-weight: 600;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 .lock-brand-dot {
@@ -468,7 +468,7 @@ onUnmounted(() => {
   margin: var(--space-4) 0 0;
   font-size: var(--text-xs);
   line-height: 1.5;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 .lock-hint.is-warn {

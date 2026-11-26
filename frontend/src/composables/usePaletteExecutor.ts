@@ -30,6 +30,7 @@ import { OpenItem, OpenItemWithQuery } from '../../bindings/quickdock/services/c
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 import { DlAdd, DlEnable } from '../../bindings/quickdock/services/download/downloadservice'
 import { ExecutePluginCommand, EnablePlugin } from '../../bindings/quickdock/services/plugin/pluginservice'
+import { OpenSshHost } from '../../bindings/quickdock/services/sshx/sshservice'
 import type { CollectionItem, ToastAPI } from '../types'
 import type { SearchResult, RecentEntry } from './useCommandSearch'
 import type { PluginCmdIndex } from './usePluginIndex'
@@ -256,6 +257,37 @@ export function usePaletteExecutor(deps: PaletteExecutorDeps) {
       if (ok) void deps.closePalette()
     } else if (result.type === 'env') {
       await deps.executeEnvAction(result)
+    } else if (result.type === 'ssh' && result.sshHostId) {
+      // SSH：交后端打开（或唤回）独立终端窗口，再由它广播 hostId 让页面去连。
+      // 不在这里自己 Show 窗口：窗口是懒创建 + 复用的，显示逻辑只能有一份
+      // （见 services/sshx/window.go 的注释），前端另写一套会和主窗口脱节。
+      try {
+        await OpenSshHost(result.sshHostId)
+      } catch (e) {
+        console.error('[CmdPalette] OpenSshHost:', e)
+      }
+      void deps.closePalette()
+    } else if (result.type === 'repo' && result.repoPath) {
+      // Git 仓库：切到 git 页并停在对应仓库上。与场景/集合同一条链路——
+      // 面板是独立浮窗，JS 状态不互通，所以先发事件把深链目标送到主窗口
+      // （GitPage 从 pendingTarget 里取 path），再交后端隐藏面板 + 唤起主窗口 + 切页。
+      // git 已在 services/palette.go 的 navigablePages 白名单里，后端无需改动。
+      try {
+        Events.Emit('palette:locate', {
+          page: 'git',
+          target: result.repoPath,
+          kind: 'repo',
+          id: result.repoPath,
+        })
+      } catch (e) {
+        console.error('[CmdPalette] palette:locate:', e)
+      }
+      try {
+        await NavigateMainWindow('git')
+      } catch (e) {
+        console.error('[CmdPalette] NavigateMainWindow:', e)
+      }
+      void deps.closePalette()
     } else if (result.type === 'nav' && result.navPage) {
       // 与笔记/待办同一条链路：面板是独立浮窗，直接 navigateTo 会把整个主界面
       // 渲染进小窗。交后端隐藏面板 + 唤起主窗口 + 广播页面 id（App.vue 监听后 setPage）。

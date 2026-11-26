@@ -416,7 +416,7 @@ function onKeydown(e: KeyboardEvent) {
 .cred-empty {
   margin: 0 0 10px;
   font-size: var(--text-xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 .cred-field {

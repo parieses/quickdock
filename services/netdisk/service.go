@@ -15,6 +15,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -90,6 +92,11 @@ type GatewayInfo struct {
 	// 前端据此显示「去管理后台添加网盘」的引导页，而不是把网关的 HTTP 500
 	// 原样弹成一条没有下一步动作的 toast。
 	NeedSetup bool `json:"needSetup"`
+	// External 当前连接的是用户在别处自建的 OpenList（Docker / 手工安装 / 另一台机器），
+	// 而不是本机受管安装。前端据此把「安装 / 启动」换成「外部网关」标识与断开入口。
+	External bool `json:"external"`
+	// ExternalEndpoint 外部网关的 WebDAV 地址（仅 External 为真时有值，用于回填弹窗）。
+	ExternalEndpoint string `json:"externalEndpoint"`
 }
 
 // downloadProgress 下载进度事件载荷（quickdock:netdisk:download）。
@@ -105,7 +112,14 @@ type downloadProgress struct {
 
 // NetdiskStatus 返回网关状态。前端首屏调用：未装 → 引导安装；装了没跑 → 给启动按钮。
 func (s *NetdiskService) NetdiskStatus() *services.ApiResult {
-	if s.App == nil || s.App.Env == nil {
+	if s.App == nil {
+		return services.FailMsg("服务未初始化")
+	}
+	// 外部网关优先：连着自己的 OpenList 时，本机装没装、跑没跑都不影响这一页。
+	if cfg, ok := s.external(); ok {
+		return s.externalStatus(cfg)
+	}
+	if s.App.Env == nil {
 		return services.FailMsg("环境管理未初始化")
 	}
 	rt := s.App.Env.OpenListRuntime()
@@ -278,6 +292,11 @@ func (s *NetdiskService) NetdiskTest() *services.ApiResult {
 //  3. 其它 500：多半是网关还没配置好（一个存储都没加、驱动未登录、刚启动还没
 //     加载完）。首屏已有引导页，这里再兜一句可操作的指引，别只甩一个状态码。
 func (s *NetdiskService) hint(err error) string {
+	// 外部网关的账号是用户自己填的，没有「QuickDock 托管的密码」这回事，
+	// 受管那套「重启会自动同步密码」的指引对着外部网关是错的。
+	if _, external := s.external(); external {
+		return s.externalHint(err)
+	}
 	if errors.Is(err, netdisk.ErrUnauthorized) {
 		return "网关拒绝认证：QuickDock 记的管理员密码与网关库不一致。到「环境管理 → OpenList」点停止再启动，会自动同步密码"
 	}
@@ -396,8 +415,167 @@ func (s *NetdiskService) runDownload(c *netdisk.Client, remotePath, destPath str
 	emit(base)
 }
 
+// ---- 外部网关（用户自建的 OpenList）----
+//
+// 为什么支持：用户可能在 Docker / 手工安装里已经跑着一套 OpenList，换机器或重装
+// QuickDock 后不该被逼着装第二份（本机两份网关还会争同一个 5244 端口）。
+// 这里只保存连接信息（WebDAV 地址 + 管理员账号），不碰对方的数据目录与配置。
+
+// externalSettingKey 外部网关连接信息的 app_state 键（后端内部键，前端只能经方法读写）。
+const externalSettingKey = "netdisk_external"
+
+type externalConfig struct {
+	Endpoint string `json:"endpoint"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// external 读外部网关配置；未配置或解析失败都返回 false（回落到受管网关）。
+func (s *NetdiskService) external() (externalConfig, bool) {
+	var cfg externalConfig
+	if s.App == nil || s.App.DB == nil {
+		return cfg, false
+	}
+	raw, err := s.App.DB.GetSetting(externalSettingKey)
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return cfg, false
+	}
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return cfg, false
+	}
+	if strings.TrimSpace(cfg.Endpoint) == "" {
+		return cfg, false
+	}
+	return cfg, true
+}
+
+// newExternalClient 按外部配置建客户端。
+//
+// 私网地址的 https 放宽证书校验：本地/内网网关几乎都是自签证书，强制校验等于
+// 让这条入口只能用 http。公网地址仍严格校验，避免把「连错主机」变成静默信任。
+func newExternalClient(cfg externalConfig) (*netdisk.Client, error) {
+	return netdisk.New(netdisk.Config{
+		Endpoint:    cfg.Endpoint,
+		Username:    cfg.Username,
+		Password:    cfg.Password,
+		InsecureTLS: isPrivateEndpoint(cfg.Endpoint),
+	})
+}
+
+// isPrivateEndpoint 判断端点是否指向本机 / 内网（含 .local 与私有网段）。
+func isPrivateEndpoint(endpoint string) bool {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" || host == "::1" || strings.HasSuffix(host, ".local") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate()
+}
+
+// NetdiskConnectExternal 连接用户已有的 OpenList。
+//
+// 先建客户端再 Test 一次：地址打不通/账号错在这一步就返回，不会把一份坏配置
+// 落盘——否则下次打开页面直接进「网关未运行」，用户还得自己找地方改回来。
+func (s *NetdiskService) NetdiskConnectExternal(endpoint, username, password string) *services.ApiResult {
+	cfg := externalConfig{
+		Endpoint: strings.TrimSpace(endpoint),
+		Username: strings.TrimSpace(username),
+		Password: password,
+	}
+	if cfg.Endpoint == "" {
+		return services.FailMsg("请填写网关地址")
+	}
+	// 用户通常只贴到根路径（http://127.0.0.1:5244），而 WebDAV 挂在 /dav 下。
+	// 自动补全比让人自己猜后缀省事，也不会误伤已经写全的地址。
+	if !strings.HasSuffix(strings.TrimRight(cfg.Endpoint, "/"), "/dav") {
+		cfg.Endpoint = strings.TrimRight(cfg.Endpoint, "/") + "/dav"
+	}
+	c, err := newExternalClient(cfg)
+	if err != nil {
+		return services.FailMsg(err.Error())
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	if terr := c.Test(ctx); terr != nil {
+		return services.FailMsg("连接失败：" + s.externalHint(terr))
+	}
+	if s.App == nil || s.App.DB == nil {
+		return services.FailMsg("数据库未初始化")
+	}
+	b, _ := json.Marshal(cfg)
+	if err := s.App.DB.SetSetting(externalSettingKey, string(b)); err != nil {
+		return services.FailMsg(err.Error())
+	}
+	return services.Ok(true)
+}
+
+// NetdiskDisconnectExternal 断开外部网关，回到本机受管安装（装了就用、没装就引导安装）。
+func (s *NetdiskService) NetdiskDisconnectExternal() *services.ApiResult {
+	if s.App == nil || s.App.DB == nil {
+		return services.FailMsg("数据库未初始化")
+	}
+	if err := s.App.DB.SetSetting(externalSettingKey, ""); err != nil {
+		return services.FailMsg(err.Error())
+	}
+	return services.Ok(true)
+}
+
+// externalStatus 外部网关的状态：受管侧装没装与这里无关，只看地址通不通。
+func (s *NetdiskService) externalStatus(cfg externalConfig) *services.ApiResult {
+	info := GatewayInfo{
+		Installed:        true,
+		External:         true,
+		ExternalEndpoint: cfg.Endpoint,
+		DavURL:           cfg.Endpoint,
+		Username:         cfg.Username,
+	}
+	if u, err := url.Parse(cfg.Endpoint); err == nil && u.Host != "" {
+		info.AdminURL = u.Scheme + "://" + u.Host + "/@manage"
+	}
+	if c, err := newExternalClient(cfg); err == nil {
+		// 3s：状态探测跑在 30s 轮询里，不能因为对面不可达把整页卡住。
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		list, lerr := c.List(ctx, "/")
+		cancel()
+		if lerr == nil {
+			info.Running = true
+			info.NeedSetup = len(list) == 0
+		}
+	}
+	if p := s.ensureProxy(); p != nil {
+		info.PreviewBase = p.Base() + "/f?p="
+	}
+	return services.Ok(info)
+}
+
+// externalHint 外部网关的失败提示：受管那套「重启会自动同步密码」在这里没有意义。
+func (s *NetdiskService) externalHint(err error) string {
+	if errors.Is(err, netdisk.ErrUnauthorized) {
+		return "网关拒绝认证：账号或密码不正确。点「连接设置」重新填写 OpenList 的管理员账号密码。"
+	}
+	if strings.Contains(err.Error(), "HTTP 500") {
+		return "网关返回 500：先到 OpenList 后台确认已添加存储且能打开目录，再回来刷新。"
+	}
+	return err.Error()
+}
+
 // client 组装 WebDAV 客户端：地址与账号都取自网关适配器。
 func (s *NetdiskService) client() (*netdisk.Client, *services.ApiResult) {
+	// 外部网关优先：用户明确指定了「用我自己的那套」，就不该再去看本机装没装。
+	if cfg, ok := s.external(); ok {
+		c, err := newExternalClient(cfg)
+		if err != nil {
+			return nil, services.FailMsg(err.Error())
+		}
+		return c, nil
+	}
 	if s.App == nil || s.App.Env == nil {
 		return nil, services.FailMsg("环境管理未初始化")
 	}

@@ -356,7 +356,7 @@ onUnmounted(() => {
   display: flex; align-items: center; justify-content: center;
   width: 22px; height: 22px; margin-left: var(--space-1);
   border: none; border-radius: var(--radius-sm);
-  background: transparent; color: var(--color-text-disabled); cursor: pointer;
+  background: transparent; color: var(--color-text-muted); cursor: pointer;
 }
 .pane-head-btn:hover { color: var(--color-accent); background: var(--color-bg-active); }
 /* ---- 时间线筛选（来源 + 时间）---- */
@@ -378,7 +378,7 @@ onUnmounted(() => {
   background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent);
 }
 .pane-body { flex: 1; overflow-y: auto; padding: var(--space-3); }
-.pane-empty { margin: 0; padding: var(--space-8) var(--space-5); font-size: var(--text-sm); line-height: 1.6; color: var(--color-text-disabled); }
+.pane-empty { margin: 0; padding: var(--space-8) var(--space-5); font-size: var(--text-sm); line-height: 1.6; color: var(--color-text-muted); }
 
 .used-list { list-style: none; margin: 0; padding: 0; }
 .used-row {
@@ -388,7 +388,7 @@ onUnmounted(() => {
 .used-row:hover { background: var(--color-bg-hover); }
 .used-rank {
   width: 18px; flex-shrink: 0; text-align: center; font-size: var(--text-xs);
-  color: var(--color-text-disabled); font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted); font-variant-numeric: tabular-nums;
 }
 .used-rank.top { color: var(--color-accent); font-weight: 600; }
 .used-label {
@@ -425,10 +425,10 @@ onUnmounted(() => {
   border-radius: var(--radius-xs);
   font-size: var(--text-2xs);
   line-height: 1.5;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
 }
 /* AI 触发的动作用强调色：一眼能扫出「哪些不是我干的」 */
 .tl-src.is-mcp { color: var(--color-accent); background: var(--color-accent-bg); }
-.tl-time { font-size: var(--text-xs); color: var(--color-text-disabled); }
+.tl-time { font-size: var(--text-xs); color: var(--color-text-muted); }
 </style>

@@ -101,7 +101,7 @@ watch(() => props.selectedId, () => { void nextTick(revealActive) }, { immediate
         v-for="it in grp.items"
         :key="it.id"
         class="cat-btn"
-        :class="{ active: it.active }"
+        :class="{ active: it.active, zero: it.count === 0 }"
         @click="emit('select', it.id)"
       >
         <span class="cat-avatar" :style="{ background: it.color }" v-html="it.kind === 'runtime' ? props.avatarIcon(it.id) : it.avatar"></span>
@@ -127,14 +127,24 @@ watch(() => props.selectedId, () => { void nextTick(revealActive) }, { immediate
   display: flex; flex-direction: column; gap: var(--space-2);
 }
 
+/* 搜索框：31 个运行时要靠它定位，原来用 bg-tertiary + 弱边框，在深色底上
+   几乎与背景融成一片。抬到 secondary 底色、加高一档、图标提亮，
+   聚焦时边框染强调色，才看得出这是个输入框。 */
 .cats-search {
-  display: flex; align-items: center; gap: 5px; margin: 0 var(--space-4) var(--space-4);
-  padding: 0 7px; height: 26px; flex-shrink: 0;
-  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm); color: var(--color-text-disabled);
+  display: flex; align-items: center; gap: 6px; margin: 0 var(--space-3) var(--space-5);
+  padding: 0 8px; height: 30px; flex-shrink: 0;
+  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm); color: var(--color-text-muted);
+  transition: border-color var(--transition-fast), background var(--transition-fast);
 }
 
-.cats-search:focus-within { border-color: var(--color-border-focus-soft); }
+.cats-search:hover { border-color: var(--color-border-focus-soft); }
+
+.cats-search:focus-within {
+  border-color: var(--color-accent);
+  background: var(--color-bg-primary);
+  color: var(--color-accent);
+}
 
 .cats-search-input {
   flex: 1; min-width: 0; border: none; outline: none; background: none;
@@ -144,7 +154,7 @@ watch(() => props.selectedId, () => { void nextTick(revealActive) }, { immediate
 .cats-search-input::placeholder { color: var(--color-text-disabled); }
 
 .cats-search-clear {
-  padding: 0; border: none; background: none; color: var(--color-text-disabled);
+  padding: 0; border: none; background: none; color: var(--color-text-muted);
   font-size: var(--text-base); line-height: 1; cursor: pointer;
 }
 
@@ -152,12 +162,12 @@ watch(() => props.selectedId, () => { void nextTick(revealActive) }, { immediate
 
 .cats-empty {
   padding: var(--space-6) 10px; font-size: var(--text-xs); text-align: center;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 .cats-title {
   font-size: var(--text-xs); letter-spacing: 0.5px;
-  color: var(--color-text-disabled); padding: var(--space-1) var(--space-4) var(--space-4);
+  color: var(--color-text-muted); padding: var(--space-1) var(--space-4) var(--space-4);
 }
 
 .cat-btn {
@@ -183,41 +193,54 @@ watch(() => props.selectedId, () => { void nextTick(revealActive) }, { immediate
 
 .cat-name { font-weight: 600; font-size: var(--text-md); }
 
-.cat-id { font-size: var(--text-2xs); color: var(--color-text-disabled); }
+.cat-id { font-size: var(--text-2xs); color: var(--color-text-muted); }
 
-.cat-trail { margin-left: auto; display: flex; align-items: center; gap: var(--space-3); }
+/* 未安装（数量 0）：图标降透明度、常字重降低一档，让「装了东西的那几项」
+   在长列表里先跳出来。不用 display:none 之类的隐藏——入口还得能点进去装。 */
+.cat-btn.zero .cat-avatar { opacity: 0.42; filter: saturate(0.5); }
+.cat-btn.zero .cat-name { font-weight: 500; color: var(--color-text-muted); }
+.cat-btn.zero .cat-id { opacity: 0.6; }
+
+.cat-trail { margin-left: auto; display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 
 .cat-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-success); box-shadow: 0 0 5px var(--color-success-border); flex-shrink: 0; }
 
+/* 数量胶囊：定宽 + 数字等宽，31 项的角标才能对齐成一列竖线；
+   否则 0/1/10 宽度不同，右缘参差。 */
 .cat-count {
-  min-width: 20px; text-align: center; font-size: var(--text-xs); padding: 1px var(--space-3); border-radius: var(--radius-md);
+  min-width: 22px; height: 17px; box-sizing: border-box;
+  display: inline-flex; align-items: center; justify-content: center;
+  text-align: center; font-size: var(--text-2xs); padding: 0 5px; border-radius: var(--radius-full);
+  font-variant-numeric: tabular-nums;
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
 }
 
+.cat-btn.active .cat-count { background: var(--color-accent-bg); color: var(--color-accent); }
+
 .cats-sep { height: 1px; background: var(--color-border); margin: var(--space-4) var(--space-3); flex-shrink: 0; }
 
-/* 分组标题不是按钮：做成"有边框 + 左侧强调色块"的实心条后，它比下面的
-   语言项更像主操作，整列读起来有三个层级在抢。降为文字标签 + 上间距，
-   分组关系靠留白和字重表达，点击区仍是整行。 */
+/* 分组标题：12px/700 + secondary 色，靠「字重差」把分组边界立起来。
+   间距收到 8px：一屏能看到的分组更多，折叠状态（只有标题）时尤其明显—— 
+   原来 16px 上间距 + 6/4 内边距，7 个标题排下来像 7 条互不相干的条目。 */
 .cats-group-label {
   display: flex; align-items: center; gap: var(--space-4);
   width: 100%; text-align: left; cursor: pointer; font-family: inherit;
-  font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.08em;
-  
-  color: var(--color-text-muted);
+  font-size: var(--text-sm); font-weight: 700; letter-spacing: 0.02em;
+
+  color: var(--color-text-secondary);
   background: none;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  padding: 7px var(--space-4); margin-top: 10px;
+  padding: 3px var(--space-4); margin-top: 8px;
   transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .cats-group-label:hover {
   background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary);
+  color: var(--color-text-primary);
 }
 
-.cats-chevron { margin-left: auto; font-size: var(--text-xs); line-height: 1; color: var(--color-text-disabled); transition: transform 120ms ease; }
+.cats-chevron { margin-left: auto; font-size: var(--text-xs); line-height: 1; color: var(--color-text-muted); transition: transform 120ms ease; }
 
 /* 选中项与侧栏 / 三栏同一套：整行淡底 + 左缘竖条。
    原来用 border-color 变蓝，等于给这一行描了个亮蓝框，比页头的主按钮还抢。 */
@@ -235,5 +258,5 @@ watch(() => props.selectedId, () => { void nextTick(revealActive) }, { immediate
 }
 .cat-btn.active .cat-name { font-weight: 600; }
 
-.cat-count.zero { color: var(--color-text-disabled); }
+.cat-count.zero { color: var(--color-text-muted); }
 </style>

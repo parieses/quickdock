@@ -174,7 +174,7 @@ watch([range, () => props.refreshToken], () => { void load() }, { immediate: tru
   background: var(--color-accent-bg); color: var(--color-accent);
   border-color: var(--color-accent-border); font-weight: 600;
 }
-.fsp-state { padding: var(--space-5) 0; text-align: center; color: var(--color-text-disabled); }
+.fsp-state { padding: var(--space-5) 0; text-align: center; color: var(--color-text-muted); }
 .fsp-cards { display: flex; gap: var(--space-2); margin-bottom: var(--space-3); }
 .fsp-card {
   flex: 1; display: flex; flex-direction: column; gap: var(--space-1);
@@ -192,16 +192,16 @@ watch([range, () => props.refreshToken], () => { void load() }, { immediate: tru
   font-style: normal; color: var(--color-text-muted);
 }
 .fsp-sec { font-weight: 600; color: var(--color-text-primary); margin: var(--space-3) 0 var(--space-1); }
-.fsp-sub-empty { color: var(--color-text-disabled); padding: var(--space-1) 0; }
+.fsp-sub-empty { color: var(--color-text-muted); padding: var(--space-1) 0; }
 .fsp-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) 0; }
 .fsp-row-title {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; color: var(--color-text-primary);
 }
 .fsp-row-num { flex-shrink: 0; color: var(--color-accent); font-variant-numeric: tabular-nums; }
-.fsp-row-sub { flex-shrink: 0; color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
+.fsp-row-sub { flex-shrink: 0; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .fsp-hint {
   margin-top: var(--space-3); padding-top: var(--space-2);
-  border-top: 1px solid var(--color-border); color: var(--color-text-disabled);
+  border-top: 1px solid var(--color-border); color: var(--color-text-muted);
 }
 </style>

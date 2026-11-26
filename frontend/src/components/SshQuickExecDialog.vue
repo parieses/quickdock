@@ -679,7 +679,7 @@ onBeforeUnmount(() => {
   outline: none;
 }
 .qex-opt input:focus { border-color: var(--color-border-focus-soft); }
-.qex-kbd { margin-left: auto; font-size: var(--text-2xs); color: var(--color-text-disabled); }
+.qex-kbd { margin-left: auto; font-size: var(--text-2xs); color: var(--color-text-muted); }
 
 .qex-warn,
 .qex-risk {

@@ -40,8 +40,12 @@ defineEmits<{ (e: 'click'): void }>()
   background: var(--color-accent);
   color: var(--color-accent-text);
   cursor: pointer;
-  transition: opacity var(--transition-fast), background-color var(--transition-fast);
+  transition: opacity var(--transition-fast), background-color var(--transition-fast),
+    transform var(--transition-fast);
 }
+/* 可点 / 点击各给一档缩放：32px 的圆钮不靠位移也能看出「按到了」 */
+.ai-bit-send:not(:disabled):hover { transform: scale(1.06); }
+.ai-bit-send:not(:disabled):active { transform: scale(0.94); }
 .ai-bit-send:disabled { background: var(--color-bg-active); color: var(--color-text-disabled); cursor: default; }
 .ai-bit-send.is-stop { background: var(--color-danger); color: var(--color-danger-text); }
 .ai-bit-send.is-stop:hover { background: var(--color-danger-hover); }

@@ -14,7 +14,7 @@
 //
 //  1. all       —— 不过滤
 //  2. favorite  —— isPinned === 1（收藏项可能是任意类型，故不限 contentType）
-//  3. image/file—— contentType 精确等于该类型（整类匹配）
+//  3. text/image/file —— contentType 精确等于该类型（整类匹配）
 //  4. 智能分类   —— 入库时已按文本正则算出 text_type（url/email/json/code/phone），
 //                  筛选阶段直接下推到 SQL（WHERE content_type='text' AND text_type=?），
 //                  既快又覆盖全量历史；前端仅用存储的 text_type 做一遍校验兜底。
@@ -34,6 +34,7 @@ export interface FilterableEntry {
 export type ClipTagId =
   | 'all'
   | 'favorite'
+  | 'text'
   | 'image'
   | 'file'
   | 'url'
@@ -60,8 +61,8 @@ export type TagPush =
 /** 智能分类标签：靠文本内容正则判断，对非文本条目无意义。 */
 const SMART_TEXT_TAGS = ['url', 'email', 'json', 'code', 'phone'] as const
 
-/** 直接下推到 content_type 整类的标签（图片/文件是 content_type 已有的两类）。 */
-const SQL_TYPE_TAGS: Record<string, string> = { image: 'image', file: 'file' }
+/** 直接下推到 content_type 整类的标签（text/image/file 都是 content_type 已有的整类）。 */
+const SQL_TYPE_TAGS: Record<string, string> = { text: 'text', image: 'image', file: 'file' }
 
 /**
  * 该标签是否是「智能分类标签」（只对文本条目有意义）。
@@ -131,6 +132,6 @@ export function filterByTag<T extends FilterableEntry>(
       return t === tagId
     })
   }
-  // image/file：content_type 精确匹配（整类），不套 text 前置条件。
+  // image/file/text：content_type 精确匹配（整类），不套 text 前置条件。
   return list.filter(e => e.contentType === tagId)
 }

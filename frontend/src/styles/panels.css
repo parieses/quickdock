@@ -110,7 +110,7 @@
   border-color: var(--color-border-focus-soft);
 }
 .qd-panel-search.is-disabled { opacity: 0.6; }
-.qd-search-icon { flex-shrink: 0; color: var(--color-text-disabled); }
+.qd-search-icon { flex-shrink: 0; color: var(--color-text-muted); }
 .qd-search-input {
   flex: 1;
   min-width: 0;
@@ -134,7 +134,7 @@
   border: none;
   border-radius: var(--radius-xs);
   background: none;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   cursor: pointer;
 }
 .qd-search-clear:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
@@ -371,7 +371,7 @@
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--color-text-muted); flex-shrink: 0; align-self: center;
 }
-.qd-run-dot.is-pending { background: var(--color-text-disabled); }
+.qd-run-dot.is-pending { background: var(--color-text-muted); }
 .qd-run-dot.is-running {
   background: var(--color-accent);
   animation: qd-run-pulse 1.8s ease-out infinite;

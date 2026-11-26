@@ -4171,7 +4171,7 @@ onUnmounted(() => {
   padding: 0 var(--space-5) var(--space-3);
   text-align: center;
   font-size: var(--text-xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   user-select: none;
   -webkit-user-select: none;
 }

@@ -26,7 +26,7 @@ import { matchesTextOrPinyin } from '../utils/pinyin'
 import { invalidateLinkTargets } from '../constants/linkEvents'
 import {
   Plus, Check, Trash2, Pencil, ChevronLeft, ChevronRight, CalendarDays, Bell, Clock, BellRing,
-  RefreshCw, ListTree, Timer, X, Search, ChevronUp, ChevronDown, History, BarChart3,
+  RefreshCw, ListTree, Timer, X, Search, ChevronUp, ChevronDown, History, BarChart3, MoreHorizontal,
 } from '@lucide/vue'
 
 const { t } = useI18n()
@@ -73,6 +73,7 @@ const error = ref('')
 const FOCUS_DEFAULTS = [25, 45, 60]
 const FOCUS_KEY = 'qd_focus_session'
 const focusMinutes = ref(25)          // 本次专注时长（分钟）
+const showFocusDur = ref(false)       // 专注时长浮层（把 25/45/60/自定义 收进一个下拉）
 const focusTodoId = ref('')           // 正在专注的待办 id（''=无）
 const focusRemaining = ref(0)         // 剩余秒数
 const focusRunning = ref(false)       // 是否在倒计时
@@ -100,6 +101,9 @@ const showFocusHist = ref(false)
 // 统计面板入口：与历史浮层互斥。refreshToken 每完成一次专注 +1，
 // 让已打开的面板重新拉数（面板内部 watch 它）。
 const showFocusStats = ref(false)
+// 面板右上角「更多」：清除已完成 / 发送测试提醒这两个低频动作从底栏收进来，
+// 让列表底部保持干净（底栏那行提示文案在深色下也读不清）。
+const showMore = ref(false)
 const focusStatsRefresh = ref(0)
 function toggleFocusHist() {
   showFocusHist.value = !showFocusHist.value
@@ -178,6 +182,10 @@ function applyFocusCustom(e: Event) {
   if (!Number.isFinite(v) || v < 1) { el.value = ''; return }
   focusMinutes.value = Math.min(180, v)
   el.value = String(focusMinutes.value)
+}
+function pickFocusMinutes(m: number) {
+  focusMinutes.value = m
+  showFocusDur.value = false
 }
 
 function focusTitle(id: string): string {
@@ -829,6 +837,37 @@ const selectedTodos = computed(() => {
 
 const remainingCount = computed(() => selectedTodos.value.filter(x => !x.done).length)
 
+// ---- 空状态 ----
+// 空态不再放第二颗「添加」按钮（上方快捷输入框已经是最显眼的 CTA），
+// 改为温和文案 + 两块有价值的信息：刚做完的（成就感）和接下来 3 天的（提前规划）。
+const isTodaySelected = computed(() => !searching.value && selectedDate.value === todayStr.value)
+const emptyTitle = computed(() => {
+  if (activeTag.value) return t('todoEmptyTagTitle')
+  if (selectedDate.value === '') return t('todoEmptyUnscheduled')
+  return isTodaySelected.value ? t('todoEmptyCalmToday') : t('todoEmptyCalmDay')
+})
+const emptyHint = computed(() => activeTag.value ? t('todoEmptyTagHint') : t('todoEmptyQuickHint'))
+
+const recentDone = computed(() => todos.value
+  .filter(x => x.done && x.parentId === '' && x.completedAt)
+  .sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || ''))
+  .slice(0, 3))
+
+const upcomingPreview = computed(() => {
+  if (searching.value) return []
+  const base = new Date(); base.setHours(0, 0, 0, 0)
+  const days = [1, 2, 3].map(n => {
+    const d = new Date(base.getTime() + n * 86400000)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })
+  const labels: Record<string, string> = { [days[0]]: t('todoTomorrow'), [days[1]]: t('todoDayAfter') }
+  return todos.value
+    .filter(x => !x.done && x.parentId === '' && x.dueDate && days.includes(x.dueDate))
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.sort - b.sort)
+    .slice(0, 4)
+    .map(x => ({ ...x, dayLabel: labels[x.dueDate] || x.dueDate.slice(5) }))
+})
+
 // ---- 操作 ----
 let refreshGen = 0
 async function refresh() {
@@ -927,6 +966,35 @@ async function createTodo() {
     await refresh()
   } catch (e) {
     formErr.value = getErrorMessage(e)
+  }
+}
+
+// ---- 行内快速添加 ----
+//
+// 「+」弹窗有九个字段，但日常新增待办九成只要一个标题。多出来的那一步是纯摩擦。
+// 这里只带走标题与当前选中的日期（今天 / 某个分组），提醒、重复、优先级仍回弹窗——
+// 那些是「这条和别的不一样」的地方，塞进一行输入会让回车变成一次不确定的提交。
+const quickTitle = ref('')
+const quickBusy = ref(false)
+
+async function quickCreate() {
+  const title = quickTitle.value.trim()
+  if (!title || quickBusy.value) return
+  quickBusy.value = true
+  try {
+    await unwrap(await CreateTodo(
+      title, 'none', selectedDate.value || todayStr.value, '',
+      '', '', '',
+      recurrenceToJSON({ kind: 'none', timeOfDay: '09:00', weekdays: '' }),
+      tagsTextToJSON(''),
+    ))
+    quickTitle.value = ''
+    invalidateLinkTargets() // 新待办立刻可当互链目标
+    await refresh()
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  } finally {
+    quickBusy.value = false
   }
 }
 
@@ -1249,10 +1317,13 @@ function consumeCreateRequest() {
 watch(pendingCreateTodo, consumeCreateRequest)
 
 function onDocClick(e: MouseEvent) {
-  if (!(e.target as HTMLElement).closest?.('.focus-hist-wrap')) {
+  const el = e.target as HTMLElement
+  if (!el.closest?.('.focus-hist-wrap')) {
     showFocusHist.value = false
     showFocusStats.value = false
   }
+  if (!el.closest?.('.focus-dur-wrap')) showFocusDur.value = false
+  if (!el.closest?.('.panel-more-wrap')) showMore.value = false
 }
 // 全局 click 监听要跟着激活态走：本页保活后切走不卸载，若一直挂着，
 // 用户在别的页面点一下也会触发本页的 onDocClick（收起浮层），属于串台。
@@ -1319,20 +1390,32 @@ onUnmounted(() => {
         </div>
       </div>
       <div class="qd-page-actions">
-        <div class="focus-dur" :title="t('todoFocusDur')">
-          <button v-for="d in FOCUS_DEFAULTS" :key="d"
-            :class="['focus-dur-btn', { active: focusMinutes === d }]"
-            @click="focusMinutes = d">
-            {{ d }}
+        <!-- 专注时长：一排光秃秃的数字（25/45/60）猜不出含义，收成一个带秒表图标的下拉 -->
+        <div class="focus-dur-wrap">
+          <button class="focus-dur-trigger" :class="{ open: showFocusDur }"
+            :title="t('todoFocusDur')" @click.stop="showFocusDur = !showFocusDur">
+            <Timer :size="14" />
+            <span class="fd-label">{{ t('todoFocusMode') }}</span>
+            <span class="fd-value">{{ focusMinutes }} {{ t('todoFocusMinUnit') }}</span>
+            <ChevronDown :size="12" class="fd-caret" />
           </button>
-          <input
-            class="focus-dur-custom"
-            type="number" min="1" max="180"
-            :value="isFocusPreset ? '' : focusMinutes"
-            :placeholder="t('todoFocusCustom')"
-            :title="t('todoFocusCustom')"
-            @change="applyFocusCustom"
-          />
+          <div v-key-click v-if="showFocusDur" class="focus-dur-pop" @click.stop>
+            <button v-for="d in FOCUS_DEFAULTS" :key="d"
+              :class="['fd-opt', { active: focusMinutes === d }]"
+              @click="pickFocusMinutes(d)">
+              {{ d }} {{ t('todoFocusMinUnit') }}
+            </button>
+            <div class="fd-custom">
+              <span>{{ t('todoFocusCustom') }}</span>
+              <input
+                class="focus-dur-custom"
+                type="number" min="1" max="180"
+                :value="isFocusPreset ? '' : focusMinutes"
+                :placeholder="String(FOCUS_DEFAULTS[0])"
+                @change="applyFocusCustom"
+              />
+            </div>
+          </div>
         </div>
         <div class="focus-hist-wrap">
           <button class="qd-icon-btn focus-hist-btn" :class="{ active: showFocusHist }"
@@ -1401,7 +1484,10 @@ onUnmounted(() => {
       <!-- 右侧：选中日任务 -->
       <div class="todo-panel">
         <div class="panel-head">
-          <span class="panel-date">{{ selectedLabel }}</span>
+          <div class="panel-head-left">
+            <span class="panel-date">{{ selectedLabel }}</span>
+            <span v-if="isTodaySelected" class="panel-today-tag">{{ t('todoToday') }}</span>
+          </div>
           <div class="panel-head-right">
             <div class="view-toggle">
               <button :class="['vt-btn', { active: viewMode === 'list' }]" @click="viewMode = 'list'">{{ t('todoViewList') }}</button>
@@ -1410,11 +1496,40 @@ onUnmounted(() => {
             </div>
             <span class="panel-remaining">{{ t('todoRemaining', { count: remainingCount }) }}</span>
             <button class="add-fab" @click="openCreate" :title="t('todoAdd')"><Plus :size="16" /></button>
+            <!-- 低频操作从底栏收进这里，列表底部不再挂一排灰字 -->
+            <div class="panel-more-wrap">
+              <button class="qd-icon-btn" :class="{ active: showMore }"
+                :title="t('todoMore')" @click.stop="showMore = !showMore">
+                <MoreHorizontal :size="16" />
+              </button>
+              <div v-key-click v-if="showMore" class="panel-more-pop" @click.stop>
+                <button class="pm-item danger" @click="clearCompleted(); showMore = false">
+                  <Trash2 :size="13" /> {{ t('todoClearCompleted') }}
+                </button>
+                <button class="pm-item" :disabled="testing" @click="testReminder(); showMore = false">
+                  <Bell :size="13" /> {{ t('todoTestReminder') }}
+                </button>
+                <p class="pm-hint">{{ t('todoReminderHint') }}</p>
+              </div>
+            </div>
           </div>
         </div>
 
         <!-- 列表视图 -->
         <template v-if="viewMode === 'list'">
+          <!-- 行内快速添加：回车即建，落在当前选中的日期上。它是本页最常用的入口，
+               所以做成实心输入控件（描边 + 卡片底），而不是一行虚线占位符。 -->
+          <div class="quick-add">
+            <Plus :size="14" class="quick-add-icon" />
+            <input
+              v-model="quickTitle"
+              class="quick-add-input"
+              :placeholder="t('todoQuickAddPlaceholder')"
+              :disabled="quickBusy"
+              @keydown.enter.prevent="quickCreate"
+            />
+            <kbd class="quick-add-kbd" aria-hidden="true">↵</kbd>
+          </div>
           <!-- 4.2 标签筛选 -->
           <div v-if="allTags.length" class="tag-filter">
             <button :class="['tag-fbtn', { active: activeTag === '' }]" @click="activeTag = ''">{{ t('todoAllTags') }}</button>
@@ -1428,15 +1543,50 @@ onUnmounted(() => {
           <!-- 列表 -->
           <div class="todo-list">
             <div v-if="selectedTodos.length === 0" class="todo-empty">
-              <CalendarDays :size="28" class="empty-icon" />
               <template v-if="searching">
-                <p>{{ t('noMatchItems') }}</p>
-                <p class="empty-hint">{{ t('tryOtherKeywords') }}</p>
+                <div class="empty-hero">
+                  <CalendarDays :size="20" class="empty-icon" />
+                  <p>{{ t('noMatchItems') }}</p>
+                  <p class="empty-hint">{{ t('tryOtherKeywords') }}</p>
+                </div>
               </template>
               <template v-else>
-                <p>{{ t('todoNoTodosThisDay') }}</p>
-                <p class="empty-hint">{{ t('todoClickDayHint') }}</p>
-                <button class="empty-add-btn" @click="openCreate"><Plus :size="13" /> {{ t('todoAddFirst') }}</button>
+                <!-- 空态不放第二个「添加」按钮：上方输入框就是唯一的行动号召 -->
+                <div class="empty-hero">
+                  <svg class="empty-art" viewBox="0 0 120 100" fill="none" aria-hidden="true">
+                    <circle cx="60" cy="50" r="36" fill="var(--color-accent)" opacity="0.07" />
+                    <g class="art-sway">
+                      <path d="M60 60C60 48 57 40 52 34" stroke="var(--color-text-muted)" stroke-width="2" stroke-linecap="round" />
+                      <path d="M60 60C60 50 64 42 69 36" stroke="var(--color-text-muted)" stroke-width="2" stroke-linecap="round" />
+                      <ellipse cx="49" cy="35" rx="9" ry="5.5" transform="rotate(-28 49 35)" fill="var(--color-accent)" opacity="0.55" />
+                      <ellipse cx="72" cy="37" rx="9" ry="5.5" transform="rotate(26 72 37)" fill="var(--color-accent)" opacity="0.35" />
+                      <ellipse cx="60" cy="27" rx="7" ry="4.5" fill="var(--color-accent)" opacity="0.7" />
+                    </g>
+                    <rect x="43" y="59" width="34" height="7" rx="2.5" fill="var(--color-bg-tertiary)" stroke="var(--color-border)" />
+                    <path d="M46 66h28l-3.2 17.5c-.5 2.6-2.5 4.5-5 4.5H54.2c-2.5 0-4.5-1.9-5-4.5L46 66z"
+                      fill="var(--color-bg-tertiary)" stroke="var(--color-border)" />
+                  </svg>
+                  <p class="empty-title">{{ emptyTitle }}</p>
+                  <p class="empty-hint">{{ emptyHint }}</p>
+                </div>
+
+                <!-- 有价值的补充信息，比一大片纯黑更有用：刚做完的给成就感，接下来的便于规划 -->
+                <div v-if="recentDone.length || upcomingPreview.length" class="empty-insights">
+                  <div v-if="recentDone.length" class="empty-card">
+                    <div class="empty-card-title"><Check :size="12" /> {{ t('todoEmptyRecentDone') }}</div>
+                    <div v-for="x in recentDone" :key="x.id" class="empty-card-row">
+                      <span class="ecr-title">{{ x.title }}</span>
+                      <span class="ecr-date">{{ (x.completedAt || '').slice(5, 10) }}</span>
+                    </div>
+                  </div>
+                  <div v-if="upcomingPreview.length" class="empty-card">
+                    <div class="empty-card-title"><CalendarDays :size="12" /> {{ t('todoEmptyUpcoming') }}</div>
+                    <div v-for="x in upcomingPreview" :key="x.id" class="empty-card-row">
+                      <span class="ecr-title">{{ x.title }}</span>
+                      <span class="ecr-date">{{ x.dayLabel }}</span>
+                    </div>
+                  </div>
+                </div>
               </template>
             </div>
             <div
@@ -1652,13 +1802,6 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div class="panel-foot">
-          <button class="qd-btn qd-btn-ghost clear-completed" @click="clearCompleted">{{ t('todoClearCompleted') }}</button>
-          <button class="qd-btn qd-btn-ghost test-reminder" :disabled="testing" @click="testReminder">
-            <Bell :size="12" /> {{ t('todoTestReminder') }}
-          </button>
-        </div>
-        <p class="reminder-hint">{{ t('todoReminderHint') }}</p>
       </div>
     </div>
 
@@ -1842,16 +1985,45 @@ onUnmounted(() => {
 .todo-search { width: 220px; flex-shrink: 1; min-width: 120px; margin-right: var(--space-3); }
 .ts-input { padding-left: 28px; padding-right: 26px; }
 .ts-clear { position: absolute; right: 6px; border: none; background: none; color: var(--color-text-muted); cursor: pointer; display: flex; align-items: center; }
-.focus-dur { display: flex; align-items: center; gap: var(--space-1); }
-.focus-dur-btn {
-  min-width: 28px; height: 24px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
-  color: var(--color-text-muted); border-radius: var(--radius-sm); font-size: var(--text-xs); cursor: pointer; font-family: inherit;
+/* 专注时长：一个带秒表图标的触发器 + 浮层，替代原来一排 25/45/60 裸数字 */
+.focus-dur-wrap { position: relative; }
+.focus-dur-trigger {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  height: 26px; padding: 0 var(--space-3);
+  border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary); border-radius: var(--radius-sm);
+  font-size: var(--text-xs); font-family: inherit; cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
-.focus-dur-btn:hover { color: var(--color-text-primary); }
-.focus-dur-btn.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
+.focus-dur-trigger:hover { color: var(--color-text-primary); border-color: var(--color-border-focus); }
+.focus-dur-trigger.open { border-color: var(--color-accent-border); background: var(--color-accent-bg); color: var(--color-accent); }
+.fd-label { color: var(--color-text-muted); }
+.focus-dur-trigger.open .fd-label { color: var(--color-accent); }
+.fd-value { color: var(--color-text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+.focus-dur-trigger.open .fd-value { color: var(--color-accent); }
+.fd-caret { opacity: 0.7; }
+.focus-dur-pop {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: var(--z-dropdown);
+  display: flex; flex-direction: column; gap: 2px; min-width: 132px; padding: var(--space-2);
+  background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-pop);
+}
+.fd-opt {
+  padding: var(--space-2) var(--space-3); text-align: left;
+  border: none; background: none; border-radius: var(--radius-xs); cursor: pointer;
+  color: var(--color-text-secondary); font-size: var(--text-sm); font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.fd-opt:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.fd-opt.active { color: var(--color-accent); background: var(--color-accent-bg); font-weight: 600; }
+.fd-custom {
+  display: flex; align-items: center; gap: var(--space-2);
+  margin-top: var(--space-1); padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-2xs); color: var(--color-text-muted);
+}
 .focus-dur-custom {
-  width: 52px; height: 24px; padding: 0 var(--space-2); text-align: center;
+  width: 56px; height: 24px; padding: 0 var(--space-2); text-align: center;
   border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
   color: var(--color-text-primary); border-radius: var(--radius-sm);
   font-size: var(--text-xs); font-family: inherit; outline: none; -moz-appearance: textfield;
@@ -1887,13 +2059,13 @@ onUnmounted(() => {
   padding-bottom: var(--space-2); margin-bottom: var(--space-2);
   border-bottom: 1px solid var(--color-border);
 }
-.fh-empty { font-size: var(--text-xs); color: var(--color-text-disabled); text-align: center; padding: var(--space-3) 0; }
+.fh-empty { font-size: var(--text-xs); color: var(--color-text-muted); text-align: center; padding: var(--space-3) 0; }
 .fh-row { display: flex; align-items: center; gap: var(--space-3); padding: 3px 0; font-size: var(--text-xs); }
 .fh-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-text-disabled); flex-shrink: 0; }
 .fh-dot.ok { background: var(--color-accent); }
 .fh-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-primary); }
 .fh-min { color: var(--color-text-muted); flex-shrink: 0; }
-.fh-time { color: var(--color-text-disabled); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.fh-time { color: var(--color-text-muted); flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .cal-month { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); min-width: 84px; text-align: center; }
 
 .todo-error {
@@ -1917,7 +2089,7 @@ onUnmounted(() => {
   align-self: flex-start;
 }
 .cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); margin-bottom: var(--space-1); }
-.cal-weekday { text-align: center; font-size: var(--text-xs); color: var(--color-text-disabled); font-weight: 500; padding-bottom: var(--space-1); }
+.cal-weekday { text-align: center; font-size: var(--text-xs); color: var(--color-text-muted); font-weight: 500; padding-bottom: var(--space-1); }
 /* 日期格高度钉死在 46：原来用 1fr 且卡片被 flex 拉伸，空月份时日历会撑到
    500px 高，六行数字之间各空出一大段，整块看起来像没加载完。
    日历高度跟着内容走（日历卡自身 align-self: flex-start），右侧列表该占多高占多高。 */
@@ -1942,15 +2114,24 @@ onUnmounted(() => {
   font-size: var(--text-sm); font-weight: 500; color: var(--color-text-primary);
   transition: color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
 }
-.cal-cell.out-month .cal-day { color: var(--color-text-disabled); }
+.cal-cell.out-month .cal-day { color: var(--color-text-muted); }
 .cal-cell.is-today .cal-day { color: var(--color-accent); border: 1px solid var(--color-accent); }
-.cal-cell.is-selected .cal-day { background: var(--color-accent); color: var(--color-accent-text); box-shadow: none; }
-.cal-cell.is-selected.is-today .cal-day { background: var(--color-accent); color: var(--color-accent-text); }
+/* 选中态用半透明主题色 + 一圈细描边：深色下实心亮蓝对比过强，压得整块日历发刺 */
+.cal-cell.is-selected .cal-day {
+  background: var(--color-select-bg);
+  color: var(--color-accent);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--color-accent-border);
+}
+.cal-cell.is-selected.is-today .cal-day { box-shadow: inset 0 0 0 1px var(--color-accent-muted); }
 .cal-marks { display: flex; align-items: center; gap: 3px; height: 7px; flex-wrap: wrap; justify-content: center; }
-.dot { width: 4px; height: 4px; border-radius: 50%; display: inline-block; }
+/* 圆点带优先级配色（none 灰 / low 蓝 / medium 橙 / high 红），4px 太小几乎只看得出"有个点"，
+   高优再放大 1px，颜色之外多一个尺寸信号 */
+.dot { width: 5px; height: 5px; border-radius: 50%; display: inline-block; }
+.dot.p-high { width: 6px; height: 6px; }
 .dot.done { opacity: 0.3; }
 .cal-bell { color: var(--color-accent); }
-.cal-more { font-size: var(--text-2xs); color: var(--color-text-disabled); font-style: normal; }
+.cal-more { font-size: var(--text-2xs); color: var(--color-text-muted); font-style: normal; }
 
 .unscheduled-chip {
   display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-3);
@@ -1965,10 +2146,45 @@ onUnmounted(() => {
 /* 右侧面板 */
 .todo-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-4); }
-.panel-date { font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
-.panel-remaining { font-size: var(--text-sm); color: var(--color-text-disabled); }
+/* 日期是右栏的主标题：加粗一档 + 今日标签，与下方 12px 的视图切换拉开层级。
+   字号维持 15px（与页头标题同级），不越级到 18px 的「区块标题」档。 */
+.panel-head-left { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.panel-date {
+  font-size: var(--text-lg); font-weight: 700; letter-spacing: -0.01em;
+  color: var(--color-text-primary); white-space: nowrap;
+}
+.panel-today-tag {
+  flex-shrink: 0; padding: 1px 7px; border-radius: var(--radius-full);
+  background: var(--color-accent-bg); border: 1px solid var(--color-accent-border);
+  color: var(--color-accent); font-size: var(--text-2xs); font-weight: 600; line-height: 15px;
+}
+.panel-remaining { font-size: var(--text-sm); color: var(--color-text-muted); }
 
 .panel-head-right { display: flex; align-items: center; gap: var(--space-3); }
+
+/* 面板右上角「更多」：低频操作（清除已完成 / 测试提醒）收在这里，底部不再挂灰字 */
+.panel-more-wrap { position: relative; display: flex; align-items: center; }
+.panel-more-wrap .qd-icon-btn.active { color: var(--color-accent); }
+.panel-more-pop {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: var(--z-dropdown);
+  display: flex; flex-direction: column; gap: 2px; width: 208px; padding: var(--space-2);
+  background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-pop);
+}
+.pm-item {
+  display: flex; align-items: center; gap: var(--space-3); width: 100%;
+  padding: var(--space-3); text-align: left;
+  border: none; background: none; border-radius: var(--radius-xs); cursor: pointer;
+  color: var(--color-text-secondary); font-size: var(--text-sm); font-family: inherit;
+}
+.pm-item:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.pm-item.danger:hover:not(:disabled) { color: var(--color-danger); background: var(--color-danger-bg); }
+.pm-item:disabled { opacity: 0.5; cursor: default; }
+.pm-hint {
+  margin: var(--space-1) 0 0; padding: var(--space-2) var(--space-3) 0;
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-2xs); line-height: 1.6; color: var(--color-text-muted);
+}
 
 /* 视图切换（列表 / 看板）*/
 .view-toggle { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
@@ -2000,7 +2216,7 @@ onUnmounted(() => {
 .sub-progress { display: flex; align-items: center; gap: var(--space-4); margin-bottom: var(--space-2); }
 .sub-progress-bar { flex: 1; height: 4px; border-radius: var(--radius-xs); background: var(--color-bg-tertiary); overflow: hidden; }
 .sub-progress-fill { height: 100%; background: var(--color-accent); border-radius: var(--radius-xs); transition: width var(--transition-fast); }
-.sub-progress-text { font-size: var(--text-xs); color: var(--color-text-disabled); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sub-progress-text { font-size: var(--text-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .subtasks { flex-basis: 100%; margin: var(--space-3) 0 var(--space-1) 26px; display: flex; flex-direction: column; gap: 3px; }
 .sub-item { display: flex; align-items: center; gap: 7px; padding: 3px 0; }
 .sub-item.done .sub-name { text-decoration: line-through; color: var(--color-text-disabled); }
@@ -2042,11 +2258,11 @@ onUnmounted(() => {
 }
 .kanban-col-head { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-2); flex-shrink: 0; }
 .kanban-dot { width: 8px; height: 8px; border-radius: 50%; }
-.kanban-dot.st-todo { background: var(--color-text-disabled); }
+.kanban-dot.st-todo { background: var(--color-text-muted); }
 .kanban-dot.st-doing { background: var(--color-warning); }
 .kanban-dot.st-done { background: var(--color-accent); }
 .kanban-col-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
-.kanban-count { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-disabled); background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 7px; }
+.kanban-count { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-muted); background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 7px; }
 .kanban-cards { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); }
 .kanban-card {
   padding: 9px 11px; background: var(--color-bg-primary); border: 1px solid var(--color-border);
@@ -2058,18 +2274,18 @@ onUnmounted(() => {
 .kanban-card-name { font-size: var(--text-md); color: var(--color-text-primary); }
 .kanban-card-meta { margin-top: 5px; display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center; }
 /* 卡片上的截止日：逾期改用警示色，扫一眼就知道哪张拖后腿了 */
-.kanban-due { font-size: var(--text-2xs); color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
+.kanban-due { font-size: var(--text-2xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .kanban-due.overdue { color: var(--color-danger); font-weight: 500; }
 /* 拖拽落点：整列描边提示，比只高亮卡片更容易判断"会落到哪一列" */
 .kanban-col.drag-over { border-color: var(--color-accent); background: var(--color-accent-bg); }
 .kanban-empty {
   flex: 1; display: flex; align-items: center; justify-content: center;
-  text-align: center; font-size: var(--text-xs); color: var(--color-text-disabled); padding: var(--space-5) 0;
+  text-align: center; font-size: var(--text-xs); color: var(--color-text-muted); padding: var(--space-5) 0;
 }
 
 /* 四象限视图：2×2 网格，样式沿用看板 token，不引入硬编码色值 */
 .quadrant-view { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-.quadrant-hint { margin: 0 0 var(--space-2); font-size: var(--text-xs); color: var(--color-text-disabled); flex-shrink: 0; }
+.quadrant-hint { margin: 0 0 var(--space-2); font-size: var(--text-xs); color: var(--color-text-muted); flex-shrink: 0; }
 .quadrant { flex: 1; display: grid; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); gap: var(--space-3); min-height: 0; }
 .quadrant-cell {
   display: flex; flex-direction: column; min-height: 0;
@@ -2081,11 +2297,11 @@ onUnmounted(() => {
 .quadrant-dot.q1 { background: var(--color-danger); }
 .quadrant-dot.q2 { background: var(--color-warning); }
 .quadrant-dot.q3 { background: var(--color-accent); }
-.quadrant-dot.q4 { background: var(--color-text-disabled); }
+.quadrant-dot.q4 { background: var(--color-text-muted); }
 .quadrant-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
-.quadrant-count { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-disabled); background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 7px; }
+.quadrant-count { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-muted); background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 7px; }
 .quadrant-cards { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); }
-.quadrant-empty { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; font-size: var(--text-xs); color: var(--color-text-disabled); padding: var(--space-5) 0; }
+.quadrant-empty { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; font-size: var(--text-xs); color: var(--color-text-muted); padding: var(--space-5) 0; }
 /* 象限卡片复用看板卡片，但不拖拽，光标不提示可抓取 */
 .quadrant .kanban-card, .quadrant .kanban-card:active { cursor: default; }
 
@@ -2104,10 +2320,93 @@ onUnmounted(() => {
 }
 .add-fab:hover { background: var(--color-accent-hover); }
 
+/* 行内快速添加：本页最高频的入口，做成"真实的输入控件"——
+   实心卡片底 + 1px 描边 + 聚焦时的淡色外环；回车提示贴在右侧。 */
+.quick-add {
+  display: flex; align-items: center; gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+  padding: 0 var(--space-4);
+  height: 38px;
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: border-color var(--transition-fast), background-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.quick-add:hover { border-color: var(--color-border-focus); }
+.quick-add:focus-within { border-color: var(--color-accent); box-shadow: 0 0 0 3px var(--color-accent-bg); }
+.quick-add-icon { color: var(--color-text-muted); flex-shrink: 0; }
+.quick-add-input {
+  flex: 1; min-width: 0;
+  border: 0; outline: 0; background: transparent;
+  font: inherit; font-size: var(--text-sm); color: var(--color-text-primary);
+}
+.quick-add-input::placeholder { color: var(--color-text-muted); }
+.quick-add-kbd {
+  flex-shrink: 0; min-width: 18px; padding: 0 4px; line-height: 16px; text-align: center;
+  border: 1px solid var(--color-border); border-radius: var(--radius-xs);
+  font-family: inherit; font-size: var(--text-2xs); color: var(--color-text-muted);
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+.quick-add:focus-within .quick-add-kbd { color: var(--color-text-muted); border-color: var(--color-accent-border); }
+
 .todo-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); }
-.todo-empty { text-align: center; padding: var(--space-9) var(--space-4); color: var(--color-text-disabled); }
-.empty-icon { opacity: 0.4; margin-bottom: var(--space-2); }
-.empty-hint { font-size: var(--text-xs); color: var(--color-text-muted); margin-top: var(--space-2); }
+/* 空态占满可用高度并居中：比顶部一小撮灰字更像"状态"，而不是加载残骸 */
+.todo-empty {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--space-5); padding: var(--space-6) var(--space-4); text-align: center;
+  color: var(--color-text-muted);
+}
+.empty-hero { display: flex; flex-direction: column; align-items: center; }
+/* 搜索无结果时的空态图标：同 .qd-empty-icon 的 44 方底。
+   原先只有 opacity .4——把细线图标洗成一片灰雾，看不出是日历还是加载中。 */
+.empty-icon {
+  width: 44px;
+  height: 44px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 0 var(--color-hairline);
+  margin-bottom: var(--space-2);
+}
+.empty-art { width: 118px; height: 96px; }
+/* 微动效：盆栽轻轻摆动（幅度很小，只是让空态"活着"），减弱动效偏好下停掉 */
+.art-sway { transform-origin: 60px 60px; animation: art-sway 6.5s ease-in-out infinite; }
+@keyframes art-sway {
+  0%, 100% { transform: rotate(-1.8deg); }
+  50% { transform: rotate(1.8deg); }
+}
+.empty-title { margin: var(--space-2) 0 0; font-size: var(--text-md); color: var(--color-text-secondary); }
+.empty-hint { margin: var(--space-2) 0 0; font-size: var(--text-xs); color: var(--color-text-muted); }
+.empty-insights {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
+  gap: var(--space-3); width: 100%; max-width: 460px;
+}
+.empty-card {
+  text-align: left; padding: var(--space-3) var(--space-4);
+  background: var(--color-card-bg); border: 1px solid var(--card-border-color);
+  border-radius: var(--radius-md);
+}
+.empty-card-title {
+  display: flex; align-items: center; gap: var(--space-2);
+  margin-bottom: var(--space-2); font-size: var(--text-xs); color: var(--color-text-muted);
+}
+.empty-card-row { display: flex; align-items: center; gap: var(--space-3); padding: 3px 0; }
+.ecr-title {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--text-sm); color: var(--color-text-secondary);
+}
+.ecr-date {
+  flex-shrink: 0; font-size: var(--text-2xs); color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  .art-sway { animation: none; }
+}
 
 .todo-item {
   position: relative;
@@ -2156,7 +2455,7 @@ onUnmounted(() => {
 .todo-meta { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: 3px; display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center; }
 .overdue-text { color: var(--color-danger); }
 .meta-pill { display: inline-flex; align-items: center; gap: 3px; color: var(--color-text-muted); }
-.meta-pill.sent { color: var(--color-text-disabled); }
+.meta-pill.sent { color: var(--color-text-muted); }
 .done-pill { color: var(--color-accent); }
 .todo-note { color: var(--color-text-muted); }
 .tag-chip {
@@ -2170,7 +2469,7 @@ onUnmounted(() => {
 .todo-item:hover .todo-actions { opacity: 1; }
 .act {
   width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
-  border: none; background: transparent; color: var(--color-text-disabled);
+  border: none; background: transparent; color: var(--color-text-muted);
   border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .act:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
@@ -2178,16 +2477,8 @@ onUnmounted(() => {
 .focus-act { font-size: var(--text-xs); font-weight: 600; color: var(--color-accent); min-width: 34px; }
 .focus-act.running { background: var(--color-accent-bg); color: var(--color-accent); }
 
-.panel-foot { margin-top: var(--space-3); flex-shrink: 0; display: flex; align-items: center; gap: var(--space-3); }
-/* 两个按钮已收编到 qd-btn/qd-btn-ghost（盒模型由 app.css 统一负责），
-   这里只保留各自的语义色提示与右推布局，不再重声明尺寸/边框/padding。 */
-.clear-completed:hover { color: var(--color-danger); }
-.test-reminder { margin-left: auto; }
-.test-reminder:hover:not(:disabled) { color: var(--color-accent); }
-.reminder-hint { margin: var(--space-2) 0 0; font-size: var(--text-xs); color: var(--color-text-disabled); }
-
 /* 优先级配色 */
-.p-none { background: var(--color-text-disabled); }
+.p-none { background: var(--color-text-muted); }
 .p-low { background: var(--color-accent); }
 .p-medium { background: var(--color-warning); }
 .p-high { background: var(--color-danger); }
@@ -2196,14 +2487,11 @@ onUnmounted(() => {
 .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .modal-grid > * { min-width: 0; }
 .modal-grid input[type="datetime-local"] { width: 100%; box-sizing: border-box; }
-.occ-hint { margin: var(--space-1) 0 0; font-size: var(--text-xs); color: var(--color-text-disabled); line-height: 1.5; }
+.occ-hint { margin: var(--space-1) 0 0; font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.5; }
 
 /* 弹窗内错误条：页面级 .todo-error 在遮罩下面，弹窗必须自带一处反馈。
    与 SchedulePage / MonitorPage 的 .form-err 同口径。 */
 .form-err { margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3); font-size: var(--text-sm); color: var(--color-danger); background: var(--color-danger-bg); border: 1px solid var(--color-danger-border); border-radius: var(--radius-sm); }
-/* 空态里的「添加第一条」：给全新用户一个明确的下一步，而不是只说"点击左侧日期" */
-.empty-add-btn { display: inline-flex; align-items: center; gap: var(--space-2); margin-top: var(--space-4); padding: 5px 12px; border: 1px solid var(--color-accent-border); border-radius: var(--radius-md); background: var(--color-accent-bg); color: var(--color-accent); font-size: var(--text-sm); font-family: inherit; cursor: pointer; }
-.empty-add-btn:hover { background: var(--color-accent); color: var(--color-bg-primary); }
 
 /* 看板卡片：标题与最小操作集同一行。操作按钮常驻但弱化，聚焦时补回对比度，
    避免 hover 才显形导致键盘用户 Tab 到透明按钮上（横向共性里的可达性问题）。 */

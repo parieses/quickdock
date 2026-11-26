@@ -262,10 +262,10 @@ defineExpose({
           @change="emit('change-permission', $event)"
         />
         <button v-if="props.allowFileImage" class="ai-tool-btn" :disabled="props.streaming" :title="t('aiAttachImage')" @click="emit('open-file-picker')">
-          <ImageIcon :size="16" />
+          <ImageIcon :size="17" />
         </button>
         <button v-if="props.allowUrlImage" class="ai-tool-btn" :disabled="props.streaming" :title="t('aiAddImageUrl')" @click="emit('toggle-url')">
-          <Link2 :size="16" />
+          <Link2 :size="17" />
         </button>
         <!-- 生成中：红色的停止按钮 + （有字时）一枚插入按钮。
              两个按钮并排而不是把发送换成停止：以前只有停止，用户想补一句就得先
@@ -276,7 +276,7 @@ defineExpose({
             :title="t('aiInjectTip')"
             @click="emit('send')"
           >
-            <ArrowUp :size="16" />
+            <ArrowUp :size="18" />
           </AiSendButton>
           <AiSendButton variant="stop" :title="t('aiStop')" @click="emit('stop')">
             <Square :size="15" />
@@ -288,7 +288,7 @@ defineExpose({
           :title="t('send')"
           @click="emit('send')"
         >
-          <ArrowUp :size="16" />
+          <ArrowUp :size="18" />
         </AiSendButton>
       </div>
     </div>
@@ -334,7 +334,7 @@ defineExpose({
      原来是不带上限的 80%，大屏上比 hero 还宽，切页面时会跳一下。 */
   width: var(--ai-column-w);
   margin: 0 auto var(--space-5);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border-light);
   border-radius: var(--radius-lg);
   background: var(--color-bg-tertiary);
   flex-shrink: 0;
@@ -344,10 +344,9 @@ defineExpose({
   transition: border-color var(--transition-fast);
 }
 
-/* 与落地页 hero 输入框同一套聚焦反馈：只换中性边框色、不加外环，
-   不把整圈刷成强调色（大输入盒会盖掉页面里所有的强调元素）。 */
+/* 与落地页 hero 输入框同一套聚焦反馈：整圈换成强调蓝，不加外环。 */
 .ai-input-area:focus-within {
-  border-color: var(--color-border-focus-soft);
+  border-color: var(--color-accent);
 }
 
 .ai-input-bar {
@@ -372,7 +371,7 @@ defineExpose({
   border: none;
   border-radius: 50%;
   background: transparent;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }

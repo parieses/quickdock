@@ -57,6 +57,8 @@ import {
   Plus, Play, Pencil, Trash2, Globe, Activity, RefreshCw,
   ChevronDown, ChevronUp, CheckCircle2, XCircle, Radio, Download, Search, Power, X, Wrench,
   Bell as BellIcon, BellOff, Network, Cpu, TerminalSquare, Save,
+  // 汇总卡的延迟趋势箭头：向上=变慢（告警色）、向下=变快、持平用一条短横线
+  TrendingUp, TrendingDown, Minus, Ellipsis, AlertTriangle, History,
 } from '@lucide/vue'
 
 const { t } = useI18n()
@@ -134,6 +136,36 @@ async function batchSetEnabled(enabled: boolean) {
   else toast.error(t('mon_batch_partial', { n: failed.length, names: failed.slice(0, 3).join('、') }))
 }
 
+// 批量删除：同样是逐条软删（进回收站，可恢复）。勾了七八条再一条条点垃圾桶，
+// 是这页最长的一条操作路径，收进批量条里才合理。
+const showBatchDel = ref(false)
+function askBatchDelete() {
+  if (selectedIds.value.size) showBatchDel.value = true
+}
+async function batchDelete() {
+  showBatchDel.value = false
+  const ids = [...selectedIds.value]
+  if (!ids.length || batchBusy.value) return
+  batchBusy.value = true
+  error.value = ''
+  const failed: string[] = []
+  for (const id of ids) {
+    const m = monitors.value.find(x => x.id === id)
+    try {
+      unwrap(await SoftDeleteMonitor(id))
+      expanded.value.delete(id)
+    } catch (e) {
+      failed.push(m?.name || id)
+      error.value = getErrorMessage(e)
+    }
+  }
+  batchBusy.value = false
+  clearSelection()
+  await refresh()
+  if (!failed.length) toast.success(t('mon_batch_deleted', { n: ids.length }))
+  else toast.error(t('mon_batch_partial', { n: failed.length, names: failed.slice(0, 3).join('、') }))
+}
+
 const monitorGroups = computed(() => {
   const names = new Set<string>()
   for (const m of monitors.value) if (m.groupName) names.add(m.groupName)
@@ -178,18 +210,30 @@ const monitorGroupList = computed<MonitorGroup[]>(() => {
 const visibleMonitors = computed<Monitor[]>(() => monitorGroupList.value.flatMap(g => g.items))
 
 // ---- 汇总指标 ----
+// 「平均延迟 268ms」单独摆着看不出好坏，所以顺手算一个趋势基准：
+// 用 ListMonitorStats 的 24h 均值做参照，当前值与之相比才有方向。
+// 只统计当前在线的监控：故障项的 lastLatency 是超时/错误链路的残留值，混进来会把均值抬高。
 const summary = computed(() => {
   const list = monitors.value
   const up = list.filter(m => m.lastStatus === 'up').length
   const down = list.filter(m => m.lastStatus === 'down').length
   let lat = 0, n = 0
+  let lat24 = 0, n24 = 0
   for (const m of list) {
-    if (m.lastStatus === 'up' && m.lastLatencyMs > 0) { lat += m.lastLatencyMs; n++ }
+    const now = m.lastStatus === 'up' ? m.lastLatencyMs : 0
+    if (now > 0) { lat += now; n++ }
+    const avg = stats.value[m.id]?.avgLatencyMs || 0
+    if (m.lastStatus === 'up' && avg > 0) { lat24 += avg; n24++ }
   }
+  const avgLatency = n ? Math.round(lat / n) : 0
+  const avg24 = n24 ? Math.round(lat24 / n24) : 0
+  const trendPct = avg24 > 0 && avgLatency > 0 ? Math.round(((avgLatency - avg24) / avg24) * 100) : 0
   return {
     total: list.length,
     up, down,
-    avgLatency: n ? Math.round(lat / n) : 0,
+    avgLatency, avg24, trendPct,
+    // 升高=更慢（告警色），降低=更快（成功色），持平用中性灰
+    trendDir: trendPct === 0 ? 'flat' : trendPct > 0 ? 'up' : 'down',
   }
 })
 
@@ -242,6 +286,21 @@ function p99Of(id: string): number { return statOf(id)?.p99LatencyMs ?? 0 }
 function lastDownText(id: string): string {
   const v = statOf(id)?.lastDownAt || ''
   return v ? v.slice(5, 16) : '' // YYYY-MM-DD HH:MM:SS → MM-DD HH:MM
+}
+
+// 当次延迟占超时阈值的比例：纯数字肉眼分不出「131ms 算快还是慢」，
+// 给一条相对阈值的细进度条当刻度（越满越接近超时）。
+// 下限 4% 只是为了让极快响应也留下一小截可见的长度。
+function latPct(m: Monitor): number {
+  const limit = (m.timeoutSec || 10) * 1000
+  if (!limit || m.lastLatencyMs <= 0) return 0
+  return Math.max(4, Math.min(100, Math.round((m.lastLatencyMs / limit) * 100)))
+}
+function latLevel(m: Monitor): string {
+  const limit = (m.timeoutSec || 10) * 1000
+  if (!limit || m.lastLatencyMs <= 0) return ''
+  const r = m.lastLatencyMs / limit
+  return r >= 0.8 ? 'bad' : r >= 0.5 ? 'warn' : ''
 }
 
 // ---- 表单（新增 / 编辑共用） ----
@@ -476,6 +535,36 @@ async function remove(m: Monitor) {
   delTarget.value = m
   showDelConfirm.value = true
 }
+
+// ---- 行内「更多」菜单 ----
+// 静默 / 维护窗口 / 删除都是低频动作，和「立即检测 / 编辑」挤在一排会把常用项
+// 稀释成一片灰点；收进 ⋯ 之后，hover 时露出的三个图标才是真正每天要点的。
+// 同一时刻只允许开一个：几十行里留一堆展开的浮层，比藏着更难看清。
+const menuFor = ref('')
+function toggleRowMenu(id: string) { menuFor.value = menuFor.value === id ? '' : id }
+function closeRowMenu(e: MouseEvent) {
+  if (!(e.target as HTMLElement | null)?.closest?.('.mon-more-wrap')) menuFor.value = ''
+}
+
+// ---- 最近故障 ----
+// 列表只回答「现在好不好」，回答不了「刚刚有没有抖过」。页面下方本来就空着，
+// 用最近 24h 的 lastDownAt 拼一条时间线，点一下还能跳回那条监控。
+interface RecentDown { id: string; name: string; ts: number; rel: string }
+const recentDowns = computed<RecentDown[]>(() => {
+  const nowSec = Date.now() / 1000
+  const out: RecentDown[] = []
+  for (const m of monitors.value) {
+    const at = stats.value[m.id]?.lastDownAt || ''
+    if (!at) continue
+    // 后端给的是 "YYYY-MM-DD HH:MM:SS"（本地时间）：换成 T 分隔，Safari/旧 WebView 才认
+    const ms = new Date(at.replace(' ', 'T')).getTime()
+    if (!Number.isFinite(ms)) continue
+    const ts = Math.floor(ms / 1000)
+    if (nowSec - ts > 86400) continue
+    out.push({ id: m.id, name: m.name, ts, rel: relTime(ts) })
+  }
+  return out.sort((a, b) => b.ts - a.ts).slice(0, 6)
+})
 
 const delTarget = ref<Monitor | null>(null)
 const showDelConfirm = ref(false)
@@ -953,6 +1042,9 @@ function startPolling() {
     void refresh() // 后台期间的数据是过期的，切回来立刻补一次
   }
   document.addEventListener('visibilitychange', onVisibility)
+  // 行内 ⋯ 菜单的点击外部关闭：跟着页面激活态挂/卸，
+  // 保活页常驻时不会在别的页面点一下就把本页浮层关掉（串台）。
+  document.addEventListener('click', closeRowMenu)
   applyAutoRefresh()
 }
 
@@ -961,6 +1053,8 @@ function stopPolling() {
   needsRefresh = true
   if (pollTimer) { clearTimeout(pollTimer); pollTimer = undefined }
   document.removeEventListener('visibilitychange', onVisibility)
+  document.removeEventListener('click', closeRowMenu)
+  menuFor.value = ''
 }
 
 // 设置里的全局回收站恢复/彻底删除监控后发这个事件。监控页是 KeepAlive
@@ -1059,12 +1153,37 @@ onUnmounted(() => {
 
     <div v-if="error" class="mon-error">{{ error }}</div>
 
-    <!-- 汇总条：三个视图共用，状态页不许把统计顶掉，否则切 tab 时上方数字会整块消失 -->
+    <!-- 汇总条：三个视图共用，状态页不许把统计顶掉，否则切 tab 时上方数字会整块消失。
+         排版统一为「小标签在上、读数在下」：数字与单位贴同一基线，
+         标签也不再比数字深一级灰——两行各自成组，视线不会在卡片里来回跳。 -->
     <div v-if="monitors.length" class="mon-summary">
-      <div class="sum-item"><span class="sum-num">{{ summary.total }}</span><span class="sum-lbl">{{ t('mon_sum_total') }}</span></div>
-      <div class="sum-item up"><span class="sum-num">{{ summary.up }}</span><span class="sum-lbl">{{ t('mon_sum_up') }}</span></div>
-      <div class="sum-item down"><span class="sum-num">{{ summary.down }}</span><span class="sum-lbl">{{ t('mon_sum_down') }}</span></div>
-      <div class="sum-item"><span class="sum-num">{{ summary.avgLatency }}<i>ms</i></span><span class="sum-lbl">{{ t('mon_sum_latency') }}</span></div>
+      <div class="sum-item">
+        <span class="sum-lbl">{{ t('mon_sum_total') }}</span>
+        <span class="sum-val"><span class="sum-num">{{ summary.total }}</span></span>
+      </div>
+      <div class="sum-item up">
+        <span class="sum-lbl">{{ t('mon_sum_up') }}</span>
+        <span class="sum-val"><span class="sum-num">{{ summary.up }}</span></span>
+      </div>
+      <div class="sum-item down">
+        <span class="sum-lbl">{{ t('mon_sum_down') }}</span>
+        <span class="sum-val"><span class="sum-num">{{ summary.down }}</span></span>
+      </div>
+      <!-- 平均延迟带趋势：单独一个 268ms 看不出好坏，跟自己的 24h 均值比才有方向 -->
+      <div class="sum-item" :title="t('monLatTrendTtl')">
+        <span class="sum-lbl">{{ t('mon_sum_latency') }}</span>
+        <span class="sum-val">
+          <span class="sum-num">{{ summary.avgLatency }}<i>ms</i></span>
+          <span v-if="summary.avgLatency > 0 && summary.avg24 > 0" :class="['sum-trend', summary.trendDir]">
+            <TrendingUp v-if="summary.trendDir === 'up'" :size="11" />
+            <TrendingDown v-else-if="summary.trendDir === 'down'" :size="11" />
+            <Minus v-else :size="11" />
+            <template v-if="summary.trendDir === 'flat'">{{ t('monLatFlat') }}</template>
+            <template v-else-if="summary.trendDir === 'up'">{{ t('monLatSlower', { p: Math.abs(summary.trendPct) }) }}</template>
+            <template v-else>{{ t('monLatFaster', { p: Math.abs(summary.trendPct) }) }}</template>
+          </span>
+        </span>
+      </div>
     </div>
 
     <!-- 视图切换：活动列表 / 状态页（回收站在设置 → 历史） -->
@@ -1098,8 +1217,9 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <!-- 搜索 + 批量操作条 -->
-    <div v-if="viewMode !== 'status' && monitors.length >= 4" class="mon-tools">
+    <!-- 搜索 + 批量操作条：只要勾了东西就必须出现，不再被「至少 4 条」挡住；
+         勾选态下整条换成强调色底，否则批量动作藏在灰色工具条里等于没提示。 -->
+    <div v-if="viewMode !== 'status' && (monitors.length >= 4 || selectedIds.size)" :class="['mon-tools', { 'mon-tools-batch': selectedIds.size > 0 }]">
       <label v-if="visibleMonitors.length > 1" class="mon-selall" :title="t('mon_sel_all')">
         <input type="checkbox" :checked="allVisibleSelected" @change="toggleSelectAll" />
       </label>
@@ -1118,6 +1238,9 @@ onUnmounted(() => {
         <button class="mon-selbtn" :disabled="batchBusy" @click="batchSetEnabled(false)">
           <Power :size="12" />{{ t('mon_batch_off') }}
         </button>
+        <button class="mon-selbtn danger" :disabled="batchBusy" @click="askBatchDelete">
+          <Trash2 :size="12" />{{ t('mon_batch_delete') }}
+        </button>
         <button class="mon-selbtn" @click="clearSelection">{{ t('mon_sel_clear') }}</button>
       </template>
     </div>
@@ -1130,7 +1253,7 @@ onUnmounted(() => {
     <!-- 列表（活动监控） -->
     <div v-else-if="viewMode === 'active'" class="mon-list">
       <div v-if="!loading && monitors.length === 0" class="mon-empty">
-        <Radio :size="30" class="empty-icon" />
+        <Radio :size="20" class="empty-icon" />
         <p>{{ t('mon_empty') }}</p>
         <p class="empty-hint">{{ t('mon_empty_hint') }}</p>
       </div>
@@ -1167,39 +1290,51 @@ onUnmounted(() => {
           />
           <span :class="['status-dot', m.lastStatus || 'unknown']"></span>
           <div class="item-main">
+            <!-- 第一行：名称 + 状态 + 目标地址（单行省略）。
+                 地址从独立一行挪上来，第二行整行让给指标——原来是名称/地址/数字三层堆叠，
+                 每一层都要从头扫一遍，视线负担比信息本身还重。 -->
             <div class="item-line1">
               <span class="item-name">{{ m.name }}</span>
               <span v-if="m.lastStatus" :class="['status-badge', m.lastStatus]">
                 {{ m.lastStatus === 'up' ? t('mon_up') : t('mon_down') }}
               </span>
+              <!-- 维护/静默原本混在指标行里，和延迟、状态码抢位置；它们改的是「行为」不是「读数」，
+                   跟状态徽标排在一起更合理 -->
+              <span v-if="inMaintenance(m)" class="item-tag" :title="t('mon_maint_ttl')">
+                <Wrench :size="10" />{{ t('mon_maint_on', { t: maintRemaining(m) }) }}
+              </span>
+              <span v-if="inMute(m)" class="item-tag mute" :title="t('mon_mute_ttl')">
+                <BellOff :size="10" />{{ t('mon_mute_on', { t: muteRemaining(m) }) }}
+              </span>
+              <span class="item-url" :title="targetText(m)">
+                <component :is="kindIcon(m)" :size="11" class="item-url-icon" />
+                <span class="item-url-text">{{ targetText(m) }}</span>
+              </span>
             </div>
-            <div class="item-url" :title="targetText(m)">
-              <component :is="kindIcon(m)" :size="11" /> {{ targetText(m) }}
-            </div>
+            <!-- 第二行：指标详情。统一 11px 灰字 + 竖线分隔，数值前用文字给出口径，
+                 比一串并列的裸数字好扫。延迟后面那条细进度条是「占超时阈值的比例」，
+                 纯数字看不出 131ms 到底算快还是接近超时。 -->
             <div class="item-meta">
-              <span class="meta-up" :title="t('mon_checks_ttl')">{{ t('mon_uptime') }} {{ uptimeText(m.id) }}<template v-if="checksOf(m.id)"> · {{ t('mon_checks_n', { n: checksOf(m.id) }) }}</template></span>
-              <span class="meta-lat" v-if="m.lastLatencyMs > 0">{{ m.lastLatencyMs }}ms</span>
-              <span class="meta-avg" v-if="avgLatOf(m.id)" :title="t('mon_avg_ttl')">⌀ {{ avgLatOf(m.id) }}ms</span>
+              <span class="meta-cell meta-up" :title="t('mon_checks_ttl')">{{ t('mon_uptime') }} {{ uptimeText(m.id) }}</span>
+              <span v-if="checksOf(m.id)" class="meta-cell">{{ t('mon_checks_n', { n: checksOf(m.id) }) }}</span>
+              <span v-if="m.lastLatencyMs > 0" class="meta-cell meta-lat" :title="t('monLatBarTtl')">
+                <span class="meta-lat-num">{{ m.lastLatencyMs }}ms</span>
+                <span :class="['lat-bar', latLevel(m)]"><i :style="{ width: latPct(m) + '%' }"></i></span>
+                <span v-if="avgLatOf(m.id)" class="meta-sub" :title="t('mon_avg_ttl')">{{ t('monMetaAvg', { ms: avgLatOf(m.id) }) }}</span>
+              </span>
               <!-- p95/p99 从 ListMonitorStats 读：只在有样本（>0）时显示，0 会被当成「没统计」而不是「0ms」 -->
-              <span v-if="p95Of(m.id) > 0" class="meta-pctl" :title="t('monitorPercentileTip')">p95 {{ p95Of(m.id) }}ms</span>
-              <span v-if="p99Of(m.id) > 0" class="meta-pctl" :title="t('monitorPercentileTip')">p99 {{ p99Of(m.id) }}ms</span>
-              <span class="meta-checked">{{ t('mon_checked') }} {{ relTime(m.lastCheckedTs) }}</span>
-              <span v-if="lastDownText(m.id)" class="meta-down">{{ t('mon_last_down') }} {{ lastDownText(m.id) }}</span>
+              <span v-if="p95Of(m.id) > 0" class="meta-cell" :title="t('monitorPercentileTip')">p95 {{ p95Of(m.id) }}ms</span>
+              <span v-if="p99Of(m.id) > 0" class="meta-cell" :title="t('monitorPercentileTip')">p99 {{ p99Of(m.id) }}ms</span>
               <!-- 状态码列复用给非 http 类型：tcp 没有码（不显示），process 的 code 是进程数，
                    cmd 的 code 是退出码——同一格换成对应含义，比硬写 HTTP 更不容易误读 -->
-              <span v-if="m.lastStatusCode && kindOf(m) === 'http'" class="meta-code" :title="t('mon_status_code')">HTTP {{ m.lastStatusCode }}</span>
-              <span v-else-if="m.lastStatusCode && kindOf(m) === 'process'" class="meta-code" :title="t('mon_proc_count_ttl')">{{ m.lastStatusCode }}{{ t('mon_proc_count_unit') }}</span>
-              <span v-else-if="m.lastStatusCode && kindOf(m) === 'cmd'" class="meta-code" :title="t('mon_exit_code_ttl')">{{ t('mon_exit_code') }} {{ m.lastStatusCode }}</span>
-              <span v-if="m.lastError" class="meta-err" :title="m.lastError">{{ m.lastError }}</span>
-              <span v-if="certText(m)" :class="['meta-cert', { warn: certWarn(m) }]">
+              <span v-if="m.lastStatusCode && kindOf(m) === 'http'" class="meta-cell" :title="t('mon_status_code')">HTTP {{ m.lastStatusCode }}</span>
+              <span v-else-if="m.lastStatusCode && kindOf(m) === 'process'" class="meta-cell" :title="t('mon_proc_count_ttl')">{{ m.lastStatusCode }}{{ t('mon_proc_count_unit') }}</span>
+              <span v-else-if="m.lastStatusCode && kindOf(m) === 'cmd'" class="meta-cell" :title="t('mon_exit_code_ttl')">{{ t('mon_exit_code') }} {{ m.lastStatusCode }}</span>
+              <span v-if="certText(m)" :class="['meta-cell', 'meta-cert', { warn: certWarn(m) }]">
                 <component :is="certWarn(m) ? XCircle : CheckCircle2" :size="11" /> {{ certText(m) }}
               </span>
-              <span v-if="inMaintenance(m)" class="meta-maint" :title="t('mon_maint_ttl')">
-                <Wrench :size="11" /> {{ t('mon_maint_on', { t: maintRemaining(m) }) }}
-              </span>
-              <span v-if="inMute(m)" class="meta-mute" :title="t('mon_mute_ttl')">
-                <BellOff :size="11" /> {{ t('mon_mute_on', { t: muteRemaining(m) }) }}
-              </span>
+              <span class="meta-cell">{{ t('mon_checked') }} {{ relTime(m.lastCheckedTs) }}</span>
+              <span v-if="lastDownText(m.id)" class="meta-cell meta-down">{{ t('mon_last_down') }} {{ lastDownText(m.id) }}</span>
             </div>
           </div>
           <div v-key-click class="item-actions" @click.stop>
@@ -1210,19 +1345,47 @@ onUnmounted(() => {
               <RefreshCw :size="14" :class="{ spin: checkingId === m.id }" />
             </button>
             <button class="act" @click="openEdit(m)" :title="t('mon_edit')"><Pencil :size="14" /></button>
-            <button class="act" :class="{ active: inMute(m) }" @click="toggleMute(m)"
-                    :title="inMute(m) ? t('mon_mute_cancel') : t('mon_mute_1h')">
-              <BellOff :size="14" />
-            </button>
-            <button class="act" :class="{ active: inMaintenance(m) }" @click="toggleMaintenance(m)"
-                    :title="inMaintenance(m) ? t('mon_maint_cancel') : t('mon_maint_1h')">
-              <Wrench :size="14" />
-            </button>
-            <button class="act danger" @click="remove(m)" :title="t('mon_delete')"><Trash2 :size="14" /></button>
+            <!-- 静默 / 维护 / 删除收进 ⋯：这三个是低频动作，常驻只会把
+                 「立即检测」「编辑」稀释成一片同样大小的灰图标 -->
+            <div class="mon-more-wrap">
+              <button class="act" :class="{ active: menuFor === m.id || inMute(m) || inMaintenance(m) }"
+                      :title="t('monMore')" :aria-expanded="menuFor === m.id" @click="toggleRowMenu(m.id)">
+                <Ellipsis :size="14" />
+              </button>
+              <div v-if="menuFor === m.id" class="mon-more-pop" @click.stop>
+                <button class="mon-menu-item" @click="menuFor = ''; toggleMute(m)">
+                  <BellOff :size="13" />{{ inMute(m) ? t('mon_mute_cancel') : t('mon_mute_1h') }}
+                  <span v-if="inMute(m)" class="mm-hint">{{ muteRemaining(m) }}</span>
+                </button>
+                <button class="mon-menu-item" @click="menuFor = ''; toggleMaintenance(m)">
+                  <Wrench :size="13" />{{ inMaintenance(m) ? t('mon_maint_cancel') : t('mon_maint_1h') }}
+                  <span v-if="inMaintenance(m)" class="mm-hint">{{ maintRemaining(m) }}</span>
+                </button>
+                <button class="mon-menu-item danger" @click="menuFor = ''; remove(m)">
+                  <Trash2 :size="13" />{{ t('mon_delete') }}
+                </button>
+              </div>
+            </div>
           </div>
           <button class="expand-btn" :aria-expanded="isExpanded(m.id)" @click.stop="toggleExpand(m)" :title="t('mon_logs')">
             <ChevronDown v-if="!isExpanded(m.id)" :size="16" />
             <ChevronUp v-else :size="16" />
+          </button>
+        </div>
+
+        <!-- 故障行下方独立告警区：错误串原来接在网址后面，长错误会把地址挤没，
+             而且和正常指标同号同色，读起来像一行脏数据。这里给淡红底 + 可换行的完整错误。 -->
+        <div v-if="m.lastError" class="err-banner">
+          <AlertTriangle :size="14" class="eb-icon" />
+          <div class="eb-main">
+            <div class="eb-title">
+              {{ t('monErrBanner') }}
+              <span class="eb-time">{{ relTime(m.lastCheckedTs) }}</span>
+            </div>
+            <p class="eb-msg">{{ m.lastError }}</p>
+          </div>
+          <button class="eb-retry" :disabled="checkingId === m.id" @click.stop="checkNow(m)">
+            <RefreshCw :size="12" :class="{ spin: checkingId === m.id }" />{{ t('mon_check_now') }}
           </button>
         </div>
 
@@ -1313,6 +1476,22 @@ onUnmounted(() => {
         </div>
         <!-- /mon-item：必须收在 <template v-for> 之内，否则分组循环外会多出一个闭合标签 -->
       </template>
+
+      <!-- 最近故障时间线：列表只回答「现在好不好」，这块补上「刚刚抖过没有」。
+           放在列表末尾 + margin-top:auto——监控少时它落到页面底部填掉那片留白，
+           监控多时自然跟着滚动，不额外占一屏。 -->
+      <div v-if="recentDowns.length" class="mon-recent">
+        <div class="mr-head">
+          <History :size="12" />
+          <span>{{ t('mon_last_down') }}</span>
+          <span class="mr-hint">{{ t('monRecentHint') }}</span>
+        </div>
+        <button v-for="d in recentDowns" :key="d.id + '-' + d.ts" class="mr-row" @click="focusMonitor(d.id)">
+          <span class="mr-dot"></span>
+          <span class="mr-name">{{ d.name }}</span>
+          <span class="mr-time">{{ d.rel }}</span>
+        </button>
+      </div>
     </div>
 
     <!-- 新增/编辑弹窗 -->
@@ -1480,6 +1659,14 @@ onUnmounted(() => {
       @confirm="confirmDel"
       @cancel="showDelConfirm = false"
     />
+
+    <!-- 批量删除单独一个确认框：文案要带数量，用户才知道自己到底要删几条 -->
+    <ConfirmDialog
+      :visible="showBatchDel"
+      :message="t('mon_batch_delete_confirm', { n: selectedIds.size })"
+      @confirm="batchDelete"
+      @cancel="showBatchDel = false"
+    />
   </div>
 </template>
 
@@ -1521,13 +1708,31 @@ onUnmounted(() => {
   display: flex; gap: var(--space-3); margin: 14px var(--space-7) var(--space-5); flex-shrink: 0;
 }
 .sum-item {
-  flex: 1; display: flex; flex-direction: column; gap: var(--space-1); padding: 10px 14px;
+  flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 9px 14px 10px;
   background: var(--color-card-bg); border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
 }
-.sum-num { font-size: var(--text-xl); font-weight: 600; color: var(--color-text-primary); }
-.sum-num i { font-size: var(--text-xs); font-style: normal; color: var(--color-text-disabled); margin-left: var(--space-1); }
-.sum-lbl { font-size: var(--text-xs); color: var(--color-text-disabled); }
+/* 标签提到数字上方并用 muted（而不是 disabled）：disabled 那档在深底上低于 4.5:1，
+   这一行本来就小，再压灰等于读不出来。 */
+.sum-lbl { font-size: var(--text-xs); color: var(--color-text-muted); letter-spacing: 0.02em; }
+/* 数字与单位同一基线、只留 1px 间隙：单位和数字属于同一个读数，不该被拉开成两段 */
+.sum-val { display: flex; align-items: baseline; gap: var(--space-3); min-width: 0; }
+.sum-num {
+  font-size: var(--text-xl); font-weight: 700; line-height: 1.15;
+  color: var(--color-text-primary);
+  /* 等宽数字：4 张卡并排时，3 和 268 的字形宽度不跳，读数才对齐 */
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.sum-num i { font-size: var(--text-xs); font-weight: 500; font-style: normal; color: var(--color-text-muted); margin-left: 1px; }
+/* 延迟趋势：向上=变慢（danger）、向下=变快（success）、持平中性色。
+   箭头比纯文字快，百分比补上幅度。 */
+.sum-trend {
+  display: inline-flex; align-items: center; gap: 2px; min-width: 0;
+  font-size: var(--text-2xs); color: var(--color-text-muted); white-space: nowrap;
+}
+.sum-trend.up { color: var(--color-danger); }
+.sum-trend.down { color: var(--color-success); }
 .sum-item.up .sum-num { color: var(--color-success); }
 .sum-item.down .sum-num { color: var(--color-danger); }
 
@@ -1554,7 +1759,7 @@ onUnmounted(() => {
 .group-head-name { letter-spacing: 0.06em; }
 .group-head-count {
   font-weight: 400; padding: 0 var(--space-3); border-radius: var(--radius-md);
-  background: var(--color-bg-tertiary); color: var(--color-text-disabled);
+  background: var(--color-bg-tertiary); color: var(--color-text-muted);
 }
 /* 组头右侧的全选本组：只在组内多于一条时出现 */
 .group-sel {
@@ -1596,20 +1801,38 @@ onUnmounted(() => {
 }
 .mon-selbtn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
 .mon-selbtn:disabled { opacity: 0.5; cursor: not-allowed; }
+.mon-selbtn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); }
+/* 勾选态把整条工具条换成强调底：批量动作只在选中后出现，
+   如果还跟搜索框混在同一条灰底里，等于没有提示。 */
+.mon-tools-batch {
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border, var(--color-border));
+  border-radius: var(--radius-sm);
+  margin: 0 var(--space-7) var(--space-2);
+  padding: 4px var(--space-4);
+  flex-wrap: wrap; row-gap: var(--space-3);
+}
+/* 批量条自带左右内缩后，搜索框不再需要外层的 20px padding */
+.mon-tools-batch .mon-search { background: var(--color-bg-secondary); }
 .mon-check { flex-shrink: 0; cursor: pointer; }
-.field-hint { margin: var(--space-2) 0 0; font-size: var(--text-xs); color: var(--color-text-disabled); }
-.mon-empty { text-align: center; padding: 72px var(--space-4); color: var(--color-text-disabled); }
+.field-hint { margin: var(--space-2) 0 0; font-size: var(--text-xs); color: var(--color-text-muted); }
+.mon-empty { text-align: center; padding: 72px var(--space-4); color: var(--color-text-muted); }
 /* 空状态图标：一根细线图标直接浮在深底上，容易被读成「没加载出来」。
-   给一层方底 + 细边，它才是一个完整的标识；padding 配合 content-box，
-   图标本身的尺寸不用改（各页 28/30/36/48 都成立）。 */
+   给一层方底 + 细边，它才是一个完整的标识。
+   盒子固定 44（= .qd-empty-icon），图标一律 20：早先靠 padding + content-box
+   "适配任意尺寸"，结果 28/30/36/48 各自撑成 48~68，同屏不同页的图标底托大小不一。 */
 .empty-icon {
-  padding: 10px;
-  box-sizing: content-box;
-  opacity: 1;
+  width: 44px;
+  height: 44px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 0 var(--color-hairline);
   margin-bottom: var(--space-5);
 }
 .empty-hint { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: var(--space-3); }
@@ -1637,10 +1860,7 @@ onUnmounted(() => {
 .mon-item[draggable="true"]:active { cursor: grabbing; }
 /* 回收站里的条目：只读展示，没有展开/勾选那套交互 */
 
-/* 维护窗口徽标：与状态徽标区分，用中性的强调色 */
-.meta-maint { color: var(--color-warning, var(--color-text-muted)); }
-/* 静默徽标：比维护更轻——探测还在跑，只是不吵人，用弱化的次要色 */
-.meta-mute { display: inline-flex; align-items: center; gap: 3px; color: var(--color-text-muted); }
+/* 维护 / 静默已收进第一行的 .item-tag，原来的 .meta-maint / .meta-mute 随之删除 */
 .mon-item .act.active { color: var(--color-warning, var(--color-accent)); }
 
 /* 视图切换 tab：活动列表 / 状态页，像标签页一样一眼分清当前在哪 */
@@ -1661,34 +1881,77 @@ onUnmounted(() => {
 /* 与 DashboardPage .dot 同一克制画法：实色点，down 额外一圈实底环，不用发光 */
 .status-dot.up { background: var(--color-success); }
 .status-dot.down { background: var(--color-danger); box-shadow: 0 0 0 3px var(--color-danger-bg); }
-.status-dot.unknown { background: var(--color-text-disabled); }
+.status-dot.unknown { background: var(--color-text-muted); }
 
 .item-main { flex: 1; min-width: 0; }
-.item-line1 { display: flex; align-items: center; gap: var(--space-4); }
-.item-name { font-size: var(--text-md); font-weight: 500; color: var(--color-text-primary); }
-.status-badge { font-size: var(--text-2xs); padding: 1px 7px; border-radius: var(--radius-md); }
-.status-badge.up { background: var(--color-success-bg); color: var(--color-success); }
-.status-badge.down { background: var(--color-danger-bg); color: var(--color-danger); }
-.item-url { font-size: var(--text-sm); color: var(--color-text-secondary); margin-top: var(--space-1); display: flex; align-items: center; gap: var(--space-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.item-meta { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: var(--space-2); display: flex; gap: 10px; flex-wrap: wrap; }
-.meta-up { color: var(--color-accent); }
-.meta-lat { color: var(--color-text-muted); }
-.meta-avg { color: var(--color-text-muted); }
-.meta-pctl { color: var(--color-text-muted); }
-.meta-down { color: var(--color-warning); }
-.meta-code { color: var(--color-text-muted); }
-/* 最近一次错误：单行截断，完整内容在 title 里（错误串可能很长，撑开会把行挤爆） */
-.meta-err {
-  max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: var(--color-danger);
+.item-line1 { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.item-name {
+  font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary);
+  max-width: 38%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.meta-cert { display: inline-flex; align-items: center; gap: 3px; color: var(--color-text-muted); }
+/* 状态徽标：实心绿/红底在深色下过曝，改成 12% 透明底 + 亮字 + 一圈淡描边。
+   描边用语义色的 40% 透明度（--color-*-border），比纯色块克制，又比无边框清晰。 */
+.status-badge {
+  display: inline-flex; align-items: center; flex-shrink: 0;
+  height: 17px; padding: 0 6px;
+  font-size: var(--text-2xs); font-weight: 500; line-height: 1;
+  border-radius: var(--radius-full); border: 1px solid transparent;
+  background: transparent;
+}
+.status-badge.up { background: var(--color-success-bg); color: var(--color-success); border-color: var(--color-success-border); }
+.status-badge.down { background: var(--color-danger-bg); color: var(--color-danger); border-color: var(--color-danger-border); }
+/* 维护 / 静默标记：与状态徽标同高但更轻，不抢「正常/故障」的判断 */
+.item-tag {
+  display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0;
+  height: 17px; padding: 0 6px; border-radius: var(--radius-full);
+  font-size: var(--text-2xs); color: var(--color-warning);
+  background: var(--color-warning-bg); border: 1px solid var(--color-warning-border);
+  white-space: nowrap;
+}
+/* 静默：探测照常、日志照常，只是不吵人——比「维护中」更轻，用中性灰而不是告警黄 */
+.item-tag.mute {
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-border);
+}
+
+/* 地址与名称同一行：flex:1 吃掉剩余宽度，超出部分靠内部 span 省略。
+   直接给 flex 容器写 text-overflow 对匿名文本节点无效，必须套一层。 */
+.item-url {
+  display: flex; align-items: center; gap: 4px; flex: 1 1 auto; min-width: 24px;
+  font-size: var(--text-xs); color: var(--color-text-muted); overflow: hidden;
+}
+.item-url-icon { flex-shrink: 0; opacity: 0.75; }
+.item-url-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 指标行：11px 灰字 + 竖线分隔。原来 12px 且和地址同色，整块看起来像一行散落的数字。 */
+.item-meta {
+  display: flex; flex-wrap: wrap; align-items: center; row-gap: 2px;
+  margin-top: 3px; font-size: var(--text-xs); color: var(--color-text-muted);
+}
+.meta-cell { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.meta-cell + .meta-cell::before {
+  content: '|'; margin: 0 var(--space-3); color: var(--color-border); font-weight: 400;
+}
+.meta-up { color: var(--color-accent); }
+.meta-lat { color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.meta-lat-num { font-weight: 500; }
+.meta-sub { color: var(--color-text-muted); }
+.meta-down { color: var(--color-warning); }
+/* 延迟刻度：占超时阈值的比例。细到 3px，只做「离超时还有多远」的暗示，不喧宾夺主。 */
+.lat-bar {
+  display: inline-block; width: 34px; height: 3px; flex-shrink: 0;
+  border-radius: var(--radius-full); background: var(--color-border-light); overflow: hidden;
+}
+.lat-bar > i { display: block; height: 100%; border-radius: inherit; background: var(--color-success); }
+.lat-bar.warn > i { background: var(--color-warning); }
+.lat-bar.bad > i { background: var(--color-danger); }
+.meta-cert { color: var(--color-text-muted); }
 .meta-cert.warn { color: var(--color-warning); font-weight: 500; }
 
 .item-actions { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
 .act {
   width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
-  border: none; background: transparent; color: var(--color-text-disabled);
+  border: none; background: transparent; color: var(--color-text-muted);
   border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .act:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-active); }
@@ -1707,10 +1970,81 @@ onUnmounted(() => {
 @keyframes mon-spin { to { transform: rotate(360deg); } }
 .expand-btn {
   width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
-  border: none; background: transparent; color: var(--color-text-disabled);
+  border: none; background: transparent; color: var(--color-text-muted);
   border-radius: var(--radius-sm); cursor: pointer; flex-shrink: 0; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .expand-btn:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
+/* 开关的强调色饱和度收到 0.7：它只是「开/关」的状态指示，
+   和旁边的「正常/故障」徽标抢同一块视觉注意力没有必要。 */
+.item-actions :deep(.qd-switch[aria-checked='true']) { filter: saturate(0.7); }
+/* ⋯ 菜单：静默 / 维护 / 删除。z-index 用 dropdown 层，避免被下一条监控盖住 */
+.mon-more-wrap { position: relative; display: flex; align-items: center; }
+.mon-more-pop {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: var(--z-dropdown);
+  display: flex; flex-direction: column; gap: 2px; width: 186px; padding: var(--space-2);
+  background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-pop);
+}
+.mon-menu-item {
+  display: flex; align-items: center; gap: var(--space-3); width: 100%;
+  padding: var(--space-3); border: none; background: none; border-radius: var(--radius-xs);
+  color: var(--color-text-secondary); font-size: var(--text-sm); font-family: inherit;
+  text-align: left; cursor: pointer; white-space: nowrap;
+}
+.mon-menu-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.mon-menu-item.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.mm-hint { margin-left: auto; font-size: var(--text-2xs); color: var(--color-text-muted); }
+
+/* 故障告警条：淡红底 + 红字，与正常指标行彻底分开。
+   错误串可能是整段 Get "https://…" 的报错，必须允许换行，不能截断成省略号。 */
+.err-banner {
+  display: flex; align-items: flex-start; gap: var(--space-4);
+  margin: 0 14px var(--space-5); padding: var(--space-4) var(--space-5);
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-danger);
+}
+.eb-icon { flex-shrink: 0; margin-top: 1px; }
+.eb-main { flex: 1; min-width: 0; }
+.eb-title { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-xs); font-weight: 600; }
+.eb-time { font-weight: 400; opacity: 0.8; }
+.eb-msg {
+  margin: 3px 0 0; font-size: var(--text-xs); line-height: 1.55;
+  opacity: 0.92; word-break: break-all;
+}
+.eb-retry {
+  display: inline-flex; align-items: center; gap: var(--space-2); flex-shrink: 0;
+  height: 22px; padding: 0 var(--space-4); font-family: inherit; font-size: var(--text-xs);
+  color: var(--color-danger); background: transparent; cursor: pointer;
+  border: 1px solid var(--color-danger-border); border-radius: var(--radius-xs);
+}
+.eb-retry:hover:not(:disabled) { background: var(--color-danger-bg); }
+.eb-retry:disabled { opacity: 0.5; cursor: default; }
+
+/* 最近故障时间线：margin-top:auto 让它在监控少时落到页面底部填白，
+   监控多时自然跟在列表末尾一起滚。 */
+.mon-recent {
+  margin-top: auto; padding: var(--space-4) var(--space-5) var(--space-4);
+  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+.mr-head {
+  display: flex; align-items: center; gap: var(--space-3);
+  font-size: var(--text-xs); font-weight: 600; color: var(--color-text-secondary);
+  margin-bottom: var(--space-3);
+}
+.mr-hint { font-weight: 400; color: var(--color-text-muted); }
+.mr-row {
+  display: flex; align-items: center; gap: var(--space-4); width: 100%;
+  padding: var(--space-3) var(--space-2); border: none; background: none;
+  border-radius: var(--radius-xs); cursor: pointer; font-family: inherit;
+  font-size: var(--text-xs); color: var(--color-text-secondary); text-align: left;
+}
+.mr-row:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.mr-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: var(--color-danger); }
+.mr-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mr-time { flex-shrink: 0; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 
 .logs-panel { border-top: 1px solid var(--color-border); padding: var(--space-4) 14px var(--space-5); }
 /* 面板头部允许换行：范围切换 + 导出 + 清空三个控件加起来比一行还宽时，
@@ -1730,7 +2064,7 @@ onUnmounted(() => {
 .logs-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
 .logs-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .logs-btn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); }
-.logs-empty { font-size: var(--text-xs); color: var(--color-text-disabled); padding: var(--space-3) 0; }
+.logs-empty { font-size: var(--text-xs); color: var(--color-text-muted); padding: var(--space-3) 0; }
 .logs-load-error { display: inline-flex; align-items: center; gap: var(--space-3); font-size: var(--text-xs); color: var(--color-danger); padding: var(--space-3) 0; }
 
 /* 日志可视化：正常率环（原生 SVG）+ 延迟折线（QdLineChart） */
@@ -1762,8 +2096,8 @@ onUnmounted(() => {
   align-items: center; justify-content: center; gap: 0;
 }
 .ring-pct { font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); line-height: 1.1; font-variant-numeric: tabular-nums; }
-.ring-pct i { font-size: var(--text-2xs); font-style: normal; color: var(--color-text-disabled); margin-left: 1px; }
-.ring-lbl { font-size: var(--text-xs); color: var(--color-text-disabled); }
+.ring-pct i { font-size: var(--text-2xs); font-style: normal; color: var(--color-text-muted); margin-left: 1px; }
+.ring-lbl { font-size: var(--text-xs); color: var(--color-text-muted); }
 .ring-legend { display: flex; gap: var(--space-4); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
 .ring-legend .ok { color: var(--color-success); }
 .ring-legend .bad { color: var(--color-danger); }
@@ -1774,7 +2108,7 @@ onUnmounted(() => {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
   font-size: var(--text-xs); color: var(--color-text-muted); margin-bottom: var(--space-3);
 }
-.cal-legend { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-xs); color: var(--color-text-disabled); }
+.cal-legend { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-xs); color: var(--color-text-muted); }
 .cal-legend .cal-cell { margin-left: var(--space-1); }
 /* 一周一列（7 行），列自动流；格子 11px + 3px 间距，12 周约 190px 宽 */
 .cal-grid {
@@ -1805,7 +2139,7 @@ onUnmounted(() => {
 .interval-num { flex: 1; min-width: 0; }
 .interval-num--fixed { flex: 0 0 72px; }
 .mt-2 { margin-top: var(--space-2); }
-.unit-suffix { font-size: var(--text-sm); color: var(--color-text-disabled); width: 90px; flex-shrink: 0; text-align: center; }
+.unit-suffix { font-size: var(--text-sm); color: var(--color-text-muted); width: 90px; flex-shrink: 0; text-align: center; }
 
 .toggle-label { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-sm); color: var(--color-text-secondary); cursor: pointer; margin: var(--space-2) 0 0; }
 .toggle-label input { cursor: pointer; }

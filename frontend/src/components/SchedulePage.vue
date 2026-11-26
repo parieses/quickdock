@@ -35,13 +35,16 @@ import {
   Plus, Play, Pause, Pencil, Trash2, AlarmClock, AppWindow, FolderOpen,
   Globe, TerminalSquare, Zap, CheckCircle2, XCircle, History,
   Search, LoaderCircle, GripVertical, Bell, BarChart3, FolderSearch, Bot, MessagesSquare, CalendarDays,
-  FileCode2,
+  FileCode2, ChevronDown,
 } from '@lucide/vue'
 
 const { t, locale } = useI18n()
 
 // 视图 tab：列表 / 统一日历。日历作为本页的一个 tab，不占侧栏导航项（铁律 6）。
 const viewMode = ref<'list' | 'calendar'>('list')
+// 日历自带一份数据（它同时拉待办与定时任务），本页 refresh 触不到它：
+// 新建/保存后要显式让它重拉，否则日历上刚建的任务不出现。
+const calendarRef = ref<InstanceType<typeof UnifiedCalendar> | null>(null)
 
 const tasks = ref<ScheduledTask[]>([])
 const loading = ref(false)
@@ -184,13 +187,13 @@ async function loadRuns() {
   }
 }
 const stats = computed(() => {
-  const days: { date: string; total: number; fail: number }[] = []
+  const days: { date: string; total: number; fail: number; dur: number; durN: number }[] = []
   const today = new Date(); today.setHours(0, 0, 0, 0)
   for (let i = 6; i >= 0; i--) {
     const d = new Date(today); d.setDate(d.getDate() - i)
     days.push({
       date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
-      total: 0, fail: 0,
+      total: 0, fail: 0, dur: 0, durN: 0,
     })
   }
   const idx = new Map(days.map((x, i) => [x.date, i]))
@@ -203,6 +206,7 @@ const stats = computed(() => {
     if (i === undefined) continue
     days[i].total++
     total++
+    if (r.durationMs > 0) { days[i].dur += r.durationMs; days[i].durN++ }
     if (r.status === 'fail') { days[i].fail++; fail++ }
   }
   return { days, total, fail, rate: total ? Math.round((fail / total) * 100) : 0 }
@@ -221,7 +225,18 @@ const weekChartSeries = computed(() => [{
 function weekTooltipExtra(index: number): string {
   const d = stats.value.days[index]
   if (!d) return ''
-  return `<div>${t('sched_stats_fail', { n: d.fail })}</div>`
+  // 只报「几次失败 / 平均多久」不够定位——补上执行次数，才能判断这根柱子是不是
+  // 一条每 5 分钟跑一次的任务刷出来的。
+  const rows = [
+    `<div>${t('sched_stats_runs_n', { n: d.total })}</div>`,
+    `<div>${t('sched_stats_fail', { n: d.fail })}</div>`,
+  ]
+  if (d.durN) rows.push(`<div>${t('sched_stats_avg_dur', { ms: Math.round(d.dur / d.durN) })}</div>`)
+  return rows.join('')
+}
+/** 轴标签只放得下 MM-DD，悬停时把完整年月日补回 tooltip 标题 */
+function weekTooltipTitle(index: number): string {
+  return stats.value.days[index]?.date || ''
 }
 function dayLabel(ds: string): string {
   return ds.slice(5) // MM-DD，tooltip 用
@@ -293,6 +308,19 @@ function leftText(task: ScheduledTask): string {
   const hour = Math.floor(min / 60)
   if (hour < 24) return t('sched_left_hr', { n: hour })
   return t('sched_left_day', { n: Math.round(hour / 24) })
+}
+
+/** 「2 小时前」：上次执行结果旁边必须带时间，否则「✅ 已完成」永远像刚刚完成的。 */
+function agoText(when: string): string {
+  const ts = parseLocal(when)
+  if (!ts) return ''
+  const diff = nowTs.value - ts
+  if (diff < 60_000) return t('sched_ago_just')
+  const min = Math.round(diff / 60_000)
+  if (min < 60) return t('sched_ago_min', { n: min })
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return t('sched_ago_hr', { n: hr })
+  return t('sched_ago_day', { n: Math.round(hr / 24) })
 }
 
 // ---- 拖拽排序 ----
@@ -611,6 +639,7 @@ async function save() {
     }
     showModal.value = false
     await refresh()
+    if (viewMode.value === 'calendar') void calendarRef.value?.reload()
   } catch (e) {
     formErr.value = getErrorMessage(e)
   } finally {
@@ -699,6 +728,34 @@ function finishRun() {
   runProgress.value = ''
   void refresh()
 }
+
+// ---- 执行控制台 ----
+// 运行结果此前只活在「运行历史」弹窗里，得专门点进去看；而列表下面本来就有
+// 一大片空白。这里把最近 40 条真实运行记录铺成等宽时间线，点 ▶ 之后结果会
+// 自己滚进来，不用开弹窗确认「刚才到底跑成没有」。
+const consoleOpen = ref(true)
+const consoleBody = ref<HTMLElement | null>(null)
+interface ConsoleLine { key: string; time: string; text: string; status: string }
+const consoleLines = computed<ConsoleLine[]>(() => {
+  // runs 是后端倒序（新→旧），控制台按时间正序读（旧→新），最新的永远在最后一行。
+  return [...runs.value].slice(0, 40).reverse().map(r => ({
+    key: r.id || `${r.taskId}-${r.runAt}-${r.createdTs}`,
+    time: (r.runAt || '').slice(5, 19),
+    text: `${r.taskName} · ${r.result || r.status}${r.durationMs > 0 ? ` · ${r.durationMs}ms` : ''}`,
+    status: r.status,
+  }))
+})
+// 运行中的那一行是「活的」：不落库，直接从进度事件拼，收尾 refresh 后自然消失。
+const consoleLive = computed(() => {
+  if (!runningTask.value) return ''
+  return `${runningTask.value.name} · ${runProgress.value || runNotice.value}`
+})
+async function scrollConsoleToEnd() {
+  await nextTick()
+  const el = consoleBody.value
+  if (el) el.scrollTop = el.scrollHeight
+}
+watch([consoleLines, consoleLive], () => { void scrollConsoleToEnd() })
 
 // 定时任务页看不到「空间」这层：AI 任务的产出全在它的专属空间里。
 // 从这里直接跳过去，省得绕「运行历史 → 查看会话」（那条还得先有一次运行）。
@@ -816,6 +873,22 @@ watch(pendingTarget, consumePendingTarget, { immediate: true })
 // 双重兜底：immediate 那次若撞上数据未就绪，挂载后再补一次（已消费则是 no-op）
 onMounted(consumePendingTarget)
 onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
+
+// ---- 日历 → 列表联动 ----
+// 在日历里点某个任务，用户想知道的是「它到底怎么配的」。让他回列表自己找，
+// 等于把刚才那次点击作废。这里直接切到列表、滚到那一行并高亮，再展开编辑。
+async function openTaskFromCalendar(id: string) {
+  viewMode.value = 'list'
+  // 筛选/搜索会把目标行藏起来，先放回可见集合
+  query.value = ''
+  statusFilter.value = 'all'
+  await nextTick()
+  await focusTask(id)
+  const task = tasks.value.find(x => x.id === id)
+  if (!task) return
+  // 留一拍让用户看见自己落在哪一行；立刻弹窗会把刚跳过来的位置整个盖住。
+  window.setTimeout(() => { openEdit(task) }, 320)
+}
 </script>
 
 <template>
@@ -895,12 +968,18 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
         <span v-if="stats.total" class="stat-rate" :class="{ bad: stats.rate >= 20 }">{{ stats.rate }}%</span>
       </div>
       <div class="stat-bars">
+        <!-- 红蓝两色不写图例就只是装饰：蓝=当天全部成功，红=当天有失败 -->
+        <div class="stat-legend">
+          <span class="lg-item"><i class="lg-swatch ok"></i>{{ t('sched_legend_ok') }}</span>
+          <span class="lg-item"><i class="lg-swatch bad"></i>{{ t('sched_legend_fail') }}</span>
+        </div>
         <QdBarChart
           :labels="weekChart.labels"
           :series="weekChartSeries"
           :height="24"
           minimal
           :tooltip-extra="weekTooltipExtra"
+          :tooltip-title="weekTooltipTitle"
         />
       </div>
       </template>
@@ -909,13 +988,13 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
     <!-- 列表 -->
     <div v-if="viewMode === 'list'" class="sched-list">
       <div v-if="!loading && tasks.length === 0" class="sched-empty">
-        <AlarmClock :size="30" class="empty-icon" />
+        <AlarmClock :size="20" class="empty-icon" />
         <p>{{ t('sched_empty') }}</p>
         <p class="empty-hint">{{ t('sched_empty_hint') }}</p>
       </div>
 
       <div v-else-if="filteredTasks.length === 0" class="sched-empty">
-        <Search :size="26" class="empty-icon" />
+        <Search :size="20" class="empty-icon" />
         <p>{{ t('sched_no_match') }}</p>
       </div>
 
@@ -936,26 +1015,33 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
         <div class="item-main">
           <div class="item-line1">
             <span class="item-name">{{ task.name }}</span>
-            <span class="item-badge">{{ actionLabel(task.action) }}</span>
+            <!-- 类型标签跟着图标同色：色点 + 文字一起出现，色弱用户也能读 -->
+            <span :class="['item-kind', 'a-' + task.action]">{{ actionLabel(task.action) }}</span>
+            <span v-if="!task.enabled" class="item-off">{{ t('sched_disabled') }}</span>
           </div>
           <div class="item-target" :title="task.target">{{ task.target }}</div>
           <div class="item-meta">
-            <span class="meta-sched">{{ scheduleDesc(task) }}</span>
-            <span v-if="task.action === 'ai'" class="meta-ai-mode">{{ t('sched_ai_mode_' + (task.aiMode || 'chat')) }}</span>
-            <span v-if="task.validFrom || task.validUntil" class="meta-valid">
-              {{ t('sched_valid_badge', {
-                from: (task.validFrom || '').slice(5, 16) || '…',
-                until: (task.validUntil || '').slice(5, 16) || '…',
-              }) }}
+            <span class="meta-left-group">
+              <span class="meta-sched">{{ scheduleDesc(task) }}</span>
+              <span v-if="task.action === 'ai'" class="meta-ai-mode">{{ t('sched_ai_mode_' + (task.aiMode || 'chat')) }}</span>
+              <span v-if="task.validFrom || task.validUntil" class="meta-valid">
+                {{ t('sched_valid_badge', {
+                  from: (task.validFrom || '').slice(5, 16) || '…',
+                  until: (task.validUntil || '').slice(5, 16) || '…',
+                }) }}
+              </span>
+              <span v-if="task.enabled && task.nextRun" class="meta-next">
+                {{ t('sched_next') }} {{ task.nextRun.slice(5, 16) }}
+                <span v-if="leftText(task)" class="meta-left">({{ leftText(task) }})</span>
+              </span>
             </span>
-            <span v-if="task.enabled && task.nextRun" class="meta-next">
-              {{ t('sched_next') }} {{ task.nextRun.slice(5, 16) }}
-              <span v-if="leftText(task)" class="meta-left">({{ leftText(task) }})</span>
-            </span>
+            <span class="meta-fill"></span>
+            <!-- 上次结果靠右：右对齐才有「列」的感觉，扫一列就能看出谁在报错 -->
             <span v-if="task.lastRun" class="meta-last" :class="task.lastStatus">
               <CheckCircle2 v-if="task.lastStatus === 'ok'" :size="11" />
               <XCircle v-else :size="11" />
-              {{ task.lastResult || task.lastStatus }}
+              <span class="ml-text">{{ task.lastResult || task.lastStatus }}</span>
+              <span class="ml-ago">{{ agoText(task.lastRun) }}</span>
             </span>
           </div>
         </div>
@@ -981,8 +1067,43 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
         </div>
       </div>
     </div>
-    <!-- 统一日历：与列表互斥的视图，数据源与列表无关（组件内部自己拉两个 binding） -->
-    <UnifiedCalendar v-else />
+
+    <!-- 执行控制台：贴在列表下方，把最近运行记录铺成等宽日志。
+         收起后只留一条标题栏，空出来的高度还给列表。 -->
+    <section v-if="viewMode === 'list' && tasks.length" :class="['sched-console', { collapsed: !consoleOpen }]">
+      <header class="console-head">
+        <TerminalSquare :size="13" class="console-ico" />
+        <span class="console-title">{{ t('sched_console_title') }}</span>
+        <span v-if="runningId" class="console-live"><i class="live-dot"></i>{{ t('sched_console_running') }}</span>
+        <span class="console-count">{{ t('sched_console_count', { n: consoleLines.length }) }}</span>
+        <button class="console-toggle" :title="consoleOpen ? t('sched_console_collapse') : t('sched_console_expand')"
+                :aria-expanded="consoleOpen" @click="consoleOpen = !consoleOpen">
+          <ChevronDown :size="14" :class="{ up: !consoleOpen }" />
+        </button>
+      </header>
+      <div v-show="consoleOpen" ref="consoleBody" class="console-body">
+        <div v-if="!consoleLines.length && !consoleLive" class="console-empty">{{ t('sched_console_empty') }}</div>
+        <div v-for="ln in consoleLines" :key="ln.key" :class="['console-line', ln.status]">
+          <span class="cl-time">{{ ln.time }}</span>
+          <span class="cl-mark">{{ ln.status === 'fail' ? '✕' : ln.status === 'skipped' ? '–' : '✓' }}</span>
+          <span class="cl-text">{{ ln.text }}</span>
+        </div>
+        <div v-if="consoleLive" class="console-line live">
+          <span class="cl-time">{{ t('sched_console_now') }}</span>
+          <span class="cl-mark"><LoaderCircle :size="11" class="spin" /></span>
+          <span class="cl-text">{{ consoleLive }}</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 统一日历：与列表互斥的视图，数据源与列表无关（组件内部自己拉两个 binding）。
+         日历里点任务 → 回到列表定位并展开编辑；空月份 → 直接开新建弹窗。 -->
+    <UnifiedCalendar
+      v-if="viewMode === 'calendar'"
+      ref="calendarRef"
+      @open-task="openTaskFromCalendar"
+      @create="openCreate"
+    />
 
     <!-- 新增/编辑弹窗 -->
     <QdModal v-model="showModal" :title="modalTitle" width="440px">
@@ -1253,14 +1374,14 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
   border-radius: var(--radius-sm); flex: 1 1 180px; max-width: 320px;
 }
 .sched-search:focus-within { border-color: var(--color-border-focus-soft); }
-.sched-search-icon { color: var(--color-text-disabled); flex-shrink: 0; }
+.sched-search-icon { color: var(--color-text-muted); flex-shrink: 0; }
 .sched-search-input {
   flex: 1; min-width: 0; border: none; outline: none; background: none;
   color: var(--color-text-primary); font-size: var(--text-sm); font-family: inherit;
 }
 .sched-search-input::placeholder { color: var(--color-text-disabled); }
 .sched-filters { display: flex; align-items: center; gap: var(--space-2); }
-.sched-count { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
+.sched-count { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 
 /* 运行统计条（近 7 天） */
 .sched-stats {
@@ -1268,20 +1389,26 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
   padding: var(--space-4) var(--space-7) 0; flex-shrink: 0;
 }
 .stat-sum { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); }
-.stat-ico { color: var(--color-text-disabled); flex-shrink: 0; }
+.stat-ico { color: var(--color-text-muted); flex-shrink: 0; }
 .stat-label { color: var(--color-text-secondary); }
 .stat-num { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); font-variant-numeric: tabular-nums; }
 .stat-unit { color: var(--color-text-muted); }
-.stat-sep { color: var(--color-text-disabled); }
+.stat-sep { color: var(--color-text-muted); }
 .stat-fail { color: var(--color-danger); }
-.stat-fail.zero { color: var(--color-text-disabled); }
+.stat-fail.zero { color: var(--color-text-muted); }
 .stat-rate {
   font-size: var(--text-2xs); padding: 0 5px; border-radius: var(--radius-md);
   background: var(--color-bg-tertiary); color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
 }
 .stat-rate.bad { background: var(--color-danger-bg); color: var(--color-danger); }
-.stat-bars { margin-left: auto; width: 168px; flex-shrink: 0; }
+.stat-bars { margin-left: auto; display: flex; flex-direction: column; align-items: stretch; gap: 2px; width: 184px; flex-shrink: 0; }
+/* 图表两色必须有图例：蓝=当天没有失败，红=当天出现过失败 */
+.stat-legend { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-3); font-size: var(--text-2xs); color: var(--color-text-muted); }
+.lg-item { display: inline-flex; align-items: center; gap: 3px; }
+.lg-swatch { width: 7px; height: 7px; border-radius: 2px; display: inline-block; }
+.lg-swatch.ok { background: var(--color-accent); }
+.lg-swatch.bad { background: var(--color-danger); }
 /* 统计拉取失败：明确告知数字不可用，不拿全 0 冒充「没跑过」 */
 .stat-unavailable {
   display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-xs);
@@ -1325,21 +1452,71 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 
 .sched-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); padding: 14px var(--space-7) var(--space-6); }
 /* 空态在整页高度里落到上 1/3 处：贴着页头会显得"这块是空的"，沉到底部又找不到 */
-.sched-empty { text-align: center; padding: 72px var(--space-4); color: var(--color-text-disabled); }
+.sched-empty { text-align: center; padding: 72px var(--space-4); color: var(--color-text-muted); }
 /* 空状态图标：一根细线图标直接浮在深底上，容易被读成「没加载出来」。
-   给一层方底 + 细边，它才是一个完整的标识；padding 配合 content-box，
-   图标本身的尺寸不用改（各页 28/30/36/48 都成立）。 */
+   给一层方底 + 细边，它才是一个完整的标识。
+   盒子固定 44（= .qd-empty-icon），图标一律 20：早先靠 padding + content-box
+   "适配任意尺寸"，结果 28/30/36/48 各自撑成 48~68，同屏不同页的图标底托大小不一。 */
 .empty-icon {
-  padding: 10px;
-  box-sizing: content-box;
-  opacity: 1;
+  width: 44px;
+  height: 44px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 0 var(--color-hairline);
   margin-bottom: var(--space-5);
 }
 .empty-hint { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: var(--space-3); }
+
+/* 执行控制台：占据列表下方那块原本空着的高度。深一档的底 + 等宽字体，
+   和上面的卡片列明确分层——它是「终端」，不是又一张卡片。 */
+.sched-console {
+  flex-shrink: 0; display: flex; flex-direction: column;
+  margin: 0 var(--space-7) var(--space-5);
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); overflow: hidden;
+}
+.console-head {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: 5px var(--space-4); font-size: var(--text-xs); color: var(--color-text-secondary);
+  background: var(--color-bg-secondary); border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.console-ico { color: var(--color-cat-command); flex-shrink: 0; }
+.console-title { font-weight: 500; }
+.console-live { display: inline-flex; align-items: center; gap: 4px; color: var(--color-success); }
+.live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-success); animation: live-pulse 1.4s ease-in-out infinite; }
+@keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.console-count { margin-left: auto; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.console-toggle {
+  display: flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+  border: none; background: transparent; color: var(--color-text-muted); cursor: pointer;
+  border-radius: var(--radius-xs);
+}
+.console-toggle:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
+.console-toggle .up { transform: rotate(180deg); }
+.console-body {
+  height: 118px; overflow-y: auto; padding: var(--space-2) var(--space-4) var(--space-3);
+  font-family: var(--font-mono); font-size: var(--text-2xs); line-height: 1.75;
+}
+.console-line { display: flex; gap: var(--space-3); white-space: nowrap; color: var(--color-text-secondary); }
+.cl-time { flex-shrink: 0; color: var(--color-text-muted); }
+.cl-mark { flex-shrink: 0; width: 12px; text-align: center; }
+.console-line.ok .cl-mark { color: var(--color-success); }
+.console-line.fail .cl-mark,
+.console-line.fail .cl-text { color: var(--color-danger); }
+.console-line.skipped { color: var(--color-text-muted); }
+.cl-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.console-line.live .cl-text { color: var(--color-accent); }
+.console-empty { color: var(--color-text-muted); }
+@media (prefers-reduced-motion: reduce) {
+  .live-dot { animation: none; }
+}
 
 .sched-item {
   display: flex; align-items: center; gap: var(--space-3); padding: var(--space-5) 14px;
@@ -1360,43 +1537,74 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
   0%, 55% { background: var(--color-bg-hover); }
   100% { background: var(--color-bg-secondary); }
 }
-.drag-handle { flex-shrink: 0; color: var(--color-text-disabled); cursor: grab; margin-right: -6px; }
+.drag-handle { flex-shrink: 0; color: var(--color-text-muted); cursor: grab; margin-right: -6px; }
 .sched-item:active .drag-handle { cursor: grabbing; }
 
+/* 类型身份色：整套色只在这里定义一次，徽标、日历事件都从这里取同一组。
+   蓝=打开应用/网页，琥珀=目录，紫=命令/脚本，玫红=Webhook，青=AI。 */
 .item-icon {
   flex-shrink: 0; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
   border-radius: var(--radius-md); color: var(--color-accent-text); background: var(--color-accent);
 }
-.item-icon.a-app { background: var(--color-accent); }
+.item-icon.a-app,
+.item-icon.a-url { background: var(--color-accent); }
 .item-icon.a-dir { background: var(--color-warning); }
-.item-icon.a-url { background: var(--color-success); }
-.item-icon.a-command { background: var(--color-cat-command); }
+.item-icon.a-command,
+.item-icon.a-script { background: var(--color-cat-command); }
 .item-icon.a-http { background: var(--color-cat-http); }
+.item-icon.a-ai { background: var(--color-cat-ai); color: #06232b; }
 
 .item-main { flex: 1; min-width: 0; }
-.item-line1 { display: flex; align-items: center; gap: var(--space-4); }
-.item-name { font-size: var(--text-md); font-weight: 500; color: var(--color-text-primary); }
-.item-badge {
-  font-size: var(--text-2xs); padding: 1px 7px; border-radius: var(--radius-md);
-  background: var(--color-bg-tertiary); color: var(--color-text-muted);
+.item-line1 { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.item-name { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 类型徽标跟着图标同色：颜色只是辅助，信息仍在文字上，色弱用户也读得懂 */
+.item-kind {
+  flex-shrink: 0; font-size: var(--text-2xs); padding: 1px 7px; border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
 }
+.item-kind.a-app,
+.item-kind.a-url { color: var(--color-accent); }
+.item-kind.a-dir { color: var(--color-warning); }
+.item-kind.a-command,
+.item-kind.a-script { color: var(--color-cat-command); }
+.item-kind.a-http { color: var(--color-cat-http); }
+.item-kind.a-ai { color: var(--color-cat-ai); }
+.item-off { flex-shrink: 0; font-size: var(--text-2xs); color: var(--color-text-muted); }
+/* 执行目标用等宽：路径与命令行里的空格、斜杠、参数在比例字体里很容易看错，
+   单行截断 + title 兜全量，行高不被长命令撑开。 */
 .item-target {
-  font-size: var(--text-sm); color: var(--color-text-secondary); margin-top: var(--space-1);
+  font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-secondary);
+  margin-top: 3px; line-height: 1.5;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
-.item-meta { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: var(--space-2); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.item-meta {
+  font-size: var(--text-xs); color: var(--color-text-muted); margin-top: var(--space-2);
+  display: flex; align-items: center; gap: var(--space-3); min-width: 0;
+}
+.meta-left-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+/* 中间那段空白把「规则」和「上次结果」推到两端：左对齐一列、右对齐一列，
+   扫视时不用在一长串文字里找结果。 */
+.meta-fill { flex: 1 1 auto; min-width: 0; }
 .meta-next { color: var(--color-accent); }
 .meta-left { color: var(--color-text-muted); }
-.meta-last { display: inline-flex; align-items: center; gap: 3px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.meta-last.ok { color: var(--color-text-muted); }
+.meta-last {
+  display: inline-flex; align-items: center; gap: 4px; flex-shrink: 1; min-width: 0;
+  max-width: 340px; white-space: nowrap;
+}
+.meta-last .ml-text { overflow: hidden; text-overflow: ellipsis; }
+.meta-last .ml-ago { flex-shrink: 0; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.meta-last.ok { color: var(--color-success); }
 .meta-last.fail { color: var(--color-danger); }
-.meta-ai-mode { color: var(--color-accent); }
+.meta-last.ok .ml-ago,
+.meta-last.fail .ml-ago { color: var(--color-text-muted); }
+.meta-ai-mode { color: var(--color-cat-ai); font-weight: 500; }
 .meta-valid { color: var(--color-text-muted); }
 
 .item-actions { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
 .act {
   width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
-  border: none; background: transparent; color: var(--color-text-disabled);
+  border: none; background: transparent; color: var(--color-text-muted);
   border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .act:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-active); }

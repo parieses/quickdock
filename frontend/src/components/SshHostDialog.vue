@@ -782,7 +782,7 @@ function onKeydown(e: KeyboardEvent) {
 .hd-x {
   display: flex;
   padding: var(--space-2);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   background: none;
   border: none;
   border-radius: var(--radius-xs);

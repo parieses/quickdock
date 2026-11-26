@@ -566,7 +566,7 @@ onBeforeUnmount(() => {
 .sfp-row.is-retrying .sfp-status, .sfp-row.is-starting .sfp-status { color: var(--color-warning); }
 
 .sfp-line { display: flex; align-items: baseline; gap: var(--space-2); margin-top: var(--space-1); }
-.sfp-k { flex: 0 0 auto; font-size: var(--text-2xs); color: var(--color-text-disabled); }
+.sfp-k { flex: 0 0 auto; font-size: var(--text-2xs); color: var(--color-text-muted); }
 .sfp-addr { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-secondary); word-break: break-all; }
 
 .sfp-meta {
@@ -590,7 +590,7 @@ onBeforeUnmount(() => {
 .sfp-act:hover { color: var(--color-accent); background: var(--color-bg-active); }
 .sfp-act.is-danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 
-.sfp-empty { padding: var(--space-6) var(--space-3); text-align: center; font-size: var(--text-xs); color: var(--color-text-disabled); }
+.sfp-empty { padding: var(--space-6) var(--space-3); text-align: center; font-size: var(--text-xs); color: var(--color-text-muted); }
 .sfp-empty.is-err { color: var(--color-danger); }
 
 /* —— 表单 —— */
@@ -599,7 +599,7 @@ onBeforeUnmount(() => {
 .sfp-field { display: block; margin-bottom: var(--space-3); }
 .sfp-label { display: block; margin-bottom: var(--space-1); font-size: var(--text-2xs); color: var(--color-text-muted); }
 /* 「所属标签」下拉下方的说明：复用表单小字层级，只用已有 token，无内联 style。 */
-.sfp-hint { display: block; margin-top: var(--space-1); font-size: var(--text-2xs); line-height: 1.5; color: var(--color-text-disabled); }
+.sfp-hint { display: block; margin-top: var(--space-1); font-size: var(--text-2xs); line-height: 1.5; color: var(--color-text-muted); }
 /* 列表里「所属标签」的值：比 sfp-k 标签高一档，便于和键区分。 */
 .sfp-owner { font-size: var(--text-xs); color: var(--color-text-secondary); }
 .sfp-input {

@@ -91,7 +91,7 @@ function doneCount(card: { items: Array<{ status: string }> }): number {
 .ai-plan-count { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .ai-plan-chev {
   flex: 0 0 auto; margin-left: auto;
-  color: var(--color-text-disabled); transition: transform var(--transition-fast);
+  color: var(--color-text-muted); transition: transform var(--transition-fast);
 }
 .ai-plan-card:not([open]) .ai-plan-chev { transform: rotate(-90deg); }
 .ai-plan-list {

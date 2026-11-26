@@ -11,6 +11,10 @@ export type ResultType =
   | 'note' | 'todo' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best' | 'env' | 'file' | 'nav'
   // 场景 / 工作空间集合：切到 workspace 页并定位到条目；create：新建笔记 / 待办动作
   | 'scene' | 'collection' | 'create'
+  // Git 仓库：回车切到 git 页并停在该仓库上（与 note / todo 同属「跳到一个具体对象」）
+  | 'repo'
+  // SSH 主机：回车打开（或唤回）SSH 独立终端并直接连上这台
+  | 'ssh'
 
 export interface SearchResult {
   type: ResultType
@@ -65,6 +69,10 @@ export interface SearchResult {
   collection?: CmdCollection
   // 新建动作：note=新建笔记 / todo=新建待办，回车进入内联标题输入态
   createKind?: 'note' | 'todo'
+  // Git 仓库命中：path 是 Git 页深链主键（GitPage 的 deepRepo）
+  repoPath?: string
+  // SSH 主机命中：hostId 交给后端 OpenSshHost 打开终端并连接
+  sshHostId?: string
 }
 
 // 场景 / 集合的检索项：只留匹配与定位需要的字段。matcher 是纯函数，不该拖进
@@ -95,6 +103,22 @@ export interface CmdNote {
 
 // 待办命中项：命令面板只做「检索 + 跳转」，展示用字段够用即可，
 // 完整字段由待办页自行按 id 加载（避免每次输入都把备注/重复配置全量拉回来）。
+// Git 仓库检索项：只带跳转需要的两个字段。仓库名可能重复（两个不同目录同名），
+// 所以 path 才是主键，name 只用于显示与检索。
+export interface CmdRepo {
+  path: string
+  name: string
+}
+
+// SSH 主机检索项：只带展示与连接所需字段（密码/私钥不进前端池）。
+export interface CmdSshHost {
+  id: string
+  name: string
+  host: string
+  port: number
+  user: string
+}
+
 export interface CmdTodo {
   id: string
   title: string
@@ -165,6 +189,8 @@ export interface LcSysEntry { cmd: SystemCmd; labelLC: string }
 // 场景 / 集合的预计算小写索引：与 items/notes 同构，逐键输入时不再重复 toLowerCase。
 export interface LcSceneEntry { scene: CmdScene; nameLC: string; descLC: string }
 export interface LcCollectionEntry { collection: CmdCollection; nameLC: string; descLC: string }
+export interface LcRepoEntry { repo: CmdRepo; nameLC: string; pathLC: string }
+export interface LcSshEntry { host: CmdSshHost; nameLC: string; targetLC: string }
 
 export interface LcIndex {
   items: LcItemEntry[]
@@ -176,6 +202,8 @@ export interface LcIndex {
   // 缺字段就等于「这类条目一条都没有」，不会让整套检索炸掉。
   scenes?: LcSceneEntry[]
   collections?: LcCollectionEntry[]
+  repos?: LcRepoEntry[]
+  sshHosts?: LcSshEntry[]
 }
 
 // ---- 环境运行时的中文别名 ----

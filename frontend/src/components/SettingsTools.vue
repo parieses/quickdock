@@ -291,13 +291,13 @@ async function setDefault(tool: OpenTool) {
 }
 .tool-desc {
   font-size: var(--text-sm);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   margin: 0;
 }
 .tool-loading,
 .tool-empty {
   font-size: var(--text-md);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   padding: var(--space-8) 0;
   text-align: center;
 }
@@ -414,7 +414,7 @@ async function setDefault(tool: OpenTool) {
 }
 .tool-args {
   font-size: var(--text-xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -481,7 +481,7 @@ async function setDefault(tool: OpenTool) {
 }
 .field-hint {
   font-size: var(--text-xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   margin: 0;
   line-height: 1.5;
 }

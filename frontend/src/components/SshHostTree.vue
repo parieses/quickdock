@@ -715,7 +715,7 @@ function onTestTrusted() {
 }
 
 .tree-hint-icon {
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 .tree-hint-text {

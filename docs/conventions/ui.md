@@ -47,9 +47,9 @@
 | **浮层底** | `--color-popover-bg` | `#1e232d` | `#ffffff` |
 | **浮层描边** | `--popover-border-color` | `rgba(255,255,255,.08)` | `var(--color-border)` |
 | 正文 | `--color-text-primary` | `#e8ecf4` | `#1a1f27` |
-| 次要 | `--color-text-secondary` | `#a3acbb` | `#525b68` |
-| 弱 | `--color-text-muted` | `#74808f` | `#6e7683` |
-| 禁用 | `--color-text-disabled` | `#59616e` | `#9aa2ae` |
+| 次要 | `--color-text-secondary` | `#bfc9d6` | `#525b68` |
+| 弱 | `--color-text-muted` | `#a5b0c1` | `#6e7683` |
+| 禁用 | `--color-text-disabled` | `#8b95a4` | `#9aa2ae` |
 | 分隔线 | `--color-border` | `#232936` | `#dde1e8` |
 | hover 描边 | `--color-border-light` | `#313948` | `#c9cfd9` |
 | 强调 | `--color-accent` | `#5b8cff` | `#5b8cff` |
@@ -107,6 +107,38 @@
 `--color-acrylic-bg`；文字承载的编辑器 `.ne-editor` 与各类 overlay 保持实色。
 材质档还把 `--color-select-bg` 换成实色蓝灰，避免 14% 蓝底混进壁纸变脏蓝；
 剪贴板列表的选中项改用左竖条 + 内描边，不铺整条实色块。
+
+### 文字四档的亮度下限
+
+深色主题下这四档不是"能用就行"的灰，有硬下限（对比度按压在 `--color-bg-primary` `#0c0e13` 上算）：
+
+| 档 | 用在哪 | 底线 |
+|---|---|---|
+| `text-primary` | 正文、列表标题、当前项 | ≥ 7:1 |
+| `text-secondary` | 描述、副标题、未选中项 | ≥ 6:1 |
+| `text-muted` | 元信息（版本、时间、路径、计数） | ≥ 4.5:1（WCAG AA） |
+| `text-disabled` | 占位符、禁用态，**只此两处** | 可更低，但必须仍能辨认 |
+
+2026-11 的两次提亮就是照这张表补的：`#a3acbb` / `#74808f` / `#59616e` 分别只有
+7.4 / 4.4 / 2.9 的对比度，100% 缩放的深色屏上「路径、命令、日历小字」读起来发涩。
+现在四档整体上移（`#bfc9d6` / `#a5b0c1` / `#8b95a4`），相对层级保持不变。
+
+两条推论：
+
+- 看到「这段文字太暗」，先查它是不是**误用了 `text-disabled`**；不要反过来把 muted 继续调亮。
+- 需要更弱的效果一律换 token，**不许加 `opacity`**：`opacity` 叠在 muted 上等于退回旧值，
+  还会连带压暗同一行的图标；禁用态同理用 `text-disabled`，不写 `opacity: .5`。
+
+**误用自查**：`text-disabled` 命中项里，除了 `::placeholder`、`:disabled`、圆点/边框色块
+（`background` / `border-color` / `stroke`），其余都是误用：
+
+```bash
+grep -rn "color: var(--color-text-disabled)" frontend/src --include=*.vue --include=*.css \
+  | grep -v "::placeholder\|:disabled"
+```
+
+2026-11 照这条做了一次全量清理（453 → 84 处）：正文、描述、时间戳、路径、计数、
+空态文案、状态值（`off` / `missing` / `pending`）全部回到 `muted`，只留占位符与禁用态。
 
 ### 勾选框 / 单选框
 
@@ -254,6 +286,9 @@
   5~7 个同级按钮时，「这页要做的事」和「顺手的工具」一样重，视线没有落点。
   类名刻意不带 `.qd-page-actions` 前缀：Git 顶部是 `.bar-actions` 工具栏，也用同一套。
   已落地：Git（Push 为主按钮）、环境页（环境体检为主按钮，另 3 个工具收成图标）。
+- **主按钮必须是"这一页要做的事"，不是"顺手工具"**：新建、安装、保存、推送这类才配实心蓝；
+  在线市场、检查更新、刷新、导出这类一律 `.qd-btn-ghost` 或 `.qd-icon-btn`，否则一排同款描边按钮
+  谁也看不出先点哪个。已落地：插件页（「安装插件」实心蓝，市场 / 检查更新 / 刷新归 ghost 组）。
 - **任何页面不许再写 `xxx-header`。** 存量 5 种写法（10/14/16/20px 内边距、14/15/18px 标题、有无分隔线）已全部迁移；新增一律用上面两个类。
 
 ### 3.2 按钮（四种尺寸，四种语气）
@@ -306,16 +341,46 @@
 - 卡片：`.qd-card`（`--color-card-bg` + `radius-md`；深色无描边无投影，浅色由 `--card-border-color` 补 1px 边）
   - **卡片里不许再套 `.qd-card`**：没有更高一档的亮度可用，套了只能靠加描边，等于回到三层装饰
   - 卡片**内部**的输入框 / 代码块 / chip 用 `bg-secondary` 或 `bg-tertiary`（比卡片暗 = 下沉），这是对的
+- **网格卡片**（插件 / 市场这类「一屏十几张、每张一个对象」）固定三段式，顺序不许变：
+  - **头**：图标底托（统一尺寸 + `bg-tertiary` + 1px 边；插件自带彩色 PNG 也只放进去，不另调色）
+    + 名称（`text-md` / 600 / 单行省略）+ 右上角状态徽标（同色圆点 + 文字）
+  - **中**：描述固定两行（`-webkit-line-clamp: 2` + `min-height: 2em × line-height`；**没有描述也占位**，
+    否则同排卡片底边参差），颜色用 `text-secondary`——它是卡片里唯一的"说明"，用 muted 等于没写
+  - **尾**：`v1.0.8 · 分类 · 权限` 一行小字（`text-2xs` / muted，整行省略，全文进 `title`）
+    + 右下角**唯一**一个 CTA（打开 / 启用 / 命令），不给第二个同级按钮
+  - 等高：卡片 `display:flex; flex-direction:column`，尾部 `margin-top:auto`。描述长短、命令行有无
+    都不该让底边参差
+- **禁止把元信息做成灰底小胶囊**（`bg-tertiary` + 圆角 + padding 的 chip 排一行）：200px 宽的卡上
+  它们把一行切成四块碎片，每块都读不进去。权限、分类、能力名一律纯文本 + `·` 分隔
 - 浮层（下拉 / 右键菜单 / 命令面板 / 模态 / 通知中心）：`--color-popover-bg` + `--popover-border-color` +
   `--shadow-pop`（或 `-lg`），`radius-md` 起步、`-lg` 给模态。
   **浮层是唯一允许带投影的一级**；它比任何静态层都亮，所以盖在卡片上不会像挖了个洞
-- 空状态：`.qd-empty` > `.qd-empty-icon`(40，1px 虚线方框) + `.qd-empty-title` + `.qd-empty-hint` + `.qd-empty-cta`
+- 空状态：`.qd-empty` > `.qd-empty-icon`(44 方底 + 1px 实线 + `bg-tertiary` + inset 上沿高光) +
+  `.qd-empty-title` + `.qd-empty-hint` + `.qd-empty-cta`
+  - 图标本身**只用 20**（§3.5）。容器固定 44×44 + `flex` 居中，**不要**用
+    `padding + content-box` 去"适配任意尺寸"——28/30/36/48 会各自撑成 48~68，同屏不同页大小不一
+  - 空态**不套卡片**：不写 `card-bg` / 浮层描边 / `shadow-md`。投影是浮层的专属（见上一条），
+    空态做成浮岛就是把一块弹窗砸在空白页上
+  - 图标不许加 `opacity` 压淡（细线图标会被洗成灰雾），也不加外发光 / 呼吸动画
 - 整页引导：`.qd-guide` > `.qd-guide-inner` + 标题/描述 + `.qd-guide-cta` + `.qd-guide-steps`（3 列 grid，≤660px 折 1 列）
 
 ### 3.5 图标
 
 用 `@lucide/vue`，尺寸只用 **14 / 15 / 16 / 20**（页头按钮 14、行内 16、空状态 20）。
 图标继承 `currentColor`，**不要给 svg 单独写 fill 色**。
+
+### 3.6 分类切换（分段控制器）
+
+一屏里有 3 个以上互斥分类（全部 / 安全工具 / 开发工具 …）时，用**一条灰轨道 + 一个实块**表达，
+不要平铺一排透明 tab：
+
+- 轨道：`bg-secondary` + 1px `--color-border` + `radius-md` + 内 3px padding，`flex-wrap: wrap`
+- 项：`radius-sm`、`padding: 4px 10px`、`text-xs`，hover 用 `bg-hover`
+- 选中：`accent-bg` 底 + `accent-border-strong` 边 + accent 字 + 600 —— **不许只让文字变色**
+- 计数跟在标签后（`text-2xs` + `opacity: .6`），不单独占一列
+
+原因：十几个分类平铺成小字时，选中项只靠一点淡蓝几乎找不到锚点；有轨道才读得出「这是一组单选」。
+已落地：插件页分类条（`.cat-track` / `.cat-tab`）。
 
 ---
 
@@ -343,12 +408,16 @@
 
 | 状态 | 表达方式 | 禁止 |
 |---|---|---|
-| hover | 底色 `bg-hover`，文字升一档 | 改字号/位置 |
+| hover（行 / 按钮 / 图标） | 底色 `bg-hover`，文字升一档 | 改字号 / 位置（位移只允许给可点卡片，见下一行） |
 | 选中（列表行/导航项） | 底色 `select-bg` + 左缘 3px accent 竖条，图标保持中性 | 再叠图标变色（三个弱信号不如两个强信号）；整行文字变蓝（字多像超链接） |
 | 选中（chip / 开关型按钮） | 底色 `accent-bg` + `accent-border` 描边 + 文字 accent | 与列表行选中混用同一底色（两者语义不同：一个是"我在哪"，一个是"这个开着"） |
 | 键盘焦点 | `:focus-visible` 2px accent 外框 | 去掉 outline 又不给替代 |
 | 禁用 | 底色不动，文字转 `text-disabled`，`cursor: not-allowed` | 用 `opacity`（叠在 muted 上对比度只剩 ~1.6:1，等于消失） |
 | 加载中 | 原位换成 `<Loader2 class="spin">`，宽度不变 | 按钮变宽/抖动 |
+| hover（可点卡片） | `translateY(-2px)` + 边框转 `--color-border-light` + `--shadow-md` | 用在列表行 / 导航项上（整列一起动，像排版错位）；带 `prefers-reduced-motion` 时不位移 |
+| 状态徽标（运行中 / 就绪 / 已停用 / 已崩溃） | 同色 5px 圆点 + 文字；只有运行中 / 启动中做 2.2s 呼吸 | 静止状态也做动效（整页噪音）；只给颜色不给文字 |
+| 异常读数 | **只染数字**（`--color-danger`）+ 2.4s 呼吸 | 整块卡片变红 / 整块闪（一屏多张卡时像全都在报警） |
+| 拖拽分隔条（列宽 / 行高） | 命中区 5–7px，**视觉只有 1px**（`::after` 画线）；`margin: -2px`（横向 `-3px`）把多出的命中区收回，布局占位保持 1px；hover / 拖动时线转 `accent` | 让命中区参与布局：4px 透明条 + 1px 边框等于 5px 空缝，6px 实心带 + 上下两条边等于 8px —— 用户看到的就是「线变粗了」 |
 
 > 「选中（列表行/导航项）」覆盖**所有**列表当前项：三栏 `.qd-row`、知识库文档行、
 > 剪贴板条目、Git 提交行 / 工作区条 / 文件行。grid 布局里不能加 `border-left`
@@ -360,6 +429,17 @@
 > 三种画法全部收编到这一条。chip / 开关型按钮仍用 `accent-bg`，两者语义不同。
 
 对比度底线：正文 ≥ 7:1，次要 ≥ 4.5:1，禁用态允许低但必须**仍可辨认**。
+
+**分隔条的自查**：把两条相邻容器的 `getBoundingClientRect()` 相减，间隙必须等于 1px；
+分隔条盒子的 `left`/`top` 会落在边界外 2–3px（那是收回来的命中区），但**线**（`::after`）
+必须正好压在边界上，偏差 0px。2026-11 全项目四处把手按此收口：`GitPage` 的 `.vsplit` /
+`.splitter`、`NoteManagerPage` 的 `.tree-splitter`；`AiSidePanel` 一开始就是绝对定位覆盖、
+不占布局，可作为参照写法。
+
+**多分区页面的默认位**：带「左导航 + 右内容」的页面（设置、扩展这类）打开时必须直接有内容 ——
+默认选中第一项，并记住上次关掉时停在哪一项（`localStorage` 存页面键，读时按**当前菜单**校验，
+失效或首次使用回落第一项）。停在「请选择左侧菜单项」等于先让用户做一次无用选择，右侧那片空白
+还会被读成加载失败。深链（通知中心带 `settings:ai:usage` 这种）只负责这一次跳转，不写记忆。
 
 ---
 
@@ -388,6 +468,10 @@
 | `:has()` / `@container` / `:is()` | 宿主是 WebView2，旧版整条规则失效且**无报错** | 显式加 class |
 | `-webkit-app-region: drag` | 吞掉 mousedown，按钮点不动 | `--wails-draggable: drag` 只给标题栏，内部控件显式 `no-drag` |
 | flex 容器同时 `justify-content:center` + `overflow:auto` | 内容溢出被顶出可视区且**滚不上去** | 容器只 `display:flex; overflow:auto`，居中交给内层 `margin:auto` |
+| 卡片里把分类 / 权限做成灰底小胶囊 | 窄卡上把一行切成四块碎片，谁也读不进去 | 一行 `text-2xs` 纯文本 + `·` 分隔，全文进 `title`（§3.4） |
+| 一屏出现两个以上 `.qd-btn-primary` | 主次消失，「这页该干什么」看不出来 | 只给这一页的主操作；工具类（市场 / 检查更新 / 刷新）用 ghost 或图标（§3.1） |
+| 用 `opacity` 调弱文字 | 叠在 muted 上等于退回旧对比度，还连带压暗同行图标 | 换 `text-secondary` / `muted` / `disabled` 三档（§2.1） |
+| 页面默认停在「请选择左侧菜单项」 | 右侧一大片空白，被读成没加载出来 | 默认选中第一项 + 记住上次那一页（§5） |
 
 ---
 

@@ -11,12 +11,13 @@ import PageHeader from './PageHeader.vue'
 //   维护  死链检查 / 重复合并 / 策展洞察 / 补全网站图标
 // 没有阅读状态（未读→在读→已读）：那是稍后读工具的语义，这里的条目是「要用的东西」，
 // 加了没人会维护。
-import { computed, onMounted, onScopeDispose, ref } from 'vue'
+import { computed, onMounted, onScopeDispose, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { KEEP_ALIVE } from '../pages/keepAlive'
 import {
-  Bookmark, ChevronDown, Copy, CopyCheck, ExternalLink, FilePlus2, Globe, Link2Off, Loader2, Plus,
-  RefreshCw, Search, Sparkles, X,
+  ArrowLeft, ArrowUpDown, Bookmark, Check, CheckSquare, Copy, CopyCheck, ExternalLink, FilePlus2,
+  Folder, Globe, Globe2, GripVertical, Link2Off, Loader2, Pencil, Plus, RefreshCw, Search, Sparkles,
+  Trash2, X,
 } from '@lucide/vue'
 import QdModal from './QdModal.vue'
 import QdTabs from './QdTabs.vue'
@@ -25,7 +26,9 @@ import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { SelectLocalFile } from '../../bindings/quickdock/services/appservice'
-import { OpenItem } from '../../bindings/quickdock/services/collection/collectionservice'
+import {
+  DeleteCollection, OpenAllInCollection, OpenItem, ReorderCollections, UpdateCollection,
+} from '../../bindings/quickdock/services/collection/collectionservice'
 import {
   ApplyMovedURL, BuildCurationInsight, FillIcons, FindDuplicates, ImportBookmarks, ImportBrowserBookmarks,
   LinkCheckStatus, ListBookmarks, ListBrowserSources, ListHealth, MergeDuplicates, PreviewBrowserImport,
@@ -100,6 +103,7 @@ const keyword = ref('')
 const tab = ref<TabKey>('all')
 const loading = ref(false)
 const iconsBusy = ref(false)
+const iconsFilled = ref(0)
 
 // 导入
 const importOpen = ref(false)
@@ -159,21 +163,10 @@ const filtered = computed(() => {
 })
 
 // 分组是两级的：一级 = 书签文件夹的上级路径（collection.group_name），二级 = 集合本身。
-// 之前把两级拼成「组 / 集合」平铺，几百条书签就是几十个无法收起的标题——书签页最常见的
-// 操作恰恰是「先收起不关心的大类，只看剩下的」。所以两级都可折叠，状态记在 localStorage。
+// 网格视图拿二级（集合）当卡片，一级只作标题前缀——几百条书签平铺成几十个无法收起的
+// 标题时，一屏能看的文件夹数量反而变少，横向又被拉成空白长条。
 type LeafGroup = { key: string; label: string; items: BookmarkRow[] }
-type RootGroup = {
-  key: string
-  label: string
-  scene: string
-  total: number
-  leaves: LeafGroup[]
-  // 只有一个集合时不再画第二层：多一层什么也没分组，反而多一次点击
-  flat: boolean
-  // 场景标签只在「换了浏览器」的那一行出现：十几个组全挂着同一个「Edge」
-  // 只是噪声，扫列表时反而看不见真正的分组信息
-  showScene: boolean
-}
+type RootGroup = { key: string; label: string; scene: string; total: number; leaves: LeafGroup[]; flat: boolean }
 
 const groups = computed<RootGroup[]>(() => {
   const roots: RootGroup[] = []
@@ -198,7 +191,6 @@ const groups = computed<RootGroup[]>(() => {
         total: 0,
         leaves: [],
         flat: !groupName,
-        showScene: true,
       })
     }
     const root = roots[ri]
@@ -223,49 +215,341 @@ const groups = computed<RootGroup[]>(() => {
     }
   }
 
-  // 每个分组都显示场景名（浏览器名）：用户导入多个浏览器时，按场景定位比只看文件夹
-  // 名字更快；只有一个场景时也保持一致，不会「有时有有时没有」。
   return roots
 })
 
-// 折叠状态按 key 记住：一级 key 是「场景|组名」，二级 key 是集合 id，前缀区分避免撞键
-const COLLAPSE_KEY = 'quickdock.bookmarks.collapsed'
-const collapsed = ref<Record<string, boolean>>(readCollapsed())
-
-function readCollapsed(): Record<string, boolean> {
-  try {
-    const raw = localStorage.getItem(COLLAPSE_KEY)
-    const parsed = raw ? JSON.parse(raw) : null
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, boolean>) : {}
-  } catch {
-    return {}
-  }
-}
-function persistCollapsed() {
-  try {
-    localStorage.setItem(COLLAPSE_KEY, JSON.stringify(collapsed.value))
-  } catch {
-    /* 隐私模式下写不进，折叠照旧按内存状态工作 */
-  }
-}
-// 搜索或筛选时强制展开：命中结果藏在折叠组里，等于告诉用户「没搜到」
-const forceExpand = computed(() => keyword.value.trim() !== '' || tab.value !== 'all')
-function isCollapsed(key: string) {
-  return !forceExpand.value && !!collapsed.value[key]
-}
-function toggleCollapse(key: string) {
-  if (collapsed.value[key]) delete collapsed.value[key]
-  else collapsed.value[key] = true
-  persistCollapsed()
-}
-const allCollapsed = computed(() => groups.value.length > 0 && groups.value.every((g) => isCollapsed(g.key)))
-function toggleAllCollapsed() {
-  const next: Record<string, boolean> = {}
-  if (!allCollapsed.value) for (const g of groups.value) next[g.key] = true
-  collapsed.value = next
-  persistCollapsed()
+// ── 卡片 ─────────────────────────────────────────────
+// 两个视图共用一张卡片：文件夹视图按集合聚合，域名视图按主机名聚合。
+// 卡片只算「数量 + 健康分布 + 前几个图标」，条目本身留在 items 里给详情页渲染。
+type Card = {
+  key: string
+  rootKey: string
+  name: string
+  label: string
+  sub: string
+  scene: string
+  collectionId: string
+  items: BookmarkRow[]
+  total: number
+  broken: number
+  blocked: number
+  moved: number
+  changed: number
+  issues: number
+  preview: BookmarkRow[]
+  names: string[]
 }
 
+function buildCard(base: Omit<Card, 'total' | 'broken' | 'blocked' | 'moved' | 'changed' | 'issues' | 'preview' | 'names'>): Card {
+  let broken = 0
+  let blocked = 0
+  let moved = 0
+  let changed = 0
+  let issues = 0
+  for (const r of base.items) {
+    const h = health.value[r.id]
+    if (!h) continue
+    const isBroken = h.status === 'broken'
+    const isBlocked = h.status === 'blocked'
+    const isMoved = h.status === 'moved'
+    if (isBroken) broken++
+    if (isBlocked) blocked++
+    if (isMoved) moved++
+    if (h.changed) changed++
+    if (isBroken || isBlocked || isMoved || h.changed) issues++
+  }
+  return {
+    ...base,
+    total: base.items.length,
+    broken, blocked, moved, changed, issues,
+    // 预览最多 5 个图标：卡片宽度只够这么多，再挤就成了一排看不清的小点
+    preview: base.items.slice(0, 5),
+    names: base.items.slice(0, 3).map((r) => r.name),
+  }
+}
+
+// 只有一个场景时不重复播报浏览器名：十几个卡片各挂一个「Chrome」，
+// 扫列表时反而看不见真正的文件夹信息。
+const multiScene = computed(() => new Set(rows.value.map((r) => r.scene_name || '')).size > 1)
+
+const folderCards = computed<Card[]>(() => {
+  const out: Card[] = []
+  for (const root of groups.value) {
+    for (const leaf of root.leaves) {
+      out.push(buildCard({
+        key: `f|${root.scene}|${leaf.key}`,
+        rootKey: root.key,
+        name: leaf.label,
+        label: root.flat ? root.label : `${root.label} / ${leaf.label}`,
+        sub: multiScene.value ? root.scene : '',
+        scene: root.scene,
+        collectionId: leaf.key === 'none' ? '' : leaf.key,
+        items: leaf.items,
+      }))
+    }
+  }
+  return out
+})
+
+const domainCards = computed<Card[]>(() => {
+  const byHost = new Map<string, BookmarkRow[]>()
+  for (const r of filtered.value) {
+    const host = hostOf(r.value)
+    const arr = byHost.get(host)
+    if (arr) arr.push(r)
+    else byHost.set(host, [r])
+  }
+  const out: Card[] = []
+  for (const [host, items] of byHost) {
+    out.push(buildCard({
+      key: `d|${host}`,
+      rootKey: 'domain',
+      name: host,
+      label: host,
+      sub: t('bmDomainFolders', { n: new Set(items.map((r) => r.collection_name || '')).size }),
+      scene: '',
+      collectionId: '',
+      items,
+    }))
+  }
+  return out
+})
+
+type ViewMode = 'folder' | 'domain'
+type SortMode = 'default' | 'issues' | 'count'
+
+const viewMode = ref<ViewMode>('folder')
+const sortMode = ref<SortMode>('default')
+const sortOpen = ref(false)
+const selectMode = ref(false)
+
+const cards = computed<Card[]>(() => {
+  const list = [...(viewMode.value === 'folder' ? folderCards.value : domainCards.value)]
+  if (sortMode.value === 'issues') list.sort((a, b) => b.issues - a.issues || b.total - a.total)
+  else if (sortMode.value === 'count') list.sort((a, b) => b.total - a.total)
+  // 域名视图默认按书签数排：几百个站点里，头部那几个才是常去的
+  else if (viewMode.value === 'domain') list.sort((a, b) => b.total - a.total)
+  return list
+})
+
+// 筛选态：有关键词或选了健康标签时，卡片上的数量是「命中数」而不是文件夹总数
+const filterActive = computed(() => keyword.value.trim() !== '' || tab.value !== 'all')
+
+// 详情：点卡片进入，面包屑返回。key 用集合 id，重新加载后依然指得回同一个文件夹。
+const openKey = ref('')
+const openCard = computed(() => cards.value.find((c) => c.key === openKey.value) || null)
+const openItems = computed(() => openCard.value?.items ?? [])
+watch(cards, () => {
+  // 文件夹被删掉、或切到域名视图后旧 key 不存在了：退回网格，别停在空白详情页
+  if (openKey.value && !openCard.value) openKey.value = ''
+})
+
+function openFolder(c: Card) {
+  if (selectMode.value && c.collectionId) {
+    togglePick(c.collectionId)
+    return
+  }
+  openKey.value = c.key
+}
+
+const viewTabs = computed(() => [
+  { id: 'folder' as const, label: t('bmViewFolder') },
+  { id: 'domain' as const, label: t('bmViewDomain') },
+])
+
+const sortOptions = computed(() => [
+  { id: 'default' as const, label: t('bmSortDefault') },
+  { id: 'issues' as const, label: t('bmSortIssues') },
+  { id: 'count' as const, label: t('bmSortCount') },
+])
+const sortLabel = computed(() => sortOptions.value.find((o) => o.id === sortMode.value)?.label ?? '')
+
+// ── 勾选与批量 ────────────────────────────────────────
+const picked = ref<string[]>([])
+// 统计用「全部文件夹」而不是当前可见卡片：勾完再敲关键词筛选时，
+// 已选 N / 共 M 条 不该因为筛掉了几个就缩水，否则批量删除的代价会被低估。
+const pickedCards = computed(() => folderCards.value.filter((c) => c.collectionId && picked.value.includes(c.collectionId)))
+const pickedTotal = computed(() => pickedCards.value.reduce((n, c) => n + c.total, 0))
+const allPicked = computed(() => {
+  const ids = cards.value.filter((c) => c.collectionId).map((c) => c.collectionId)
+  return ids.length > 0 && ids.every((id) => picked.value.includes(id))
+})
+const isPicked = (c: Card) => !!c.collectionId && picked.value.includes(c.collectionId)
+
+// 换视图时退出批量与详情：勾选的是集合 id，域名视图里没有对应卡片，
+// 留着会让「已选 3 个」悬空。
+watch(viewMode, () => {
+  openKey.value = ''
+  selectMode.value = false
+  picked.value = []
+})
+
+function toggleSelectMode() {
+  selectMode.value = !selectMode.value
+  if (!selectMode.value) picked.value = []
+  // 批量只在网格里有意义，进详情就退出
+  if (selectMode.value) openKey.value = ''
+}
+function togglePick(id: string) {
+  picked.value = picked.value.includes(id) ? picked.value.filter((x) => x !== id) : [...picked.value, id]
+}
+function togglePickAll() {
+  picked.value = allPicked.value ? [] : cards.value.filter((c) => c.collectionId).map((c) => c.collectionId)
+}
+
+const batchOpen = ref(false)
+const batchBusy = ref(false)
+function askBatchDelete() {
+  if (picked.value.length) batchOpen.value = true
+}
+async function confirmBatchDelete() {
+  const ids = [...picked.value]
+  if (!ids.length) return
+  batchBusy.value = true
+  let done = 0
+  for (const id of ids) {
+    try {
+      unwrap(await DeleteCollection(id))
+      done++
+    } catch (e) {
+      logErr('bookmark.batchDelete', e)
+    }
+  }
+  batchBusy.value = false
+  batchOpen.value = false
+  picked.value = []
+  selectMode.value = false
+  await load(true)
+  if (done === ids.length) toast.success(t('bmBatchDeleted', { n: done }))
+  else toast.error(t('bmBatchPartial', { done, total: ids.length }))
+}
+
+// ── 重命名 / 删除单个文件夹 ────────────────────────────
+const renameOpen = ref(false)
+const renameValue = ref('')
+const renameTarget = ref<Card | null>(null)
+const renameBusy = ref(false)
+function askRename(c: Card) {
+  if (!c.collectionId) return
+  renameTarget.value = c
+  renameValue.value = c.name
+  renameOpen.value = true
+}
+async function confirmRename() {
+  const c = renameTarget.value
+  const name = renameValue.value.trim()
+  if (!c?.collectionId || !name || renameBusy.value) return
+  renameBusy.value = true
+  try {
+    unwrap(await UpdateCollection(c.collectionId, { name }))
+    renameOpen.value = false
+    await load(true)
+    toast.success(t('bmRenamed'))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+    logErr('bookmark.rename', e)
+  } finally {
+    renameBusy.value = false
+  }
+}
+
+const deleteTarget = ref<Card | null>(null)
+const deleteBusy = ref(false)
+function askDelete(c: Card) {
+  if (!c.collectionId) return
+  deleteTarget.value = c
+}
+async function confirmDelete() {
+  const c = deleteTarget.value
+  if (!c?.collectionId || deleteBusy.value) return
+  deleteBusy.value = true
+  try {
+    unwrap(await DeleteCollection(c.collectionId))
+    if (openKey.value === c.key) openKey.value = ''
+    deleteTarget.value = null
+    await load(true)
+    toast.success(t('bmFolderDeleted'))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+    logErr('bookmark.delete', e)
+  } finally {
+    deleteBusy.value = false
+  }
+}
+
+async function openAll() {
+  const c = openCard.value
+  if (!c?.collectionId) return
+  try {
+    unwrap(await OpenAllInCollection(c.collectionId, ''))
+  } catch (e) {
+    toast.error(t('openAllFailed') + ': ' + getErrorMessage(e))
+    logErr('bookmark', e)
+  }
+}
+
+// ── 拖拽排序（同组内） ─────────────────────────────────
+// 后端 ReorderCollections 只按传入顺序重写 sort；列表 SQL 是
+// `ORDER BY s.name, c.group_name, c.sort, c.name`，跨组拖会被 group_name 弹回原位，
+// 所以只在同一 rootKey 内允许放下，语义与结果一致。
+const dragKey = ref('')
+const dragOverKey = ref('')
+function canDrag(c: Card) {
+  return viewMode.value === 'folder' && sortMode.value === 'default' && !selectMode.value
+    && !filterActive.value && !!c.collectionId
+}
+function onDragStart(e: DragEvent, c: Card) {
+  if (!canDrag(c)) {
+    e.preventDefault()
+    return
+  }
+  dragKey.value = c.key
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', c.key)
+  }
+}
+function onDragOver(e: DragEvent, c: Card) {
+  const from = cards.value.find((x) => x.key === dragKey.value)
+  if (!from || from.key === c.key || from.rootKey !== c.rootKey) {
+    dragOverKey.value = ''
+    return
+  }
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  dragOverKey.value = c.key
+}
+async function onDrop(c: Card) {
+  const from = cards.value.find((x) => x.key === dragKey.value)
+  dragKey.value = ''
+  dragOverKey.value = ''
+  if (!from || from.key === c.key || from.rootKey !== c.rootKey) return
+  const ids = cards.value.filter((x) => x.rootKey === c.rootKey && x.collectionId).map((x) => x.collectionId)
+  const fromIdx = ids.indexOf(from.collectionId)
+  const toIdx = ids.indexOf(c.collectionId)
+  if (fromIdx < 0 || toIdx < 0) return
+  ids.splice(toIdx, 0, ids.splice(fromIdx, 1)[0])
+  try {
+    unwrap(await ReorderCollections(ids))
+    await load(true)
+    toast.success(t('bmReordered'))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+    logErr('bookmark.reorder', e)
+  }
+}
+function onDragEnd() {
+  dragKey.value = ''
+  dragOverKey.value = ''
+}
+
+// 死链检查的进度：总量来自后端，百分比是实测值，不做「假装在动」的动画。
+const checkInfo = computed(() => {
+  const c = checking.value
+  if (!c?.running) return null
+  const pct = c.total ? Math.min(100, Math.round((c.done / c.total) * 100)) : 0
+  return { done: c.done, total: c.total, pct }
+})
 const progressText = computed(() => {
   const c = checking.value
   if (!c) return ''
@@ -290,6 +574,14 @@ function hostOf(url: string) {
 }
 function initial(r: BookmarkRow) {
   return (hostOf(r.value).charAt(0) || '?').toUpperCase()
+}
+// 行副标题：文件夹视图看「这个条目属于哪个站」，域名视图反过来看「它在哪个文件夹」，
+// 否则在 github.com 的详情里每行都重复一遍 github.com。
+function rowSub(r: BookmarkRow) {
+  const base = viewMode.value === 'domain'
+    ? (r.collection_name || t('bmUncategorized'))
+    : hostOf(r.value)
+  return r.remark ? `${base} · ${r.remark}` : base
 }
 function badgeText(r: BookmarkRow) {
   const h = health.value[r.id]
@@ -322,10 +614,12 @@ async function fillIcons() {
   if (iconsRunning) return
   iconsRunning = true
   iconsBusy.value = true
+  iconsFilled.value = 0
   try {
     for (let round = 0; round < 6; round++) {
       const res = unwrap<{ checked: number; filled: number }>(await FillIcons(24))
       if (!res || res.filled === 0) break
+      iconsFilled.value += res.filled
       await load(true)
     }
   } catch (e) {
@@ -576,20 +870,84 @@ onMounted(() => {
           <X :size="14" />
         </button>
       </div>
-      <QdTabs v-model="tab" :tabs="tabs" variant="chip" />
+
+      <!-- 视图：文件夹 / 域名。域名视图把散落在各文件夹里的同一站点收成一堆 -->
+      <QdTabs v-model="viewMode" :tabs="viewTabs" class="bm-view" :aria-label="t('bmViewLabel')">
+        <template #tab="{ tab: item }">
+          <component :is="item.id === 'folder' ? Folder : Globe2" :size="12" />
+          <span>{{ item.label }}</span>
+        </template>
+      </QdTabs>
+
+      <!-- 健康筛选：三个问题标签各带一个色点，扫一眼就知道哪里有脏数据 -->
+      <QdTabs v-model="tab" :tabs="tabs" variant="chip">
+        <template #tab="{ tab: item }">
+          <span v-if="item.id !== 'all'" class="bm-tab-dot" :class="'is-' + item.id"></span>
+          <span>{{ item.label }}</span>
+          <span class="bm-tab-n">{{ item.badge }}</span>
+        </template>
+      </QdTabs>
+
       <span class="qd-page-fill" />
-      <!-- 搜索/筛选时分组是强制展开的，这时「全部收起」按了也不会生效，干脆不显示 -->
+
       <button
-        v-if="!forceExpand && groups.length"
-        class="qd-btn qd-btn-ghost qd-btn-sm"
-        @click="toggleAllCollapsed"
-      >{{ allCollapsed ? t('bmExpandAll') : t('bmCollapseAll') }}</button>
-      <span v-if="checking?.running" class="bm-note">
-        <Loader2 :size="12" class="spin" />{{ progressText }}
-      </span>
-      <span v-else-if="iconsBusy" class="bm-note">
-        <Loader2 :size="12" class="spin" />{{ t('bmIconsFetching') }}
-      </span>
+        v-if="viewMode === 'folder'"
+        class="qd-icon-btn"
+        :class="{ active: selectMode }"
+        :aria-pressed="selectMode"
+        :title="t('bmSelect')"
+        @click="toggleSelectMode"
+      >
+        <CheckSquare :size="14" />
+      </button>
+
+      <!-- 排序：替代原来的「全部展开 / 全部收起」——网格里没有折叠，六百条一次铺开也不会卡 -->
+      <div class="bm-sort">
+        <button class="qd-btn qd-btn-ghost qd-btn-sm" :aria-expanded="sortOpen" @click="sortOpen = !sortOpen">
+          <ArrowUpDown :size="12" /><span class="bm-sort-label">{{ sortLabel }}</span>
+        </button>
+        <template v-if="sortOpen">
+          <div class="bm-menu-backdrop" @click="sortOpen = false"></div>
+          <div class="bm-menu" role="menu">
+            <button
+              v-for="o in sortOptions"
+              :key="o.id"
+              class="bm-menu-item"
+              role="menuitem"
+              :class="{ active: sortMode === o.id }"
+              @click="sortMode = o.id; sortOpen = false"
+            >
+              <span class="bm-menu-tick"><Check v-if="sortMode === o.id" :size="12" /></span>
+              {{ o.label }}
+            </button>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- 后台任务条：检查死链 / 补图标原来是右上角一行小字，很容易错过 -->
+    <div v-if="checkInfo || iconsBusy" class="bm-banner">
+      <Loader2 :size="13" class="spin" />
+      <template v-if="checkInfo">
+        <span class="bm-banner-text">{{ t('bmCheckRunning', { done: checkInfo.done, total: checkInfo.total }) }}</span>
+        <span class="bm-banner-bar"><span class="bm-banner-fill" :style="{ width: checkInfo.pct + '%' }"></span></span>
+        <span class="bm-banner-num">{{ checkInfo.pct }}%</span>
+      </template>
+      <template v-else>
+        <span class="bm-banner-text">{{ t('bmIconsFetching') }}</span>
+        <span class="bm-banner-bar"><span class="bm-banner-fill is-indeterminate"></span></span>
+        <span v-if="iconsFilled" class="bm-banner-num">{{ iconsFilled }}</span>
+      </template>
+    </div>
+
+    <!-- 批量条：勾选文件夹后从工具栏下方浮出 -->
+    <div v-if="selectMode" class="bm-batch">
+      <span class="bm-batch-n">{{ t('bmBatchPicked', { n: picked.length }) }}</span>
+      <span class="bm-batch-sub">{{ t('bmBatchBooks', { n: pickedTotal }) }}</span>
+      <span class="qd-page-fill" />
+      <button class="qd-btn qd-btn-sm" @click="togglePickAll">{{ allPicked ? t('bmUnpickAll') : t('bmPickAll') }}</button>
+      <button class="qd-btn qd-btn-sm qd-btn-danger" :disabled="!picked.length" @click="askBatchDelete">{{ t('delete') }}</button>
+      <button class="qd-btn qd-btn-sm" @click="toggleSelectMode">{{ t('cancel') }}</button>
     </div>
 
     <div class="qd-page-body bm-body">
@@ -600,85 +958,188 @@ onMounted(() => {
         <button class="qd-empty-cta" @click="openImport"><Plus :size="14" />{{ t('bmImport') }}</button>
       </div>
 
-      <template v-else>
-        <section v-for="root in groups" :key="root.key" class="qd-card bm-group">
-          <button
-            class="bm-group-head"
-            :class="{ 'is-collapsed': isCollapsed(root.key) }"
-            :aria-expanded="!isCollapsed(root.key)"
-            @click="toggleCollapse(root.key)"
-          >
-            <ChevronDown :size="12" class="bm-chev" />
-            <span class="bm-group-name" :title="root.label">{{ root.label }}</span>
-            <span v-if="root.showScene" class="bm-group-scene">{{ root.scene }}</span>
-            <span class="qd-page-fill" />
-            <span class="bm-group-n">{{ root.total }}</span>
+      <!-- 详情：一个文件夹（或一个站点）里的全部书签 -->
+      <template v-else-if="openCard">
+        <div class="bm-detail-head">
+          <button class="qd-btn qd-btn-ghost qd-btn-sm" @click="openKey = ''">
+            <ArrowLeft :size="13" />{{ viewMode === 'folder' ? t('bmAllFolders') : t('bmAllDomains') }}
           </button>
-
-          <template v-if="!isCollapsed(root.key)">
-            <div v-for="leaf in root.leaves" :key="leaf.key" class="bm-leaf">
-              <button
-                v-if="!root.flat"
-                class="bm-leaf-head"
-                :class="{ 'is-collapsed': isCollapsed(leaf.key) }"
-                :aria-expanded="!isCollapsed(leaf.key)"
-                @click="toggleCollapse(leaf.key)"
-              >
-                <ChevronDown :size="12" class="bm-chev" />
-                <span class="bm-leaf-name" :title="leaf.label">{{ leaf.label }}</span>
-                <span class="qd-page-fill" />
-                <span class="bm-group-n">{{ leaf.items.length }}</span>
-              </button>
-
-              <template v-if="root.flat || !isCollapsed(leaf.key)">
-                <div
-                  v-for="r in leaf.items"
-                  :key="r.id"
-                  class="qd-row bm-row"
-                  @dblclick="openBookmark(r)"
-                >
-                  <span class="qd-row-icon">
-                    <img
-                      v-if="r.icon" class="bm-fav" :src="r.icon" alt=""
-                      referrerpolicy="no-referrer" loading="lazy"
-                    />
-                    <span v-else class="bm-fav-ph">{{ initial(r) }}</span>
-                  </span>
-                  <div class="qd-row-main">
-                    <span class="qd-row-title" :title="r.name">{{ r.name }}</span>
-                    <span class="qd-row-sub" :title="r.value">
-                      {{ hostOf(r.value) }}<template v-if="r.remark"> · {{ r.remark }}</template>
-                    </span>
-                  </div>
-                  <span
-                    v-if="statusOf(r.id) && statusOf(r.id) !== 'ok'"
-                    class="bm-badge"
-                    :class="`is-${statusOf(r.id)}`"
-                    :title="health[r.id]?.errMsg || health[r.id]?.checkedAt"
-                  >{{ badgeText(r) }}</span>
-                  <span v-if="health[r.id]?.changed" class="bm-badge is-changed">{{ t('bmStatus_changed') }}</span>
-                  <div class="qd-row-actions">
-                    <button
-                      v-if="statusOf(r.id) === 'moved' && health[r.id]?.finalUrl"
-                      class="qd-row-btn"
-                      :title="t('bmApplyMoved')"
-                      @click.stop="applyMoved(health[r.id])"
-                    ><RefreshCw :size="14" /></button>
-                    <button class="qd-row-btn" :title="t('bmCopyUrl')" @click.stop="copyUrl(r)">
-                      <Copy :size="14" />
-                    </button>
-                    <button class="qd-row-btn" :title="t('bmOpen')" @click.stop="openBookmark(r)">
-                      <ExternalLink :size="14" />
-                    </button>
-                  </div>
-                </div>
-              </template>
-            </div>
+          <span class="bm-detail-sep"></span>
+          <span class="bm-detail-title" :title="openCard.label">
+            <component :is="viewMode === 'folder' ? Folder : Globe2" :size="13" />
+            {{ openCard.label }}
+          </span>
+          <span class="bm-detail-n">{{ t('bmCountN', { n: openCard.total }) }}</span>
+          <!-- 详情头里带文字：孤零零一个红「3」离开卡片上下文就说不清是什么 -->
+          <span v-if="openCard.broken" class="bm-badge is-broken">{{ t('bmTabBroken') }} {{ openCard.broken }}</span>
+          <span v-if="openCard.blocked" class="bm-badge is-blocked">{{ t('bmTabBlocked') }} {{ openCard.blocked }}</span>
+          <span v-if="openCard.moved" class="bm-badge is-moved">{{ t('bmTabMoved') }} {{ openCard.moved }}</span>
+          <span v-if="openCard.changed" class="bm-badge is-changed">{{ t('bmTabChanged') }} {{ openCard.changed }}</span>
+          <span class="qd-page-fill" />
+          <template v-if="openCard.collectionId">
+            <button class="qd-btn qd-btn-sm" @click="openAll"><ExternalLink :size="12" />{{ t('openAll') }}</button>
+            <button class="qd-icon-btn" :title="t('bmRename')" @click="askRename(openCard)"><Pencil :size="14" /></button>
+            <button class="qd-icon-btn" :title="t('delete')" @click="askDelete(openCard)"><Trash2 :size="14" /></button>
           </template>
+        </div>
+
+        <section class="qd-card bm-detail">
+          <div v-for="r in openItems" :key="r.id" class="qd-row bm-row" @dblclick="openBookmark(r)">
+            <span class="qd-row-icon">
+              <img
+                v-if="r.icon" class="bm-fav" :src="r.icon" alt=""
+                referrerpolicy="no-referrer" loading="lazy"
+              />
+              <span v-else class="bm-fav-ph">{{ initial(r) }}</span>
+            </span>
+            <div class="qd-row-main">
+              <span class="qd-row-title" :title="r.name">{{ r.name }}</span>
+              <span class="qd-row-sub" :title="r.value">{{ rowSub(r) }}</span>
+            </div>
+            <span
+              v-if="statusOf(r.id) && statusOf(r.id) !== 'ok'"
+              class="bm-badge"
+              :class="`is-${statusOf(r.id)}`"
+              :title="health[r.id]?.errMsg || health[r.id]?.checkedAt"
+            >{{ badgeText(r) }}</span>
+            <span v-if="health[r.id]?.changed" class="bm-badge is-changed">{{ t('bmStatus_changed') }}</span>
+            <div class="qd-row-actions">
+              <button
+                v-if="statusOf(r.id) === 'moved' && health[r.id]?.finalUrl"
+                class="qd-row-btn"
+                :title="t('bmApplyMoved')"
+                @click.stop="applyMoved(health[r.id])"
+              ><RefreshCw :size="14" /></button>
+              <button class="qd-row-btn" :title="t('bmCopyUrl')" @click.stop="copyUrl(r)">
+                <Copy :size="14" />
+              </button>
+              <button class="qd-row-btn" :title="t('bmOpen')" @click.stop="openBookmark(r)">
+                <ExternalLink :size="14" />
+              </button>
+            </div>
+          </div>
+          <p v-if="!openItems.length" class="bm-none">{{ t('bmNoMatch') }}</p>
         </section>
-        <p v-if="!filtered.length" class="bm-none">{{ t('bmNoMatch') }}</p>
+      </template>
+
+      <!-- 网格：一个文件夹一张卡，卡片里带前几个站点图标，不进文件夹也能看出装了什么 -->
+      <template v-else>
+        <div class="bm-grid">
+          <article
+            v-for="c in cards"
+            :key="c.key"
+            v-key-click
+            class="bm-card"
+            :class="{
+              'is-select': selectMode,
+              'is-domain': viewMode === 'domain',
+              'is-picked': isPicked(c),
+              'is-drop': dragOverKey === c.key,
+              'is-dragging': dragKey === c.key
+            }"
+            :draggable="canDrag(c)"
+            @click="openFolder(c)"
+            @dragstart="onDragStart($event, c)"
+            @dragover="onDragOver($event, c)"
+            @drop.prevent="onDrop(c)"
+            @dragend="onDragEnd"
+          >
+            <label v-if="selectMode && c.collectionId" class="bm-card-check" @click.stop>
+              <input type="checkbox" :checked="isPicked(c)" @change="togglePick(c.collectionId)" />
+            </label>
+            <span v-else-if="canDrag(c)" class="bm-grip" :title="t('bmDragHint')" aria-hidden="true">
+              <GripVertical :size="12" />
+            </span>
+
+            <div class="bm-card-top">
+              <component :is="viewMode === 'folder' ? Folder : Globe2" :size="14" class="bm-card-icon" />
+              <span class="bm-card-name" :title="c.label">{{ c.label }}</span>
+              <span class="bm-card-n">{{ c.total }}</span>
+            </div>
+
+            <div v-if="c.sub" class="bm-card-sub" :title="c.sub">{{ c.sub }}</div>
+
+            <div class="bm-fav-strip">
+              <template v-for="r in c.preview" :key="r.id">
+                <img
+                  v-if="r.icon" class="bm-card-fav" :src="r.icon" alt=""
+                  referrerpolicy="no-referrer" loading="lazy"
+                />
+                <span v-else class="bm-card-fav-ph">{{ initial(r) }}</span>
+              </template>
+              <span v-if="c.total > c.preview.length" class="bm-fav-more">+{{ c.total - c.preview.length }}</span>
+            </div>
+
+            <div class="bm-card-names">{{ c.names.join(' · ') }}</div>
+
+            <div v-if="c.issues" class="bm-card-flags">
+              <span v-if="c.broken" class="bm-flag is-broken" :title="t('bmTabBroken')">{{ c.broken }}</span>
+              <span v-if="c.blocked" class="bm-flag is-blocked" :title="t('bmTabBlocked')">{{ c.blocked }}</span>
+              <span v-if="c.moved" class="bm-flag is-moved" :title="t('bmTabMoved')">{{ c.moved }}</span>
+              <span v-if="c.changed" class="bm-flag is-changed" :title="t('bmTabChanged')">{{ c.changed }}</span>
+            </div>
+
+            <div v-if="viewMode === 'folder' && !selectMode" class="bm-card-actions" @click.stop>
+              <button class="qd-row-btn" :title="t('bmRename')" @click="askRename(c)"><Pencil :size="12" /></button>
+              <button class="qd-row-btn" :title="t('delete')" @click="askDelete(c)"><Trash2 :size="12" /></button>
+            </div>
+          </article>
+        </div>
+        <p v-if="!cards.length" class="bm-none">{{ loading ? t('loading') : t('bmNoMatch') }}</p>
       </template>
     </div>
+
+    <!-- 重命名文件夹 -->
+    <QdModal
+      v-if="renameOpen"
+      :model-value="true" :title="t('bmRenameTitle')" width="420px"
+      @update:model-value="renameOpen = false"
+    >
+      <label class="bm-field">
+        <span class="bm-field-label">{{ t('bmRenameLabel') }}</span>
+        <input v-model="renameValue" class="qd-input" @keydown.enter.prevent="confirmRename" />
+      </label>
+      <template #footer>
+        <button class="qd-btn" @click="renameOpen = false">{{ t('cancel') }}</button>
+        <button
+          class="qd-btn qd-btn-primary"
+          :disabled="renameBusy || !renameValue.trim()"
+          @click="confirmRename"
+        >{{ t('save') }}</button>
+      </template>
+    </QdModal>
+
+    <!-- 删除文件夹（会连带删掉里面的书签，必须说清条数） -->
+    <QdModal
+      v-if="deleteTarget"
+      :model-value="true" :title="t('bmDeleteTitle')" width="440px"
+      @update:model-value="deleteTarget = null"
+    >
+      <p class="bm-hint">{{ t('bmDeleteBody', { name: deleteTarget.name, n: deleteTarget.total }) }}</p>
+      <p class="bm-hint bm-hint-warn">{{ t('bmDeleteWarn') }}</p>
+      <template #footer>
+        <button class="qd-btn" @click="deleteTarget = null">{{ t('cancel') }}</button>
+        <button class="qd-btn qd-btn-danger" :disabled="deleteBusy" @click="confirmDelete">
+          <Loader2 v-if="deleteBusy" :size="13" class="spin" />{{ t('delete') }}
+        </button>
+      </template>
+    </QdModal>
+
+    <!-- 批量删除文件夹 -->
+    <QdModal
+      v-if="batchOpen"
+      :model-value="true" :title="t('bmDeleteTitle')" width="440px"
+      @update:model-value="batchOpen = false"
+    >
+      <p class="bm-hint">{{ t('bmBatchDeleteBody', { folders: picked.length, n: pickedTotal }) }}</p>
+      <p class="bm-hint bm-hint-warn">{{ t('bmDeleteWarn') }}</p>
+      <template #footer>
+        <button class="qd-btn" @click="batchOpen = false">{{ t('cancel') }}</button>
+        <button class="qd-btn qd-btn-danger" :disabled="batchBusy" @click="confirmBatchDelete">
+          <Loader2 v-if="batchBusy" :size="13" class="spin" />{{ t('delete') }}
+        </button>
+      </template>
+    </QdModal>
 
     <!-- 导入：先选来源（本机浏览器 / HTML 文件），再确认预览 -->
     <QdModal
@@ -869,85 +1330,221 @@ onMounted(() => {
 
 <style scoped>
 /* 只写本页独有的布局偏移与元素；页头、按钮、输入框、行、空状态一律用全局类。 */
-.bm-toolbar { gap: var(--space-3); }
-.bm-search { width: 260px; flex-shrink: 1; min-width: 150px; }
+.bm-toolbar { gap: var(--space-3); flex-wrap: wrap; }
+.bm-search { width: 240px; flex-shrink: 1; min-width: 150px; }
 .bm-clear { position: absolute; right: 2px; width: 22px; height: 22px; }
-.bm-note {
-  display: inline-flex; align-items: center; gap: var(--space-2); margin-left: var(--space-3);
-  font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap;
+.bm-view { flex-shrink: 0; }
+
+/* 健康筛选的色点：死链红、无法访问橙、地址已变蓝、内容已变蓝。
+   标签文字是灰的，靠这点色把「这里有脏数据」先递到眼睛里。 */
+.bm-tab-dot {
+  flex-shrink: 0; width: 6px; height: 6px; border-radius: var(--radius-full);
+  background: var(--color-text-muted);
+}
+.bm-tab-dot.is-broken { background: var(--color-danger); }
+.bm-tab-dot.is-blocked { background: var(--color-warning); }
+.bm-tab-dot.is-moved,
+.bm-tab-dot.is-changed { background: var(--color-accent); }
+.bm-tab-n {
+  font-size: var(--text-2xs); color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
-/* 分组 = 卡片。全站的「一组内容」都是 .qd-card（下载任务、插件、笔记面板、统计块），
-   页面主体也统一留 18/20px 内边距；这里把分组做成通栏灰带 + 发丝线，行贴到窗口
-   边缘、组头跟条目行同高同色，整页读起来像一张表格，和其余页面完全两个世界。
-   一级组头 34px、二级 30px，卡片内部靠缩进和字重分层，不再用底色分块。 */
-.bm-body { display: flex; flex-direction: column; gap: var(--space-3); }
-/* flex-shrink:0：卡片是纵向 flex 的子项，内容总高一旦超过可视区，默认的
-   flex-shrink:1 会把每张卡片按比例压扁，配合卡片上的 overflow:hidden，
-   组头连字都被裁掉半行（20 张卡片时每个只剩十几像素高）。空状态同理。 */
-.bm-body > * { flex-shrink: 0; }
-.bm-group { display: flex; flex-direction: column; overflow: hidden; }
-.bm-leaf { display: flex; flex-direction: column; }
+/* ---- 排序菜单 ---- */
+.bm-sort { position: relative; flex-shrink: 0; }
+.bm-sort-label { max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 铺满整屏的透明背板：点空白处收起，比 document 级监听更好清理 */
+.bm-menu-backdrop { position: fixed; inset: 0; z-index: var(--z-dropdown); }
+.bm-menu {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: calc(var(--z-dropdown) + 1);
+  min-width: 132px; padding: var(--space-2);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+.bm-menu-item {
+  display: flex; align-items: center; gap: var(--space-2); width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: transparent; border: 0; border-radius: var(--radius-sm);
+  color: var(--color-text-secondary); font-family: inherit;
+  font-size: var(--text-sm); text-align: left; cursor: pointer;
+}
+.bm-menu-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.bm-menu-item.active { color: var(--color-accent); }
+.bm-menu-tick { display: inline-flex; width: 14px; flex-shrink: 0; }
 
-.bm-group-head,
-.bm-leaf-head {
+/* ---- 后台任务条 ---- */
+.bm-banner {
   display: flex; align-items: center; gap: var(--space-3);
-  width: 100%; margin: 0; padding: 0 var(--space-5);
-  border: 0;
-  box-sizing: border-box;
-  background: transparent;
-  font-family: inherit; text-align: left; color: inherit;
-  cursor: pointer;
-  transition: background-color var(--transition-fast);
+  flex-shrink: 0; margin: 0 var(--space-6); padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+  font-size: var(--text-xs);
 }
-.bm-group-head {
-  height: 34px;
-  font-size: var(--text-md);
-  /* 展开时用一条线收住组头；收起时卡片只有组头高，这条线会和卡片下缘重合 */
-  border-bottom: 1px solid var(--color-border);
+.bm-banner-text { flex-shrink: 0; white-space: nowrap; }
+.bm-banner-bar {
+  flex: 1; min-width: 60px; height: 3px; overflow: hidden;
+  border-radius: var(--radius-full); background: var(--color-accent-muted);
 }
-.bm-group-head.is-collapsed { border-bottom: 0; }
-.bm-leaf-head {
-  height: 30px;
-  padding-left: var(--space-8);
-  font-size: var(--text-sm);
+.bm-banner-fill {
+  display: block; height: 100%; width: 0;
+  border-radius: inherit; background: var(--color-accent);
+  transition: width var(--transition-slow);
 }
-/* 二级之间才画线：第一层二级紧贴组头的 1px 线，再加一条会变成双线 */
-.bm-leaf + .bm-leaf .bm-leaf-head { border-top: 1px solid var(--color-border); }
-.bm-group-head:hover,
-.bm-leaf-head:hover { background: var(--color-bg-hover); }
-.bm-chev {
-  flex-shrink: 0; color: var(--color-text-muted);
-  transition: transform var(--transition-fast);
+/* 补图标拿不到总量，用一条来回跑的光带表示「还在动」，不假造百分比 */
+.bm-banner-fill.is-indeterminate {
+  width: 32%;
+  animation: bm-indeterminate 1.4s ease-in-out infinite;
 }
-.is-collapsed .bm-chev { transform: rotate(-90deg); }
+@keyframes bm-indeterminate {
+  0% { margin-left: -32%; }
+  100% { margin-left: 100%; }
+}
+.bm-banner-num { flex-shrink: 0; font-variant-numeric: tabular-nums; }
 
-.bm-group-name {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-weight: 600; color: var(--color-text-primary);
+/* ---- 批量条 ---- */
+.bm-batch {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3);
+  flex-shrink: 0; margin: 0 var(--space-6); padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-select-bg);
 }
-.bm-leaf-name {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-weight: 500; color: var(--color-text-secondary);
+.bm-batch-n { font-size: var(--text-sm); font-weight: 600; color: var(--color-accent); }
+.bm-batch-sub { font-size: var(--text-xs); color: var(--color-text-muted); }
+
+/* ---- 网格 ---- */
+/* minmax(272px)：1280 宽是 4 列，1024 宽是 3 列，窄窗自动落回 2 列。
+   卡片之间只隔 10px，一屏能看到十几个文件夹，比原来一条一条往下排密度高得多。 */
+.bm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
+  gap: var(--space-4);
+  align-content: start;
 }
-/* 场景用低调的前缀文字，不做描边药丸：十几个组各挂一个「Edge」时，
-   一圈圈边框会把注意力拉到「这台机器有几个浏览器」这件无关的事上。 */
-.bm-group-scene {
-  flex-shrink: 0; padding-left: var(--space-3);
-  border-left: 1px solid var(--color-border);
+.bm-card {
+  position: relative;
+  display: flex; flex-direction: column; gap: var(--space-2);
+  min-height: 108px;
+  /* 左侧多留 8px 给拖拽把手 / 复选框，hover 时才浮出，不占常态版面 */
+  padding: var(--space-4) var(--space-5) var(--space-4) var(--space-7);
+  border: 1px solid var(--card-border-color);
+  border-radius: var(--radius-md);
+  background: var(--color-card-bg);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.bm-card:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-light);
+  box-shadow: var(--shadow-sm);
+}
+.bm-card.is-picked { border-color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent-border); }
+/* 拖拽落点：用一条竖直色条表示「插到这里」，比整卡高亮更接近列表排序的直觉 */
+.bm-card.is-drop::before {
+  content: '';
+  position: absolute; left: -6px; top: 6px; bottom: 6px; width: 2px;
+  border-radius: var(--radius-full); background: var(--color-accent);
+}
+.bm-card.is-dragging { opacity: 0.5; }
+.bm-card.is-select { cursor: default; padding-left: var(--space-9); }
+
+/* 拖拽把手 / 复选框占用同一个左上角位置 */
+.bm-grip {
+  position: absolute; left: 4px; top: 50%; transform: translateY(-50%);
+  display: flex; align-items: center; justify-content: center;
+  width: 12px; height: 20px;
+  color: var(--color-text-muted); cursor: grab; opacity: 0;
+  transition: opacity var(--transition-fast), color var(--transition-fast);
+}
+.bm-card:hover .bm-grip { opacity: 1; }
+.bm-grip:hover { color: var(--color-text-secondary); }
+.bm-card-check {
+  position: absolute; left: 8px; top: var(--space-4);
+  display: flex; align-items: center; cursor: pointer;
+}
+
+.bm-card-top { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.bm-card-icon { flex-shrink: 0; color: var(--color-text-muted); }
+.bm-card-name {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary);
+}
+/* 数量用主文字色而不是 muted：它是扫网格时最先要找的信息，
+   和右边的 ⋯ 操作错开一层，hover 时让位给操作按钮。 */
+.bm-card-n {
+  flex-shrink: 0; font-size: var(--text-sm); font-weight: 600;
+  color: var(--color-text-primary); font-variant-numeric: tabular-nums;
+  transition: opacity var(--transition-fast);
+}
+.bm-card:not(.is-domain):hover .bm-card-n { opacity: 0; }
+
+.bm-card-sub {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: var(--text-xs); color: var(--color-text-muted);
 }
-.bm-group-n {
-  flex-shrink: 0; color: var(--color-text-muted);
-  font-size: var(--text-xs); font-variant-numeric: tabular-nums;
+
+.bm-fav-strip { display: flex; align-items: center; gap: var(--space-1); }
+.bm-card-fav { width: 14px; height: 14px; object-fit: contain; border-radius: 2px; }
+.bm-card-fav-ph {
+  display: flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border-radius: 2px;
+  background: var(--color-bg-tertiary); color: var(--color-text-muted);
+  font-size: 9px; font-weight: 600; text-transform: uppercase;
+}
+.bm-fav-more { font-size: var(--text-2xs); color: var(--color-text-muted); }
+
+.bm-card-names {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--text-xs); color: var(--color-text-secondary);
 }
 
+/* 问题计数：贴底排，四类各一色；margin-top:auto 让没有问题的卡片和对齐 */
+.bm-card-flags { display: flex; align-items: center; gap: var(--space-2); margin-top: auto; }
+.bm-flag {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 0 5px; height: 15px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-2xs); font-variant-numeric: tabular-nums;
+  border: 1px solid transparent;
+}
+.bm-flag.is-broken { color: var(--color-danger); border-color: var(--color-danger-border); background: var(--color-danger-bg); }
+.bm-flag.is-blocked { color: var(--color-warning); border-color: var(--color-warning-border); background: var(--color-warning-bg); }
+.bm-flag.is-moved,
+.bm-flag.is-changed { color: var(--color-accent); border-color: var(--color-accent-border); background: var(--color-accent-bg); }
+
+.bm-card-actions {
+  position: absolute; top: var(--space-3); right: var(--space-3);
+  display: flex; gap: var(--space-1); opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+.bm-card:hover .bm-card-actions,
+.bm-card:focus-within .bm-card-actions { opacity: 1; }
+
+/* ---- 详情 ---- */
+.bm-detail-head {
+  display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.bm-detail-sep { width: 1px; height: 14px; background: var(--color-border); }
+.bm-detail-title {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary);
+}
+.bm-detail-n { font-size: var(--text-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.bm-detail { flex-shrink: 0; padding: var(--space-2) var(--space-2) var(--space-3); }
+
+.bm-body { display: flex; flex-direction: column; gap: var(--space-3); }
+/* flex-shrink:0：卡片是纵向 flex 的子项，内容总高一旦超过可视区，默认的
+   flex-shrink:1 会把每张卡片按比例压扁，配合 overflow:hidden 连字都被裁掉半行。 */
+.bm-body > * { flex-shrink: 0; }
+
 .bm-row { cursor: default; }
-/* 二级下面的条目要落在二级组头右侧，否则子项看着比父标题更靠左，层级是反的。
-   三级缩进：一级文字 26px → 二级文字 70px → 条目标题 76px。 */
-.bm-leaf > .qd-row { padding-left: var(--space-9); }
-/* 组头紧贴首行会显得挤，给条目区留一点呼吸；行自身的 margin 只负责行间距 */
-.bm-leaf > .qd-row:first-of-type { margin-top: var(--space-1); }
 /* 行尾操作常驻占位、hover 才浮出：一屏几十个图标按钮会让视线没有落点。
    不用 display:none，避免 hover 时行宽跳动。 */
 .bm-row .qd-row-actions { opacity: 0; transition: opacity var(--transition-fast); }
@@ -977,6 +1574,7 @@ onMounted(() => {
 
 .bm-none { padding: var(--space-6); text-align: center; font-size: var(--text-sm); color: var(--color-text-muted); }
 .bm-hint { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--color-text-muted); }
+.bm-hint-warn { color: var(--color-warning); }
 
 /* ---- 导入弹窗 ---- */
 .bm-src-head { display: flex; align-items: flex-start; gap: var(--space-4); margin-bottom: var(--space-2); }

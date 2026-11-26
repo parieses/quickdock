@@ -1303,7 +1303,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 .ai-tools-chev {
   margin-left: auto;
   flex: 0 0 auto;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   transition: transform var(--transition-fast);
 }
 
@@ -1385,7 +1385,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   background: none;
   font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 .ai-tool-ms.is-ask { background: none; color: var(--color-warning); }
@@ -1677,17 +1677,17 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
    用户消息仍收 88%，气泡太宽就失去「我说的话」那种块感。 */
 .ai-msg.assistant { align-self: flex-start; max-width: 100%; }
 
-.ai-msg-role { font-size: var(--text-xs); color: var(--color-text-disabled); margin-bottom: 1px; display: flex; align-items: center; gap: var(--space-3); }
+.ai-msg-role { font-size: var(--text-xs); color: var(--color-text-muted); margin-bottom: 1px; display: flex; align-items: center; gap: var(--space-3); }
 
 .ai-msg-model {
-  font-size: var(--text-2xs); color: var(--color-text-disabled);
+  font-size: var(--text-2xs); color: var(--color-text-muted);
   background: var(--color-bg-tertiary); padding: 0 5px;
-  border-radius: var(--radius-xs); opacity: 0.85;
+  border-radius: var(--radius-xs);
 }
 
 /* 定时任务每轮执行的时刻。等宽数字，纵向看下来时间列是齐的。 */
 .ai-msg-clock {
-  font-size: var(--text-2xs); color: var(--color-text-disabled);
+  font-size: var(--text-2xs); color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1768,7 +1768,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-copy {
   display: flex; align-items: center; gap: 3px;
-  background: none; border: none; color: var(--color-text-disabled);
+  background: none; border: none; color: var(--color-text-muted);
   font-size: var(--text-xs); cursor: pointer; padding: var(--space-1) var(--space-2); border-radius: var(--radius-xs);
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
@@ -1789,7 +1789,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-msg-stat {
   font-size: var(--text-2xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
   /* 允许换行：这行可能同时有「耗时 / 首字 / 输入输出 / 缓存命中」四段，
      窄窗口下 nowrap 会把后面的内容顶出可视区（数字被裁比换行更难接受） */
@@ -1837,7 +1837,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 .ai-need-key, .ai-empty {
   margin: auto;
   display: flex; flex-direction: column; align-items: center; gap: var(--space-5);
-  color: var(--color-text-disabled); text-align: center;
+  color: var(--color-text-muted); text-align: center;
 }
 
 .ai-need-key p, .ai-empty p { font-size: var(--text-md); margin: 0; }
@@ -1973,7 +1973,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   display: inline-flex; align-items: center; gap: 3px;
   font-size: var(--text-xs); padding: 1px 7px;
   border: 1px solid transparent; border-radius: var(--radius-xs);
-  background: transparent; color: var(--color-text-disabled);
+  background: transparent; color: var(--color-text-muted);
   cursor: pointer;
   transition: color var(--transition-fast), background-color var(--transition-fast),
               border-color var(--transition-fast);
@@ -2130,7 +2130,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-msg-img-el.is-clickable { cursor: zoom-in; }
 
-.ai-img-broken { height: 80px; display: flex; align-items: center; justify-content: center; font-size: var(--text-xl); color: var(--color-text-disabled); }
+.ai-img-broken { height: 80px; display: flex; align-items: center; justify-content: center; font-size: var(--text-xl); color: var(--color-text-muted); }
 
 @keyframes ai-blink { 50% { opacity: 0; } }
 
@@ -2140,7 +2140,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
    WebView2 不支持 :has()/:is()/:container，这里也不依赖它们。 */
 .ai-msg-cost {
   font-size: var(--text-2xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
   line-height: 1.6;
   white-space: normal;

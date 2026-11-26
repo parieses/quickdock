@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { logErr } from '../utils/logger'
-import { ref, computed, onMounted, onUnmounted, toRef, watch, inject, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, toRef, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X, Palette, Keyboard, Database, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, RotateCcw, Bot, Wrench, ExternalLink, ScrollText, History, ListOrdered, Search, Clipboard, Bell, ShieldCheck, Settings } from '@lucide/vue'
+import { X, Palette, Keyboard, Database, Info, Sun, Moon, Monitor as MonitorIcon, RotateCcw, Bot, Wrench, ExternalLink, ScrollText, History, ListOrdered, Search, Clipboard, Bell, ShieldCheck, Settings } from '@lucide/vue'
 import { useFocusTrap } from '../utils/focusTrap'
 import { useTheme } from '../composables/useTheme'
 import { unwrap } from '../utils/api'
@@ -218,12 +218,37 @@ function onSearchKeydown(e: KeyboardEvent) {
   }
 }
 
-// 打开设置且停在根菜单时聚焦搜索框（带 initialPage 的直接进目标页，不抢焦点）
-watch(() => props.visible, (v) => {
-  if (v && !props.initialPage && !activePage.value) {
-    nextTick(() => searchRef.value?.focus())
+// ---- 记住上次停留的页 ----
+// 以前每次打开都落「通用」并停在空状态；现在关掉后记住停在哪一页，下次直接回去。
+// 设置关掉时 activePage 会被置空，而用户再次打开十有八九还是想改上次那一项；
+// 每次都回到「通用」等于让他重走一遍。只记页面键，不记页内分段（二级 tab 由
+// 各子页自己恢复，父组件不该知道 AI 页有几个 tab）。
+// 深链（通知中心 / 命令面板传 settings:ai:usage）只负责这一次跳转，不写记忆——
+// 「被通知叫过去看了一眼」不该变成下次打开设置的默认落点。
+const LAST_PAGE_KEY = 'qd_settings_last_page'
+
+function readLastPage(): string | null {
+  try {
+    const v = localStorage.getItem(LAST_PAGE_KEY)
+    if (!v) return null
+    // 页面可能是旧版本写的、也可能已被合并掉：不校验就会落进一个空白页。
+    // 用当前菜单实测而不是再维护一份白名单，加删页面时不用同步两处。
+    const known = menuItems.value.some((m) => m.key === v) || footerItems.value.some((m) => m.key === v)
+    return known ? v : null
+  } catch (e) {
+    // 隐私模式 / 存储被禁用时读不到：当作没记过，不影响打开设置
+    logErr('SettingsModal:readLastPage', e)
+    return null
   }
-})
+}
+
+function rememberPage(key: string) {
+  try {
+    localStorage.setItem(LAST_PAGE_KEY, key)
+  } catch (e) {
+    logErr('SettingsModal:rememberPage', e)
+  }
+}
 
 function selectMenu(key: string) {
   activePage.value = resolvePage(key)
@@ -231,6 +256,7 @@ function selectMenu(key: string) {
   activeTab.value = ''
   // 选了就走：过滤条件留着，从设置页返回根菜单时反而要找半天为什么少了一半
   settingsQuery.value = ''
+  if (activePage.value) rememberPage(activePage.value)
 }
 
 function close() {
@@ -1043,6 +1069,11 @@ watch(() => props.visible, async (val) => {
       if (props.initialPage) {
         // 兼容旧入口：'sync' / 'snapshot' / 'data' / 'storage' … 经 PAGE_ALIASES 落到当前页
         applyInitialPage(props.initialPage)
+      } else {
+        // 没有深链：回到上次停留的页；首次使用（没记录 / 记录已失效）落第一页。
+        // 落第一页而不是留空，是因为右侧一大片空白加一句「选择左侧菜单项」，
+        // 等于让用户先做一次无用选择。第一页取自菜单顺序，不写死 key。
+        selectMenu(readLastPage() || menuItems.value[0]?.key || 'preferences')
       }
   }
 }, { immediate: false })
@@ -1193,7 +1224,7 @@ async function toggleAutoStart() {
         <div class="settings-sidebar">
           <div class="settings-sidebar-header">
             <span class="sidebar-header-title">{{ t('settings') }}</span>
-            <button class="close-btn" @click="close">
+            <button class="close-btn" :title="t('settingsCloseEsc')" @click="close">
               <X :size="18" />
             </button>
           </div>
@@ -1228,7 +1259,8 @@ async function toggleAutoStart() {
                   <span class="menu-row-label">{{ item.label }}</span>
                   <span class="menu-row-desc">{{ item.desc }}</span>
                 </div>
-                <ChevronRight :size="14" class="menu-row-arrow" />
+                <!-- 不加右箭头：点左侧只在右边换内容，没有第二级，箭头会被读成「还要再点一次」。
+                     当前位置由淡底 + 左缘竖条表示（见 settings.css 的 .menu-row.active）。 -->
               </button>
             </template>
 
@@ -1257,7 +1289,6 @@ async function toggleAutoStart() {
                   :class="`tone-${item.badgeTone}`"
                   :title="t('badgeNewCrash', { n: item.badge })"
                 >{{ item.badge > 99 ? '99+' : item.badge }}</span>
-                <ChevronRight :size="14" class="menu-row-arrow" />
               </button>
             </div>
           </div>
@@ -1685,7 +1716,7 @@ async function toggleAutoStart() {
           <!-- 空状态：无 activePage（或落到未知路由）时回落到统一的「选菜单」提示，
                不再显示 comingSoon 那种没有下一步的空话占位 -->
           <div v-else class="content-page content-empty">
-            <p class="empty-icon"><Settings :size="40" :stroke-width="1.5" /></p>
+            <p class="empty-icon"><Settings :size="20" :stroke-width="1.5" /></p>
             <p class="empty-text">{{ t('selectMenuHint') }}</p>
           </div>
         </div>
@@ -1745,7 +1776,7 @@ async function toggleAutoStart() {
 }
 .skip-versions {
   font-size: var(--text-sm);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   overflow-wrap: anywhere;
 }
 

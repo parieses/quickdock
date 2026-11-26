@@ -759,7 +759,7 @@ onBeforeUnmount(() => {
   position: absolute;
   right: var(--space-3);
   bottom: var(--space-3);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   font-size: var(--text-xs);
   z-index: 2;
   pointer-events: none;
@@ -831,8 +831,8 @@ onBeforeUnmount(() => {
   font-weight: 600;
   font-size: var(--text-xs);
 }
-.qd-graph-side-n { color: var(--color-text-disabled); }
-.qd-graph-side-empty { padding: var(--space-3) 0; color: var(--color-text-disabled); font-size: var(--text-xs); }
+.qd-graph-side-n { color: var(--color-text-muted); }
+.qd-graph-side-empty { padding: var(--space-3) 0; color: var(--color-text-muted); font-size: var(--text-xs); }
 .qd-graph-side-row {
   display: flex;
   align-items: center;
@@ -852,7 +852,7 @@ onBeforeUnmount(() => {
   color: var(--color-text-primary);
   font-size: var(--text-xs);
 }
-.qd-graph-side-kind { color: var(--color-text-disabled); font-size: var(--text-2xs); flex-shrink: 0; }
+.qd-graph-side-kind { color: var(--color-text-muted); font-size: var(--text-2xs); flex-shrink: 0; }
 .qd-graph-side-open {
   flex-shrink: 0;
   padding: 0 var(--space-2);

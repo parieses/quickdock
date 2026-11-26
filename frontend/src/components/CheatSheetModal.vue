@@ -206,7 +206,7 @@ function goHotkeySettings() {
 .cs-head-icon { color: var(--color-accent); flex-shrink: 0; margin-top: var(--space-1); }
 .cs-head-text { flex: 1; min-width: 0; }
 .cs-title { margin: 0; font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
-.cs-desc { margin: 3px 0 0; font-size: var(--text-xs); color: var(--color-text-disabled); line-height: 1.5; }
+.cs-desc { margin: 3px 0 0; font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.5; }
 .cs-icon-btn {
   flex-shrink: 0;
   display: inline-flex;
@@ -216,7 +216,7 @@ function goHotkeySettings() {
   height: 26px;
   border: none;
   background: transparent;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast);

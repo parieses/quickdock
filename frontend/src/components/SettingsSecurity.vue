@@ -10,7 +10,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Check, Copy, Lock, ShieldCheck } from '@lucide/vue'
 import {
-  LockStatus, LockNow,
+  LockStatus, LockNow, SetAutoLock,
   SetStartupPassword, ChangeStartupPassword, RemoveStartupPassword,
 } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
@@ -21,6 +21,9 @@ const props = defineProps<{ visible: boolean }>()
 const { t } = useI18n()
 
 const hasPassword = ref(false)
+/** 空闲自动锁定分钟数；0 = 关闭。计时在后端，这里只负责展示与设置。 */
+const autoLockMin = ref(0)
+const autoLockBusy = ref(false)
 // 读取状态失败必须与「确实没设密码」区分开：否则已有密码的机器会显示「未启用」，
 // 用户点「设置密码」等于把原密码覆盖掉（后端 set 是直接覆盖，不校验旧密码）。
 const loadFailed = ref(false)
@@ -44,8 +47,9 @@ const submitLabel = computed(() => {
 async function load() {
   loading.value = true
   try {
-    const st = unwrap<{ hasPassword?: boolean }>(await LockStatus())
+    const st = unwrap<{ hasPassword?: boolean; autoLockMinutes?: number }>(await LockStatus())
     hasPassword.value = !!st?.hasPassword
+    autoLockMin.value = st?.autoLockMinutes ?? 0
     loadFailed.value = false
   } catch (e) {
     logErr('SettingsSecurity.load', e)
@@ -132,6 +136,24 @@ async function lockNow() {
   }
 }
 
+/** 改自动锁定时长。后端立即生效，前端用返回的状态校准，避免显示与实际不一致。 */
+async function changeAutoLock(e: Event) {
+  if (autoLockBusy.value) return
+  const next = Number((e.target as HTMLSelectElement).value) || 0
+  const prev = autoLockMin.value
+  autoLockBusy.value = true
+  try {
+    const st = unwrap<{ autoLockMinutes?: number }>(await SetAutoLock(next))
+    autoLockMin.value = st?.autoLockMinutes ?? next
+    setMsg(t('securityAutoLockSaved'), true)
+  } catch (err) {
+    autoLockMin.value = prev
+    setMsg(getErrorMessage(err), false)
+  } finally {
+    autoLockBusy.value = false
+  }
+}
+
 async function copyRecovery() {
   try {
     await navigator.clipboard.writeText(recoveryCode.value)
@@ -191,6 +213,26 @@ function dismissRecovery() {
             <Lock :size="13" />{{ t('securityLockNow') }}
           </button>
         </template>
+      </div>
+    </div>
+
+    <!-- 离开自动锁定：密码库最需要的一道闸。计时在后端（系统空闲时长），
+         关闭窗口/切到后台都不会暂停。 -->
+    <div v-if="!loading && !loadFailed" class="setting-row">
+      <span class="setting-label">{{ t('securityAutoLock') }}</span>
+      <div class="setting-control">
+        <select
+          class="field-input sec-autolock"
+          :value="autoLockMin"
+          :disabled="autoLockBusy"
+          @change="changeAutoLock"
+        >
+          <option :value="0">{{ t('securityAutoLockOff') }}</option>
+          <option v-for="m in [5, 10, 15, 30, 60]" :key="m" :value="m">
+            {{ t('securityAutoLockMin', { n: m }) }}
+          </option>
+        </select>
+        <span class="sec-hint">{{ t('securityAutoLockDesc') }}</span>
       </div>
     </div>
 
@@ -285,6 +327,18 @@ function dismissRecovery() {
   display: flex;
   gap: var(--space-3);
   margin-top: var(--space-2);
+}
+
+.sec-autolock {
+  width: 120px;
+  flex-shrink: 0;
+}
+
+.sec-hint {
+  min-width: 0;
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--color-text-muted);
 }
 
 .sec-msg {

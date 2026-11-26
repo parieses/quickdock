@@ -617,7 +617,7 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 .ai-panel-empty ul {
   margin: 0;
   padding-left: var(--space-6);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 /* 示例问题：做成链接质感的按钮而不是又一个实心块——
@@ -640,7 +640,7 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
   margin: var(--space-4) 0 0;
   padding-top: var(--space-4);
   border-top: 1px solid var(--color-border);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 .ai-panel-err {
@@ -822,7 +822,7 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 .ai-panel-meta {
   margin: 0;
   font-size: var(--text-xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 /* 结果尾部操作条：与 cmd-actions 同一套轻量语言（无边框、弱化色、hover 浮背景） */

@@ -190,7 +190,7 @@ function onDragStart(e: DragEvent) {
 .tn-row.drop-after { box-shadow: inset 0 -2px 0 var(--color-accent); }
 .tn-row.tn-folder { font-weight: 600; }
 
-.tn-caret { border: none; background: none; color: var(--color-text-disabled); cursor: pointer; width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.tn-caret { border: none; background: none; color: var(--color-text-muted); cursor: pointer; width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .tn-spacer { width: 14px; flex-shrink: 0; }
 /* 勾选框统一走全局 input[type='checkbox']，组件只留布局 */
 .tn-check { flex: none; margin-top: 0; }

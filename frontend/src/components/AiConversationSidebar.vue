@@ -8,7 +8,7 @@
 import type { Component } from 'vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlarmClock, ChevronDown, ChevronRight, Copy, Folder, FolderOpen, Loader2, Pencil, Play, Plus, Search, Star, Terminal, Trash2, X } from '@lucide/vue'
+import { AlarmClock, ChevronDown, ChevronRight, Copy, Folder, FolderOpen, Loader2, Pencil, Play, Plus, Search, Star, Terminal, Trash2, X, Zap } from '@lucide/vue'
 import type { AIConvHit, AIConversation, AISpace } from '../types/ai'
 import AiConvRunDot from './AiConvRunDot.vue'
 
@@ -380,7 +380,7 @@ onBeforeUnmount(() => {
                所以这里的数字应该等于该任务各条回复下方统计之和。
                折算成 k/M 显示，精确值放 title。 -->
           <span v-if="renamingId !== c.id && (c.prompt_tokens > 0 || c.completion_tokens > 0)" class="ai-conv-tokens" :title="t('aiConvTokenTip', { in: c.prompt_tokens, out: c.completion_tokens })">
-            {{ fmtTokens(c.prompt_tokens + c.completion_tokens) }}
+            <Zap :size="10" class="ai-conv-tokens-ico" />{{ fmtTokens(c.prompt_tokens + c.completion_tokens) }}
           </span>
           <span v-if="c.unread" class="ai-conv-unread" :title="t('aiUnreadHint')" />
         </div>
@@ -585,10 +585,12 @@ onBeforeUnmount(() => {
   padding: var(--space-5) 10px var(--space-3);
   font-size: var(--text-xs);
   font-weight: 600;
-  color: var(--color-text-disabled);
+  /* disabled 太弱，两个分组标题在长列表里像是「不存在」；muted 仍低于条目正文，
+     但能一眼看出这是分区 */
+  color: var(--color-text-muted);
   letter-spacing: 0.4px;
 }
-.ai-group-head-space { margin-top: var(--space-2); border-top: 1px solid var(--color-border); padding-top: var(--space-5); }
+.ai-group-head-space { margin-top: var(--space-4); border-top: 1px solid var(--color-border); padding-top: var(--space-5); }
 /* 组标题可点（收起整组）：条目一多时，先收起一整组比在里面翻找更快。
    箭头与空间行同一套语义——展开是向下箭头。 */
 .ai-group-head-btn {
@@ -640,7 +642,7 @@ onBeforeUnmount(() => {
   background: none;
   border: none;
   border-radius: var(--radius-sm);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   cursor: pointer;
 }
 .ai-space-run:hover { color: var(--color-accent); background: var(--color-bg-tertiary); }
@@ -667,13 +669,13 @@ onBeforeUnmount(() => {
 .ai-space-count {
   flex-shrink: 0;
   font-size: var(--text-xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
   border-radius: var(--radius-md);
   padding: 0 var(--space-3);
 }
 .ai-conv-item.is-in-space { margin-left: 18px; padding: var(--space-3) 10px; font-size: var(--text-md); }
-.ai-space-empty { padding: var(--space-2) 10px var(--space-4) 28px; font-size: var(--text-xs); color: var(--color-text-disabled); }
+.ai-space-empty { padding: var(--space-2) 10px var(--space-4) 28px; font-size: var(--text-xs); color: var(--color-text-muted); }
 
 .ai-conv-item {
   display: flex;
@@ -712,7 +714,7 @@ onBeforeUnmount(() => {
 /* 「还有 N 条」用数字而不是一条分隔线：同一段话被追问、被复述都会重复命中，
    这个数说明「这条对话里提过好几次」，是选哪条进去的关键。 */
 .ai-msg-hit-count {
-  flex: none; font-size: var(--text-2xs); color: var(--color-text-disabled);
+  flex: none; font-size: var(--text-2xs); color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
 }
 .ai-msg-hit-snippet {
@@ -760,10 +762,16 @@ onBeforeUnmount(() => {
   outline: none;
 }
 .ai-conv-tokens {
-  font-size: var(--text-2xs); color: var(--color-text-disabled); white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--text-2xs); color: var(--color-text-muted); white-space: nowrap;
   margin-right: var(--space-2); font-variant-numeric: tabular-nums;
 }
-.ai-conv-empty { padding: var(--space-8) var(--space-5); text-align: center; color: var(--color-text-disabled); font-size: var(--text-sm); }
+/* 一枚闪电标出「这是用量，不是文件大小 / 行数」；数字用 muted 而不是 disabled：
+   它是内容（会随对话增长的用量），不是禁用态，浅色下 disabled 对白底只有 2.4:1。 */
+.ai-conv-tokens-ico { flex: none; opacity: 0.8; }
+.ai-conv-empty { padding: var(--space-8) var(--space-5); text-align: center; color: var(--color-text-muted); font-size: var(--text-sm); }
 
 /* 会话搜索：与新建按钮同宽，同一视觉层级 */
 .ai-conv-search {
@@ -773,7 +781,7 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-sm); flex-shrink: 0;
 }
 .ai-conv-search:focus-within { border-color: var(--color-border-focus-soft); }
-.ai-conv-search-icon { color: var(--color-text-disabled); flex-shrink: 0; }
+.ai-conv-search-icon { color: var(--color-text-muted); flex-shrink: 0; }
 .ai-conv-search-input {
   flex: 1; min-width: 0; border: none; outline: none; background: none;
   color: var(--color-text-primary); font-size: var(--text-xs); font-family: inherit;
@@ -781,7 +789,7 @@ onBeforeUnmount(() => {
 .ai-conv-search-input::placeholder { color: var(--color-text-disabled); }
 .ai-conv-search-clear {
   display: flex; padding: 0; border: none; background: none;
-  color: var(--color-text-disabled); cursor: pointer;
+  color: var(--color-text-muted); cursor: pointer;
 }
 .ai-conv-search-clear:hover { color: var(--color-text-primary); }
 /* 加载更多：整行按钮，不要做成小链接——点中的概率太低 */

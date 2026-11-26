@@ -897,7 +897,7 @@ watch(() => props.visible, async (v) => {
 }
 .dsh-status-path {
   font-size: var(--text-xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   word-break: break-all;
   line-height: 1.4;
 }
@@ -913,7 +913,7 @@ watch(() => props.visible, async (v) => {
   display: flex; align-items: center; justify-content: center;
   width: 18px; height: 18px; padding: 0; flex-shrink: 0;
   border: none; border-radius: var(--radius-xs); background: none;
-  color: var(--color-text-disabled); cursor: pointer;
+  color: var(--color-text-muted); cursor: pointer;
 }
 .dsh-url-copy:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 
@@ -948,7 +948,7 @@ watch(() => props.visible, async (v) => {
   align-items: center;
   gap: var(--space-2);
   font-size: var(--text-sm);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 .dsh-badge.ok {
   color: var(--color-accent);
@@ -1232,7 +1232,7 @@ watch(() => props.visible, async (v) => {
 }
 .dsh-log-line::before {
   content: '› ';
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 .dsh-log-line.error {
   color: var(--color-danger);

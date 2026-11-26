@@ -96,14 +96,18 @@ type BranchInfo struct {
 
 // Commit 一条提交历史。
 type Commit struct {
-	Hash    string `json:"hash"`
-	Short   string `json:"short"`
-	Author  string `json:"author"`
-	Email   string `json:"email"`
-	Ts      int64  `json:"ts"`
-	Subject string `json:"subject"`
-	Refs    string `json:"refs"`  // 分支/标签装饰（git 给的原始串）
-	Graph   string `json:"graph"` // 图形前缀（--graph 的第一列字符），前端用等宽字体画线
+	Hash    string   `json:"hash"`
+	Parents []string `json:"parents"` // 父提交 hash：前端排 lane 画提交图用（merge 有 2 个以上）
+	Short   string   `json:"short"`
+	Author  string   `json:"author"`
+	Email   string   `json:"email"`
+	Ts      int64    `json:"ts"`
+	Subject string   `json:"subject"`
+	Refs    string   `json:"refs"`  // 分支/标签装饰（git 给的原始串）
+	Graph   string   `json:"graph"` // --graph 的 ASCII 前缀，仅保留兼容，前端已不再渲染
+	// OnHead 该提交在当前分支（HEAD）上。列表是 --all 混排的，前端要支持
+	// 「当前分支 / 全部」切换，靠这个标记原地筛，不必回后端再查一遍。
+	OnHead bool `json:"onHead"`
 }
 
 // CommitDetail 提交详情：改了哪些文件 + 可选 diff 文本。
@@ -423,7 +427,8 @@ func (s *GitService) GitBranches(path string) *services.ApiResult {
 	return services.Ok(map[string]any{"local": local, "remote": remote, "tags": tags})
 }
 
-// GitLog 当前分支的提交历史（带 --graph，前端按等宽字体画线，贴近 SourceTree 的观感）。
+// GitLog 提交历史，一次拿全（--all，所有分支/远端/标签混排），前端用 OnHead 原地
+// 切「当前分支 / 全部」。带上每个提交的父 hash，前端据此自己排 lane 画提交图。
 func (s *GitService) GitLog(path string, limit int) *services.ApiResult {
 	bin, err := findGit()
 	if err != nil {
@@ -433,7 +438,9 @@ func (s *GitService) GitLog(path string, limit int) *services.ApiResult {
 		limit = 80
 	}
 	// %x09 是制表符：用不可见字符分隔，避免作者名里带 | 把解析搞乱。
-	out, errOut, err := run(bin, path, cmdTimeout, "log", "--graph", "--date-order",
+	// 不再带 --graph：那套 ASCII 前缀里纯连线的行没有 hash，解析时会被丢掉，
+	// 画出来只剩断线；前端改按 parents 自己连。
+	out, errOut, err := run(bin, path, cmdTimeout, "log", "--date-order",
 		"-n", strconv.Itoa(limit), commitFormat, "--all", "--no-color")
 	if err != nil {
 		// 空仓库（还没有第一次提交）不是错误，返回空列表让面板显示引导
@@ -448,12 +455,38 @@ func (s *GitService) GitLog(path string, limit int) *services.ApiResult {
 			commits = append(commits, c)
 		}
 	}
+	markOnHead(bin, path, commits, limit)
 	return services.Ok(commits)
 }
 
-// commitFormat 提交行的字段：hash / 短 hash / 作者 / 邮箱 / 时间戳 / 标题 / 装饰。
+// markOnHead 标出哪些提交在当前分支（HEAD）上。
+//
+// 列表本来就是 --all 拿的，要想「只看当前分支」有两条路：再查一次 git（前端一切换
+// 就得等一次进程），或者在这里顺手标一列。多跑一次 rev-list 是几十毫秒，比切一次
+// 转圈便宜，且窗口内当前分支的提交数一定 ≤ limit，不会漏标。
+// detached HEAD / 空仓库拿不到 HEAD 时静默跳过：前端没看到任何 true 就不筛。
+func markOnHead(bin, path string, commits []Commit, limit int) {
+	if len(commits) == 0 {
+		return
+	}
+	out, _, err := run(bin, path, cmdTimeout, "rev-list", "-n", strconv.Itoa(limit), "HEAD")
+	if err != nil {
+		return
+	}
+	onHead := make(map[string]struct{}, limit)
+	for _, h := range strings.Fields(out) {
+		onHead[h] = struct{}{}
+	}
+	for i := range commits {
+		_, commits[i].OnHead = onHead[commits[i].Hash]
+	}
+}
+
+// commitFormat 提交行的字段：hash / 父提交 / 短 hash / 作者 / 邮箱 / 时间戳 / 标题 / 装饰。
 // GitLog 与 GitFileHistory 共用，免得两处格式串改一处忘一处。
-const commitFormat = "--pretty=format:%H%x09%h%x09%an%x09%ae%x09%at%x09%s%x09%D"
+// 父提交用 %P（空格分隔）：前端据此自己排 lane 画提交图，不再依赖 --graph 的 ASCII 前缀
+// ——那套字符里纯连线的 "/" "\" 行没有 hash，解析时会被丢掉，画出来只剩断线。
+const commitFormat = "--pretty=format:%H%x09%P%x09%h%x09%an%x09%ae%x09%at%x09%s%x09%D"
 
 // parseCommitLine 解析一行提交。--graph 时行首会插 "* " / "| * " 这类前缀，
 // 且它粘在第一个字段（hash）前面；不用 --graph 时照常按 tab 切。
@@ -462,7 +495,7 @@ func parseCommitLine(line string) (Commit, bool) {
 		return Commit{}, false
 	}
 	parts := strings.Split(line, "\t")
-	if len(parts) < 7 {
+	if len(parts) < 8 {
 		return Commit{}, false
 	}
 	head := parts[0]
@@ -473,19 +506,20 @@ func parseCommitLine(line string) (Commit, bool) {
 	}
 	c := Commit{
 		Hash:    hash,
-		Short:   parts[1],
-		Author:  parts[2],
-		Email:   parts[3],
-		Subject: parts[5],
-		Refs:    parts[6],
+		Parents: strings.Fields(parts[1]),
+		Short:   parts[2],
+		Author:  parts[3],
+		Email:   parts[4],
+		Subject: parts[6],
+		Refs:    parts[7],
 		Graph:   graph,
 	}
 	// subject 本身含 tab（少见）时会被多切几段：把中间并回 subject，末段才是 refs。
-	if len(parts) > 7 {
-		c.Subject = strings.Join(parts[5:len(parts)-1], " ")
+	if len(parts) > 8 {
+		c.Subject = strings.Join(parts[6:len(parts)-1], " ")
 		c.Refs = parts[len(parts)-1]
 	}
-	if ts, e := strconv.ParseInt(parts[4], 10, 64); e == nil {
+	if ts, e := strconv.ParseInt(parts[5], 10, 64); e == nil {
 		c.Ts = ts
 	}
 	return c, true

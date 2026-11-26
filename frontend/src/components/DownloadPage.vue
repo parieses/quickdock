@@ -17,7 +17,7 @@ import {
   ClipboardPaste, Info, Folder, Clock, RotateCcw, Plus, AlertCircle,
   ChevronDown, ChevronUp, Gauge, Activity, Link, Timer,
   ArrowUp, ArrowDown, Magnet, FileArchive, Users,
-  Shield, Zap, ExternalLink, Hash, Cpu, Radio, Check, FolderInput, Save,
+  Shield, Zap, ExternalLink, Hash, Cpu, Radio, Check, FolderInput, Save, Power,
 } from '@lucide/vue'
 import {
   useDownloadTasks, formatBytes, formatSpeed, formatEta, formatTime, formatRatio,
@@ -34,6 +34,7 @@ import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { ReadText } from '../../bindings/quickdock/services/clipboard/clipboardservice'
+import { Events } from '@wailsio/runtime'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -519,6 +520,22 @@ const stats = computed(() => {
   return { speed, done, total, overall: total > 0 ? Math.min(100, (done / total) * 100) : 0 }
 })
 
+// 全局连接数：aria2 的 getGlobalStat 不给连接数，但每个任务快照带 connections，
+// 求和即可（HTTP 是多连接分段，BT 是 peer 连接，口径一致）。
+const connCount = computed(() =>
+  tasks.value.reduce((s, x) => s + (x.status === 'active' ? x.connections || 0 : 0), 0))
+
+// 页头状态灯三档：跑着（绿）/ 装了没跑（红）/ 没装（灰）。
+// 原来是 running 二态，「压根没装」和「装了没启动」共用一句「网关未运行」，
+// 与正文卡片文案直接打架。
+const engineChip = computed(() => {
+  if (status.value.running) return 'is-on'
+  return status.value.installed ? 'is-stopped' : 'is-off'
+})
+
+// 有任务才显示统计条与工具栏：全是 0 的时候它们只是噪音，空态卡才是这一刻的主体。
+const hasTasks = computed(() => tasks.value.length > 0)
+
 function sparkPoints(list: number[]): string {
   if (list.length < 2) return ''
   const max = Math.max(...list, 1)
@@ -807,6 +824,98 @@ async function pasteLinks() {
   }
 }
 
+// ===== 空态：拖入 / 快捷动作 =====
+// 拖链接（浏览器里拖 URL、拖磁力、拖纯文本）走 HTML5 通道，拿得到文本；
+// 拖 .torrent 文件拿不到真实路径（WebView2 的 File 只有文件名），
+// 只能由宿主 WindowFilesDropped 事件把路径传回来（见 main.go 的 download:files-dropped）。
+const dragOver = ref(false)
+
+function onDropDragOver(e: DragEvent) {
+  if (!status.value.running) return
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+  dragOver.value = true
+}
+
+function onDropDragLeave(e: DragEvent) {
+  // 移入子元素同样触发 dragleave：relatedTarget 还在区域内时不算离开。
+  const zone = e.currentTarget as HTMLElement | null
+  if (zone && e.relatedTarget instanceof Node && zone.contains(e.relatedTarget)) return
+  dragOver.value = false
+}
+
+function fillAddWith(uris: string[]) {
+  ctx.value = null
+  selectedId.value = ''
+  showSettings.value = false
+  showImport.value = false
+  if (uris.length > 1) {
+    addMode.value = 'batch'
+    batchText.value = uris.join('\n')
+  } else {
+    addMode.value = 'url'
+    url.value = uris[0]
+  }
+  showAdd.value = true
+  void focusAddInput()
+  void refreshDisk()
+}
+
+function onDropText(e: DragEvent) {
+  dragOver.value = false
+  if (!status.value.running) return
+  const dt = e.dataTransfer
+  if (!dt) return
+  // 拖进来的是文件：路径只有宿主拿得到（WindowFilesDropped → download:files-dropped），
+  // 这里什么都不做，否则会先弹一次「不支持」再被宿主补一次成功，两句话打架。
+  if (dt.files.length) return
+  const raw = dt.getData('text/uri-list') || dt.getData('text/plain') || ''
+  const lines = raw
+    .split(/\r?\n/)
+    .map((x) => x.trim())
+    .filter((x) => x && !x.startsWith('#'))
+  const uris = lines.filter(isSupportedUri)
+  if (!uris.length) {
+    toast.error(t('dlDropNoUri'))
+    return
+  }
+  fillAddWith(uris)
+}
+
+/** 宿主导航回来的本地种子 / Metalink 路径：直接进新建弹框，保留目录与高级选项可改。 */
+function onHostFiles(files: string[]) {
+  const list = (files || []).filter(Boolean)
+  if (!list.length) return
+  if (!status.value.running) { toast.error(t('dlEngineNotReady')); return }
+  const p = list[0]
+  const lower = p.toLowerCase()
+  if (lower.endsWith('.torrent')) addMode.value = 'torrent'
+  else if (lower.endsWith('.metalink') || lower.endsWith('.meta4')) addMode.value = 'metalink'
+  else { toast.error(t('dlDropFileHint')); return }
+  filePath.value = p
+  if (list.length > 1) toast.success(t('dlDropPickedFirst', { name: p.split(/[\\/]/).pop() || p }))
+  ctx.value = null
+  selectedId.value = ''
+  showSettings.value = false
+  showImport.value = false
+  showAdd.value = true
+  void refreshDisk()
+}
+
+async function pasteToAdd() {
+  openAdd()
+  await nextTick()
+  await pasteLinks()
+}
+
+async function openTorrentPicker() {
+  addMode.value = 'torrent'
+  openAdd()
+  await nextTick()
+  const p = await pickFile(t('dlPickTorrent'))
+  if (p) filePath.value = p
+}
+
 // ===== 设置 =====
 async function openSettings() {
   showAdd.value = false
@@ -1091,9 +1200,19 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
+// 宿主把拖到 #dl-drop-target 上的真实路径转发过来（种子 / Metalink）。
+let offHostFiles: (() => void) | null = null
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+  offHostFiles = Events.On('download:files-dropped', (ev: { data?: string[] } | string[]) => {
+    const data = Array.isArray(ev) ? ev : ev?.data
+    if (Array.isArray(data)) onHostFiles(data)
+  })
+})
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
+  offHostFiles?.()
+  offHostFiles = null
   if (diskTimer) clearTimeout(diskTimer)
   if (detailTimer) { clearInterval(detailTimer); detailTimer = null }
 })
@@ -1107,7 +1226,7 @@ onUnmounted(() => {
         <span class="qd-page-sub">{{ t('dlSubtitle') }}</span>
       </template>
       <div class="qd-page-fill">
-        <span class="dl-engine" :class="status.running ? 'is-on' : 'is-off'">
+        <span class="dl-engine" :class="engineChip" :title="status.running ? '' : t('dlNotRunningHint')">
           <span class="dl-dot"></span>
           <span v-if="status.remote" class="dl-badge" :title="status.host">{{ t('dlRemoteBadge') }}</span>
           <span v-if="!statusReady">{{ t('dlChecking') }}</span>
@@ -1119,11 +1238,11 @@ onUnmounted(() => {
       <div v-if="statusReady && status.installed" class="qd-page-actions">
         <button
           class="qd-btn qd-btn-primary" :disabled="!status.running"
-          :title="status.running ? t('dlAddTitle') : t('dlEngineNotReady')" @click="openAdd"
+          :title="status.running ? t('dlAddTitle') : t('dlStartEngineHint')" @click="openAdd"
         ><Plus :size="14" />{{ t('dlAddTitle') }}</button>
         <button
           class="qd-btn qd-btn-ghost" :disabled="!status.running"
-          :title="status.running ? t('dlImportTitle') : t('dlEngineNotReady')" @click="openImport"
+          :title="status.running ? t('dlImportTitle') : t('dlStartEngineHint')" @click="openImport"
         ><FolderInput :size="14" />{{ t('dlImportTitle') }}</button>
         <span class="qd-action-sep"></span>
         <div class="qd-action-group">
@@ -1163,15 +1282,22 @@ onUnmounted(() => {
       </div>
 
       <template v-else>
-        <div v-if="!status.running" class="qd-card dl-notice">
+        <!-- 停在旧快照上时才提示：没有任务时这条横幅与空态卡说的是同一件事，
+             两个「启动引擎」按钮并排出现反而让人犹豫按哪个。 -->
+        <div v-if="!status.running && hasTasks" class="qd-card dl-notice">
           <AlertCircle :size="16" class="dl-notice-icon" />
           <div class="dl-notice-text">
-            <span>{{ t('dlEngineNotReady') }}</span>
+            <span>{{ t('dlInstalledOff') }}</span>
             <p>{{ t('dlNotRunningHint') }}</p>
           </div>
+          <span class="dl-grow"></span>
+          <button class="qd-btn qd-btn-primary qd-btn-sm" :disabled="busy" @click="enable">
+            <Power :size="14" />{{ busy ? t('dlEnabling') : t('dlStartNow') }}
+          </button>
         </div>
 
-        <div class="qd-card dl-stats">
+        <!-- 统计条只在真的在跑且有任务时出现：全 0 的一排数字遮住空态引导，纯噪音 -->
+        <div v-if="hasTasks && status.running" class="qd-card dl-stats">
           <div class="dl-stat is-speed">
             <span class="dl-stat-label"><Activity :size="14" />{{ t('dlStatSpeed') }}</span>
             <strong class="dl-stat-value">{{ formatSpeed(stats.speed) }}</strong>
@@ -1179,6 +1305,10 @@ onUnmounted(() => {
           <div class="dl-stat is-up">
             <span class="dl-stat-label"><ArrowUp :size="14" />{{ t('dlStatUpload') }}</span>
             <strong class="dl-stat-value">{{ formatSpeed(global.uploadSpeed) }}</strong>
+          </div>
+          <div class="dl-stat">
+            <span class="dl-stat-label"><Link :size="14" />{{ t('dlStatConn') }}</span>
+            <strong class="dl-stat-value">{{ connCount }}</strong>
           </div>
           <div class="dl-stat"><span class="dl-stat-label">{{ t('dlStatusActive') }}</span><strong class="dl-stat-value">{{ counts.active }}</strong></div>
           <div class="dl-stat"><span class="dl-stat-label">{{ t('dlStatusWaiting') }}</span><strong class="dl-stat-value">{{ counts.waiting }}</strong></div>
@@ -1203,9 +1333,11 @@ onUnmounted(() => {
 
         <div class="dl-workspace">
           <div class="dl-main">
-            <QdTabs v-model="filter" :tabs="filterTabs" variant="chip" />
+            <!-- 一条任务都没有时，筛选计数全是 0、搜索/排序/批量动作全是死按钮：
+                 整条工具栏收起，把空间让给下面的空态引导。 -->
+            <QdTabs v-if="hasTasks" v-model="filter" :tabs="filterTabs" variant="chip" />
 
-            <div class="dl-toolbar">
+            <div v-if="hasTasks" class="dl-toolbar">
               <label class="dl-check-all">
                 <input ref="selectAllEl" type="checkbox" class="dl-check" :checked="allChecked" :disabled="!visible.length" @change="toggleAll" />
                 <span>{{ t('dlSelectAll') }}</span>
@@ -1228,28 +1360,72 @@ onUnmounted(() => {
               </button>
               <span class="dl-grow"></span>
               <span class="dl-count">{{ t('dlTaskCount', { count: visible.length }) }}</span>
-              <button class="qd-btn qd-btn-sm" @click="doPauseAll"><Pause :size="14" />{{ t('dlPauseAll') }}</button>
-              <button class="qd-btn qd-btn-sm" @click="doResumeAll"><Play :size="14" />{{ t('dlResumeAll') }}</button>
-              <button class="qd-btn qd-btn-sm" @click="clearFinished"><Trash2 :size="14" />{{ t('dlPurgeResults') }}</button>
+              <!-- 引擎没跑时暂停/继续一律禁用：列表是上一次的快照（顶部已有提示条），
+                   按钮仍可点只会让用户拿到一条 aria2 RPC 报错。下载器这一屏所有
+                   「要引擎才生效」的按钮都走同一个 :disabled 判定。 -->
+              <button class="qd-btn qd-btn-sm" :disabled="!status.running" :title="status.running ? t('dlPauseAll') : t('dlNotRunningHint')" @click="doPauseAll"><Pause :size="14" />{{ t('dlPauseAll') }}</button>
+              <button class="qd-btn qd-btn-sm" :disabled="!status.running" :title="status.running ? t('dlResumeAll') : t('dlNotRunningHint')" @click="doResumeAll"><Play :size="14" />{{ t('dlResumeAll') }}</button>
+              <button class="qd-btn qd-btn-sm" :disabled="!status.running" :title="status.running ? '' : t('dlNotRunningHint')" @click="clearFinished"><Trash2 :size="14" />{{ t('dlPurgeResults') }}</button>
               <button class="qd-icon-btn" :title="t('dlRefreshGlobal')" @click="refreshGlobal"><RefreshCw :size="14" /></button>
             </div>
 
             <div v-if="selectedIds.size" class="dl-bulk">
               <span>{{ t('dlSelected', { count: selectedIds.size }) }}</span>
               <span class="dl-grow"></span>
-              <button class="qd-btn qd-btn-sm" @click="bulkPause"><Pause :size="14" />{{ t('dlBulkPause') }}</button>
-              <button class="qd-btn qd-btn-sm" @click="bulkResume"><Play :size="14" />{{ t('dlBulkResume') }}</button>
+              <button class="qd-btn qd-btn-sm" :disabled="!status.running" :title="status.running ? t('dlBulkPause') : t('dlNotRunningHint')" @click="bulkPause"><Pause :size="14" />{{ t('dlBulkPause') }}</button>
+              <button class="qd-btn qd-btn-sm" :disabled="!status.running" :title="status.running ? t('dlBulkResume') : t('dlNotRunningHint')" @click="bulkResume"><Play :size="14" />{{ t('dlBulkResume') }}</button>
               <button class="qd-btn qd-btn-sm qd-btn-danger" @click="bulkRemove"><Trash2 :size="14" />{{ t('dlBulkRemove') }}</button>
               <button class="qd-icon-btn" :title="t('dlClearSelection')" @click="clearSelection"><X :size="14" /></button>
             </div>
 
-            <div v-if="!visible.length" class="qd-card dl-empty">
-              <div class="dl-empty-icon"><Search :size="20" /></div>
-              <p>{{ tasks.length ? t('dlEmptyFiltered') : t('dlEmpty') }}</p>
-              <span>{{ tasks.length ? t('dlEmptyFilteredHint') : t('dlEmptyHint') }}</span>
-              <button v-if="!tasks.length && status.running" class="qd-btn qd-btn-primary qd-btn-sm" @click="openAdd">
-                <Plus :size="14" />{{ t('dlAddTitle') }}
-              </button>
+            <!-- 空态卡同时是投放区：id + data-file-drop-target 是 Wails
+                 WindowFilesDropped 的投递目标（种子 / Metalink 的真实路径只能由宿主给）。 -->
+            <div
+              v-if="!visible.length"
+              id="dl-drop-target" data-file-drop-target class="qd-card dl-empty dl-drop"
+              :class="{ 'is-drop': !tasks.length && status.running, 'is-over': dragOver }"
+              @dragover="onDropDragOver" @dragenter="onDropDragOver"
+              @dragleave="onDropDragLeave" @drop.prevent="onDropText"
+            >
+              <!-- ① 有任务，只是被筛选/搜索滤掉了 -->
+              <template v-if="tasks.length">
+                <div class="dl-empty-icon"><Search :size="20" /></div>
+                <p>{{ t('dlEmptyFiltered') }}</p>
+                <span>{{ t('dlEmptyFilteredHint') }}</span>
+              </template>
+
+              <!-- ② 引擎没跑：先启动。这时候教用户「点新建下载」是指向一个按不了的按钮 -->
+              <template v-else-if="!status.running">
+                <div class="dl-empty-icon is-off"><Power :size="20" /></div>
+                <p>{{ t('dlEmptyOff') }}</p>
+                <span>{{ t('dlEmptyOffHint') }}</span>
+                <button class="qd-btn qd-btn-primary qd-btn-sm" :disabled="busy" @click="enable">
+                  <Power :size="14" />{{ busy ? t('dlEnabling') : t('dlStartEngine') }}
+                </button>
+              </template>
+
+              <!-- ③ 在跑但一条任务都没有：拖拽引导 + 两个开箱即用的入口 -->
+              <template v-else>
+                <svg class="dl-art" viewBox="0 0 96 96" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="dl-art-grad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stop-color="var(--color-accent)" stop-opacity="1" />
+                      <stop offset="100%" stop-color="var(--color-accent)" stop-opacity=".45" />
+                    </linearGradient>
+                  </defs>
+                  <circle cx="48" cy="44" r="34" class="dl-art-halo" />
+                  <path d="M48 20v30" class="dl-art-arrow" stroke="url(#dl-art-grad)" />
+                  <path d="M37 42l11 11 11-11" class="dl-art-arrow" stroke="url(#dl-art-grad)" />
+                  <path d="M26 62v6a6 6 0 0 0 6 6h32a6 6 0 0 0 6-6v-6" class="dl-art-tray" />
+                </svg>
+                <p class="dl-drop-title">{{ t('dlEmptyDropTitle') }}</p>
+                <span>{{ t('dlEmptyHint') }}</span>
+                <div class="dl-empty-acts">
+                  <button class="dl-pill" @click="pasteToAdd"><ClipboardPaste :size="13" />{{ t('dlPaste') }}</button>
+                  <button class="dl-pill" @click="openTorrentPicker"><FileArchive :size="13" />{{ t('dlPickTorrent') }}</button>
+                  <button class="dl-pill is-primary" @click="openAdd"><Plus :size="13" />{{ t('dlAddTitle') }}</button>
+                </div>
+              </template>
             </div>
 
             <div v-else class="dl-list">
@@ -1279,14 +1455,14 @@ onUnmounted(() => {
                   <span><Clock :size="14" />{{ formatTime(task.createdAt) }}</span>
                   <span v-if="task.error" class="dl-err-text">{{ task.error }}</span>
                   <span class="dl-grow"></span>
-                  <button v-if="task.status === 'active' || task.status === 'waiting'" class="qd-btn qd-btn-sm" @click.stop="pause(task.gid)">{{ t('dlPause') }}</button>
-                  <button v-if="task.status === 'paused'" class="qd-btn qd-btn-sm" @click.stop="resume(task.gid)">{{ t('dlResume') }}</button>
+                  <button v-if="task.status === 'active' || task.status === 'waiting'" class="qd-btn qd-btn-sm" :disabled="!status.running" :title="status.running ? t('dlPause') : t('dlNotRunningHint')" @click.stop="pause(task.gid)">{{ t('dlPause') }}</button>
+                  <button v-if="task.status === 'paused'" class="qd-btn qd-btn-sm" :disabled="!status.running" :title="status.running ? t('dlResume') : t('dlNotRunningHint')" @click.stop="resume(task.gid)">{{ t('dlResume') }}</button>
                   <template v-if="!task.stale">
-                    <button class="qd-icon-btn" :title="t('dlMoveUp')" @click.stop="moveTask(task, -1)"><ArrowUp :size="14" /></button>
-                    <button class="qd-icon-btn" :title="t('dlMoveDown')" @click.stop="moveTask(task, 1)"><ArrowDown :size="14" /></button>
+                    <button class="qd-icon-btn" :disabled="!status.running" :title="status.running ? t('dlMoveUp') : t('dlNotRunningHint')" @click.stop="moveTask(task, -1)"><ArrowUp :size="14" /></button>
+                    <button class="qd-icon-btn" :disabled="!status.running" :title="status.running ? t('dlMoveDown') : t('dlNotRunningHint')" @click.stop="moveTask(task, 1)"><ArrowDown :size="14" /></button>
                   </template>
                   <button class="qd-icon-btn" :title="t('dlOpenFolder')" @click.stop="openFolder(task)"><Folder :size="14" /></button>
-                  <button v-if="task.status === 'error' && !task.stale" class="qd-btn qd-btn-sm" @click.stop="retryTask(task)"><RotateCcw :size="14" />{{ t('dlRetry') }}</button>
+                  <button v-if="task.status === 'error' && !task.stale" class="qd-btn qd-btn-sm" :disabled="!status.running" :title="status.running ? t('dlRetry') : t('dlNotRunningHint')" @click.stop="retryTask(task)"><RotateCcw :size="14" />{{ t('dlRetry') }}</button>
                   <button class="qd-btn qd-btn-sm qd-btn-danger" @click.stop="confirmRemove(task)">{{ task.stale ? t('dlForgetRecord') : t('dlRemove') }}</button>
                   <button class="qd-icon-btn" :title="t('dlDetail')" @click.stop="selectedId = task.gid"><Info :size="14" /></button>
                 </div>
@@ -1306,13 +1482,13 @@ onUnmounted(() => {
       <button class="dl-ctx-item" @click="ctxSaveAs"><Save :size="14" />{{ t('saveAsTitle') }}</button>
       <button v-if="ctxTask?.infoHash" class="dl-ctx-item" @click="ctxCopyHash"><Hash :size="14" />{{ t('dlCopyInfoHash') }}</button>
       <div class="dl-ctx-sep"></div>
-      <button v-if="!ctxTask?.stale && (ctxTask?.status === 'active' || ctxTask?.status === 'waiting')" class="dl-ctx-item" @click="ctxPause(false)"><Pause :size="14" />{{ t('dlPause') }}</button>
-      <button v-if="!ctxTask?.stale && ctxTask?.status === 'active'" class="dl-ctx-item" @click="ctxPause(true)"><Shield :size="14" />{{ t('dlForcePause') }}</button>
-      <button v-if="!ctxTask?.stale && ctxTask?.status === 'paused'" class="dl-ctx-item" @click="ctxResume"><Play :size="14" />{{ t('dlResume') }}</button>
-      <button v-if="!ctxTask?.stale && ctxTask?.status === 'error'" class="dl-ctx-item" @click="ctxRetry"><RotateCcw :size="14" />{{ t('dlRetry') }}</button>
+      <button v-if="!ctxTask?.stale && (ctxTask?.status === 'active' || ctxTask?.status === 'waiting')" class="dl-ctx-item" :disabled="!status.running" :title="status.running ? '' : t('dlNotRunningHint')" @click="ctxPause(false)"><Pause :size="14" />{{ t('dlPause') }}</button>
+      <button v-if="!ctxTask?.stale && ctxTask?.status === 'active'" class="dl-ctx-item" :disabled="!status.running" :title="status.running ? '' : t('dlNotRunningHint')" @click="ctxPause(true)"><Shield :size="14" />{{ t('dlForcePause') }}</button>
+      <button v-if="!ctxTask?.stale && ctxTask?.status === 'paused'" class="dl-ctx-item" :disabled="!status.running" :title="status.running ? '' : t('dlNotRunningHint')" @click="ctxResume"><Play :size="14" />{{ t('dlResume') }}</button>
+      <button v-if="!ctxTask?.stale && ctxTask?.status === 'error'" class="dl-ctx-item" :disabled="!status.running" :title="status.running ? '' : t('dlNotRunningHint')" @click="ctxRetry"><RotateCcw :size="14" />{{ t('dlRetry') }}</button>
       <template v-if="!ctxTask?.stale">
-        <button class="dl-ctx-item" @click="ctxMove(-1)"><ArrowUp :size="14" />{{ t('dlMoveUp') }}</button>
-        <button class="dl-ctx-item" @click="ctxMove(1)"><ArrowDown :size="14" />{{ t('dlMoveDown') }}</button>
+        <button class="dl-ctx-item" :disabled="!status.running" :title="status.running ? '' : t('dlNotRunningHint')" @click="ctxMove(-1)"><ArrowUp :size="14" />{{ t('dlMoveUp') }}</button>
+        <button class="dl-ctx-item" :disabled="!status.running" :title="status.running ? '' : t('dlNotRunningHint')" @click="ctxMove(1)"><ArrowDown :size="14" />{{ t('dlMoveDown') }}</button>
       </template>
       <div class="dl-ctx-sep"></div>
       <button class="dl-ctx-item is-danger" @click="ctxRemove"><Trash2 :size="14" />{{ ctxTask?.stale ? t('dlForgetRecord') : t('dlRemove') }}</button>
@@ -1949,7 +2125,14 @@ onUnmounted(() => {
   background: var(--color-bg-tertiary); font-size: var(--text-xs); color: var(--color-text-secondary);
 }
 .dl-dot { width: 8px; height: 8px; border-radius: var(--radius-full); background: var(--color-text-disabled); flex: none; }
-.dl-engine.is-on .dl-dot { background: var(--color-success); }
+.dl-engine.is-on .dl-dot { background: var(--color-success); box-shadow: 0 0 6px var(--color-success-border); }
+/* 装了没启动：红灯 + 呼吸，这是「需要你动手」的状态，不该和「未安装」同色 */
+.dl-engine.is-stopped { color: var(--color-danger); background: var(--color-danger-bg); }
+.dl-engine.is-stopped .dl-dot {
+  background: var(--color-danger); box-shadow: 0 0 6px var(--color-danger-border);
+  animation: dl-dot-pulse 2.4s ease-in-out infinite;
+}
+@keyframes dl-dot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .dl-error {
   padding: var(--space-4) var(--space-5); border-radius: var(--radius-md);
   border: 1px solid var(--color-danger-border); background: var(--color-danger-bg);
@@ -1967,17 +2150,20 @@ onUnmounted(() => {
 }
 .dl-setup h3 { margin: 0; font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
 .dl-setup p { margin: 0; max-width: 560px; font-size: var(--text-sm); line-height: 1.7; color: var(--color-text-secondary); }
-.dl-setup .dl-license { font-size: var(--text-xs); color: var(--color-text-disabled); }
+.dl-setup .dl-license { font-size: var(--text-xs); color: var(--color-text-muted); }
 .dl-setup-icon.is-loading svg { animation: dl-spin 1.2s linear infinite; }
 @keyframes dl-spin { to { transform: rotate(360deg); } }
 
 .dl-notice {
   display: flex; align-items: center; gap: var(--space-3);
-  padding: var(--space-4) var(--space-5); font-size: var(--text-sm); color: var(--color-text-secondary);
+  padding: var(--space-4) var(--space-5); font-size: var(--text-sm); color: var(--color-text-primary);
+  border-color: var(--color-warning-border);
+  background: var(--color-warning-bg);
 }
 .dl-notice-icon { color: var(--color-warning); flex: none; }
-.dl-notice-text { display: flex; flex-direction: column; gap: var(--space-1); }
-.dl-notice p { margin: 0; font-size: var(--text-xs); color: var(--color-text-muted); }
+.dl-notice-text { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+/* 副文案原本是 text-muted，深色底上几乎看不清「列表为上次快照」这个关键信息 */
+.dl-notice p { margin: 0; font-size: var(--text-xs); color: var(--color-text-secondary); }
 
 .dl-stats { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-5); padding: var(--space-4) var(--space-5); }
 .dl-stat { display: flex; flex-direction: column; gap: var(--space-1); min-width: 62px; }
@@ -2002,7 +2188,7 @@ onUnmounted(() => {
 .dl-field-block { margin-top: var(--space-4); }
 .dl-field-block .qd-input { min-height: 88px; resize: vertical; }
 .dl-card-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-5); }
-.dl-hint { margin: var(--space-3) 0 0; font-size: var(--text-xs); line-height: 1.6; color: var(--color-text-disabled); }
+.dl-hint { margin: var(--space-3) 0 0; font-size: var(--text-xs); line-height: 1.6; color: var(--color-text-muted); }
 .dl-hint.is-warn { color: var(--color-danger); }
 
 /* 新建弹框内的输入区：不占列表宽度，source / target / 高级选项分段 */
@@ -2017,7 +2203,7 @@ onUnmounted(() => {
 .dl-check-field { display: flex; align-items: center; gap: var(--space-2); align-self: end; font-size: var(--text-sm); color: var(--color-text-secondary); }
 .dl-check { flex: none; margin: 0; }
 .dl-switch-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-3); margin-top: var(--space-4); }
-.dl-license { margin: var(--space-4) 0 0; font-size: var(--text-xs); line-height: 1.6; color: var(--color-text-disabled); }
+.dl-license { margin: var(--space-4) 0 0; font-size: var(--text-xs); line-height: 1.6; color: var(--color-text-muted); }
 
 .dl-workspace { display: flex; align-items: flex-start; gap: var(--space-4); }
 .dl-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-3); }
@@ -2042,10 +2228,55 @@ onUnmounted(() => {
   font-size: var(--text-xs); color: var(--color-accent);
 }
 
-.dl-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); min-height: 180px; padding: var(--space-8); }
-.dl-empty-icon { color: var(--color-text-disabled); }
+/* 空态卡：一条任务都没有时它是整页唯一主体。虚线框 + 悬停淡光晕表示
+   「可以往这里扔东西」；有任务只是被筛掉时退回普通实线卡片，不暗示拖拽。 */
+.dl-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--space-3); min-height: 220px; padding: var(--space-8); text-align: center;
+  transition: border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
+}
+.dl-empty.is-drop {
+  min-height: 340px;
+  border: 1px dashed var(--color-border-light);
+  background: var(--color-bg-secondary);
+}
+.dl-empty.is-drop.is-over {
+  border-color: var(--color-accent-border-strong);
+  background: var(--color-accent-bg);
+  box-shadow: inset 0 0 0 1px var(--color-accent-border-strong), 0 0 26px -12px var(--color-accent);
+}
+.dl-empty-icon { color: var(--color-text-muted); }
+.dl-empty-icon.is-off { color: var(--color-danger); }
 .dl-empty p { margin: 0; font-size: var(--text-md); color: var(--color-text-secondary); }
-.dl-empty span { font-size: var(--text-xs); color: var(--color-text-disabled); }
+.dl-empty span { max-width: 40em; font-size: var(--text-xs); line-height: 1.7; color: var(--color-text-muted); }
+.dl-empty .dl-drop-title { font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
+
+/* 拖拽区插画：托盘 + 蓝色渐变箭头 + 背后一圈淡光，箭头缓慢上下浮动 */
+.dl-art { width: 88px; height: 88px; margin-bottom: var(--space-1); }
+.dl-art-halo { fill: var(--color-accent-bg); }
+.dl-art-arrow {
+  fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round;
+  animation: dl-art-bob 2.6s ease-in-out infinite;
+}
+.dl-art-tray { fill: none; stroke: var(--color-accent); stroke-width: 2.5; stroke-linecap: round; opacity: 0.75; }
+@keyframes dl-art-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(3px); } }
+
+.dl-empty-acts { display: flex; align-items: center; justify-content: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); }
+.dl-pill {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  height: 28px; padding: 0 var(--space-4); cursor: pointer;
+  font-family: inherit; font-size: var(--text-xs); color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+.dl-pill:hover { background: var(--color-bg-hover); color: var(--color-text-primary); border-color: var(--color-border-light); }
+.dl-pill.is-primary { color: var(--color-accent); border-color: var(--color-accent-border-strong); background: var(--color-accent-bg); }
+.dl-pill.is-primary:hover { background: var(--color-accent-bg); color: var(--color-accent-hover); }
+
+@media (prefers-reduced-motion: reduce) {
+  .dl-art-arrow, .dl-engine.is-stopped .dl-dot { animation: none; }
+}
 
 .dl-list { display: flex; flex-direction: column; gap: var(--space-3); }
 .dl-item { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4) var(--space-5); cursor: pointer; }
@@ -2088,7 +2319,7 @@ onUnmounted(() => {
 .dl-import-table td.is-nowrap { white-space: nowrap; }
 .dl-import-table tr.is-off { opacity: 0.55; }
 .dl-import-input { width: 100%; min-width: 0; font-size: var(--text-2xs); }
-.dl-import-note { margin-top: var(--space-1); font-size: var(--text-2xs); line-height: 1.4; color: var(--color-text-disabled); }
+.dl-import-note { margin-top: var(--space-1); font-size: var(--text-2xs); line-height: 1.4; color: var(--color-text-muted); }
 .dl-import-state {
   display: inline-block; padding: 1px var(--space-2); border-radius: var(--radius-full);
   font-size: var(--text-2xs); white-space: nowrap;
@@ -2147,6 +2378,10 @@ onUnmounted(() => {
   font-family: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer;
 }
 .dl-ctx-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+/* 引擎未运行时暂停/继续这类项留在菜单里但压灰：直接隐藏会让菜单项忽有忽无，
+   用户以为是 bug；压灰 + title 说明原因才读得懂。 */
+.dl-ctx-item:disabled { opacity: 0.45; cursor: default; }
+.dl-ctx-item:disabled:hover { background: none; color: var(--color-text-secondary); }
 .dl-ctx-item.is-danger { color: var(--color-danger); }
 .dl-ctx-sep { height: 1px; margin: var(--space-1) 0; background: var(--color-border); }
 

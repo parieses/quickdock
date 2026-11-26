@@ -210,11 +210,15 @@
   border-color: transparent;
   color: var(--color-accent-text);
 }
+/* 禁用态不再沿用 accent（半透明蓝）——那看起来仍是「可以点的蓝按钮」，
+   只是淡了一点。禁用的语义必须是「现在按不了」，所以整块退回中性表面 +
+   disabled 文字色，和 .qd-btn:disabled 保持同一档视觉。 */
 .qd-btn-primary:disabled, .btn-primary:disabled {
-  background: var(--color-accent-muted);
-  border-color: transparent;
-  color: var(--color-accent-text);
-  opacity: 0.6;
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-border);
+  color: var(--color-text-disabled);
+  box-shadow: none;
+  opacity: 1;
 }
 
 /* 无边框：用于页头里成组的心理"次要动作"，hover 才浮出底色。
@@ -307,10 +311,21 @@
 }
 .qd-input::placeholder { color: var(--color-text-disabled); }
 .qd-input:hover:not(:disabled) { border-color: var(--color-border-light); }
+/* 聚焦＝accent 边 + 一圈同色柔光（与 ui.md §3.3「focus 转 accent 边」一致）。
+   原来只换 --color-border-focus-soft（浅色 #a8b2c0、深色灰蓝），在浅色面板上
+   和白底几乎分不开，键盘用户落点全靠猜；页面里各处自己写的 accent+ring 也
+   终于和全局统一，不再一半蓝一半灰。 */
 .qd-input:focus {
-  border-color: var(--color-border-focus-soft);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-border);
 }
-.qd-input:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
+/* 禁用态比面板更「沉」一档：浅色下 bg-tertiary 和白面板只差 3%，看着像可输入；
+   深色下 bg-primary 也比 bg-tertiary 更暗，两个主题都读得出「这块不能动」。 */
+.qd-input:disabled {
+  background: var(--color-bg-primary);
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
 
 /* 带图标的输入框（搜索）：图标绝对定位，输入框留左内边距 */
 .qd-input-wrap {
@@ -322,7 +337,7 @@
 .qd-input-wrap > svg {
   position: absolute;
   left: 9px;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   pointer-events: none;
 }
 .qd-input-wrap > .qd-input { padding-left: 28px; width: 100%; }
@@ -594,7 +609,7 @@
 .ai-tool-btn {
   display: flex; align-items: center; justify-content: center;
   width: 40px; height: 32px; border: 1px solid var(--color-border);
-  background: var(--color-bg-tertiary); color: var(--color-text-muted);
+  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
   border-radius: var(--radius-md); cursor: pointer; font-family: inherit;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }

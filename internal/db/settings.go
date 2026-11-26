@@ -36,8 +36,9 @@ var internalSettingKeys = map[string]bool{
 	"cred_ext_token": true,
 	"cred_ext_port":  true,
 	// 同步 / 网盘
-	"sync_config":   true,
-	"webdav_config": true, // 旧键，仅迁移期读取
+	"sync_config":       true,
+	"webdav_config":     true, // 旧键，仅迁移期读取
+	"netdisk_external": true, // 用户自建 OpenList 的连接信息（地址 + WebDAV 账号）
 	// AI 配置（含审批规则、工具策略、记忆开关）
 	"ai_agent_engine":    true,
 	"ai_approval_grants": true,

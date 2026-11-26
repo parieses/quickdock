@@ -15,13 +15,13 @@ import { MATCHERS, matchClipboard, type MatchCtx } from './commandSearch/matcher
 import { dropEmptyGroups, injectBestMatch, sortGroups } from './commandSearch/ranking'
 import { ITEM_TYPE } from '../constants/itemTypes'
 import type {
-  CmdNote, CmdTodo, CmdScene, CmdCollection, InstalledApp, LcIndex, NavSearchItem, RecentEntry, ResultGroup, SearchResult, SystemCmd,
+  CmdNote, CmdTodo, CmdRepo, CmdSshHost, CmdScene, CmdCollection, InstalledApp, LcIndex, NavSearchItem, RecentEntry, ResultGroup, SearchResult, SystemCmd,
 } from './commandSearch/types'
 
 // 类型转发：调用方一直从本文件 import 这些类型，拆到 commandSearch/types 后
 // 在这里继续 re-export，避免改动所有引用点。
 export type {
-  CmdNote, CmdTodo, CmdScene, CmdCollection, InstalledApp, NavSearchItem, RecentEntry, ResultGroup, ResultType, SearchResult, SystemCmd,
+  CmdNote, CmdTodo, CmdRepo, CmdSshHost, CmdScene, CmdCollection, InstalledApp, NavSearchItem, RecentEntry, ResultGroup, ResultType, SearchResult, SystemCmd,
 } from './commandSearch/types'
 
 // SearchPalette 的合并载荷。后端 `Services.PaletteSearchResult` 字段名固定
@@ -47,6 +47,10 @@ export interface SearchDeps {
   // 场景 / 集合全量池：面板浮窗与主窗口不共享 Pinia，故由 usePaletteData 单独拉一份
   scenes: Ref<CmdScene[]>
   collections: Ref<CmdCollection[]>
+  // Git 仓库池：数据量小（几十个），随面板唤起一次性拉齐，之后纯本地过滤
+  repos: Ref<CmdRepo[]>
+  // SSH 主机池：同理，几十条
+  sshHosts: Ref<CmdSshHost[]>
   systemCommands: ComputedRef<SystemCmd[]>
   query: Ref<string>
   selectedIndex: Ref<number>
@@ -68,7 +72,7 @@ export interface SearchDeps {
 
 export function useCommandSearch(deps: SearchDeps) {
   const { locale, tm } = useI18n()
-  const { items, installedApps, notes, scenes, collections, systemCommands, query, selectedIndex,
+  const { items, installedApps, notes, scenes, collections, repos, sshHosts, systemCommands, query, selectedIndex,
           pluginCmdIndex, clipboardUrlSource,
           frecencyScore, frecencyTick, calcPluginScore,
           pinyinMatch, appIcon, getAppAliases, itemIcon, t, pluginIcons, envRuntimes, envStatuses, envMgmt } = deps
@@ -110,6 +114,16 @@ export function useCommandSearch(deps: SearchDeps) {
       collection: c,
       nameLC: (c.name || '').toLowerCase(),
       descLC: (c.description || '').toLowerCase(),
+    })),
+    repos: repos.value.map(r => ({
+      repo: r,
+      nameLC: (r.name || '').toLowerCase(),
+      pathLC: (r.path || '').toLowerCase(),
+    })),
+    sshHosts: sshHosts.value.map(h => ({
+      host: h,
+      nameLC: (h.name || '').toLowerCase(),
+      targetLC: `${h.user || ''}@${h.host}:${h.port}`.toLowerCase(),
     })),
   }))
 

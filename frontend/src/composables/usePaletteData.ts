@@ -20,10 +20,12 @@ import { GetRecentUsage } from '../../bindings/quickdock/services/frecency/frece
 import { ListWorkspaces } from '../../bindings/quickdock/services/workspace/workspaceservice'
 import { ListScenes } from '../../bindings/quickdock/services/scene/sceneservice'
 import { ListCollections } from '../../bindings/quickdock/services/collection/collectionservice'
+import { GitListRepos } from '../../bindings/quickdock/services/git/gitservice'
+import { ListHosts } from '../../bindings/quickdock/services/sshx/sshservice'
 import type { PluginInfo } from '../types'
 import type { CollectionItem, ToastAPI } from '../types'
 import type { PluginCmdIndex } from './usePluginIndex'
-import type { CmdNote, CmdScene, CmdCollection, InstalledApp, RecentEntry } from './useCommandSearch'
+import type { CmdNote, CmdRepo, CmdScene, CmdCollection, CmdSshHost, InstalledApp, RecentEntry } from './useCommandSearch'
 
 export interface PaletteDataDeps {
   items: Ref<CollectionItem[]>
@@ -31,6 +33,8 @@ export interface PaletteDataDeps {
   notes: Ref<CmdNote[]>
   scenes: Ref<CmdScene[]>
   collections: Ref<CmdCollection[]>
+  repos: Ref<CmdRepo[]>
+  sshHosts: Ref<CmdSshHost[]>
   installedPlugins: Ref<PluginInfo[]>
   pluginCmdIndex: Ref<PluginCmdIndex[]>
   pluginIcons: Ref<Record<string, string>>
@@ -43,7 +47,7 @@ export interface PaletteDataDeps {
 }
 
 export function usePaletteData(deps: PaletteDataDeps) {
-  const { items, installedApps, notes, scenes, collections, installedPlugins, pluginCmdIndex,
+  const { items, installedApps, notes, scenes, collections, repos, sshHosts, installedPlugins, pluginCmdIndex,
           pluginIcons, recentCache, loading, t, toast } = deps
 
   // 加载代次：面板连续唤起时，旧一轮的若干 await 不能覆盖新一轮的结果
@@ -220,6 +224,39 @@ export function usePaletteData(deps: PaletteDataDeps) {
     }
   }
 
+  // Git 仓库池：只读 KV（后端不跑 git），几十条，随面板唤起拉一次。
+  // 单独 catch 而不并进上面那条链路：仓库拉不到只意味着「搜不到仓库」，
+  // 不该让 items / 场景一起被清空。
+  async function loadRepos(gen: number) {
+    try {
+      const rows = unwrap<{ path: string; name: string }[]>(await GitListRepos()) || []
+      if (gen !== itemsLoadGen) return
+      repos.value = rows.map(r => ({ path: r.path, name: r.name || r.path }))
+    } catch (e) {
+      if (gen === itemsLoadGen) repos.value = []
+      logErr('CommandPalette:loadRepos', e)
+    }
+  }
+
+  // SSH 主机池：几十条，只取非文件夹项。
+  //
+  // 密码与私钥路径不往这里带——面板只需要「搜到并连上」，凭据留在后端；
+  // 池子里多存一份明文只是多一个泄漏面。
+  async function loadSshHosts(gen: number) {
+    try {
+      const rows = unwrap<{ id: string; name: string; host: string; port: number; user: string; isFolder?: boolean }[]>(
+        await ListHosts(),
+      ) || []
+      if (gen !== itemsLoadGen) return
+      sshHosts.value = rows.filter(h => !h.isFolder).map(h => ({
+        id: h.id, name: h.name || h.host, host: h.host, port: h.port || 22, user: h.user || '',
+      }))
+    } catch (e) {
+      if (gen === itemsLoadGen) sshHosts.value = []
+      logErr('CommandPalette:loadSshHosts', e)
+    }
+  }
+
   async function loadPaletteData() {
     loading.value = true
     const gen = ++itemsLoadGen
@@ -227,6 +264,8 @@ export function usePaletteData(deps: PaletteDataDeps) {
     await deps.loadFrecency()
     // 与 items / notes 的全量池一起拉：面板打开一次即可，后续匹配都在前端做
     await loadWorkspaceNodes(gen)
+    await loadRepos(gen)
+    await loadSshHosts(gen)
     try {
       const result = (!showHidden && exclusions.items) ? [] : (unwrap<CollectionItem[]>(await ListAllItems()) || []).filter(it => showHidden || !(it as any).noSearch)
       if (gen !== itemsLoadGen) return

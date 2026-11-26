@@ -711,7 +711,7 @@ body {
 
 .plugin-standalone-empty {
   height: 100%; display: flex; align-items: center; justify-content: center;
-  color: var(--color-text-disabled); font-size: var(--text-md);
+  color: var(--color-text-muted); font-size: var(--text-md);
 }
 
 .app-container {

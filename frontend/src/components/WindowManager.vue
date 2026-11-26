@@ -224,12 +224,12 @@ onUnmounted(() => {
 
 /* 本屏可参与排版的窗口数：让「有些格子空着」变得可解释 */
 .wm-peers {
-  font-size: var(--text-xs); color: var(--color-text-disabled); white-space: nowrap;
+  font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; flex-shrink: 0;
 }
 
 .wm-body { flex: 1; overflow-y: auto; padding: 10px var(--space-6) 14px; }
-.wm-hint { font-size: var(--text-xs); color: var(--color-text-disabled); margin: 0 0 10px; }
+.wm-hint { font-size: var(--text-xs); color: var(--color-text-muted); margin: 0 0 10px; }
 .wm-hint-warn { color: var(--color-warning); }
 .wm-hint-ok { color: var(--color-success); }
 

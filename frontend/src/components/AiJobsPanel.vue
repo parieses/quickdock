@@ -511,14 +511,14 @@ onUnmounted(stopPoll)
 .ai-job-trunc {
   margin: 3px 0 0 13px;
   font-size: var(--text-xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 .ai-jobs-empty {
   padding: 14px var(--space-4);
   text-align: center;
   font-size: var(--text-sm);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 .ai-jobs-empty.is-err {
@@ -531,6 +531,6 @@ onUnmounted(stopPoll)
   border-top: 1px solid var(--color-border);
   font-size: var(--text-xs);
   line-height: 1.45;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 </style>

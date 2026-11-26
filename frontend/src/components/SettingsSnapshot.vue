@@ -257,7 +257,7 @@ function formatDate(iso: string): string {
     <p v-if="snapshotMsg" class="result-hint">{{ snapshotMsg }}</p>
 
     <div v-if="snapshots.length === 0" class="snapshot-empty">
-      <HardDrive :size="36" class="empty-icon" />
+      <HardDrive :size="20" class="empty-icon" />
       <p class="empty-text">{{ t('emptySnapshots') }}</p>
       <p class="empty-hint">{{ t('createFirstSnapshot') }}</p>
     </div>
@@ -316,7 +316,7 @@ function formatDate(iso: string): string {
 .snapshot-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px var(--space-5); }
 .snapshot-field { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
 .snapshot-field-label { font-size: var(--text-sm); color: var(--color-text-secondary); }
-.snapshot-settings-hint { font-size: var(--text-xs); color: var(--color-text-disabled); margin: var(--space-4) 0 0; line-height: 1.5; }
+.snapshot-settings-hint { font-size: var(--text-xs); color: var(--color-text-muted); margin: var(--space-4) 0 0; line-height: 1.5; }
 .snapshot-settings-save { margin-top: 10px; }
 
 .snapshot-preview {
@@ -332,7 +332,7 @@ function formatDate(iso: string): string {
   color: var(--color-text-muted); border-radius: var(--radius-sm); cursor: pointer;
 }
 .snapshot-preview-close:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.snapshot-preview-empty { font-size: var(--text-sm); color: var(--color-text-disabled); margin: 0; }
+.snapshot-preview-empty { font-size: var(--text-sm); color: var(--color-text-muted); margin: 0; }
 .snapshot-module-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2) var(--space-6); }
 .snapshot-module-row {
   display: flex; align-items: center; justify-content: space-between;

@@ -25,6 +25,7 @@ import {
   FileText,
   Folder,
   FolderPlus,
+  HelpCircle,
   Pencil,
   PlugZap,
   Power,
@@ -43,8 +44,10 @@ import { logErr } from '../utils/logger'
 import { useToast } from '../composables/useToast'
 import { openExternal } from '../utils/externalLinks'
 import { formatBytes } from '../utils/envFormat'
+import { RUNTIME_DOCS } from '../utils/runtimeDocs'
 import ConfirmDialog from './ConfirmDialog.vue'
 import CreateDialog from './CreateDialog.vue'
+import type { CreateField } from './CreateDialog.vue'
 import {
   SelectLocalDirectory,
   SelectLocalFiles,
@@ -52,7 +55,9 @@ import {
 } from '../../bindings/quickdock/services/appservice'
 import { EnvInstall, EnvRestart, EnvStart } from '../../bindings/quickdock/services/env/environmentservice'
 import {
+  NetdiskConnectExternal,
   NetdiskDelete,
+  NetdiskDisconnectExternal,
   NetdiskDownload,
   NetdiskDownloadBatch,
   NetdiskListDir,
@@ -80,6 +85,10 @@ interface GatewayInfo {
   previewBase: string
   /** 网关已运行但一个存储都没有（或根目录列不出来）：首屏进引导页，别弹 HTTP 500。 */
   needSetup: boolean
+  /** 连的是用户自建的 OpenList（Docker / 手工安装），不是本机受管安装。 */
+  external: boolean
+  /** 外部网关的 WebDAV 地址（回填连接弹窗）。 */
+  externalEndpoint: string
 }
 
 interface Entry {
@@ -119,6 +128,9 @@ const testing = ref(false) // 测试连接独立标志：网关卡住时不影�
 // 首屏状态探测失败：此时 gw 还是 null，模板没有可用分支，必须显式给出重试
 const statusError = ref('')
 const installText = ref('')
+/** 安装进度（0-100，-1 表示总量未知）：装网关是几十 MB 的下载，只给按钮文案
+ *  用户判断不了「在动还是卡住」。 */
+const installPct = ref(-1)
 const jobs = ref<JobRow[]>([])
 
 type SortKey = 'name' | 'size' | 'time'
@@ -248,6 +260,7 @@ async function installGateway() {
   if (busy.value) return
   busy.value = 'install'
   installText.value = t('netdiskInstalling')
+  installPct.value = -1
   try {
     unwrap(await EnvInstall('openlist', '', '', ''))
   } catch (e) {
@@ -629,6 +642,101 @@ async function openAdmin() {
   }
 }
 
+/** 「管理后台」在网关没跑时是死按钮：未就绪统一改成「查看教程」，永远有下一步。 */
+function openHelp() {
+  const doc = RUNTIME_DOCS['openlist']
+  void openExternal(doc?.docs || doc?.home || 'https://doc.oplist.org/')
+}
+
+/**
+ * 页头状态胶囊。
+ *
+ * 原来只有「运行中 / 未运行」两态，于是「压根没装」也显示成「网关未运行」，
+ * 和中间卡片的「还没有安装网盘网关」直接打架。现在四态分清楚：
+ * 未安装 / 外部网关（连上/断连）/ 已装未运行 / 运行中。
+ */
+const stateChip = computed(() => {
+  const g = gw.value
+  if (!g) return { cls: 'is-off', text: '' }
+  if (g.external) {
+    return g.running
+      ? { cls: 'is-on', text: t('netdiskGatewayExternalOn', { host: hostOf(g.externalEndpoint) }) }
+      : { cls: 'is-warn', text: t('netdiskGatewayExternalOff', { host: hostOf(g.externalEndpoint) }) }
+  }
+  if (!g.installed) return { cls: 'is-off', text: t('netdiskGatewayNotInstalled') }
+  if (g.running) return { cls: 'is-on', text: t('netdiskGatewayOn', { version: g.version, port: g.port }) }
+  return { cls: 'is-off', text: t('netdiskGatewayOff') }
+})
+
+function hostOf(url: string): string {
+  if (!url) return ''
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
+
+// ---- 连接已有的 OpenList（Docker / 手工安装 / 另一台机器）----
+//
+// 用户换机器或重装 QuickDock 时，本机往往已经跑着一套网关；这时逼他再装一份
+// 既浪费磁盘也会争同一个端口。这里让他填地址与 WebDAV 账号直接接过去。
+const externalDlg = ref(false)
+const externalBusy = ref(false)
+
+const externalFields = computed<CreateField[]>(() => [
+  {
+    key: 'endpoint',
+    label: t('netdiskExternalEndpoint'),
+    type: 'text',
+    placeholder: 'http://127.0.0.1:5244/dav',
+    hint: t('netdiskExternalEndpointHint'),
+  },
+  {
+    key: 'username',
+    label: t('netdiskExternalUser'),
+    type: 'text',
+    placeholder: 'admin',
+    hint: t('netdiskExternalUserHint'),
+  },
+  {
+    key: 'password',
+    label: t('netdiskExternalPass'),
+    type: 'password',
+    placeholder: '',
+  },
+])
+
+async function connectExternal(values: Record<string, string>) {
+  if (externalBusy.value) return
+  const endpoint = (values.endpoint || '').trim()
+  if (!endpoint) return
+  externalBusy.value = true
+  try {
+    // 后端会先真连一次（Test），连不通直接报错，不会把坏配置存下来。
+    unwrap(await NetdiskConnectExternal(endpoint, (values.username || '').trim(), values.password || ''))
+    externalDlg.value = false
+    toast.success(t('netdiskExternalConnected'))
+    await refreshStatus()
+  } catch (e) {
+    logErr('NetdiskPage.connectExternal', e)
+    toast.error(getErrorMessage(e))
+  } finally {
+    externalBusy.value = false
+  }
+}
+
+async function disconnectExternal() {
+  try {
+    unwrap(await NetdiskDisconnectExternal())
+    toast.success(t('netdiskExternalDisconnected'))
+    await refreshStatus()
+  } catch (e) {
+    logErr('NetdiskPage.disconnectExternal', e)
+    toast.error(getErrorMessage(e))
+  }
+}
+
 function onDownloadProgress(payload: any) {
   const p = payload?.data ?? payload
   if (!p?.path) return
@@ -690,7 +798,8 @@ function onEnvProgress(payload: any) {
   const p = payload?.data ?? payload
   if (!p || p.runtime !== 'openlist') return
   if (p.stage === 'download' && p.total > 0) {
-    installText.value = t('netdiskInstalling') + ' ' + Math.floor((p.written * 100) / p.total) + '%'
+    installPct.value = Math.floor((p.written * 100) / p.total)
+    installText.value = t('netdiskInstalling') + ' ' + installPct.value + '%'
     return
   }
   if (p.stage === 'log' && p.message) {
@@ -698,6 +807,7 @@ function onEnvProgress(payload: any) {
     return
   }
   if (p.stage === 'done') {
+    installPct.value = -1
     installText.value = t('netdiskInstallDone')
     busy.value = ''
     // 装完自动起网关，省掉一次「装好了，然后呢」。
@@ -706,6 +816,7 @@ function onEnvProgress(payload: any) {
   }
   if (p.stage === 'error') {
     busy.value = ''
+    installPct.value = -1
     installText.value = ''
     toast.error(p.message || t('netdiskFailed'))
   }
@@ -797,22 +908,38 @@ function shortTime(s: string): string {
            和其它一级页的「标题 | 中间控件 | 右侧动作」同一套排布。 -->
       <span class="qd-page-sub qd-page-sub-inline">{{ t('netdiskSubtitle') }}</span>
       <div class="qd-page-fill">
-        <span v-if="gw" class="nd-chip" :class="gw.running ? 'is-on' : 'is-off'">
-          {{ gw.running ? t('netdiskGatewayOn', { version: gw.version, port: gw.port }) : t('netdiskGatewayOff') }}
-        </span>
+        <span v-if="stateChip.text" class="nd-chip" :class="stateChip.cls">{{ stateChip.text }}</span>
       </div>
       <div class="qd-page-actions">
         <!-- 页头按钮走功能页的 .qd-btn，不再用设置页那套 .btn.btn-secondary -->
-        <button class="qd-btn" :disabled="!gw" @click="openAdmin">
+        <!-- 网关没跑时「管理后台」点进去只有错误页：未就绪改成「查看教程」，永远有下一步 -->
+        <button v-if="ready" class="qd-btn" @click="openAdmin">
           <Settings2 :size="14" />{{ t('netdiskOpenAdmin') }}
+        </button>
+        <button v-else class="qd-btn" @click="openHelp">
+          <HelpCircle :size="14" />{{ t('netdiskHelp') }}
+        </button>
+        <!-- 外部网关的进程不在本机，连接参数才是这里该管的 -->
+        <button v-if="gw?.external" class="qd-btn" @click="externalDlg = true">
+          <PlugZap :size="14" />{{ t('netdiskExternalManage') }}
+        </button>
+        <button
+          v-if="gw?.external"
+          class="qd-btn nd-icon-only"
+          :title="t('netdiskExternalDisconnect')"
+          :aria-label="t('netdiskExternalDisconnect')"
+          @click="disconnectExternal"
+        >
+          <Link2Off :size="14" />
         </button>
         <button v-if="gw?.running" class="qd-btn" :disabled="testing" @click="testGateway">
           <PlugZap :size="14" />{{ testing ? t('netdiskTesting') : t('netdiskTest') }}
         </button>
-        <button v-if="gw?.installed" class="qd-btn" :disabled="!!busy" @click="restartGateway">
+        <button v-if="gw?.installed && !gw.external" class="qd-btn" :disabled="!!busy" @click="restartGateway">
           <Power :size="14" />{{ busy === 'restart' ? t('netdiskRestarting') : t('netdiskRestartGateway') }}
         </button>
-        <button class="qd-btn" :disabled="loading" @click="() => refreshStatus()">
+        <!-- 没跑起来时没有可刷新的数据，按钮去掉，避免点了没反应 -->
+        <button v-if="ready || needSetup" class="qd-btn" :disabled="loading" @click="() => refreshStatus()">
           <RefreshCw :size="14" />{{ t('netdiskRefresh') }}
         </button>
       </div>
@@ -820,7 +947,7 @@ function shortTime(s: string): string {
 
     <!-- 首屏状态未知：探测失败时给错误 + 重试，别让内容区一片空白 -->
     <section v-if="!gw" class="nd-empty">
-      <Cloud :size="28" class="nd-empty-icon" />
+      <span class="nd-hero"><Cloud :size="20" /></span>
       <p class="nd-empty-title">{{ statusError ? t('statusError') : t('loading') }}</p>
       <p v-if="statusError" class="nd-empty-desc">{{ statusError }}</p>
       <button v-if="statusError" class="qd-btn" @click="() => refreshStatus()">
@@ -828,30 +955,55 @@ function shortTime(s: string): string {
       </button>
     </section>
 
-    <!-- 未安装：给一键安装 -->
+    <!-- 未安装：给一键安装 + 「我已经有了」的接入入口 -->
     <section v-else-if="!gw.installed" class="nd-empty">
-      <Cloud :size="28" class="nd-empty-icon" />
-      <p class="nd-empty-title">{{ t('netdiskNotInstalled') }}</p>
-      <p class="nd-empty-desc">{{ t('netdiskNotInstalledHint') }}</p>
-      <button class="qd-btn qd-btn-primary" :disabled="busy === 'install'" @click="installGateway">
+      <span class="nd-hero"><Cloud :size="20" /></span>
+      <p class="nd-empty-title">{{ t('netdiskInstallTitle') }}</p>
+      <p class="nd-empty-desc">{{ t('netdiskInstallDesc') }}</p>
+      <button class="qd-btn qd-btn-primary nd-cta" :disabled="busy === 'install'" @click="installGateway">
         <Download :size="14" />{{ busy === 'install' ? installText || t('netdiskInstalling') : t('netdiskInstall') }}
+      </button>
+      <!-- 安装是几十 MB 的下载：只改按钮文案，用户判断不了「在动」还是「卡住」 -->
+      <div v-if="busy === 'install'" class="nd-install">
+        <div class="nd-install-bar">
+          <div
+            class="nd-install-fill"
+            :class="{ unknown: installPct < 0 }"
+            :style="{ width: installPct >= 0 ? installPct + '%' : '35%' }"
+          ></div>
+        </div>
+        <span class="nd-install-text">{{ installText }}</span>
+      </div>
+      <button class="nd-text-link" :disabled="externalBusy" @click="externalDlg = true">
+        {{ t('netdiskExternalLink') }}
       </button>
     </section>
 
-    <!-- 已安装未运行：给启动 -->
+    <!-- 已安装未运行：给启动；外部网关则给「重新连接」 -->
     <section v-else-if="!gw.running" class="nd-empty">
-      <Cloud :size="28" class="nd-empty-icon" />
-      <p class="nd-empty-title">{{ t('netdiskStopped') }}</p>
-      <p class="nd-empty-desc">{{ t('netdiskStoppedHint') }}</p>
-      <button class="qd-btn qd-btn-primary" :disabled="busy === 'start'" @click="startGateway">
-        {{ busy === 'start' ? t('netdiskStarting') : t('netdiskStart') }}
+      <span class="nd-hero" :class="{ 'is-warn': gw.external }"><Cloud :size="20" /></span>
+      <p class="nd-empty-title">{{ gw.external ? t('netdiskExternalOffTitle') : t('netdiskStopped') }}</p>
+      <p class="nd-empty-desc">{{ gw.external ? t('netdiskExternalOffDesc', { host: hostOf(gw.externalEndpoint) }) : t('netdiskStoppedHint') }}</p>
+      <div class="nd-empty-acts">
+        <button v-if="!gw.external" class="qd-btn qd-btn-primary" :disabled="busy === 'start'" @click="startGateway">
+          {{ busy === 'start' ? t('netdiskStarting') : t('netdiskStart') }}
+        </button>
+        <button v-else class="qd-btn qd-btn-primary" @click="externalDlg = true">
+          <PlugZap :size="14" />{{ t('netdiskExternalManage') }}
+        </button>
+        <button class="qd-btn" :disabled="loading" @click="() => refreshStatus()">
+          <RefreshCw :size="14" />{{ t('netdiskRetryConnect') }}
+        </button>
+      </div>
+      <button v-if="!gw.external" class="nd-text-link" :disabled="externalBusy" @click="externalDlg = true">
+        {{ t('netdiskExternalLink') }}
       </button>
     </section>
 
     <!-- 已运行但一个存储都没加（或根目录列不出来）：给「去后台添加 + 刷新」，
          首屏不再撞那条没有下一步动作的 HTTP 500。 -->
     <section v-else-if="needSetup" class="nd-empty">
-      <Cloud :size="28" class="nd-empty-icon" />
+      <span class="nd-hero"><Cloud :size="20" /></span>
       <p class="nd-empty-title">{{ t('netdiskNoStorageTitle') }}</p>
       <p class="nd-empty-desc">{{ t('netdiskNoStorageDesc') }}</p>
       <div class="nd-empty-acts">
@@ -1058,6 +1210,17 @@ function shortTime(s: string): string {
       </div>
     </div>
 
+    <!-- 连接已有的 OpenList：填地址 + WebDAV 账号。后端会先真连一次再落盘，
+         连不通直接报错，不会把坏配置留在库里。 -->
+    <CreateDialog
+      :visible="externalDlg"
+      :title="t('netdiskExternalTitle')"
+      :fields="externalFields"
+      :editValues="gw?.external ? { endpoint: gw.externalEndpoint, username: gw.username } : undefined"
+      @confirm="connectExternal"
+      @cancel="externalDlg = false"
+    />
+
     <!-- 新建文件夹 / 重命名：同一个 CreateDialog，只有一个名字字段 -->
     <CreateDialog
       :visible="showMkdir"
@@ -1120,20 +1283,96 @@ function shortTime(s: string): string {
   background: var(--color-bg-tertiary);
   border-color: transparent;
 }
+/* 外部网关连不上：既不是运行中也不是「没装」，用警告色区别于普通灰色 */
+.nd-chip.is-warn {
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+  border-color: transparent;
+}
 
+/* 整页空态：不套卡片。深色主题里一块比页面亮的浮岛 + 描边 + 投影，会像一张
+   弹窗砸在空白上；这里只有「图标 + 标题 + 一句说明 + 主动作」，靠居中和留白站稳。 */
 .nd-empty {
   margin: auto;
-  max-width: 460px;
+  max-width: 400px;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
   gap: var(--space-4);
-  padding: var(--space-9);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  padding: var(--space-6) var(--space-5);
 }
+
+/* 空态图标直接对齐 .qd-empty-icon：44px 实底方块 + inset 上沿高光。
+   别用虚线框——虚线读起来是"待补的占位槽"，显示不完整。
+   也不给发光：一圈强调色光晕配呼吸动画，在静态页面上就是"一直在闪"的噪音，
+   还会把注意力从标题和按钮上抢走。 */
+.nd-hero {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  box-shadow: inset 0 1px 0 var(--color-hairline);
+  color: var(--color-text-muted);
+}
+.nd-hero.is-warn {
+  color: var(--color-warning);
+  border-color: var(--color-warning-border);
+  background: var(--color-warning-bg);
+}
+
+/* 安装进度：几十 MB 的下载，只改按钮文字看不出「在动」还是「卡住」 */
+.nd-install {
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.nd-install-bar {
+  height: 5px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  overflow: hidden;
+}
+.nd-install-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+  transition: width 0.25s ease;
+}
+/* 总量未知（还没拿到 Content-Length）时来回滑动，表示「在动但不知道还剩多少」 */
+.nd-install-fill.unknown { animation: nd-indet 1.2s ease-in-out infinite; }
+@keyframes nd-indet {
+  0% { margin-left: -40%; }
+  100% { margin-left: 100%; }
+}
+.nd-install-text {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* 「已有 OpenList？点击连接」：次要入口，做成文字链接不抢主按钮 */
+.nd-text-link {
+  margin-top: calc(0px - var(--space-2));
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+  cursor: pointer;
+}
+.nd-text-link:hover { text-decoration: underline; }
+.nd-text-link:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
+
+.nd-cta { min-width: 180px; }
+/* 页头纯图标按钮（断开外部网关）：qd-btn 自带左右 padding，收成方形 */
+.nd-icon-only { padding: 0; width: 28px; justify-content: center; }
 
 /* 引导态里并排的两个动作：主操作 + 刷新，窄窗口允许换行 */
 .nd-empty-acts {
@@ -1142,9 +1381,6 @@ function shortTime(s: string): string {
   justify-content: center;
   gap: var(--space-3);
   flex-wrap: wrap;
-}
-.nd-empty-icon {
-  color: var(--color-text-muted);
 }
 .nd-empty-title {
   margin: 0;
@@ -1156,6 +1392,8 @@ function shortTime(s: string): string {
   font-size: var(--text-md);
   line-height: 1.7;
   color: var(--color-text-secondary);
+  /* 居中段落 + 中文长句：没有它，末行常剩两三个字单独成行 */
+  text-wrap: pretty;
 }
 
 .nd-bar {
@@ -1190,7 +1428,7 @@ function shortTime(s: string): string {
   cursor: default;
 }
 .nd-sep {
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 /* ---- 工具栏：搜索 + 新建 + 上传 + 刷新 ---- */
 .nd-tools {

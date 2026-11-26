@@ -278,7 +278,7 @@ function indentStyle(level: number): { paddingLeft: string } {
 .qd-outline-lv {
   flex: none;
   min-width: 12px;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   font-size: var(--text-2xs);
   font-variant-numeric: tabular-nums;
   text-align: center;

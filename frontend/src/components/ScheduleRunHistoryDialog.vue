@@ -198,7 +198,7 @@ function close() {
 .dlg-sub { font-size: var(--text-sm); color: var(--color-text-muted); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dlg-close {
   position: absolute; right: -6px; top: -4px; width: 28px; height: 28px;
-  border: none; background: transparent; color: var(--color-text-disabled);
+  border: none; background: transparent; color: var(--color-text-muted);
   font-size: var(--text-xl); line-height: 1; cursor: pointer; border-radius: var(--radius-sm);
 }
 .dlg-close:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
@@ -210,7 +210,7 @@ function close() {
 }
 
 .dlg-body { flex: 1; overflow-y: auto; min-height: 120px; }
-.dlg-empty { text-align: center; padding: var(--space-8) var(--space-4); color: var(--color-text-disabled); font-size: var(--text-md); }
+.dlg-empty { text-align: center; padding: var(--space-8) var(--space-4); color: var(--color-text-muted); font-size: var(--text-md); }
 
 .run-list { display: flex; flex-direction: column; gap: var(--space-3); }
 .run-row {
@@ -238,7 +238,7 @@ function close() {
   display: flex; align-items: center; justify-content: space-between;
   margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--color-border);
 }
-.dlg-retention { font-size: var(--text-xs); color: var(--color-text-disabled); }
+.dlg-retention { font-size: var(--text-xs); color: var(--color-text-muted); }
 /* 工具条与头部之间留白；导出按钮靠右 */
 .dlg-tools { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
 .dlg-export { margin-left: auto; }

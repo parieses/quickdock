@@ -335,7 +335,7 @@ async function saveAll() {
 .wm-page { width: 100%; max-width: var(--settings-max); }
 .wm-head { margin-bottom: var(--space-5); }
 .wm-title { font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); margin: 0 0 var(--space-2); }
-.wm-desc { font-size: var(--text-sm); color: var(--color-text-disabled); margin: 0; line-height: 1.5; }
+.wm-desc { font-size: var(--text-sm); color: var(--color-text-muted); margin: 0; line-height: 1.5; }
 
 .wm-card {
   background: var(--color-card-bg);
@@ -346,7 +346,7 @@ async function saveAll() {
 }
 .wm-card-head { display: flex; align-items: baseline; gap: var(--space-4); margin-bottom: var(--space-4); }
 .wm-card-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
-.wm-card-sub { font-size: var(--text-xs); color: var(--color-text-disabled); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wm-card-sub { font-size: var(--text-xs); color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 2 列紧凑网格 */
 .wm-grid {
@@ -414,7 +414,7 @@ async function saveAll() {
   justify-content: center;
   border: none;
   background: transparent;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   border-radius: var(--radius-xs);
   cursor: pointer;
   opacity: 0;
@@ -430,7 +430,7 @@ async function saveAll() {
 .wm-ratio { display: flex; align-items: center; gap: var(--space-5); }
 .wm-slider { flex: 1; accent-color: var(--color-accent); }
 .wm-ratio-val { font-size: var(--text-md); font-weight: 600; color: var(--color-accent); min-width: 44px; text-align: right; }
-.wm-hint { font-size: var(--text-xs); color: var(--color-text-disabled); margin: var(--space-4) 0 0; line-height: 1.5; }
+.wm-hint { font-size: var(--text-xs); color: var(--color-text-muted); margin: var(--space-4) 0 0; line-height: 1.5; }
 
 .wm-actions { display: flex; gap: var(--space-4); margin-top: var(--space-1); }
 .wm-msg { font-size: var(--text-sm); color: var(--color-success); margin: var(--space-4) 0 0; }

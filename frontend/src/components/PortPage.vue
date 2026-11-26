@@ -114,7 +114,7 @@ onUnmounted(() => {
         <p>{{ t('portsLoading') }}</p>
       </div>
       <div v-else-if="!filtered.length" class="port-empty">
-        <Network :size="28" class="empty-icon" />
+        <Network :size="20" class="empty-icon" />
         <p>{{ error ? t('portsLoadFail') : t('portsEmpty') }}</p>
       </div>
       <div
@@ -164,31 +164,36 @@ onUnmounted(() => {
 /* 标题字号由 .qd-page-title 统一给出（--text-lg），不再用 --text-xl 另起一档 */
 .port-title-wrap { display: flex; align-items: baseline; gap: var(--space-3); }
 .port-tools { display: flex; align-items: center; gap: var(--space-3); margin-left: auto; }
-.port-search { display: flex; align-items: center; gap: 5px; padding: 5px 9px; border-radius: var(--radius-sm); background: var(--color-bg-secondary); color: var(--color-text-disabled); min-width: 200px; }
+.port-search { display: flex; align-items: center; gap: 5px; padding: 5px 9px; border-radius: var(--radius-sm); background: var(--color-bg-secondary); color: var(--color-text-muted); min-width: 200px; }
 .port-search-input { flex: 1; border: none; outline: none; background: transparent; color: var(--color-text-primary); font-size: var(--text-md); }
 .port-btn { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); height: 28px; padding: 0 11px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--color-border); background: var(--color-bg-secondary); color: var(--color-text-primary); }
 .port-btn:disabled { opacity: 0.5; cursor: default; }
 .port-btn.is-loading .port-btn-icon { animation: port-spin 0.8s linear infinite; }
 @keyframes port-spin { to { transform: rotate(360deg); } }
 
-.port-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); padding: var(--space-9) var(--space-4); color: var(--color-text-disabled); }
+.port-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); padding: var(--space-9) var(--space-4); color: var(--color-text-muted); }
 .port-spinner { width: 26px; height: 26px; border-radius: 50%; border: 2.5px solid var(--color-border); border-top-color: var(--color-accent); animation: port-spin 0.8s linear infinite; }
 
 .port-error { margin-bottom: var(--space-4); padding: var(--space-4) var(--space-5); font-size: var(--text-sm); color: var(--color-danger); background: var(--color-danger-bg); border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); flex-shrink: 0; }
 
 .port-list { display: flex; flex-direction: column; gap: var(--space-2); }
-.port-empty { text-align: center; padding: var(--space-9) var(--space-4); color: var(--color-text-disabled); }
+.port-empty { text-align: center; padding: var(--space-9) var(--space-4); color: var(--color-text-muted); }
 /* 空状态图标：一根细线图标直接浮在深底上，容易被读成「没加载出来」。
-   给一层方底 + 细边，它才是一个完整的标识；padding 配合 content-box，
-   图标本身的尺寸不用改（各页 28/30/36/48 都成立）。 */
+   给一层方底 + 细边，它才是一个完整的标识。
+   盒子固定 44（= .qd-empty-icon），图标一律 20：早先靠 padding + content-box
+   "适配任意尺寸"，结果 28/30/36/48 各自撑成 48~68，同屏不同页的图标底托大小不一。 */
 .empty-icon {
-  padding: 10px;
-  box-sizing: content-box;
-  opacity: 1;
+  width: 44px;
+  height: 44px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 0 var(--color-hairline);
   margin-bottom: var(--space-5);
 }
 .port-row { display: flex; align-items: center; gap: var(--space-3); padding: 9px var(--space-5); background: var(--color-card-bg); border: 1px solid var(--card-border-color); border-radius: var(--radius-md); transition: background var(--transition-fast); }
@@ -200,7 +205,7 @@ onUnmounted(() => {
 .port-num { font-size: var(--text-base); font-weight: 600; color: var(--color-text-primary); font-variant-numeric: tabular-nums; min-width: 64px; }
 .port-proto { font-size: var(--text-2xs); font-weight: 600; padding: 1px var(--space-3); border-radius: var(--radius-xs); background: var(--color-bg-tertiary); color: var(--color-text-muted); min-width: 38px; text-align: center; }
 .port-proto.proto-udp { color: var(--color-warning); }
-.port-pid { font-size: var(--text-xs); color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
+.port-pid { font-size: var(--text-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .port-name { flex: 1; min-width: 0; font-size: var(--text-md); color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .port-path { flex: 1.6; min-width: 0; font-size: var(--text-sm); color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .port-kill { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); padding: var(--space-2) 9px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--color-border); background: transparent; color: var(--color-danger); transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast); }

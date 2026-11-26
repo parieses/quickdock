@@ -7,7 +7,7 @@ import QdSwitch from './QdSwitch.vue'
 import { ref, reactive, computed, onMounted, onUnmounted, watch, inject, nextTick } from 'vue'
 import { matchesTextOrPinyin } from '../utils/pinyin'
 import { useI18n } from 'vue-i18n'
-import { Inbox, AlertCircle, AlertTriangle, ChevronDown, ChevronUp, CornerUpRight, Check } from '@lucide/vue'
+import { Inbox, AlertCircle, AlertTriangle, ChevronDown, ChevronUp, CornerUpRight, Check, Copy, FolderOpen, MoreHorizontal, SlidersHorizontal, Terminal } from '@lucide/vue'
 import { Events } from '@wailsio/runtime'
 import ConfigEditor from './ConfigEditor.vue'
 import RuntimeLogView from './RuntimeLogView.vue'
@@ -575,6 +575,9 @@ interface UiState {
   fetching: boolean        // 正在拉取版本列表
   loadError: string        // 拉取失败时的错误信息（空=无错误）
   listExpanded: boolean    // 版本列表是否展开（点击 ▾ 切换）
+  // 安装区「高级选项」是否展开：镜像源 / 刷新列表 / 自定义源都收在这一层，
+  // 主行只留「版本 + 安装」，否则四个控件挤一行，窄窗直接换行成两排。
+  advOpen: boolean
   svc: Record<string, ServiceStatus>
 }
 const ui = reactive<Record<string, UiState>>({})
@@ -634,6 +637,15 @@ const selectedConflict = computed<PortConflict | null>(() => {
   return portConflicts[selectedId.value] || null
 })
 
+// 同一运行时已有多个版本的 bin 同时在用户 PATH 里：命令到底命中哪个取决于 PATH
+// 顺序，是「环境莫名其妙不对」最典型的来源。受管切换会互相注销，但手工改过 PATH
+// 或导入过外部目录就会留下重复项——这里如实提示，并把修复入口给到 PATH 面板。
+const pathDupVersions = computed(() => {
+  const cur = selected.value
+  if (!cur) return []
+  return (cur.installed || []).filter(i => i.inSystemPath)
+})
+
 // ---- 下载源选择持久化 ----
 // source / custom 原先只是组件内的临时状态：关面板或重启就回落到 activeSource，
 // 而 activeSource 是「上次成功安装用的源」，不是「用户选的源」——选了镜像的人下次
@@ -675,6 +687,16 @@ function customSourceMissing(r: RuntimeInfo): boolean {
   return s.source === 'custom' && !s.custom.trim()
 }
 
+// 安装按钮的「该按了」引导：选了版本、且这个版本还没装过时轻微呼吸一次，
+// 把视线引到主操作上。安装中/版本为空不亮，避免常驻闪动变成噪音。
+function installReady(r: RuntimeInfo): boolean {
+  const s = stateFor(r.id, r)
+  if (s.installing || !s.version.trim()) return false
+  // 自定义源没填时按钮是禁用态，再闪就是在催用户按一个按不动的按钮
+  if (customSourceMissing(r)) return false
+  return !(r.installed || []).some(i => i.version === s.version)
+}
+
 function stateFor(id: string, info: RuntimeInfo): UiState {
   if (!ui[id]) {
     const pref = readSourcePref(id)
@@ -694,6 +716,9 @@ function stateFor(id: string, info: RuntimeInfo): UiState {
       fetching: false,
       loadError: '',
       listExpanded: false,
+      // 上次选的是自定义源时直接摊开：否则输入框藏在折叠层里，按钮却是禁用态，
+      // 用户看不出「还差一个模板地址」。
+      advOpen: pref.source === 'custom',
       svc: {},
     }
   }
@@ -912,6 +937,25 @@ async function toggleEnvVar(r: RuntimeInfo, ins: Install) {
   }
 }
 
+// 全局默认版本：单运行时可能装了好几个版本，但同一时刻只有一版在 PATH 里生效。
+// 点另一行的圆点即「换默认」——后端 SetActive 会先把旧版本的 bin 从 PATH 注销，
+// 所以不会出现两个 node 同时在 PATH 里打架。已是默认时不重复写。
+const settingDefault = ref('')
+
+async function setGlobalDefault(r: RuntimeInfo, ins: Install) {
+  if (ins.inSystemPath) return
+  settingDefault.value = insKey(ins)
+  try {
+    unwrap(await EnvSetActive(r.id, ins.version))
+    toast.success(t('envDefaultSet', { v: ins.version }))
+    await load()
+  } catch (e: any) {
+    failState(r, e)
+  } finally {
+    settingDefault.value = ''
+  }
+}
+
 // PATH 面板：按版本加入/移出用户 PATH。复用上面的按版本激活/注销，不整体覆盖 PATH
 // （EnvUserEnvSetPath 会抹掉用户非 QuickDock 的条目）。非 Windows 后端返回"不支持"，
 // 这里用 toast 展示即可；成功后 pathEntries 随 load() 刷新，按钮态自动跟着变。
@@ -1090,6 +1134,14 @@ async function importExisting(r: RuntimeInfo) {
   } catch (e: any) {
     toast.error(getErrorMessage(e))
   }
+}
+
+// 复制路径：长路径在表格里必然被截断，用户又常要把它粘进终端 / IDE 的环境变量，
+// 所以每个路径旁边常驻一个复制入口，且复制的是完整原值（不看截断后的显示）。
+async function copyPath(path: string) {
+  if (!path) return
+  if (await copyToClipboard(path)) toast.success(t('copied'))
+  else toast.error(t('copyFailed'))
 }
 
 // 在文件资源管理器中打开路径（目录直接打开，文件高亮选中）。
@@ -2372,7 +2424,7 @@ const dialogCtx = reactive({
               </div>
             </div>
             <div v-else class="empty-state">
-              <div class="empty-icon"><Inbox :size="30" /></div>
+              <div class="empty-icon"><Inbox :size="20" /></div>
               <div class="empty-text">{{ t('httpNoServer') }}</div>
             </div>
           </section>
@@ -2669,6 +2721,14 @@ const dialogCtx = reactive({
             <span>{{ t('portConflict', { port: selectedConflict.port, pid: selectedConflict.pid }) }}</span>
           </div>
 
+          <!-- PATH 冲突：同一运行时多个版本的 bin 同时在 PATH 里，命令命中哪个看顺序，
+               这是「明明装了新版但终端还是旧版」的常见原因。给到 PATH 面板一键清理。 -->
+          <div v-if="pathDupVersions.length > 1" class="port-conflict-banner">
+            <span class="pc-icon"><AlertTriangle :size="14" /></span>
+            <span>{{ t('envPathDupWarn', { n: pathDupVersions.length }) }}</span>
+            <button class="link-btn env-dup-fix" @click="pathModal.open = true">{{ t('envPathDupFix') }}</button>
+          </div>
+
           <div v-if="selected.installed.length" class="ver-table">
             <div class="ver-row ver-head">
               <span class="col-ver">{{ t('version') }}</span>
@@ -2687,6 +2747,17 @@ const dialogCtx = reactive({
             >
               <div class="col-ver">
                 <div class="ver-name">
+                  <!-- 全局默认版本开关：单选语义，点哪行哪行进 PATH。已生效的那行显示实心点，
+                       既是「当前默认是哪个」的答案，也是多版本共存时的切换器。 -->
+                  <button
+                    type="button"
+                    class="def-radio"
+                    :class="{ on: ins.inSystemPath }"
+                    :disabled="ins.inSystemPath || settingDefault === insKey(ins)"
+                    :title="ins.inSystemPath ? t('envDefaultCurrent', { v: ins.version }) : t('envSetDefaultHint', { v: ins.version })"
+                    :aria-label="t('envSetDefault')"
+                    @click.stop="setGlobalDefault(selected!, ins)"
+                  ><span class="def-radio-dot"></span></button>
                   <span v-if="ins.alias" class="ver-alias">{{ ins.alias }}</span>
                   <span class="ver-ver">{{ ins.version }}</span>
                 </div>
@@ -2694,10 +2765,33 @@ const dialogCtx = reactive({
                   {{ ins.scope === 'system' ? t('scopeSystem') : t('scopePortable') }}
                 </span>
               </div>
-              <div v-key-click class="col-path clickable" :title="t('openInExplorer') + ': ' + ins.path" @click="reveal(ins.path)">{{ ins.path }}</div>
+              <!-- 路径：超长必然截断，所以显示省略号 + 悬停给完整路径，旁边常驻复制。
+                   点路径本身仍是「在资源管理器打开」，保持既有手感。 -->
+              <div class="col-path path-cell">
+                <span
+                  v-key-click
+                  class="path-text"
+                  :title="ins.path"
+                  @click="reveal(ins.path)"
+                >{{ ins.path }}</span>
+                <button
+                  type="button"
+                  class="path-copy"
+                  :title="t('copyPath')"
+                  :aria-label="t('copyPath')"
+                  @click.stop="copyPath(ins.path)"
+                ><Copy :size="12" /></button>
+              </div>
               <div class="col-note" :title="ins.note">{{ ins.note || '—' }}</div>
               <div class="col-svc">
-                <span v-if="ins.inSystemPath" class="env-badge on" :title="t('envVarSetTitle')">{{ t('envVarSet') }}</span>
+                <!-- 「已配置」可点：直接把 PATH 面板摊开，看这条到底注入了哪个 bin 目录 -->
+                <button
+                  v-if="ins.inSystemPath"
+                  type="button"
+                  class="env-badge on clickable"
+                  :title="t('envVarSetTitle') + ' ' + t('envVarViewPath')"
+                  @click.stop="pathModal.open = true"
+                >{{ t('envVarSet') }}</button>
                 <span v-else class="env-badge off" :title="t('envVarUnsetTitle')">{{ t('envVarUnset') }}</span>
                 <template v-if="selected.hasService && (ins.scope !== 'linked' || selected.id === 'php')">
                 <span
@@ -2754,8 +2848,26 @@ const dialogCtx = reactive({
                 </template>
               </div>
               <div class="col-ops">
-                <button class="op-btn menu-trigger" @click.stop="toggleMenu(insKey(ins))">
-                  {{ t('operations') }}<ChevronDown :size="12" class="caret" />
+                <!-- 高频动作浮出在行上，低频操作收进 ⋯：整列表默认安静，
+                     鼠标扫过某行才出现「环境变量 / 打开目录」，删除仍留在菜单里带红色警示。 -->
+                <button
+                  class="row-ico"
+                  :class="{ on: ins.inSystemPath }"
+                  :title="ins.inSystemPath ? t('unsetEnvVar') : t('setEnvVar')"
+                  @click.stop="toggleEnvVar(selected, ins)"
+                >
+                  <Terminal :size="13" />
+                </button>
+                <button class="row-ico" :title="t('openInExplorer')" @click.stop="reveal(ins.path)">
+                  <FolderOpen :size="13" />
+                </button>
+                <button
+                  class="row-ico menu-trigger"
+                  :class="{ on: openMenu === insKey(ins) }"
+                  :title="t('operations')"
+                  @click.stop="toggleMenu(insKey(ins))"
+                >
+                  <MoreHorizontal :size="14" />
                 </button>
                 <div v-if="openMenu === insKey(ins)" class="op-menu">
                   <button class="op-item" :class="{ on: ins.inSystemPath }" :title="t('setEnvVarHint')" @click="toggleEnvVar(selected, ins); openMenu = null">
@@ -2831,13 +2943,13 @@ const dialogCtx = reactive({
 
           <!-- 首次 EnvList 失败：给出持久的错误说明与重试入口，别让详情区一片空白 -->
           <div v-if="loadFailed" class="empty-state env-load-error">
-            <div class="empty-icon"><AlertCircle :size="30" /></div>
+            <div class="empty-icon"><AlertCircle :size="20" /></div>
             <div class="empty-text">{{ t('envLoadFailed') }}</div>
             <button class="op-btn" @click="load()">{{ t('retry') }}</button>
           </div>
 
           <div v-else-if="loadedOnce && !selected.installed.length" class="empty-state">
-            <div class="empty-icon"><Inbox :size="30" /></div>
+            <div class="empty-icon"><Inbox :size="20" /></div>
             <div class="empty-text">{{ t('noInstalledVersion') }}</div>
             <div class="empty-hint">{{ t('installHint') }}</div>
           </div>
@@ -3185,8 +3297,10 @@ const dialogCtx = reactive({
             <span class="block-title">{{ t('installNewVersion') }}</span>
           </div>
 
-          <!-- 多版本：版本输入 + 列表 + 源 + 安装 -->
-          <div v-if="!selected.singleVersion" class="install-grid">
+          <!-- 多版本：主行只留「选版本 + 安装」。镜像源 / 刷新列表 / 自定义源收进右侧
+               高级选项——四件控件平铺一行时，窄窗换行会让安装按钮掉到第二排，
+               与版本输入失去对应关系。 -->
+          <div v-if="!selected.singleVersion" class="install-main">
             <!-- 版本号输入 + 可选列表 -->
             <div class="install-input-wrap">
               <input
@@ -3229,28 +3343,65 @@ const dialogCtx = reactive({
                 </template>
               </div>
             </div>
-            <!-- 手动拉取按钮（始终可见，方便换源后重新拉取） -->
+            <!-- 安装选项紧贴版本输入框：它是「选版本」这件事的附属设置，
+                 主按钮留在最右，符合对话框的阅读终点。 -->
             <button
-              class="link-btn"
-              :disabled="s.fetching || s.installing"
-              @click="loadAvailable(selected.id)"
-              :title="s.loadError ? t('retry') : t('refreshList')"
-            >{{ s.fetching ? t('loading') : (s.loadError ? t('retry') : t('refreshList')) }}</button>
-            <select
-              v-model="stateFor(selected.id, selected).source"
-              class="env-select"
-              :disabled="stateFor(selected.id, selected).installing"
-              @change="onSourceChange(selected)"
-            >
-              <option v-for="s in selected.sources" :key="s.id" :value="s.id">{{ s.name }}</option>
-            </select>
+              type="button"
+              class="adv-toggle"
+              :class="{ on: s.advOpen, dirty: !!s.source && s.source !== (selected.sources[0]?.id || ''), warn: customSourceMissing(selected) }"
+              :title="t('envInstallAdv')"
+              :aria-expanded="s.advOpen"
+              @click="s.advOpen = !s.advOpen"
+            ><SlidersHorizontal :size="14" /></button>
             <button
               class="env-install-btn"
-              :class="{ busy: stateFor(selected.id, selected).installing }"
-              :disabled="stateFor(selected.id, selected).installing || !s.version || customSourceMissing(selected)"
+              :class="{ busy: s.installing, ready: installReady(selected) }"
+              :disabled="s.installing || !s.version || customSourceMissing(selected)"
               :title="!s.version ? t('versionRequired') : (customSourceMissing(selected) ? t('customSourceRequired') : '')"
               @click="install(selected)"
-            >{{ stateFor(selected.id, selected).installing ? t('installing') : t('install') }}</button>
+            >{{ s.installing ? t('installing') : t('install') }}</button>
+          </div>
+
+          <!-- 高级选项：镜像源 + 重新拉取 + 自定义模板 + 该运行时的镜像加速开关 -->
+          <div v-if="!selected.singleVersion && s.advOpen" class="install-adv">
+            <div class="adv-row">
+              <span class="adv-label">{{ t('envMirrorSource') }}</span>
+              <select
+                v-model="s.source"
+                class="env-select"
+                :disabled="s.installing"
+                @change="onSourceChange(selected)"
+              >
+                <option v-for="src in selected.sources" :key="src.id" :value="src.id">{{ src.name }}</option>
+              </select>
+              <!-- 换源后要重新拉清单，所以刷新和源放同一层：它们是配套动作 -->
+              <button
+                class="link-btn"
+                :disabled="s.fetching || s.installing"
+                @click="loadAvailable(selected.id)"
+                :title="s.loadError ? t('retry') : t('refreshList')"
+              >{{ s.fetching ? t('loading') : (s.loadError ? t('retry') : t('refreshList')) }}</button>
+            </div>
+            <div v-if="MIRROR_RUNTIMES.has(selected.id)" class="adv-row">
+              <span class="adv-label">{{ t('envMirrorAccel') }}</span>
+              <button
+                class="link-btn"
+                :class="{ on: runtimeMirror[selected.id]?.enabled }"
+                :disabled="mirrorBusy === selected.id"
+                :title="mirrorMenuTitle(selected.id)"
+                @click="toggleRuntimeMirror(selected)"
+              >{{ mirrorMenuLabel(selected.id) }}</button>
+            </div>
+            <div v-if="s.source === 'custom'" class="adv-row adv-row--stack">
+              <span class="adv-label">{{ t('envCustomSource') }}</span>
+              <input
+                v-model="s.custom"
+                class="env-input"
+                :placeholder="t('customSourcePlaceholder')"
+                :disabled="s.installing"
+                @change="onSourceChange(selected)"
+              />
+            </div>
           </div>
 
           <!-- 单版本：未安装 → 一键装最新；已安装 → 当前版本 + 一键更新（更新提示由 newestUpdate 统一驱动） -->
@@ -3288,15 +3439,6 @@ const dialogCtx = reactive({
             </button>
           </div>
 
-          <input
-            v-if="stateFor(selected.id, selected).source === 'custom'"
-            v-model="stateFor(selected.id, selected).custom"
-            class="env-input custom"
-            :placeholder="t('customSourcePlaceholder')"
-            :disabled="stateFor(selected.id, selected).installing"
-            @change="onSourceChange(selected)"
-          />
-
           <div v-if="stateFor(selected.id, selected).installing" class="env-progress">
             <div class="env-progress-bar">
               <div
@@ -3320,7 +3462,7 @@ const dialogCtx = reactive({
         </template>
 
         <div v-else class="empty-state">
-          <div class="empty-icon"><Inbox :size="30" /></div>
+          <div class="empty-icon"><Inbox :size="20" /></div>
           <div class="empty-text">{{ t('noInstalledVersion') }}</div>
         </div>
         </template>
@@ -3429,7 +3571,7 @@ const dialogCtx = reactive({
 .detail-title-row { display: flex; align-items: center; gap: var(--space-4); }
 .detail-name { font-size: var(--text-xl); font-weight: 600; color: var(--color-text-primary); }
 .detail-id {
-  font-size: var(--text-xs); color: var(--color-text-disabled);
+  font-size: var(--text-xs); color: var(--color-text-muted);
   background: var(--color-bg-tertiary); padding: 1px var(--space-3); border-radius: var(--radius-xs);
 }
 /* 运行时介绍：标题右边的小问号。默认跟次级文字同色，hover 才亮成强调色，
@@ -3439,7 +3581,7 @@ const dialogCtx = reactive({
   width: 16px; height: 16px; flex-shrink: 0; padding: 0; margin: 0;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: 50%; border: 1px solid var(--color-border);
-  background: transparent; color: var(--color-text-disabled);
+  background: transparent; color: var(--color-text-muted);
   font-size: var(--text-xs); font-weight: 600; line-height: 1; cursor: pointer;
   transition: color .15s ease, border-color .15s ease;
 }
@@ -3467,7 +3609,7 @@ const dialogCtx = reactive({
 .doc-pop-head { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
 .doc-pop-name { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
 .doc-pop-id {
-  font-size: var(--text-2xs); color: var(--color-text-disabled);
+  font-size: var(--text-2xs); color: var(--color-text-muted);
   background: var(--color-bg-tertiary); padding: 1px 5px; border-radius: var(--radius-xs);
 }
 .doc-pop-kind {
@@ -3481,7 +3623,7 @@ const dialogCtx = reactive({
 .doc-pop-section { margin-top: var(--space-5); }
 .doc-pop-label {
   margin-bottom: var(--space-3); font-size: var(--text-2xs); font-weight: 600;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 .doc-pop-points {
   margin: 0; padding: 0; list-style: none;
@@ -3598,10 +3740,10 @@ const dialogCtx = reactive({
 .ollama-ver-label { color: var(--color-text-muted); }
 .ollama-ver-cur { font-family: var(--font-mono); color: var(--color-text-primary); }
 .ollama-ver-new { color: var(--color-warning); }
-.ollama-ver-ok { color: var(--color-text-disabled); }
+.ollama-ver-ok { color: var(--color-text-muted); }
 .ollama-ver-refresh { margin-left: auto; }
 .ollama-run-row { grid-template-columns: 1.6fr 0.8fr 1.6fr; }
-.ollama-time { display: block; font-size: var(--text-2xs); color: var(--color-text-disabled); }
+.ollama-time { display: block; font-size: var(--text-2xs); color: var(--color-text-muted); }
 .ollama-sub-head { margin-top: var(--space-6); }
 /* 官方模型库联想下拉：输入框选模型名，候选来自 ollama.com/api/tags */
 .lib-picker { position: relative; flex: 1; }
@@ -3619,8 +3761,8 @@ const dialogCtx = reactive({
 }
 .lib-option:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
 .lib-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lib-size { flex: 0 0 auto; font-size: var(--text-xs); color: var(--color-text-disabled); }
-.lib-loading { padding: var(--space-4) 9px; font-size: var(--text-xs); color: var(--color-text-disabled); }
+.lib-size { flex: 0 0 auto; font-size: var(--text-xs); color: var(--color-text-muted); }
+.lib-loading { padding: var(--space-4) 9px; font-size: var(--text-xs); color: var(--color-text-muted); }
 /* Ollama 更新提示横幅（检测到新版时出现，用户确认才替换） */
 .update-banner {
   display: flex; align-items: center; gap: var(--space-5); margin-bottom: var(--space-5);
@@ -3646,7 +3788,7 @@ const dialogCtx = reactive({
   color: var(--color-text-primary); background: var(--color-bg-primary);
   padding: var(--space-1) 7px; border-radius: var(--radius-xs); border: 1px solid var(--color-border);
 }
-.usage-tip { font-size: var(--text-xs); color: var(--color-text-disabled); line-height: 1.6; }
+.usage-tip { font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.6; }
 .ollama-pull-row { display: flex; gap: var(--space-4); margin-bottom: 10px; }
 .ollama-pull-row .env-input { flex: 1; }
 .ollama-prog { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
@@ -3656,7 +3798,7 @@ const dialogCtx = reactive({
 .ollama-prog-fill.unknown { animation: ollama-slide 1.2s ease-in-out infinite; }
 .ollama-prog-meta { display: flex; align-items: center; gap: 10px; font-size: var(--text-xs); color: var(--color-text-secondary); }
 .ollama-prog-pct { font-variant-numeric: tabular-nums; color: var(--color-text-primary); }
-.ollama-prog-status { color: var(--color-text-disabled); }
+.ollama-prog-status { color: var(--color-text-muted); }
 @keyframes ollama-slide {
   0% { margin-left: 0; }
   50% { margin-left: 60%; }
@@ -3677,7 +3819,7 @@ const dialogCtx = reactive({
 }
 .git-row.git-head {
   background: transparent; border: none; border-left: none;
-  padding: 0 var(--space-5) var(--space-1); font-size: var(--text-xs); color: var(--color-text-disabled);
+  padding: 0 var(--space-5) var(--space-1); font-size: var(--text-xs); color: var(--color-text-muted);
   letter-spacing: 0.4px;
 }
 .git-row:not(.git-head) .g-item { font-weight: 600; color: var(--color-text-primary); }
@@ -3685,10 +3827,10 @@ const dialogCtx = reactive({
 .g-status.ok { color: var(--color-success); }
 .g-status.warn { color: var(--color-warning); }
 .g-status.fail { color: var(--color-danger); }
-.g-status.missing { color: var(--color-text-disabled); }
+.g-status.missing { color: var(--color-text-muted); }
 .g-cmd code { font-size: var(--text-xs); color: var(--color-text-secondary); background: var(--color-bg-primary); padding: var(--space-1) var(--space-3); border-radius: var(--radius-xs); }
 .g-path, .g-result {
-  font-size: var(--text-xs); color: var(--color-text-disabled);
+  font-size: var(--text-xs); color: var(--color-text-muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono);
 }
 .g-result { font-family: inherit; }
@@ -3700,20 +3842,24 @@ const dialogCtx = reactive({
 }
 
 .col-ver { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.ver-name { display: flex; align-items: baseline; gap: var(--space-3); min-width: 0; }
+/* 版本行首：默认版本圆点 + 别名 + 版本号。圆点是 14px 控件，
+   用 center 对齐比 baseline 更稳（中文别名与等宽版本号基线并不一致）。 */
+.ver-name { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
 .ver-alias { font-size: var(--text-md); font-weight: 600; color: var(--color-accent); white-space: nowrap; }
 .ver-ver { font-size: var(--text-sm); color: var(--color-text-secondary); font-family: var(--font-mono); }
 .ver-scope { font-size: var(--text-2xs); padding: 1px 7px; border-radius: var(--radius-md); width: fit-content; }
 .ver-scope.portable { background: var(--color-accent-bg); color: var(--color-accent); }
 .ver-scope.system { background: var(--color-border); color: var(--color-text-secondary); }
+/* 路径/备注是这一列的内容而不是禁用态：disabled 档在浅色下（#9aa2ae on #f6f7f9）
+   只有 ~2.4:1，长路径读起来像「不可用」。内容一律至少 muted。 */
 .col-path, .col-note {
-  font-size: var(--text-xs); color: var(--color-text-disabled);
+  font-size: var(--text-xs); color: var(--color-text-muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono);
 }
 .col-note { font-family: inherit; }
 .env-badge { font-size: var(--text-xs); padding: var(--space-1) var(--space-4); border-radius: var(--radius-md); width: fit-content; }
 .env-badge.on { background: var(--color-success-bg); color: var(--color-success); }
-.env-badge.off { background: var(--color-bg-primary); color: var(--color-text-disabled); }
+.env-badge.off { background: var(--color-bg-primary); color: var(--color-text-muted); }
 
 .col-svc { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
 .svc-usage { font-size: var(--text-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
@@ -3729,7 +3875,7 @@ const dialogCtx = reactive({
 .status-dot.ok { background: var(--color-success); }
 .status-dot.warn { background: var(--color-warning); }
 .status-dot.fail { background: var(--color-danger); }
-.status-dot.missing { background: var(--color-text-disabled); }
+.status-dot.missing { background: var(--color-text-muted); }
 .svc-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
   font-size: var(--text-xs); height: 24px; padding: 0 var(--space-4); border-radius: var(--radius-sm); border: none; cursor: pointer;
   font-family: inherit; color: var(--color-accent-text); transition: opacity var(--transition-fast);
@@ -3741,7 +3887,7 @@ const dialogCtx = reactive({
 .svc-btn.console { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .svc-btn:hover { opacity: 0.9; }
 .svc-btn:disabled { opacity: 0.55; cursor: default; }
-.svc-port { font-size: var(--text-xs); color: var(--color-text-disabled); }
+.svc-port { font-size: var(--text-xs); color: var(--color-text-muted); }
 
 .port-conflict-banner {
   display: flex;
@@ -3885,11 +4031,132 @@ const dialogCtx = reactive({
 
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); padding: 26px 0; }
 .empty-actions { margin-top: 10px; }
-.empty-icon { font-size: var(--text-3xl); color: var(--color-text-disabled); }
+/* 空态图标：44 方底 + 细边，与 .qd-empty-icon 一致；图标本身只用 20 */
+.empty-icon {
+  width: 44px;
+  height: 44px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--space-3);
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 0 var(--color-hairline);
+}
 .empty-text { font-size: var(--text-md); color: var(--color-text-muted); }
-.empty-hint { font-size: var(--text-xs); color: var(--color-text-disabled); }
+.empty-hint { font-size: var(--text-xs); color: var(--color-text-muted); }
 
 /* 安装区 */
+/* 路径单元格：文本单行截断，悬停给完整值，右侧常驻复制。
+   原先整格是纯文本节点，长路径被浏览器从中间硬切，「D:\quickdock\runtime\nod…」
+   既认不出是哪个版本，也没法把完整值取走。 */
+.path-cell {
+  display: flex; align-items: center; gap: 4px;
+  overflow: visible; white-space: normal; text-overflow: clip;
+}
+.path-text {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  cursor: pointer;
+}
+.path-text:hover { color: var(--color-accent); text-decoration: underline; }
+.path-copy {
+  flex: none; width: 20px; height: 20px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; border-radius: var(--radius-xs);
+  background: transparent; color: var(--color-text-muted); cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+}
+/* 复制图标默认隐藏：30 行 × 每行一个图标会形成一条竖线干扰读表格。
+   鼠标进入该行（或键盘聚焦到行内）才出现，功能不减、默认状态更安静。 */
+.ver-row:hover .path-copy, .path-cell:focus-within .path-copy { opacity: 1; }
+.path-copy:hover { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
+
+/* 全局默认版本圆点：radio 语义，选中=该版本的 bin 在 PATH 里 */
+.def-radio {
+  flex: none; width: 14px; height: 14px; padding: 0; margin-right: 2px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--color-border); border-radius: 50%;
+  background: transparent; cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+.def-radio:hover:not(:disabled) { border-color: var(--color-accent); }
+.def-radio:disabled { cursor: default; }
+.def-radio-dot { width: 6px; height: 6px; border-radius: 50%; background: transparent; transition: background var(--transition-fast); }
+.def-radio.on { border-color: var(--color-success); }
+.def-radio.on .def-radio-dot { background: var(--color-success); }
+
+/* 行内快捷图标：打开目录、更多。前者 hover 才出现，后者常显 */
+.row-ico {
+  width: 24px; height: 24px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; border-radius: var(--radius-sm);
+  background: transparent; color: var(--color-text-muted); cursor: pointer;
+  transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+}
+.row-ico:hover, .row-ico.on { background: var(--color-bg-primary); color: var(--color-text-primary); }
+.col-ops .row-ico:not(.menu-trigger) { opacity: 0; }
+.ver-row:hover .col-ops .row-ico:not(.menu-trigger),
+.ver-row:focus-within .col-ops .row-ico:not(.menu-trigger) { opacity: 1; }
+
+/* 安装区主行：输入框吃满，安装按钮与齿轮贴右 */
+.install-main { display: flex; align-items: center; gap: var(--space-4); }
+.install-main .install-input-wrap { flex: 1; min-width: 0; }
+.adv-toggle {
+  position: relative; flex: none; width: 32px; height: 32px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: transparent; color: var(--color-text-muted); cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+.adv-toggle:hover, .adv-toggle.on {
+  background: var(--color-bg-tertiary); color: var(--color-text-primary);
+  border-color: var(--color-border-focus-soft);
+}
+/* 折叠后也要能看出「里面动过」：换过源=蓝点，自定义源没填=黄点 */
+.adv-toggle.dirty::after, .adv-toggle.warn::after {
+  content: ''; position: absolute; top: 4px; right: 4px;
+  width: 5px; height: 5px; border-radius: 50%; background: var(--color-accent);
+}
+.adv-toggle.warn::after { background: var(--color-warning); }
+.install-adv {
+  display: flex; flex-direction: column; gap: 10px;
+  margin-top: var(--space-5); padding: 10px var(--space-5);
+  background: var(--color-bg-tertiary);
+  border: 1px dashed var(--color-border); border-radius: var(--radius-sm);
+}
+.adv-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.adv-row--stack { align-items: flex-start; }
+.adv-label { flex: none; min-width: 76px; font-size: var(--text-xs); color: var(--color-text-muted); }
+.adv-row--stack .env-input { flex: 1; min-width: 220px; }
+.install-adv .link-btn.on {
+  background: var(--color-accent-bg); color: var(--color-accent);
+  border-color: var(--color-border-focus-soft);
+}
+
+/* 安装按钮「可以按了」的引导：选了新版本才轻微呼吸，避免常驻闪动 */
+.env-install-btn.ready { animation: env-ready 2.6s ease-in-out infinite; }
+@keyframes env-ready {
+  0%, 100% { box-shadow: 0 0 0 0 var(--color-accent-bg); }
+  50% { box-shadow: 0 0 0 4px var(--color-accent-bg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .env-install-btn.ready { animation: none; box-shadow: 0 0 0 3px var(--color-accent-bg); }
+}
+
+/* 「已配置」徽标：点开 PATH 面板看注入详情 */
+.env-badge.clickable {
+  cursor: pointer; border: 1px solid transparent; font-family: inherit;
+  transition: border-color var(--transition-fast), filter var(--transition-fast);
+}
+.env-badge.clickable:hover { border-color: var(--color-success-border); filter: brightness(0.97); }
+.env-dup-fix { margin-left: auto; border-color: var(--color-warning-border); color: var(--color-warning); }
+.env-dup-fix:hover { background: transparent; border-color: var(--color-warning); }
+
 .install-grid { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
 .cur-ver { font-weight: 600; color: var(--color-text-primary); font-family: var(--font-mono); }
 .up-to-date { color: var(--color-success); font-size: var(--text-sm); font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
@@ -3935,7 +4202,7 @@ const dialogCtx = reactive({
 @keyframes env-indet { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
 .env-progress-text { display: flex; justify-content: space-between; font-size: var(--text-xs); color: var(--color-text-muted); }
 .env-cancel-install { align-self: flex-start; font-size: var(--text-xs); }
-.env-msg { font-size: var(--text-xs); color: var(--color-text-disabled); margin: 10px 0 0; word-break: break-all; user-select: text; -webkit-user-select: text; }
+.env-msg { font-size: var(--text-xs); color: var(--color-text-muted); margin: 10px 0 0; word-break: break-all; user-select: text; -webkit-user-select: text; }
 .env-msg.error { color: var(--color-danger); }
 .ftp-form .env-input { margin-bottom: var(--space-3); }
 .env-update-hint {
@@ -3990,7 +4257,7 @@ const dialogCtx = reactive({
 /* 特色操作输出弹窗：宽度略宽于普通弹窗，输出区可滚动 */
 .op-group {
   padding: var(--space-2) 10px var(--space-1); font-size: var(--text-2xs); letter-spacing: 0.04em;
-  color: var(--color-text-disabled); 
+  color: var(--color-text-muted); 
 }
 
 /* 日志工具栏只剩「自动刷新」这一个按钮（搜索/跟随由 RuntimeLogView 自带），
@@ -4007,7 +4274,7 @@ const dialogCtx = reactive({
 .ev-test { display: flex; flex-direction: column; gap: var(--space-3); }
 .ev-test-row { display: flex; gap: var(--space-4); }
 .ev-test-row .env-input { flex: 1; }
-.ev-hint { font-size: var(--text-xs); color: var(--color-text-disabled); margin: 0; }
+.ev-hint { font-size: var(--text-xs); color: var(--color-text-muted); margin: 0; }
 .ev-results {
   max-height: 220px; overflow-y: auto;
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
@@ -4021,7 +4288,7 @@ const dialogCtx = reactive({
 .ev-res:last-child { border-bottom: none; }
 .ev-res:hover { background: var(--color-bg-hover); }
 .ev-res-name { font-size: var(--text-sm); color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ev-res-dir { font-size: var(--text-2xs); font-family: var(--font-mono); color: var(--color-text-disabled); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev-res-dir { font-size: var(--text-2xs); font-family: var(--font-mono); color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* 项目版本要求检查弹窗 */
 .pc-row .env-input { flex: 1; }

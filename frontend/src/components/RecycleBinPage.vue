@@ -263,7 +263,7 @@ onMounted(load)
       <div v-else-if="loading" class="rc-empty">{{ t('loading') }}</div>
       <p v-else-if="entries.length" class="rc-empty">{{ t('recycleFilterEmpty') }}</p>
       <div v-else class="rc-empty">
-        <Trash2 :size="26" class="rc-empty-icon" />
+        <Trash2 :size="20" class="rc-empty-icon" />
         <p class="rc-empty-title">{{ t('recycleEmpty') }}</p>
         <p class="rc-empty-hint">{{ t('recycleEmptyHint') }}</p>
       </div>
@@ -331,7 +331,7 @@ onMounted(load)
   color: var(--color-text-secondary); background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
 }
-.rc-time { font-size: var(--text-xs); color: var(--color-text-disabled); }
+.rc-time { font-size: var(--text-xs); color: var(--color-text-muted); }
 .rc-actions { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
 .rc-btn {
   display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs);
@@ -342,15 +342,30 @@ onMounted(load)
 .rc-btn:hover:not(:disabled) { background: var(--color-bg-active); }
 .rc-btn:disabled { opacity: 0.4; cursor: default; }
 .rc-btn.restore:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
-.rc-btn.danger { border-radius: var(--radius-sm); padding: 3px var(--space-3); color: var(--color-text-disabled); }
+.rc-btn.danger { border-radius: var(--radius-sm); padding: 3px var(--space-3); color: var(--color-text-muted); }
 .rc-btn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger-border); }
 
 .rc-empty {
   display: flex; flex-direction: column; align-items: center; gap: var(--space-2);
   padding: var(--space-9) var(--space-6); margin: 0; text-align: center;
-  font-size: var(--text-sm); color: var(--color-text-disabled);
+  font-size: var(--text-sm); color: var(--color-text-muted);
 }
-.rc-empty-icon { color: var(--color-text-disabled); opacity: 0.6; margin-bottom: var(--space-2); }
+/* 空态图标：44 方底 + 细边（同 .qd-empty-icon）。此前只有 muted 色 + opacity .6，
+   细线图标浮在整片深底上既没落点、又被透明度洗淡。 */
+.rc-empty-icon {
+  width: 44px;
+  height: 44px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 0 var(--color-hairline);
+  margin-bottom: var(--space-2);
+}
 .rc-empty-title { margin: 0; font-size: var(--text-md); color: var(--color-text-secondary); }
 .rc-empty-hint { margin: 0; line-height: 1.6; }
 </style>

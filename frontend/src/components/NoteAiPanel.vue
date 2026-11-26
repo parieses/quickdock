@@ -368,6 +368,6 @@ function writeBack(mode: 'insert' | 'replace' | 'append') {
 .note-ai-cmd-hint {
   padding-left: 3px;
   font-size: var(--text-xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 </style>

@@ -983,9 +983,17 @@ const residentServices = computed<ResidentRow[]>(() => {
     // env 的区块 id 就是运行时 id：点哪一行就定位到那个运行时的面板
     target: r.id,
   }))
-  // 进程在跑就算常驻：文件搜索总开关关掉时它仍是常驻进程，只是不参与检索
+  // 进程在跑就算常驻：文件搜索总开关关掉时它仍是常驻进程，只是不参与检索。
+  // 但 env 的运行时列表里本来就有一条 Everything（带版本数）——同一个程序再 push 一行，
+  // 卡片上就会出现两条「Everything」，一条写「1 个版本」、一条写「文件搜索」，
+  // 看起来像重复渲染。已有那行时把搜索状态并进它的 meta，不再新增行。
   if (fileSearch.value?.running) {
-    rows.push({ id: 'everything', name: 'Everything', meta: t('dash_svc_filesearch'), page: 'environments', target: 'everything' })
+    const ev = rows.find(r => r.id === 'env:everything')
+    if (ev) {
+      ev.meta = `${ev.meta} · ${t('dash_svc_filesearch')}`
+    } else {
+      rows.push({ id: 'everything', name: 'Everything', meta: t('dash_svc_filesearch'), page: 'environments', target: 'everything' })
+    }
   }
   // DSH 也进常驻卡，但落点是环境管理的 harness 区块而不是唤起窗口：
   // 这张卡回答的是「谁在后台占着资源 / 它现在什么状态」，点进去看状态比弹一个终端更贴题。
@@ -1949,18 +1957,20 @@ onUnmounted(() => {
       <div class="qd-page-actions">
         <!-- 按 ui.md §3.1 分两段：左边是「从总览直接开一个新东西」，
              右边是顺手工具（复制验证码 / 刷新）。总览没有主操作，
-             所以不画主按钮，只用一条短竖线把这两类分开。 -->
+             所以不画主按钮，只用一条短竖线把这两类分开。
+             四个「新建」从 ghost 换成常规按钮底：幽灵态在深色页头里和纯文本没差别，
+             而它们确实是这一页最常按的动作。四条同权重，不挑其中一条染主色。 -->
         <div class="qd-action-group">
-          <button class="qd-btn qd-btn-ghost" :title="t('dashQuickNewTodo')" @click="quickNewTodo">
+          <button class="qd-btn" :title="t('dashQuickNewTodo')" @click="quickNewTodo">
             <ListTodo :size="13" />{{ t('dashQuickNewTodo') }}
           </button>
-          <button class="qd-btn qd-btn-ghost" :title="t('dashQuickNewNote')" @click="quickNewNote">
+          <button class="qd-btn" :title="t('dashQuickNewNote')" @click="quickNewNote">
             <NotebookPen :size="13" />{{ t('dashQuickNewNote') }}
           </button>
-          <button class="qd-btn qd-btn-ghost" :title="t('dashQuickNewAiTask')" @click="quickNewAiTask">
+          <button class="qd-btn" :title="t('dashQuickNewAiTask')" @click="quickNewAiTask">
             <Sparkles :size="13" />{{ t('dashQuickNewAiTask') }}
           </button>
-          <button class="qd-btn qd-btn-ghost" :title="t('dashQuickNewScript')" @click="quickNewScript">
+          <button class="qd-btn" :title="t('dashQuickNewScript')" @click="quickNewScript">
             <FileCode2 :size="13" />{{ t('dashQuickNewScript') }}
           </button>
         </div>
@@ -2693,7 +2703,7 @@ onUnmounted(() => {
                 <li v-key-click v-for="p in portList" :key="`${p.protocol}-${p.port}`" class="row clickable"
                     :title="p.path" @click="go('environments', 'ports')">
                   <span class="port">{{ p.port }}</span>
-                  <span class="row-title mono" :title="p.path">{{ p.process || t('dash_unknown_proc') }}</span>
+                  <span class="row-title mono is-proc" :title="p.path">{{ p.process || t('dash_unknown_proc') }}</span>
                   <span v-if="p.self" class="due">{{ t('dash_self') }}</span>
                 </li>
               </ul>
@@ -2902,8 +2912,8 @@ onUnmounted(() => {
 }
 .band-head-dot.alert { background: var(--color-danger); }
 .band-head-title { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-secondary); }
-.band-head-hint { font-size: var(--text-2xs); color: var(--color-text-disabled); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.band-head-meta { margin-left: auto; flex-shrink: 0; font-size: var(--text-2xs); color: var(--color-text-disabled); white-space: nowrap; }
+.band-head-hint { font-size: var(--text-2xs); color: var(--color-text-muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.band-head-meta { margin-left: auto; flex-shrink: 0; font-size: var(--text-2xs); color: var(--color-text-muted); white-space: nowrap; }
 .band-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .band-grid > * + * { border-left: 1px solid var(--color-border); }
 
@@ -2915,6 +2925,9 @@ onUnmounted(() => {
   cursor: pointer; transition: background-color var(--transition-fast);
 }
 .readout:hover { background: var(--color-bg-hover); }
+/* 悬停时数字提成强调色：这块是按钮，但六个读数并排时看不出可点。
+   异常态不动（它已经是红的，再变蓝反而丢失警示）。 */
+.readout:not(.alert):hover .r-num { color: var(--color-accent); }
 .readout.static { cursor: default; }
 .readout.static:hover { background: none; }
 .r-label {
@@ -2928,12 +2941,16 @@ onUnmounted(() => {
   line-height: 1.2; color: var(--color-text-primary);
 }
 .r-foot {
-  font-size: var(--text-xs); color: var(--color-text-disabled);
+  font-size: var(--text-xs); color: var(--color-text-muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .r-foot.danger { color: var(--color-danger); }
-/* 异常读数只染数字——一排四个数字里，颜色比符号更快被看见 */
-.readout.alert .r-num { color: var(--color-danger); }
+/* 异常读数只染数字——一排四个数字里，颜色比符号更快被看见。
+   再加一档很轻的呼吸（2.4s、opacity 1→0.55）：静止的红字在深色底上容易被当成装饰，
+   动起来才会被真正读到；幅度压得很小，不是闪烁。 */
+.readout.alert .r-num { color: var(--color-danger); animation: dash-alert 2.4s ease-in-out infinite; }
+@keyframes dash-alert { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) { .readout.alert .r-num { animation: none; } }
 
 /* ---- 卡片网格 ----
  * 6 列基底 + 跨列：健康卡 4 格、其余 2 格，重要内容拿大位，不再是六张同构卡片平铺。
@@ -2958,8 +2975,10 @@ onUnmounted(() => {
 }
 .next-item:hover { border-color: var(--color-accent); }
 .next-time { font-size: var(--text-2xs); color: var(--color-text-muted); }
-.next-label { font-size: var(--text-sm); color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.next-sub { font-size: var(--text-2xs); color: var(--color-text-secondary); }
+/* 主次两级：任务名粗一档、副标签降到 muted。原来两者都是 secondary，
+   全局提亮之后几乎同级，一行里读不出哪个是主角。 */
+.next-label { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.next-sub { font-size: var(--text-2xs); color: var(--color-text-muted); }
 .activity-strip {
   display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
   margin-top: var(--space-3); padding-top: var(--space-3);
@@ -3008,6 +3027,10 @@ onUnmounted(() => {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-card);
   overflow: hidden;
+  /* 列向 flex：卡内空态才能吃掉剩余高度并居中。同行的卡本来就由 grid stretch
+     等高，但内容矮的那张底部会剩一大片毛坯白（空态），看起来像没加载完。 */
+  display: flex;
+  flex-direction: column;
 }
 .card-head {
   display: flex; align-items: center; gap: var(--space-3);
@@ -3025,13 +3048,20 @@ onUnmounted(() => {
   display: inline-flex; align-items: center; gap: 1px; margin-left: auto;
   background: none; border: 0; padding: 0; cursor: pointer;
   font: inherit; font-size: var(--text-xs); color: var(--color-text-muted);
-  transition: color var(--transition-fast);
+  /* 满屏「全部 ›」是噪音：静止时压到半透明，鼠标进卡才回到正常亮度。
+     不是 display:none——键盘 Tab 仍能聚焦，悬停也有 0.15s 过渡不至于突然冒出。 */
+  opacity: 0.55;
+  transition: color var(--transition-fast), opacity var(--transition-fast);
 }
+.card:hover .card-link,
+.card-link:focus-visible { opacity: 1; }
 .card-link:hover { color: var(--color-accent); }
 
 /* 卡片内的空态：不居中反而是对的（列表为空时上方还有热力条/分布条），
-   但留白要够，否则一行灰字像被漏掉的说明。 */
+   但留白要够，否则一行灰字像被漏掉的说明。整卡只有空态时（脚本任务那种）
+   让它吃掉剩余高度并垂直居中，卡不会再剩半截毛坯白。 */
 .empty { margin: 0; padding: var(--space-8) var(--space-6); font-size: var(--text-sm); line-height: 1.6; color: var(--color-text-muted); }
+.card > .empty { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; }
 
 /* ---- 24h 可用率热力条 ----
  * 一格 = 30 分钟：绿=全程在线、红=挂过、暗=没有数据。放在卡头之下、列表之上，
@@ -3112,7 +3142,7 @@ onUnmounted(() => {
 .qc-more { padding: var(--space-2) 0 var(--space-1); font-size: var(--text-2xs); }
 .qc-error { color: var(--color-danger); }
 .qc-conn { display: block; margin-top: var(--space-3); font-size: var(--text-2xs); line-height: 1.4; }
-.qc-conn.ok { color: var(--color-text-disabled); }
+.qc-conn.ok { color: var(--color-text-muted); }
 .qc-conn.bad { color: var(--color-danger); word-break: break-word; }
 .qc-ok { color: var(--color-success); }
 .qc-list { list-style: none; margin: 0; padding: 0; }
@@ -3164,11 +3194,11 @@ onUnmounted(() => {
 .qc-dot.up { background: var(--color-success); }
 .qc-dot.down { background: var(--color-danger); }
 /* 首次同步尚未出结果：中性灰，别用红点把「正在连」说成「连不上」 */
-.qc-dot.pending { background: var(--color-text-disabled); }
+.qc-dot.pending { background: var(--color-text-muted); }
 /* 脚本卡的两档：跑着的用警告色（「进行中」既不是成功也不是失败），
    从没跑过用中性灰——新建还没跑过一次不该摆出红点。 */
 .qc-dot.run { background: var(--color-warning); }
-.qc-dot.idle { background: var(--color-text-disabled); }
+.qc-dot.idle { background: var(--color-text-muted); }
 /* 邮箱设置浮层里的账号列表：选中态用 bg-hover，不要再套一层卡片面层——
    浮层里再挖一块更暗的面，看起来会像个洞。列表只用一圈描边分组。 */
 .qc-acct-head {
@@ -3176,7 +3206,7 @@ onUnmounted(() => {
 }
 .qc-acct-title { font-size: var(--text-xs); font-weight: 600; color: var(--color-text-secondary); }
 .qc-acct-title em {
-  margin-left: 5px; font-style: normal; font-weight: 400; color: var(--color-text-disabled);
+  margin-left: 5px; font-style: normal; font-weight: 400; color: var(--color-text-muted);
 }
 .qc-acct-add {
   display: inline-flex; align-items: center; gap: var(--space-2); flex-shrink: 0;
@@ -3204,14 +3234,14 @@ onUnmounted(() => {
 .qc-acct-state { font-size: var(--text-2xs); flex-shrink: 0; }
 .qc-acct-state.ok { color: var(--color-success); }
 .qc-acct-state.bad { color: var(--color-danger); }
-.qc-acct-state.pending, .qc-acct-state.off { color: var(--color-text-disabled); }
+.qc-acct-state.pending, .qc-acct-state.off { color: var(--color-text-muted); }
 .qc-acct-del { opacity: .55; }
 .qc-acct-row:hover .qc-acct-del, .qc-acct-row.active .qc-acct-del { opacity: 1; }
 .qc-acct-row .qc-acct-del:hover { color: var(--color-danger); }
 .qc-acct-empty {
   margin: 0; padding: 9px 10px;
   border: 1px dashed var(--color-border); border-radius: var(--radius-sm);
-  font-size: var(--text-xs); color: var(--color-text-disabled);
+  font-size: var(--text-xs); color: var(--color-text-muted);
 }
 .qc-acct-form-head {
   display: flex; align-items: baseline; gap: var(--space-3);
@@ -3220,7 +3250,7 @@ onUnmounted(() => {
 }
 .qc-acct-form-target {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: var(--text-2xs); font-weight: 400; color: var(--color-text-disabled);
+  font-size: var(--text-2xs); font-weight: 400; color: var(--color-text-muted);
 }
 /* 邮箱浮层比日期面板高，视口一矮内容就要滚；「测试连接 / 保存」是唯一出口，
    滚到看不见等于加不了邮箱。改成三段式：标题与操作栏固定，只有中间滚。
@@ -3263,7 +3293,7 @@ onUnmounted(() => {
   font-size: var(--text-2xl); font-weight: 600;  line-height: 1.25;
   color: var(--color-text-primary);
 }
-.ai-sub { font-size: var(--text-2xs); color: var(--color-text-disabled); white-space: nowrap; }
+.ai-sub { font-size: var(--text-2xs); color: var(--color-text-muted); white-space: nowrap; }
 .ai-chart { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-3); }
 /* 柱条基线：重写前由 .ai-bars 自己画，换成图形库后图表组件只管画布，
    基线留在外层，免得和图表内部的圆角/overflow 样式打架。 */
@@ -3356,7 +3386,7 @@ onUnmounted(() => {
 }
 .tile-type {
   flex-shrink: 0; font-size: var(--text-2xs); color: var(--color-text-muted);
-  background: var(--color-bg-secondary); padding: 1px var(--space-3); border-radius: var(--radius-full);
+  padding: 1px var(--space-2);
 }
 
 /* ---- 行 ---- */
@@ -3417,6 +3447,11 @@ onUnmounted(() => {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
   font-size: var(--text-sm); color: var(--color-text-secondary);
 }
+/* 端口行：端口号是主键（等宽），进程名跟在它后面做注解、不需要吃掉整行宽度。
+   原来进程名是 primary 色 + flex:1，和端口号抢主角，右侧「本应用」标签被推得很远。 */
+.row-title.is-proc { flex: 0 1 auto; color: var(--color-text-secondary); }
+/* 进程名不再吃满整行后，「本应用」标签要自己贴到右端 */
+.row-title.is-proc + .due { margin-left: auto; }
 .mono { font-family: var(--font-mono); }
 
 /* Git 行的 ↑↓ 与干净标记 */
@@ -3534,13 +3569,13 @@ onUnmounted(() => {
   flex: 0 1 auto; min-width: 0; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
 }
-.yj-more { margin-left: 3px; color: var(--color-text-disabled); }
+.yj-more { margin-left: 3px; color: var(--color-text-muted); }
 .yj-chev {
-  flex-shrink: 0; margin-left: auto; color: var(--color-text-disabled);
+  flex-shrink: 0; margin-left: auto; color: var(--color-text-muted);
   transition: transform var(--transition-fast);
 }
 .yj-chev.open { transform: rotate(180deg); }
-.yj-empty { font-size: var(--text-xs); color: var(--color-text-disabled); }
+.yj-empty { font-size: var(--text-xs); color: var(--color-text-muted); }
 
 .db-yiji-detail {
   display: flex; flex-direction: column; gap: var(--space-2);
@@ -3558,9 +3593,9 @@ onUnmounted(() => {
   font-size: var(--text-2xs); line-height: 1.7; color: var(--color-text-muted);
 }
 .yj-facts > span { min-width: 0; }
-.yj-facts b { margin-right: var(--space-2); font-weight: 500; color: var(--color-text-disabled); }
-.yj-disclaimer { font-size: var(--text-2xs); color: var(--color-text-disabled); }
-.db-pref-hint { font-size: var(--text-2xs); line-height: 1.5; color: var(--color-text-disabled); }
+.yj-facts b { margin-right: var(--space-2); font-weight: 500; color: var(--color-text-muted); }
+.yj-disclaimer { font-size: var(--text-2xs); color: var(--color-text-muted); }
+.db-pref-hint { font-size: var(--text-2xs); line-height: 1.5; color: var(--color-text-muted); }
 /* 当前生效的数据源：单独一行，不然会和上面的说明挤成一条长句 */
 .db-src-now { display: block; margin-top: var(--space-1); color: var(--color-text-secondary); }
 /* 需要 key 的源：输入区与上面的下拉拉开一点，否则会被读成同一组控件 */
@@ -3609,7 +3644,7 @@ onUnmounted(() => {
 }
 /* 更新时间只是详情行的最后一项，比其余读数更淡，用中点跟前面三个读数分开，
    不再单独挂成一列歪在刷新按钮下面 */
-.db-w-time { color: var(--color-text-disabled); }
+.db-w-time { color: var(--color-text-muted); }
 .db-w-time::before { content: '· '; }
 .db-weather-off { font-size: var(--text-sm); color: var(--color-text-muted); }
 
@@ -3678,7 +3713,7 @@ onUnmounted(() => {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
   padding-top: var(--space-2); border-top: 1px solid var(--color-border);
 }
-.db-settings-foot > span { font-size: var(--text-2xs); color: var(--color-text-disabled); }
+.db-settings-foot > span { font-size: var(--text-2xs); color: var(--color-text-muted); }
 
 @media (max-width: 1080px) {
   .db-body { flex-wrap: wrap; gap: var(--space-4); }

@@ -462,7 +462,7 @@ defineExpose({ capturing })
   border-bottom: 1px solid var(--color-border);
 }
 .hk-panel-title { font-size: var(--text-xs); font-weight: 600; color: var(--color-text-muted); letter-spacing: 0.6px; }
-.hk-panel-hint { font-size: var(--text-xs); color: var(--color-text-disabled); }
+.hk-panel-hint { font-size: var(--text-xs); color: var(--color-text-muted); }
 
 /* 单行栅格：图标 / 功能名 / 说明（可伸长可省略） / 键帽 / 重置 */
 .hk-row {
@@ -478,12 +478,12 @@ defineExpose({ capturing })
 /* 捕获态：整行点亮，让"正在录哪个键"没有歧义 */
 .hk-row.capturing { background: var(--color-accent-bg); }
 
-.hk-icon { display: inline-flex; align-items: center; justify-content: center; color: var(--color-text-disabled); }
+.hk-icon { display: inline-flex; align-items: center; justify-content: center; color: var(--color-text-muted); }
 .hk-row.capturing .hk-icon { color: var(--color-accent); }
 .hk-name { font-size: var(--text-md); font-weight: 500; color: var(--color-text-primary); white-space: nowrap; }
 .hk-desc {
   font-size: var(--text-sm);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -532,7 +532,7 @@ defineExpose({ capturing })
   height: 26px;
   border: none;
   background: transparent;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: color var(--transition-fast), background-color var(--transition-fast), opacity var(--transition-fast);
@@ -550,7 +550,7 @@ defineExpose({ capturing })
   align-items: flex-start;
   gap: var(--space-3);
   font-size: var(--text-xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   line-height: 1.6;
 }
 .tip-icon { flex-shrink: 0; margin-top: 1px; }

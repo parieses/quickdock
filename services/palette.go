@@ -188,11 +188,13 @@ func (a *AppService) OpenTodoFromPalette(todoId string) *ApiResult {
 // navigablePages 命令面板「快速导航」允许跳转的页面 id。
 //
 // 必须白名单：这个方法会被前端任意字符串调用，直接广播等于让面板可以
-// 把主窗口切到不存在的页面（内容区会空白）。与前端 pages/registry 的
-// 「带 component 的内容页」一一对应（13 个，含 dashboard / filesearch /
-// knowledge / git），一一对应的意思是：前端 useCommandSearch 从 registry
-// 自动生成的每一项都必须能过这道闸，否则用户敲到页面名、回车却只得到
-// 一句「未知的导航页面」。
+// 把主窗口切到不存在的页面（内容区会空白）。
+//
+// 与前端 pages/registry 里「带 component 的内容页」一一对应。**新增页面时
+// 两边都要改**——前端 registry 加一条、这里漏一项，表现是「能搜到、回车没反应」
+// （后端返回「未知的导航页面」，面板只把它吃掉）。bookmarks / download / netdisk /
+// credentials 就是这么漏了两轮才发现的。
+//
 // ssh / dsh 是独立窗口入口，不在其中（面板不负责唤起它们，它们有自己的入口）。
 var navigablePages = map[string]bool{
 	"dashboard":    true,
@@ -200,12 +202,17 @@ var navigablePages = map[string]bool{
 	"notes":        true,
 	"todo":         true,
 	"schedule":     true,
+	"script":       true,
 	"monitor":      true,
 	"clipboard":    true,
 	"filesearch":   true,
 	"knowledge":    true,
+	"bookmarks":    true,
 	"environments": true,
+	"download":     true,
+	"netdisk":      true,
 	"git":          true,
+	"credentials":  true,
 	"ai":           true,
 	"plugins":      true,
 }

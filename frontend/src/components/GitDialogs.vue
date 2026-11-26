@@ -520,7 +520,7 @@ const { t } = useI18n()
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-.sub-sha { flex-shrink: 0; font-size: var(--text-2xs); color: var(--color-text-disabled); }
+.sub-sha { flex-shrink: 0; font-size: var(--text-2xs); color: var(--color-text-muted); }
 
 .sub-desc {
   flex-shrink: 0; max-width: 110px; font-size: var(--text-2xs); color: var(--color-text-muted);
@@ -561,11 +561,11 @@ const { t } = useI18n()
 
 .cmp-list li:hover { background: var(--color-bg-hover); }
 
-.cmp-h { flex-shrink: 0; font-size: var(--text-2xs); color: var(--color-text-disabled); }
+.cmp-h { flex-shrink: 0; font-size: var(--text-2xs); color: var(--color-text-muted); }
 
 .cmp-s { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.cmp-empty { color: var(--color-text-disabled); }
+.cmp-empty { color: var(--color-text-muted); }
 
 .cmp-file-list { list-style: none; margin: 0; padding: 0; max-height: 160px; overflow-y: auto; }
 
@@ -603,7 +603,7 @@ const { t } = useI18n()
 
 .ssh-dir {
   margin-left: auto; font-family: var(--font-mono); font-size: var(--text-2xs); font-weight: 400;
-  color: var(--color-text-disabled); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
 .ssh-keys { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
@@ -621,7 +621,7 @@ const { t } = useI18n()
 
 .sk-fp {
   flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--text-2xs);
-  color: var(--color-text-disabled); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
 .ssh-form { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: center; gap: var(--space-3) var(--space-3); }
@@ -675,7 +675,7 @@ const { t } = useI18n()
 
 .bl-a { color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.bl-t { color: var(--color-text-disabled); }
+.bl-t { color: var(--color-text-muted); }
 
 .bl-x { color: var(--color-text-secondary); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
 

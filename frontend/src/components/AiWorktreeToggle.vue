@@ -235,7 +235,7 @@ function onToggle() {
 
 .ai-wt-empty {
   padding: var(--space-3) var(--space-4);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   font-size: var(--text-xs);
 }
 </style>

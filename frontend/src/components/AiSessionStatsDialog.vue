@@ -342,6 +342,6 @@ onBeforeUnmount(() => window.document.removeEventListener('keydown', onKeydown, 
   margin: var(--space-3) 0 0;
   font-size: var(--text-2xs);
   line-height: 1.6;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 </style>

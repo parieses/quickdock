@@ -237,7 +237,9 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
   border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
   background: transparent;
-  color: var(--color-text-muted);
+  /* 权限是「AI 这次能动多少」，底栏上最该看清的一枚：从 muted 提到 secondary，
+     完全访问仍靠警示色区分（见下） */
+  color: var(--color-text-secondary);
   font-family: inherit;
   font-size: var(--text-xs);
   white-space: nowrap;

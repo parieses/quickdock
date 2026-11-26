@@ -307,7 +307,7 @@ onMounted(load)
   display: flex;
   flex: 0 0 auto;
   padding: var(--space-2);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   background: none;
   border: none;
   border-radius: var(--radius-xs);

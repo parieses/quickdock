@@ -480,7 +480,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 .editor-title { font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
 .editor-close {
-  background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
+  background: none; border: none; color: var(--color-text-muted); cursor: pointer;
   width: 28px; height: 28px; border-radius: var(--radius-sm);
   display: flex; align-items: center; justify-content: center; font-size: var(--text-xl);
 }
@@ -516,7 +516,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 .field-textarea:focus { border-color: var(--color-border-focus-soft); }
 .field-error { font-size: var(--text-xs); color: var(--color-danger); margin-top: var(--space-1); }
-.field-hint { font-size: var(--text-xs); color: var(--color-text-disabled); margin-top: var(--space-1); }
+.field-hint { font-size: var(--text-xs); color: var(--color-text-muted); margin-top: var(--space-1); }
 
 /* 外观行：颜色 + 自定义图标（都是可选，默认不占视觉重量） */
 .appearance-row { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
@@ -546,7 +546,7 @@ function onKeydown(e: KeyboardEvent) {
 .env-tag { padding: 1px var(--space-3); border-radius: var(--radius-xs); font-size: var(--text-xs); }
 .env-tag.ok { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .env-tag.bad { background: var(--color-danger); color: var(--color-accent-text); }
-.env-active { color: var(--color-text-disabled); font-size: var(--text-xs); }
+.env-active { color: var(--color-text-muted); font-size: var(--text-xs); }
 .env-row-actions { display: flex; align-items: center; gap: var(--space-4); }
 .env-add { display: flex; align-items: center; gap: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--color-border); }
 .env-add-select { flex: 1; padding: var(--space-2) var(--space-4); font-size: var(--text-sm); }

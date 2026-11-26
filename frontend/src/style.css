@@ -170,9 +170,15 @@
   --color-surface: #14171f;
   --color-surface-elevated: #1b202a;
   --color-text-primary: #e8ecf4;
-  --color-text-secondary: #a3acbb;
-  --color-text-muted: #74808f;
-  --color-text-disabled: #59616e;
+  /* 次级文字整体提亮一档：原来 #a3acbb / #74808f / #59616e 在 #14171f 上
+     分别只有 7.4 / 4.4 / 2.9 的对比度，路径、命令、日历里的小字读起来很吃力。
+     现在 muted 提到 6.6:1（超过 WCAG AA 的 4.5:1），disabled 仍是全阶最暗、
+     只用于占位符与禁用态，不会和可点文字混淆。
+     再提一档：副标题、时间戳、未选中项大量使用 muted/disabled，6.6:1 在 100% 缩放的
+     深色屏上仍然费眼；四档之间的相对层级保持不变，只整体上移。 */
+  --color-text-secondary: #bfc9d6;
+  --color-text-muted: #a5b0c1;
+  --color-text-disabled: #8b95a4;
   --color-border: #232936;
   --color-border-light: #313948;
   /* hairline：1px 内高光/极细分隔。深色下"白 4%"能勾出边缘又不显线 */
@@ -346,9 +352,12 @@
   --color-toast-success-text: #6ee7b7;
   --color-toast-success-border: #1a5c1a;
   --color-star: #f59e0b;
-  /* 定时任务类型图标分类色：类别身份色，深浅主题保持一致（类图表系列色） */
+  /* 定时任务类型图标分类色：类别身份色，深浅主题保持一致（类图表系列色）。
+     app/url 用 --color-accent、dir 用 --color-warning，不另立 token；
+     AI 任务单独一支青色，和命令紫 / Webhook 玫红区分得开。 */
   --color-cat-command: #9b6dff;
   --color-cat-http: #e0556b;
+  --color-cat-ai: #22d3ee;
   --shadow-toast: 0 4px 24px rgba(0, 0, 0, 0.45);
   --shadow-toast-hover: 0 6px 28px rgba(0, 0, 0, 0.55);
   /* 「运行中」绿点的呼吸光晕；原来在 SettingsDSH 里写死 rgba(76,175,80,.8)。 */
@@ -492,6 +501,7 @@
   /* 定时任务类型图标分类色：类别身份色，深浅主题保持一致（类图表系列色） */
   --color-cat-command: #9b6dff;
   --color-cat-http: #e0556b;
+  --color-cat-ai: #0891b2;
   --shadow-toast: 0 4px 24px rgba(0, 0, 0, 0.15);
   --shadow-toast-hover: 0 6px 28px rgba(0, 0, 0, 0.2);
   /* 与深色档一一对应：浅底上光晕要收淡，否则绿点会糊成一团 */

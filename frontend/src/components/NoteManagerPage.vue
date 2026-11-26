@@ -23,6 +23,7 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { installMathOnce } from '../utils/mathMarkdown'
 import { installWikiOnce } from '../utils/wikiMarkdown'
+import { installCodeCopyOnce } from '../utils/codeCopyMarkdown'
 import { createCodeEditor, type CodeEditorHandle } from '../utils/aiCodeEditor'
 import { downloadText, downloadBlob, safeFileName } from '../utils/download'
 import { invalidateLinkTargets } from '../constants/linkEvents'
@@ -50,9 +51,9 @@ import {
 import { CopyText } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import { ResolveWikiTarget, ListLinkTargets, SearchLinkTargets } from '../../bindings/quickdock/services/appservice'
 import {
-  Trash2, Search, X, FolderPlus, FileText, Folder, Pencil,
+  Trash2, Search, X, FolderPlus, FileText, Folder, Pencil, Plus,
   Copy as CopyIcon, PanelLeft, PanelLeftClose, ChevronDown, Sparkles, FileDown, List,
-  FileSearch, Square, CheckSquare, Clock, Code2, Columns2, Eye, Link2, Network, PanelRight,
+  FileSearch, Square, CheckSquare, Code2, Columns2, Eye, Link2, Network, PanelRight,
   Download, Upload, History, FilePlus2, Loader2, Check, AlertTriangle, RefreshCw, CircleHelp,
   MoreHorizontal, ListTodo, Save,
 } from '@lucide/vue'
@@ -113,27 +114,8 @@ const folderOptions = computed(() =>
   flatten(tree.value).filter(n => n.isFolder).map(n => ({ id: n.id, name: n.name || n.keyword || t('notesFolder') })),
 )
 
-// ---- 最近打开（localStorage 存最近 5 篇文档 {id, 打开时间戳}）----
-const RECENT_KEY = 'quickdock.notes.recent'
-type RecentItem = { id: string; t: number }
-const recentItems = ref<RecentItem[]>([])
-function loadRecent() {
-  try {
-    const a = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]')
-    if (!Array.isArray(a)) return
-    recentItems.value = a
-      // 兼容旧版纯字符串数组：补 t:0（未知时间）
-      .map((x: any) => typeof x === 'string' ? { id: x, t: 0 } : { id: String(x.id), t: Number(x.t) || 0 })
-      .filter((x: RecentItem) => x.id)
-      .slice(0, 5)
-  } catch { /* 损坏就当没有 */ }
-}
-function pushRecent(id: string) {
-  const next = [{ id, t: Date.now() }, ...recentItems.value.filter(x => x.id !== id)].slice(0, 5)
-  recentItems.value = next
-  try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)) } catch { /* 配额/隐私模式忽略 */ }
-}
-// 相对时间：让「最近」看起来像真正的 recently-opened，而不是又一个文件列表
+// ---- 相对时间 ----
+// 「最近」列表要读起来像 recently，而不是又一个文件列表，所以显示「3 分钟前」这类相对量。
 function relTime(ts: number): string {
   if (!ts) return ''
   const d = Date.now() - ts
@@ -144,32 +126,18 @@ function relTime(ts: number): string {
   if (d < w) return Math.floor(d / day) + t('notesRecentDay')
   return Math.floor(d / w) + t('notesRecentWeek')
 }
-// 只展示仍然存在且非文件夹的文档；搜索/标签视图下不显示（那会盖住结果列表）。
-// 顺带带出父文件夹名 + 相对时间，让「最近」列表和下面的树在信息上明显分层。
-const recentDisplay = computed(() => {
-  if (searchQuery.value || activeTag.value) return []
-  const map = new Map(nodes.value.map(n => [n.id, n]))
-  return recentItems.value
-    .map(it => {
-      const n = map.get(it.id)
-      if (!n || n.isFolder) return null
-      const par = n.parentId ? map.get(n.parentId) : null
-      return {
-        ...n,
-        parentName: (par?.name || par?.keyword || '') as string,
-        rel: relTime(it.t),
-      }
-    })
-    .filter((x): x is Note & { parentName: string; rel: string } => !!x)
-})
 
 // ---- 最近编辑（后端 RecentNotes：按 updatedAt 倒序取前 N 篇文档）----
-// 与上面的「最近打开」是两条独立链路：那条是本机点击历史（localStorage），这条是
-// 真实的最后编辑时间（后端 updatedAt），彼此不能替代，分组也分开展示。
+// 曾经还有一份「最近打开」（localStorage 记的本机点击历史），两栏叠在树上方互相稀释：
+// 同一篇文档经常两边都出现，用户还得先分辨两栏差别。只保留「最近编辑」——它是后端
+// updatedAt 的真实最后编辑时间，重启、换机都成立，且正是「我要接着写哪篇」要找的。
+// 最近编辑 = 5 条：它只是「接着写哪篇」的导航捷径，不是第二棵树。
+// 8 条时这一栏几乎占满左栏可视高度，把真正的目录树挤到下方，反而要滚动。
+const RECENT_LIMIT = 5
 const recentEdited = ref<Note[]>([])
 async function loadRecentEdited() {
   try {
-    recentEdited.value = unwrap<Note[]>(await RecentNotes(8)) || []
+    recentEdited.value = unwrap<Note[]>(await RecentNotes(RECENT_LIMIT)) || []
   } catch (e) {
     // 最近编辑只是导航捷径，拉不到就沿用旧值，不弹 toast；但必须留日志，
     // 否则「最近编辑一栏空了」在日志里完全查不到原因。
@@ -622,6 +590,7 @@ const formattedUpdated = computed(() => formatTime(selectedDoc.value?.updatedAt 
 // 顺序无所谓：两者都是往同一个 marked 实例的 extensions 里合并，互不覆盖。
 installMathOnce(marked)
 installWikiOnce(marked)
+installCodeCopyOnce(marked, () => ({ copy: t('copyCode') }))
 
 // ---- Markdown 视图模式：源码 / 分屏 / 预览 ----
 // 仅对 markdown 生效（纯文本没有预览，永远只有源码一栏）。
@@ -658,7 +627,22 @@ function jumpToEntity(type: string, id: string): boolean {
  * 完整原文（含 note:/todo:/item: 前缀），正好是 ResolveWikiTarget 的入参。
  */
 async function onPreviewClick(e: MouseEvent) {
-  const a = (e.target as HTMLElement | null)?.closest?.('a.qd-wiki') as HTMLElement | null
+  const target = e.target as HTMLElement | null
+  // 代码块右上角的「复制」：v-html 生成的节点绑不了 Vue 事件，同样走容器委托
+  const copyBtn = target?.closest?.('[data-code-copy]') as HTMLElement | null
+  if (copyBtn) {
+    const code = copyBtn.closest('.md-code')?.querySelector('code')?.textContent ?? ''
+    if (!code) return
+    try {
+      unwrap(await CopyText(code))
+      toast.success(t('copied'))
+    } catch (err) {
+      logErr('NoteManagerPage.copyCode', err)
+      toast.error(getErrorMessage(err))
+    }
+    return
+  }
+  const a = target?.closest?.('a.qd-wiki') as HTMLElement | null
   if (!a) return
   const label = a.dataset.wiki || ''
   if (!label) return
@@ -751,7 +735,6 @@ async function onDoc(d: Note) {
   const fresh = nodes.value.find(x => x.id === d.id) ?? allNodes.value.find(x => x.id === d.id) ?? d
   selectedDocId.value = fresh.id
   docContent.value = fresh.content || ''
-  pushRecent(d.id)
   docTagsText.value = parseTagsS(fresh.tags).join(', ')
   // 展开祖先
   let cur = fresh.parentId
@@ -1603,7 +1586,7 @@ async function renameCurrent() {
 }
 
 onMounted(async () => {
-  loadTreePrefs(); loadRecent(); loadNoteView()
+  loadTreePrefs(); loadNoteView()
   // 「最近笔记」深链监听常驻（KeepAlive 组件只挂载一次）
   offPaletteLocate = Events.On('palette:locate', onPaletteLocate)
   docEditorHost.value?.addEventListener('paste', onEditorPaste, true)
@@ -1755,31 +1738,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 
         <div class="tree-wrap">
           <template v-if="!searchQuery && !activeTag">
-            <!-- 最近打开：启动时为空树兜底，帮用户找回上次编辑的文档 -->
-            <div v-if="recentDisplay.length" class="recent-block">
-              <div class="recent-title">
-                <Clock :size="11" />
-                <span class="rt-label">{{ t('notesRecent') }}</span>
-                <span class="rt-count">{{ recentDisplay.length }}</span>
-              </div>
-              <div v-key-click
-                v-for="n in recentDisplay" :key="'recent-'+n.id"
-                class="qd-row recent-row"
-                :class="{ active: !selectMode && selectedDocId === n.id, 'sel-on': selectMode && selectedIds.has(n.id) }"
-                @click="selectMode ? toggleSelect(n.id) : onDoc(n)"
-              >
-                <input v-key-click v-if="selectMode" type="checkbox" class="tn-check" :checked="selectedIds.has(n.id)" @change="toggleSelect(n.id)" @click.stop />
-                <FileText :size="13" class="tn-icon" />
-                <div class="rn-text">
-                  <div class="rn-line1">
-                    <span class="rn-name">{{ n.name || n.keyword }}</span>
-                    <span v-if="n.rel" class="rn-time">{{ n.rel }}</span>
-                  </div>
-                  <div v-if="n.parentName" class="rn-path">{{ n.parentName }}</div>
-                </div>
-              </div>
-            </div>
-            <!-- 最近编辑：后端按 updatedAt 倒序，与上面的「最近打开」是两条独立链路 -->
+            <!-- 最近编辑：后端按 updatedAt 倒序，启动时树还没展开也能一键回到在写的文档 -->
             <div v-if="recentEditedDisplay.length" ref="recentEditedBlockRef" class="recent-block" :class="{ 'recent-located': recentEditedFlash }">
               <div class="recent-title">
                 <Pencil :size="11" />
@@ -1820,7 +1779,13 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
               <span>{{ t('notesLoadFailed') }}</span>
               <button type="button" class="tree-retry" @click="load()">{{ t('retry') }}</button>
             </div>
-            <div v-else-if="!tree.length && !recentDisplay.length && !recentEdited.length && !loading" class="tree-empty">{{ t('notesEmpty') }}</div>
+            <div v-else-if="!tree.length && !recentEdited.length && !loading" class="tree-empty">
+              <FileText :size="20" class="tree-empty-icon" />
+              <p class="tree-empty-text">{{ t('notesEmpty') }}</p>
+              <button type="button" class="tree-empty-btn" @click="newDocAt('')">
+                <Plus :size="13" />{{ t('notesNewDoc') }}
+              </button>
+            </div>
           </template>
           <!-- 搜索/标签结果：扁平展示 -->
           <template v-else>
@@ -1900,9 +1865,9 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
             </div>
           </div>
         </div>
-        <div v-if="!selectedDoc" class="ne-empty"><FileText :size="32" /><p>{{ t('notesSelectHint') }}</p></div>
+        <div v-if="!selectedDoc" class="ne-empty"><FileText :size="20" /><p>{{ t('notesSelectHint') }}</p></div>
         <template v-else-if="selectedDoc.isFolder">
-          <div class="ne-empty ne-folder"><Folder :size="32" /><p>{{ t('notesIsFolder') }}</p></div>
+          <div class="ne-empty ne-folder"><Folder :size="20" /><p>{{ t('notesIsFolder') }}</p></div>
         </template>
         <template v-else>
           <div class="ne-head">
@@ -1915,16 +1880,6 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
               <template v-else-if="saveStatus === 'saved'">{{ t('notesSaveSaved') }}</template>
               <template v-else-if="saveStatus === 'failed'">{{ t('notesSaveFailed') }}</template>
             </span>
-            <div class="ne-format">
-              <button :class="{ active: selectedDoc.format !== 'text' }" @click="setFormat('markdown')">{{ t('notesFormatMd') }}</button>
-              <button :class="{ active: selectedDoc.format === 'text' }" @click="setFormat('text')">{{ t('notesFormatText') }}</button>
-            </div>
-            <!-- Markdown 视图三段切换：源码 / 分屏 / 预览（默认分屏）。纯文本格式没有预览，不显示。 -->
-            <div v-if="selectedDoc.format !== 'text'" class="ne-view">
-              <button :class="{ active: noteView === 'source' }" :title="t('notesViewSource')" @click="setNoteView('source')"><Code2 :size="13" /></button>
-              <button :class="{ active: noteView === 'split' }" :title="t('notesViewSplit')" @click="setNoteView('split')"><Columns2 :size="13" /></button>
-              <button :class="{ active: noteView === 'preview' }" :title="t('notesViewPreview')" @click="setNoteView('preview')"><Eye :size="13" /></button>
-            </div>
             <button class="ne-copy" :title="t('notesFindInDoc')" @click="findInDoc()"><FileSearch :size="13" /></button>
             <button class="ne-copy" :title="t('noteAiTitle')" @click="openAi"><Sparkles :size="13" /></button>
             <button class="ne-copy" :title="t('copy')" @click="copyDoc"><CopyIcon :size="13" /></button>
@@ -2014,6 +1969,21 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
             :src-label="selectedDoc?.name || ''"
             compact
           />
+          <!-- 编辑区工具条：格式与视图都是「这篇怎么呈现」，贴在编辑区上沿，
+               而不是和标题、文档操作图标挤在同一行（宽度不够时那一行会互相顶） -->
+          <div class="ne-toolbar">
+            <div class="ne-format">
+              <button :class="{ active: selectedDoc.format !== 'text' }" @click="setFormat('markdown')">{{ t('notesFormatMd') }}</button>
+              <button :class="{ active: selectedDoc.format === 'text' }" @click="setFormat('text')">{{ t('notesFormatText') }}</button>
+            </div>
+            <span class="ne-toolbar-spacer"></span>
+            <!-- Markdown 视图三段切换：源码 / 分屏 / 预览（默认分屏）。纯文本格式没有预览，不显示。 -->
+            <div v-if="selectedDoc.format !== 'text'" class="ne-view">
+              <button :class="{ active: noteView === 'source' }" :title="t('notesViewSource')" @click="setNoteView('source')"><Code2 :size="13" /></button>
+              <button :class="{ active: noteView === 'split' }" :title="t('notesViewSplit')" @click="setNoteView('split')"><Columns2 :size="13" /></button>
+              <button :class="{ active: noteView === 'preview' }" :title="t('notesViewPreview')" @click="setNoteView('preview')"><Eye :size="13" /></button>
+            </div>
+          </div>
           <!-- markdown：左编辑 + 右预览，两栏滚动同步；纯文本：仅编辑区。
                两栏共用同一个编辑器宿主（格式切换只重建 CM，不动 DOM 结构）。
                视图模式只切「显隐」不卸载：编辑器宿主始终在 DOM 里，避免切换时
@@ -2084,7 +2054,9 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .nt-chip.active { color: var(--color-accent); font-weight: 600; }
 
 .notes-body { flex: 1; display: flex; min-height: 0; }
-.notes-tree { width: 250px; flex-shrink: 0; border-right: 1px solid var(--color-border); display: flex; flex-direction: column; background: var(--color-bg-primary); }
+.notes-tree { width: 250px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--color-bg-primary); }
+/* 左树不再自己画右边线：那条线交给 .tree-splitter 的 ::after，
+   否则线 + 拖拽条会各画一份，收不起也叠不齐。 */
 /* 整组一起换行，单个图标不会散到第二行：树宽是用户可拖的，窄栏下
    原来 7 个图标各自折行，看起来像工具栏被拆坏了。 */
 .tree-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border); }
@@ -2094,7 +2066,35 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 /* 分组线只占图标高度的一半，不再是拉满整条工具栏的一根长线 */
 .tt-sep { width: 1px; height: 14px; flex-shrink: 0; background: var(--color-border); margin: 0 var(--space-1); }
 .tree-wrap { flex: 1; overflow-y: auto; padding: var(--space-2); }
-.tree-empty { color: var(--color-text-disabled); font-size: var(--text-sm); padding: var(--space-7); text-align: center; }
+.tree-empty {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-3);
+  color: var(--color-text-muted); font-size: var(--text-sm);
+  padding: var(--space-7) var(--space-4); text-align: center;
+}
+.tree-empty-icon {
+  width: 44px;
+  height: 44px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 0 var(--color-hairline);
+}
+/* 空态里的行动按钮：文字空态用户只知道「这里没东西」，不知道下一步点哪。
+   用次要按钮而不是主按钮——新建笔记在工具栏已经有一个，这里只是补一条近路。 */
+.tree-empty-btn {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-bg-hover); color: var(--color-text-secondary);
+  font: inherit; font-size: var(--text-sm); cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.tree-empty-btn:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
 .tree-error { color: var(--color-danger); display: flex; flex-direction: column; align-items: center; gap: var(--space-3); }
 .tree-retry { padding: var(--space-1) var(--space-3); border: 1px solid var(--color-danger); border-radius: var(--radius-sm); background: transparent; color: var(--color-danger); font-size: var(--text-sm); cursor: pointer; }
 .tree-retry:hover { background: var(--color-danger); color: var(--color-bg-primary); }
@@ -2109,12 +2109,15 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
   color: var(--color-text-muted); gap: var(--space-4);
 }
 .ne-empty :deep(svg) {
-  padding: var(--space-5);
-  box-sizing: content-box;
+  width: 44px;
+  height: 44px;
+  padding: 12px;
+  box-sizing: border-box;
   color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 0 var(--color-hairline);
 }
 .ne-empty p { margin: 0; font-size: var(--text-md); color: var(--color-text-secondary); }
 .ne-head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--color-border); position: relative; }
@@ -2128,7 +2131,16 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .ne-format button:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-left: -1px; }
 .ne-format button.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
 .ne-format button:hover:not(.active) { color: var(--color-text-primary); }
-/* Markdown 视图三段切换（源码 / 分屏 / 预览）：仅 markdown 格式出现，与格式按钮紧邻 */
+/* 编辑区工具条：格式 + 视图，紧贴编辑区上沿。与标题行分开后，
+   窄窗口下「文档名 + 一排图标」不再和分段按钮抢同一行宽度。 */
+.ne-toolbar {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-2) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.ne-toolbar-spacer { flex: 1; }
+/* Markdown 视图三段切换（源码 / 分屏 / 预览）：仅 markdown 格式出现，与格式按钮同排 */
 .ne-view { display: flex; gap: var(--space-1); flex-shrink: 0; }
 .ne-view button { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-muted); cursor: pointer; font-family: inherit; border-radius: var(--radius-sm); }
 .ne-view button:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
@@ -2139,7 +2151,10 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
    故这里必须 !important 才能压过内联样式；编辑器无 v-show，正常隐藏即可。 */
 .ne-view-source .ne-preview { display: none !important; }
 .ne-view-preview .ne-editor { display: none !important; }
-.ne-copy { border: none; background: none; color: var(--color-text-muted); cursor: pointer; padding: var(--space-3); border-radius: var(--radius-sm); }
+/* 文档操作图标默认压低，鼠标进入标题行或键盘聚焦时才亮起来：
+   它们常驻高对比度会把「文档名」这个主信息挤走。 */
+.ne-copy { border: none; background: none; color: var(--color-text-muted); cursor: pointer; padding: var(--space-3); border-radius: var(--radius-sm); opacity: 0.55; transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast); }
+.ne-head:hover .ne-copy, .ne-copy:hover, .ne-copy:focus-visible, .ne-copy.active { opacity: 1; }
 .ne-copy:hover { background: var(--color-bg-hover); color: var(--color-accent); }
 /* 大纲按钮的开启态。此前只有 :class="{ active: tocOpen }" 而没有任何 .active 规则，
    点了完全没反馈（11-12 补）。 */
@@ -2190,7 +2205,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .md-help-sample { flex-shrink: 0; min-width: 108px; padding: var(--space-1) var(--space-2); border-radius: var(--radius-xs); background: var(--color-bg-tertiary); color: var(--color-accent); font-family: var(--font-mono); font-size: var(--text-sm); white-space: nowrap; }
 .md-help-desc { font-size: var(--text-sm); color: var(--color-text-secondary); }
 .md-help-foot { padding: var(--space-2) var(--space-4); border-top: 1px solid var(--color-border); font-size: var(--text-xs); color: var(--color-text-muted); }
-.md-help-wiki { padding: 0 var(--space-4) var(--space-3); font-size: var(--text-xs); color: var(--color-text-disabled); }
+.md-help-wiki { padding: 0 var(--space-4) var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); }
 .ne-wiki-search { display: flex; align-items: center; gap: var(--space-3); color: var(--color-text-muted); }
 .ne-wiki-input { flex: 1; min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: var(--text-sm); outline: none; font-family: inherit; }
 .ne-wiki-input:focus { border-color: var(--color-border-focus-soft); }
@@ -2200,15 +2215,15 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .ne-wiki-tab { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-4); border: none; border-radius: var(--radius-xs); background: transparent; color: var(--color-text-muted); font-family: inherit; font-size: var(--text-xs); cursor: pointer; }
 .ne-wiki-tab:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .ne-wiki-tab.on { background: var(--color-accent-bg); color: var(--color-accent); }
-.ne-wiki-tab-n { color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
+.ne-wiki-tab-n { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .ne-wiki-tab.on .ne-wiki-tab-n { color: inherit; opacity: 0.7; }
-.ne-wiki-empty { padding: var(--space-3); color: var(--color-text-disabled); font-size: var(--text-sm); }
+.ne-wiki-empty { padding: var(--space-3); color: var(--color-text-muted); font-size: var(--text-sm); }
 .ne-wiki-item { display: flex; align-items: center; gap: var(--space-3); width: 100%; padding: var(--space-2) var(--space-3); border: none; border-radius: var(--radius-xs); background: transparent; color: var(--color-text-primary); text-align: left; cursor: pointer; font-family: inherit; font-size: var(--text-sm); }
 .ne-wiki-item:hover { background: var(--color-bg-hover); }
 .ne-wiki-type { flex-shrink: 0; color: var(--color-text-muted); }
 .ne-wiki-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 次要信息（父文件夹 / 到期日 / 所属集合）：只用来区分重名，不抢标题宽度 */
-.ne-wiki-hint { flex-shrink: 0; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-disabled); font-size: var(--text-xs); }
+.ne-wiki-hint { flex-shrink: 0; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-muted); font-size: var(--text-xs); }
 .ne-tags { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-5); border-bottom: 1px solid var(--color-border); }
 .ne-tags-label { font-size: var(--text-xs); color: var(--color-text-muted); flex-shrink: 0; }
 .ne-tags-input { flex: 1; padding: var(--space-2) var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: var(--text-sm); outline: none; font-family: inherit; }
@@ -2310,7 +2325,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .recent-title .rt-label { flex: 1; }
 .recent-title .rt-count {
   font-size: var(--text-2xs);
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
   font-weight: 500;
   background: var(--color-bg-secondary);
   border-radius: var(--radius-full);
@@ -2333,8 +2348,8 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .recent-row .rn-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
 .recent-row .rn-line1 { display: flex; align-items: baseline; gap: var(--space-3); }
 .recent-row .rn-name { font-size: var(--text-md); color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
-.recent-row .rn-time { font-size: var(--text-2xs); color: var(--color-text-disabled); flex-shrink: 0; }
-.recent-row .rn-path { font-size: var(--text-xs); color: var(--color-text-disabled); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-row .rn-time { font-size: var(--text-2xs); color: var(--color-text-muted); flex-shrink: 0; }
+.recent-row .rn-path { font-size: var(--text-xs); color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 批量操作栏 */
 .tree-batch { border-bottom: 1px solid var(--color-border); padding: var(--space-3) var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); background: var(--color-bg-secondary); }
@@ -2353,9 +2368,22 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
   color: var(--color-text-muted); cursor: pointer;
 }
 .tree-reopen:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-/* 拖拽分割线 */
-.tree-splitter { width: 4px; flex-shrink: 0; cursor: col-resize; background: transparent; transition: background-color var(--transition-fast); }
-.tree-splitter:hover { background: var(--color-accent); }
+/* 拖拽分割线：1px 视觉线由 ::after 画，命中区 5px，左右各 -2px 收回，
+   布局占位回到 1px。原来这条是 4px 宽、透明、实实在在占位的，
+   加上左树自己的 border-right，树与编辑区之间就多出 4px 空缝；
+   hover 时整条又变成 4px 宽的蓝色块，看着像线突然变粗。 */
+.tree-splitter {
+  position: relative; width: 5px; flex: 0 0 5px; margin: 0 -2px; z-index: 2;
+  cursor: col-resize; background: transparent;
+  transition: background-color var(--transition-fast);
+}
+.tree-splitter::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 2px; width: 1px;
+  background: var(--color-border);
+  transition: background-color var(--transition-fast);
+}
+.tree-splitter:hover { background: var(--color-accent-bg); }
+.tree-splitter:hover::after { background: var(--color-accent-border-strong); }
 
 /* Markdown 渲染（复用统一插件样式） */
 .markdown-body { color: var(--color-text-primary); font-size: var(--text-md); line-height: 1.7; word-break: break-word; }
@@ -2364,11 +2392,49 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .markdown-body :deep(h2) { font-size: var(--text-xl); border-bottom: 1px solid var(--color-border); padding-bottom: var(--space-2); }
 .markdown-body :deep(h3) { font-size: var(--text-lg); }
 .markdown-body :deep(p) { margin: var(--space-4) 0; }
-.markdown-body :deep(a) { color: var(--color-accent); }
+/* 链接：深色底下浏览器默认的「蓝字 + 实下划线」最刺眼，压成 accent 文字 + 极淡下划线，
+   悬停才加亮。正文里的链接读起来应该像文字，不像被框住的东西。 */
+.markdown-body :deep(a) {
+  color: var(--color-accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--color-accent-border);
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+.markdown-body :deep(a:hover) { color: var(--color-accent-hover); border-bottom-color: var(--color-accent); }
 /* wiki 链接没有 href（避免 DOMPurify 过滤伪协议），补手型与虚下划线让它可点 */
-.markdown-body :deep(a.qd-wiki) { cursor: pointer; border-bottom: 1px dashed var(--color-accent); }
+.markdown-body :deep(a.qd-wiki) {
+  cursor: pointer;
+  padding: 0 2px;
+  border-radius: var(--radius-xs);
+  border-bottom: 1px dashed var(--color-accent-border);
+}
+.markdown-body :deep(a.qd-wiki:hover) { background: var(--color-accent-bg); border-bottom-color: var(--color-accent); }
 .markdown-body :deep(code) { background: var(--color-bg-tertiary); padding: var(--space-1) var(--space-2); border-radius: var(--radius-xs); font-family: var(--font-mono); font-size: var(--text-md); }
+/* 代码块：容器承载「右下角复制」的定位，pre 自己管滚动 */
+.markdown-body :deep(.md-code) { position: relative; margin: var(--space-4) 0; }
+.markdown-body :deep(.md-code pre) { margin: 0; }
 .markdown-body :deep(pre) { background: var(--color-bg-tertiary); padding: var(--space-4) var(--space-5); border-radius: var(--radius-sm); overflow: auto; }
+.markdown-body :deep(.md-code-copy) {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-popover-bg);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+.markdown-body :deep(.md-code:hover .md-code-copy),
+.markdown-body :deep(.md-code-copy:focus-visible) { opacity: 1; }
+.markdown-body :deep(.md-code-copy:hover) { color: var(--color-text-primary); border-color: var(--color-border-focus-soft); }
+.markdown-body :deep(.md-code-copy svg) { width: 14px; height: 14px; }
 .markdown-body :deep(pre code) { background: none; padding: 0; }
 .markdown-body :deep(blockquote) { border-left: 3px solid var(--color-border-focus); margin: var(--space-4) 0; padding: var(--space-1) var(--space-5); color: var(--color-text-muted); }
 .markdown-body :deep(ul), .markdown-body :deep(ol) { padding-left: var(--space-7); margin: var(--space-4) 0; }
@@ -2388,13 +2454,13 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .ns-file-input { display: none; }
 
 /* 保存态：挤在 ne-head 那一行，不新增高度 */
-.ne-save { display: inline-flex; align-items: center; gap: var(--space-1); flex-shrink: 0; font-size: var(--text-xs); color: var(--color-text-disabled); }
+.ne-save { display: inline-flex; align-items: center; gap: var(--space-1); flex-shrink: 0; font-size: var(--text-xs); color: var(--color-text-muted); }
 .ne-save.saving { color: var(--color-text-muted); }
 .ne-save.saved { color: var(--color-success); }
 .ne-save.failed { color: var(--color-danger); }
 .ne-save-spin { animation: ne-save-rotate 1s linear infinite; }
 @keyframes ne-save-rotate { to { transform: rotate(360deg); } }
-.ne-updated { flex-shrink: 0; font-size: var(--text-xs); color: var(--color-text-disabled); }
+.ne-updated { flex-shrink: 0; font-size: var(--text-xs); color: var(--color-text-muted); }
 .ne-tags datalist { display: none; }
 
 /* 搜索结果：标题 + 正文命中片段两行 */
@@ -2432,7 +2498,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 }
 .nh-head-icon { color: var(--color-accent); flex-shrink: 0; }
 .nh-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
-.nh-count { font-size: var(--text-xs); color: var(--color-text-disabled); }
+.nh-count { font-size: var(--text-xs); color: var(--color-text-muted); }
 .nh-spacer { flex: 1; }
 .nh-icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
@@ -2446,7 +2512,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
   width: 300px; flex-shrink: 0; overflow-y: auto; padding: var(--space-2);
   border-right: 1px solid var(--color-border); background: var(--color-bg-secondary);
 }
-.nh-empty { padding: var(--space-6) var(--space-4); color: var(--color-text-disabled); font-size: var(--text-xs); }
+.nh-empty { padding: var(--space-6) var(--space-4); color: var(--color-text-muted); font-size: var(--text-xs); }
 .nh-loading { display: flex; align-items: center; justify-content: center; padding: var(--space-8); }
 .nh-spinner {
   width: 22px; height: 22px; border: 2px solid var(--color-border);

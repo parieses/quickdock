@@ -10,10 +10,11 @@ import PageHeader from './PageHeader.vue'
  *  3. 复制走 CopyCredentialSecret（后端写剪贴板 + 30 秒后比对清除），
  *     前端自己写剪贴板会绕过回环令牌，密码会被记进剪贴板历史。
  */
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  Check, Copy, Download, Eye, EyeOff, Globe, KeyRound, Plus, RefreshCw, Trash2, Upload, Wand2,
+  Braces, Check, Cloud, Copy, Database, Download, Eye, EyeOff, GitBranch, Globe, KeyRound,
+  LockKeyhole, MoreHorizontal, Plus, RefreshCw, Shield, Terminal, Trash2, Upload, Wand2,
 } from '@lucide/vue'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -25,7 +26,7 @@ import {
   ExportCredentials, GeneratePassword, ImportCredentials, ListCredentials,
   RevealCredential, SaveCredential, Status,
 } from '../../bindings/quickdock/services/credentials/credentialsservice'
-import { SelectLocalFile, SelectSavePath } from '../../bindings/quickdock/services/appservice'
+import { LockStatus, SelectLocalFile, SelectSavePath } from '../../bindings/quickdock/services/appservice'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -49,6 +50,13 @@ const loading = ref(false)
 // 把真实错误伪装成空库。失败后计数显示「—」，列表区给「加载失败 + 重试」。
 const loadFailed = ref(false)
 const saving = ref(false)
+
+/** 列表是否明文显示账号：默认打码，选择记在 localStorage（不涉及解密边界）。 */
+const showUser = ref(localStorage.getItem('quickdock.credentials.showUser') === '1')
+/** 页头「更多」菜单（导入 / 导出）。 */
+const moreOpen = ref(false)
+/** 离开自动锁定的分钟数；0 = 未开启。只做展示，真正计时在后端。 */
+const autoLockMin = ref(0)
 
 /** 表单。secret 留空 + hasSecret 表示「不改密码」，与后端约定一致。 */
 const form = reactive({
@@ -108,6 +116,77 @@ const kindOptions = computed(() => [
 
 function kindLabel(kind: string): string {
   return kindOptions.value.find((o) => o.value === kind)?.label ?? kind
+}
+
+/**
+ * 每行图标按凭据类型分：登录页用地球、SSH 用终端、数据库用库……
+ * 长列表里清一色的钥匙图标等于没有图标，还白占横向空间。
+ * 不抓 favicon：那要发外部请求（泄漏「用户存了哪些站」），也要额外的磁盘缓存。
+ */
+const KIND_ICONS = {
+  login: Globe,
+  ssh: Terminal,
+  database: Database,
+  webdav: Cloud,
+  git: GitBranch,
+  api_key: Braces,
+  other: KeyRound,
+} as const
+
+function kindIcon(kind: string) {
+  return (KIND_ICONS as Record<string, unknown>)[kind] ?? KeyRound
+}
+
+/** 打码规则：邮箱保留首字母与域名，其余保留前两位。 */
+function maskUser(value: string): string {
+  const s = (value || '').trim()
+  if (!s) return ''
+  const at = s.indexOf('@')
+  if (at > 0) return `${s.slice(0, 1)}•••${s.slice(at)}`
+  if (s.length <= 2) return '••'
+  return `${s.slice(0, 2)}•••`
+}
+
+function toggleShowUser() {
+  showUser.value = !showUser.value
+  try {
+    localStorage.setItem('quickdock.credentials.showUser', showUser.value ? '1' : '0')
+  } catch {
+    // 隐私模式下 localStorage 可能不可写：本次会话仍然生效，不打扰用户。
+  }
+}
+
+/**
+ * 列表副行：账号（默认打码）@主机:端口。
+ *
+ * 原来只显示账号，SSH / 数据库 / WebDAV 这类条目一眼看不出是哪台机器 ——
+ * 恰恰是地址而不是账号在区分它们。80/443 是默认端口，写出来只是噪音，
+ * 22 / 5432 / 8080 这类才是有效信息。两者都没有时退回类型名。
+ */
+function credSubtitle(item: CredentialSummary): string {
+  const user = item.username ? (showUser.value ? item.username : maskUser(item.username)) : ''
+  const port = Number(item.port) || 0
+  const withPort = port > 0 && port !== 80 && port !== 443
+  const addr = item.host ? `${item.host}${withPort ? `:${port}` : ''}` : ''
+  if (user && addr) return `${user}@${addr}`
+  return user || addr || kindLabel(item.kind)
+}
+
+/** 点空白处收起「更多」菜单（菜单自身用了 @click.stop 开合）。 */
+function onDocClick(e: MouseEvent) {
+  if (!moreOpen.value) return
+  const el = e.target as HTMLElement | null
+  if (el?.closest('.cred-more-wrap')) return
+  moreOpen.value = false
+}
+
+async function loadAutoLock() {
+  try {
+    const st = unwrap<{ autoLockMinutes?: number }>(await LockStatus())
+    autoLockMin.value = st?.autoLockMinutes ?? 0
+  } catch (e) {
+    logErr('CredentialsPage.autoLock', e)
+  }
 }
 
 function fillForm(item: CredentialSummary | null) {
@@ -326,6 +405,7 @@ async function copyExtKey() {
 
 /** 展开/收起面板。切换模式时清空口令，免得导出口令被顺手带进导入框。 */
 function openTransfer(mode: 'export' | 'import') {
+  moreOpen.value = false
   transferMode.value = transferMode.value === mode ? '' : mode
   transferPassword.value = ''
   transferResult.value = ''
@@ -393,7 +473,12 @@ async function runTransfer() {
 }
 
 onMounted(async () => {
-  await Promise.all([load(), loadStatus()])
+  document.addEventListener('click', onDocClick)
+  await Promise.all([load(), loadStatus(), loadAutoLock()])
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', onDocClick)
 })
 </script>
 
@@ -402,10 +487,21 @@ onMounted(async () => {
     <PageHeader>
       <template #titles>
         <h2 class="qd-page-title">{{ t('navCredentials') }}</h2>
-        <span class="qd-page-sub">{{ t('credSubtitle', { n: loadFailed || !status ? '—' : status.count }) }}</span>
+        <!-- 副标题拆成三段：条数（可扫读）+ 隐私 badge（信任感）+ 自动锁定状态。
+             原来一整句「共 16 条，只存本机，不随备份同步」挤在标题旁，既看不出
+             哪个是数量，也把最该被记住的隐私承诺埋进了灰字里。 -->
+        <span class="cred-meta">
+          <span class="cred-count">{{ t('credCount', { n: loadFailed || !status ? '—' : status.count }) }}</span>
+          <span class="cred-privacy" :title="t('credPrivacyHint')">
+            <Shield :size="11" />{{ t('credPrivacy') }}
+          </span>
+          <span v-if="autoLockMin" class="cred-autolock" :title="t('credAutoLockHint')">
+            <LockKeyhole :size="11" />{{ t('credAutoLockOn', { n: autoLockMin }) }}
+          </span>
+        </span>
       </template>
-      <!-- 页头动作按 ui.md §3.1：一组次要动作（ghost）+ 1 个主按钮，
-           中间一条短竖线。原来 5 个同级按钮平铺，「新建」和「刷新」一样重。 -->
+      <!-- 页头动作按 ui.md §3.1：一组次要动作（ghost）+ 1 个主按钮。
+           导入/导出是低频操作，收进 ⋯ 里；「新建」是这页唯一的主动作，给足尺寸。 -->
       <div class="qd-page-actions">
         <div class="qd-action-group">
           <button
@@ -421,17 +517,42 @@ onMounted(async () => {
             {{ t('credExtTitle') }}
             <span class="cred-switch-dot"></span>
           </button>
-          <button class="qd-btn qd-btn-ghost" @click="load()"><RefreshCw :size="14" /></button>
-          <button class="qd-btn qd-btn-ghost" :disabled="transferBusy" @click="openTransfer('export')">
-            <Download :size="14" /> {{ t('credTransferExport') }}
+          <button class="qd-icon-btn" type="button" :title="t('refresh')" @click="load()">
+            <RefreshCw :size="15" />
           </button>
-          <button class="qd-btn qd-btn-ghost" :disabled="transferBusy" @click="openTransfer('import')">
-            <Upload :size="14" /> {{ t('credTransferImport') }}
-          </button>
+          <div class="cred-more-wrap">
+            <button
+              class="qd-icon-btn"
+              type="button"
+              :title="t('credMore')"
+              :aria-expanded="moreOpen"
+              @click.stop="moreOpen = !moreOpen"
+            >
+              <MoreHorizontal :size="16" />
+            </button>
+            <div v-if="moreOpen" class="cred-more" role="menu">
+              <button
+                class="cred-more-item"
+                role="menuitem"
+                :disabled="transferBusy"
+                @click="openTransfer('export')"
+              >
+                <Download :size="13" />{{ t('credTransferExport') }}
+              </button>
+              <button
+                class="cred-more-item"
+                role="menuitem"
+                :disabled="transferBusy"
+                @click="openTransfer('import')"
+              >
+                <Upload :size="13" />{{ t('credTransferImport') }}
+              </button>
+            </div>
+          </div>
         </div>
         <span class="qd-action-sep"></span>
-        <button class="qd-btn qd-btn-primary" @click="createNew">
-          <Plus :size="14" /> {{ t('credNew') }}
+        <button class="qd-btn qd-btn-primary cred-new-btn" @click="createNew">
+          <Plus :size="16" />{{ t('credNew') }}
         </button>
       </div>
     </PageHeader>
@@ -440,12 +561,13 @@ onMounted(async () => {
          页面上不显示明文——它等价于密码库的读取权限，没必要挂在屏幕上。 -->
     <div v-if="status?.extensionEnabled" class="cred-ext">
       <div class="cred-ext-row">
-        <span class="cred-ext-label">{{ t('credExtPort') }}</span>
-        <code class="cred-ext-code">{{ status.extensionPort }}</code>
+        <span class="cred-live">
+          <i class="cred-live-dot"></i>
+          {{ t('credExtListening', { port: status.extensionPort }) }}
+        </span>
         <button class="qd-btn qd-btn-sm" @click="copyExtKey">
           <Copy :size="13" /> {{ t('credExtCopyKey') }}
         </button>
-        <span class="cred-ext-badge">{{ t('credExtOn') }}</span>
       </div>
       <p class="cred-ext-hint">{{ t('credExtKeyHint') }}</p>
     </div>
@@ -482,6 +604,17 @@ onMounted(async () => {
       <aside class="cred-list">
         <div class="cred-search">
           <input v-model="query" class="qd-input" :placeholder="t('credSearchPlaceholder')" />
+          <!-- 列表默认给用户名打码：密码库最先暴露在肩窥里的就是「账号叫 admin」。
+               想看全文时点这个眼睛，选择记在 localStorage，不影响安全边界。 -->
+          <button
+            class="qd-icon-btn cred-eye"
+            type="button"
+            :title="showUser ? t('credHideUser') : t('credShowUser')"
+            @click="toggleShowUser"
+          >
+            <EyeOff v-if="showUser" :size="14" />
+            <Eye v-else :size="14" />
+          </button>
         </div>
         <div class="cred-items">
           <div v-if="loadFailed" class="cred-load-failed">
@@ -500,10 +633,11 @@ onMounted(async () => {
               type="button"
               @click="selectItem(item)"
             >
-              <KeyRound :size="13" class="cred-item-icon" />
+              <!-- 图标按类型区分：长列表里一排同样的钥匙等于没有图标。 -->
+              <component :is="kindIcon(item.kind)" :size="14" class="cred-item-icon" />
               <span class="cred-item-main">
-                <span class="cred-item-name">{{ item.name }}</span>
-                <span class="cred-item-sub">{{ item.username || item.host || kindLabel(item.kind) }}</span>
+                <span class="cred-item-name">{{ item.name || item.host || kindLabel(item.kind) }}</span>
+                <span class="cred-item-sub" :title="credSubtitle(item)">{{ credSubtitle(item) }}</span>
               </span>
             </button>
             <div v-if="!loading && filtered.length === 0" class="cred-empty">
@@ -518,25 +652,54 @@ onMounted(async () => {
       </aside>
 
       <section class="cred-detail">
-        <div class="cred-grid">
-          <label class="cred-field">
-            <span class="cred-label">{{ t('credName') }}</span>
-            <input v-model="form.name" class="qd-input" :placeholder="t('credNamePlaceholder')" />
-          </label>
-          <label class="cred-field">
-            <span class="cred-label">{{ t('credKind') }}</span>
-            <select v-model="form.kind" class="qd-input">
-              <option v-for="o in kindOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-            </select>
-          </label>
-        </div>
+        <div class="cred-form">
+          <div class="cred-row">
+            <label class="cred-field">
+              <span class="cred-label">{{ t('credName') }}</span>
+              <input v-model="form.name" class="qd-input" :placeholder="t('credNamePlaceholder')" />
+            </label>
+            <label class="cred-field cred-field-kind">
+              <span class="cred-label">{{ t('credKind') }}</span>
+              <select v-model="form.kind" class="qd-input">
+                <option v-for="o in kindOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+              </select>
+            </label>
+          </div>
 
-        <div class="cred-grid">
-          <label class="cred-field">
-            <span class="cred-label">{{ t('credUsername') }}</span>
-            <input v-model="form.username" class="qd-input" autocomplete="off" spellcheck="false" />
-          </label>
-          <label class="cred-field">
+          <!-- 主机与端口是同一个地址的两半：并排 + 冒号连接，比上下两个输入框更贴直觉。 -->
+          <div class="cred-field">
+            <span class="cred-label">{{ t('credHost') }} / {{ t('credPort') }}</span>
+            <div class="cred-compound">
+              <input
+                v-model="form.host"
+                class="qd-input cred-compound-host"
+                placeholder="example.com"
+                spellcheck="false"
+              />
+              <span class="cred-compound-sep">:</span>
+              <input
+                v-model.number="form.port"
+                class="qd-input cred-compound-port"
+                type="number"
+                min="0"
+                max="65535"
+                :title="t('credPort')"
+              />
+            </div>
+          </div>
+
+          <div class="cred-row cred-row-url">
+            <label class="cred-field">
+              <span class="cred-label">{{ t('credUrl') }}</span>
+              <input v-model="form.url" class="qd-input" placeholder="https://" spellcheck="false" />
+            </label>
+            <label class="cred-field">
+              <span class="cred-label">{{ t('credUsername') }}</span>
+              <input v-model="form.username" class="qd-input" autocomplete="off" spellcheck="false" />
+            </label>
+          </div>
+
+          <div class="cred-field">
             <span class="cred-label">{{ t('credPassword') }}</span>
             <div class="cred-pw-row">
               <input
@@ -547,68 +710,57 @@ onMounted(async () => {
                 spellcheck="false"
                 :placeholder="selected?.hasSecret ? t('credPasswordKeep') : ''"
               />
-              <button class="qd-icon-btn" type="button" :title="t('credShow')" @click="toggleReveal">
-                <EyeOff v-if="(selected ? showSecret : showCreatePwd)" :size="15" />
-                <Eye v-else :size="15" />
-              </button>
-              <button class="qd-icon-btn" type="button" :title="t('credGenerate')" @click="genPassword">
-                <Wand2 :size="15" />
+              <button class="cred-tool" type="button" :title="t('credShow')" @click="toggleReveal">
+                <EyeOff v-if="(selected ? showSecret : showCreatePwd)" :size="16" />
+                <Eye v-else :size="16" />
               </button>
               <button
-                class="qd-icon-btn"
+                class="cred-tool"
                 type="button"
                 :title="t('credCopy')"
                 :disabled="!selected?.hasSecret"
                 @click="copySecret"
               >
-                <Copy :size="15" />
+                <Copy :size="16" />
+              </button>
+              <button class="qd-btn cred-gen" type="button" @click="genPassword">
+                <Wand2 :size="13" />{{ t('credGenerate') }}
               </button>
             </div>
+            <p v-if="selected?.hasSecret" class="cred-hint">{{ t('credPasswordKeepTip') }}</p>
+          </div>
+
+          <label class="cred-field">
+            <span class="cred-label">{{ t('credTags') }}</span>
+            <input v-model="form.tags" class="qd-input" :placeholder="t('credTagsPlaceholder')" />
           </label>
+
+          <label class="cred-field">
+            <span class="cred-label">{{ t('credNotes') }}</span>
+            <textarea v-model="form.notes" class="qd-input cred-textarea" rows="3"></textarea>
+          </label>
+
+          <div class="cred-checks">
+            <label class="cred-check">
+              <input v-model="form.favorite" type="checkbox" />
+              <span>{{ t('credFavorite') }}</span>
+            </label>
+            <label v-if="selected?.hasSecret" class="cred-check">
+              <input v-model="form.clearSecret" type="checkbox" />
+              <span>{{ t('credClearSecret') }}</span>
+            </label>
+          </div>
         </div>
 
-        <div class="cred-grid">
-          <label class="cred-field">
-            <span class="cred-label">{{ t('credHost') }}</span>
-            <input v-model="form.host" class="qd-input" placeholder="example.com" spellcheck="false" />
-          </label>
-          <label class="cred-field">
-            <span class="cred-label">{{ t('credPort') }}</span>
-            <input v-model.number="form.port" class="qd-input" type="number" min="0" max="65535" />
-          </label>
-        </div>
-
-        <label class="cred-field">
-          <span class="cred-label">{{ t('credUrl') }}</span>
-          <input v-model="form.url" class="qd-input" placeholder="https://" spellcheck="false" />
-        </label>
-
-        <label class="cred-field">
-          <span class="cred-label">{{ t('credTags') }}</span>
-          <input v-model="form.tags" class="qd-input" :placeholder="t('credTagsPlaceholder')" />
-        </label>
-
-        <label class="cred-field">
-          <span class="cred-label">{{ t('credNotes') }}</span>
-          <textarea v-model="form.notes" class="qd-input cred-textarea" rows="3"></textarea>
-        </label>
-
-        <label class="cred-check">
-          <input v-model="form.favorite" type="checkbox" />
-          <span>{{ t('credFavorite') }}</span>
-        </label>
-        <label v-if="selected?.hasSecret" class="cred-check">
-          <input v-model="form.clearSecret" type="checkbox" />
-          <span>{{ t('credClearSecret') }}</span>
-        </label>
-
+        <!-- 操作栏贴底常驻：表单再长也不必滚回去点保存。
+             删除降级为红色幽灵按钮，视觉权重让位给保存，也降低盲操误触。 -->
         <div class="cred-actions">
-          <button v-if="selected" class="qd-btn qd-btn-danger" @click="remove">
+          <button v-if="selected" class="qd-btn cred-del" @click="remove">
             <Trash2 :size="14" /> {{ t('delete') }}
           </button>
           <span class="cred-spacer"></span>
-          <button class="qd-btn qd-btn-primary" :disabled="saving" @click="save">
-            <Check :size="14" /> {{ t('save') }}
+          <button class="qd-btn qd-btn-primary cred-save" :disabled="saving" @click="save">
+            <Check :size="15" /> {{ t('save') }}
           </button>
         </div>
       </section>
@@ -624,9 +776,48 @@ onMounted(async () => {
   min-height: 0;
 }
 
-/* 开关：按钮形态的 role="switch"。
-   不用 input[type=checkbox] 是为了让「圆点 + 文案」一体，避免和页面里
-   真正的表单勾选框（表单区那几个）长得一样却用途不同。 */
+/* ---- 页头：条数 + 隐私 badge + 自动锁定 ---- */
+.cred-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.cred-count {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.cred-privacy,
+.cred-autolock {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 19px;
+  padding: 0 var(--space-4);
+  font-size: var(--text-2xs);
+  line-height: 1;
+  color: var(--color-text-muted);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+
+.cred-privacy svg,
+.cred-autolock svg {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.cred-autolock {
+  color: var(--color-text-secondary);
+}
+
+/* ---- 浏览器集成开关 ---- */
 .cred-switch {
   display: inline-flex;
   align-items: center;
@@ -654,19 +845,70 @@ onMounted(async () => {
 
 .cred-switch.is-on {
   color: var(--color-accent);
-  border-color: var(--color-accent);
+  border-color: var(--color-accent-border-strong);
   background: var(--color-accent-bg);
 }
 
 .cred-switch.is-on .cred-switch-dot {
-  background: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-border);
+  background: var(--color-success);
+  box-shadow: 0 0 0 3px var(--color-success-bg);
 }
 
+.cred-new-btn {
+  height: 30px;
+  padding: 0 var(--space-6);
+  font-weight: 500;
+}
+
+/* ---- 更多菜单 ---- */
+.cred-more-wrap {
+  position: relative;
+}
+
+.cred-more {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  min-width: 152px;
+  padding: var(--space-2);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--popover-border-color, var(--color-border));
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-popover, 0 8px 24px rgba(0, 0, 0, 0.35));
+}
+
+.cred-more-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.cred-more-item:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.cred-more-item:disabled {
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+
+/* ---- 集成状态条 ---- */
 .cred-ext {
   flex-shrink: 0;
-  padding: var(--space-5) var(--space-6);
-  background: var(--color-accent-bg);
+  padding: var(--space-4) var(--space-6);
+  background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -677,34 +919,44 @@ onMounted(async () => {
   gap: var(--space-4);
 }
 
+.cred-live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 「服务在跑」这件事靠一个会呼吸的绿点表达，比一行「已开启」文字更快被看到。 */
+.cred-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-success);
+  box-shadow: 0 0 0 3px var(--color-success-bg);
+  animation: cred-breathe 2.6s ease-in-out infinite;
+}
+
+@keyframes cred-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
 .cred-ext-label {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
-}
-
-.cred-ext-code {
-  padding: var(--space-1) var(--space-4);
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: var(--text-sm);
-  color: var(--color-accent);
-  background: var(--color-bg-tertiary);
-  border-radius: var(--radius-sm);
-}
-
-.cred-ext-badge {
-  margin-left: auto;
-  font-size: var(--text-xs);
-  color: var(--color-accent);
 }
 
 .cred-ext-hint {
   margin: var(--space-3) 0 0;
   font-size: var(--text-xs);
   line-height: 1.6;
-  color: var(--color-text-secondary);
+  color: var(--color-text-muted);
 }
 
-/* 导出/导入面板：与浏览器集成条同构，但用中性底色区分它是一次性操作。 */
+/* 导出/导入面板：与集成条同构，但用主底色区分它是一次性操作。 */
 .cred-transfer {
   flex-shrink: 0;
   padding: var(--space-5) var(--space-6);
@@ -740,6 +992,7 @@ onMounted(async () => {
   border-bottom: 1px solid var(--color-border);
 }
 
+/* ---- 列表 ---- */
 .cred-body {
   display: flex;
   flex: 1;
@@ -749,17 +1002,32 @@ onMounted(async () => {
 .cred-list {
   display: flex;
   flex-direction: column;
-  width: 260px;
+  width: 264px;
   flex-shrink: 0;
   border-right: 1px solid var(--color-border);
 }
 
 .cred-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
   padding: var(--space-5) var(--space-5) var(--space-3);
 }
 
 .cred-search .qd-input {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-border-light);
+}
+
+.cred-search .qd-input:focus {
+  border-color: var(--color-accent);
+}
+
+.cred-eye {
+  flex-shrink: 0;
 }
 
 .cred-items {
@@ -774,7 +1042,7 @@ onMounted(async () => {
   align-items: center;
   gap: var(--space-4);
   width: 100%;
-  padding: var(--space-4);
+  padding: 8px var(--space-4);
   background: none;
   border: none;
   border-radius: var(--radius-sm);
@@ -782,14 +1050,18 @@ onMounted(async () => {
   font-family: inherit;
   text-align: left;
   cursor: pointer;
+  /* 未选中行之间用一条极细内阴影分界：比分割线轻，又比纯留白更容易扫读。 */
+  box-shadow: inset 0 -1px 0 var(--color-border);
 }
 
 .cred-item:hover { background: var(--color-bg-hover); }
 
-/* 选中态全页唯一画法：select-bg 实底 + 3px accent 竖条，文字/图标不变色。 */
-.cred-item.is-active { background: var(--color-select-bg); }
+/* 选中态全页唯一画法：select-bg 实底 + 3px accent 竖条。 */
+.cred-item.is-active {
+  background: var(--color-select-bg);
+  box-shadow: none;
+}
 
-/* 竖条与全局 .qd-row.active 同一画法：3px、居中 16px 高。 */
 .cred-item.is-active::before {
   content: '';
   position: absolute;
@@ -802,27 +1074,52 @@ onMounted(async () => {
   background: var(--color-accent);
 }
 
-.cred-item-icon { flex-shrink: 0; opacity: 0.7; }
+.cred-item-icon {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.cred-item.is-active .cred-item-icon {
+  color: var(--color-accent);
+}
 
 .cred-item-main {
   display: flex;
   flex-direction: column;
+  gap: 1px;
   min-width: 0;
 }
 
 .cred-item-name {
   font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .cred-item-sub {
-  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
   color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 列表空态：图标落一个 44 方底（同各页空状态），文字是这一屏唯一的内容，
+   别用 muted 小字——那是提示语的层级，不是标题的层级。 */
+.cred-empty > svg {
+  width: 44px;
+  height: 44px;
+  padding: 12px;
+  box-sizing: border-box;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 0 var(--color-hairline);
 }
 
 .cred-empty {
@@ -837,8 +1134,8 @@ onMounted(async () => {
 
 .cred-empty-title {
   margin: 0;
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
   line-height: 1.6;
 }
 
@@ -860,7 +1157,7 @@ onMounted(async () => {
   padding: var(--space-3);
 }
 .cred-skeleton {
-  height: 38px;
+  height: 40px;
   border-radius: var(--radius-sm);
   background: linear-gradient(90deg, var(--color-bg-tertiary), var(--color-bg-hover), var(--color-bg-tertiary));
   background-size: 200% 100%;
@@ -871,33 +1168,108 @@ onMounted(async () => {
   100% { background-position: -200% 0; }
 }
 
+/* ---- 表单 ---- */
 .cred-detail {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: var(--space-6) var(--space-7) var(--space-7);
+  padding: var(--space-6) var(--space-7) 0;
 }
 
-.cred-grid {
+.cred-form {
+  flex: 1;
+  min-height: 0;
+}
+
+.cred-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) 152px;
   gap: var(--space-4);
+}
+
+.cred-row-url {
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
 }
 
 .cred-field {
   display: block;
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-5);
 }
 
 .cred-label {
   display: block;
-  margin-bottom: var(--space-2);
+  margin-bottom: 6px;
   font-size: var(--text-xs);
-  color: var(--color-text-muted);
+  font-weight: 500;
+  color: var(--color-text-secondary);
 }
 
-.cred-field .qd-input {
+/* 表单里的输入框要比全局「凹槽」更明确：底色提一档 + 亮一档的描边，
+   否则深色下标签和输入区几乎同色，用户得先点一下才知道哪里能填。 */
+.cred-form .qd-input {
   width: 100%;
+  height: 32px;
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-light);
+}
+
+.cred-form .qd-input:hover:not(:disabled) {
+  border-color: var(--color-text-disabled);
+}
+
+.cred-form .qd-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-border);
+}
+
+.cred-form .qd-input:disabled {
+  background: var(--color-bg-tertiary);
+}
+
+/* 主机 + 端口：一个合成控件，中间冒号，视觉上就是 host:port。
+ *
+ * 选择器必须带上 .cred-form：本页 .cred-form .qd-input 写了 width:100%，
+ * 权重（0,2,0）高于单个类名，会把页面里每个输入框都拉成整行宽 ——
+ * 端口的 92px 被顶成整行、可伸缩的主机框被挤到 0 宽（只剩一根光标），
+ * 表现为「主机那一栏看不到地址」。三条都放在 .qd-input 规则之后，
+ * 并各自显式写回 width，避免再被那条通用规则盖掉。 */
+.cred-form .cred-compound {
+  display: flex;
+  align-items: stretch;
+}
+
+.cred-form .cred-compound-host {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.cred-form .cred-compound-sep {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  flex: 0 0 20px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border-top: 1px solid var(--color-border-light);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.cred-form .cred-compound-port {
+  flex: 0 0 92px;
+  width: 92px;
+  border-left: none;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .cred-pw-row {
@@ -906,41 +1278,132 @@ onMounted(async () => {
   gap: var(--space-2);
 }
 
-.cred-pw { flex: 1; min-width: 0; }
+.cred-pw {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+}
+
+.cred-tool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.cred-tool:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+  border-color: var(--color-text-disabled);
+}
+
+.cred-tool:disabled {
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+
+.cred-gen {
+  height: 32px;
+  flex-shrink: 0;
+  gap: var(--space-2);
+  white-space: nowrap;
+  padding: 0 var(--space-5);
+}
+
+.cred-gen:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border-strong);
+  background: var(--color-accent-bg);
+}
+
+.cred-hint {
+  margin: 6px 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
 
 .cred-textarea {
   height: auto;
   padding: var(--space-3) var(--space-4);
   resize: vertical;
   line-height: 1.6;
+  font-family: inherit;
+}
+
+.cred-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-6);
+  margin-bottom: var(--space-4);
 }
 
 .cred-check {
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
-  margin: 0 var(--space-6) var(--space-4) 0;
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
   cursor: pointer;
 }
 
+/* 操作栏贴底：长表单不用滚回去找保存；删除降级成红色幽灵按钮。 */
 .cred-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: var(--space-4);
-  margin-top: var(--space-4);
-  padding-top: var(--space-5);
+  margin: 0 calc(-1 * var(--space-7));
+  padding: var(--space-5) var(--space-7);
+  background: var(--color-bg-primary);
   border-top: 1px solid var(--color-border);
+}
+
+.cred-del {
+  background: none;
+  border-color: transparent;
+  color: var(--color-danger);
+}
+
+.cred-del:hover {
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
+  color: var(--color-danger);
+}
+
+.cred-save {
+  height: 32px;
+  padding: 0 var(--space-7);
+  font-weight: 500;
 }
 
 .cred-spacer { flex: 1; }
 
-/* 窄窗：扩展条与导入导出面板原来都是单行 flex + 定宽输入，控件被挤出可视区。
-   允许整行换行，口令框独占一行自适应宽度。 */
-@media (max-width: 760px) {
-  .cred-ext-row { gap: var(--space-2); }
+/* 窄窗：扩展条与导入导出面板原来是单行 flex + 定宽输入，控件被挤出可视区。 */
+@media (max-width: 820px) {
+  .cred-list { width: 216px; }
+  .cred-row,
+  .cred-row-url { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .cred-field-kind { max-width: none; }
+  .cred-pw-row { flex-wrap: wrap; }
+  .cred-pw { flex: 1 1 100%; }
   .cred-transfer-pw { flex: 1 1 100%; width: auto; min-width: 0; }
-  .cred-ext-badge { margin-left: 0; }
+  .cred-ext-row { gap: var(--space-2); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cred-live-dot { animation: none; }
+  .cred-skeleton { animation: none; }
 }
 </style>

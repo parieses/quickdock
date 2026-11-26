@@ -451,7 +451,9 @@ func (d *Database) ListBookmarks(keyword string, limit int) ([]map[string]interf
 		like := "%" + kw + "%"
 		args = append(args, like, like)
 	}
-	q += " ORDER BY s.name, c.group_name, c.name, i.sort LIMIT ?"
+	// c.sort 排在 c.name 前面：书签页支持同组内拖拽排序（ReorderCollections 写 collections.sort），
+	// 不认这一列的话拖完刷新就弹回原样。全是 0 的老数据仍按名字排，等于没有回归。
+	q += " ORDER BY s.name, c.group_name, c.sort, c.name, i.sort LIMIT ?"
 	args = append(args, limit)
 	return d.Query(q, args...)
 }

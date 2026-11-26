@@ -480,12 +480,12 @@ onBeforeUnmount(() => {
   flex: none;
   font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 .ai-plus-nav.is-active .ai-plus-nav-count { color: var(--color-text-muted); }
 
-.ai-plus-nav-arrow { flex: none; color: var(--color-text-disabled); }
+.ai-plus-nav-arrow { flex: none; color: var(--color-text-muted); }
 
 /* —— 右：子面板 ——
    独立浮层贴在左列右边。高度由 measurePanelHeight 写进行内 style，
@@ -610,7 +610,7 @@ onBeforeUnmount(() => {
   font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.04em;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 .ai-plus-item-body {
@@ -654,7 +654,7 @@ onBeforeUnmount(() => {
   padding: var(--space-5) 10px;
   font-size: var(--text-xs);
   line-height: 1.5;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 /* 底部操作：不参与列表滚动 */
@@ -669,7 +669,7 @@ onBeforeUnmount(() => {
   padding: 5px var(--space-4);
   font-size: var(--text-xs);
   line-height: 1.4;
-  color: var(--color-text-disabled);
+  color: var(--color-text-muted);
 }
 
 .ai-plus-link {

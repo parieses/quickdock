@@ -401,12 +401,12 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
     <div v-if="loading" class="market-loading"><p>{{ t('loading') }}</p></div>
 
     <div v-else-if="plugins.length === 0" class="market-empty">
-      <Store :size="48" class="empty-icon" />
+      <Store :size="20" class="empty-icon" />
       <p class="empty-title">{{ t('pluginMarketEmpty') }}</p>
     </div>
 
     <div v-else-if="filteredPlugins.length === 0" class="market-empty">
-      <Search :size="48" class="empty-icon" />
+      <Search :size="20" class="empty-icon" />
       <p class="empty-title">{{ t('pluginMarketNoResult') }}</p>
     </div>
 
@@ -585,7 +585,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .market-header-left { display: flex; align-items: center; gap: var(--space-4); }
 .market-header-actions { margin-left: auto; display: flex; align-items: center; gap: var(--space-3); }
 .market-count { font-size: var(--text-xs); color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px var(--space-4); border-radius: var(--radius-xs); }
-.market-updated { font-size: var(--text-2xs); color: var(--color-text-disabled); margin-left: var(--space-2); }
+.market-updated { font-size: var(--text-2xs); color: var(--color-text-muted); margin-left: var(--space-2); }
 .filter-chip {
   display: inline-flex; align-items: center; gap: var(--space-2); height: 32px; padding: 0 10px; border-radius: var(--radius-sm);
   border: 1px solid var(--color-border); background: var(--color-bg-secondary);
@@ -624,16 +624,21 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
   gap: 10px; color: var(--color-text-muted);
 }
 /* 空状态图标：一根细线图标直接浮在深底上，容易被读成「没加载出来」。
-   给一层方底 + 细边，它才是一个完整的标识；padding 配合 content-box，
-   图标本身的尺寸不用改（各页 28/30/36/48 都成立）。 */
+   给一层方底 + 细边，它才是一个完整的标识。
+   盒子固定 44（= .qd-empty-icon），图标一律 20：早先靠 padding + content-box
+   "适配任意尺寸"，结果 28/30/36/48 各自撑成 48~68，同屏不同页的图标底托大小不一。 */
 .empty-icon {
-  padding: 10px;
-  box-sizing: content-box;
-  opacity: 1;
+  width: 44px;
+  height: 44px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 0 var(--color-hairline);
   margin-bottom: var(--space-5);
 }
 .empty-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-secondary); }
@@ -730,13 +735,13 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .detail-titles { min-width: 0; }
 .detail-name-row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
 .detail-name { font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
-.detail-id { font-size: var(--text-2xs); color: var(--color-text-disabled); font-family: var(--font-mono); margin-top: var(--space-1); }
+.detail-id { font-size: var(--text-2xs); color: var(--color-text-muted); font-family: var(--font-mono); margin-top: var(--space-1); }
 .detail-body { display: flex; flex-direction: column; gap: 14px; }
 .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .detail-section { display: flex; flex-direction: column; gap: 5px; }
-.detail-h { font-size: var(--text-xs); font-weight: 600; letter-spacing: .3px; color: var(--color-text-disabled); margin: 0; }
+.detail-h { font-size: var(--text-xs); font-weight: 600; letter-spacing: .3px; color: var(--color-text-muted); margin: 0; }
 .detail-desc, .detail-meta { font-size: var(--text-sm); color: var(--color-text-secondary); line-height: 1.55; margin: 0; white-space: pre-wrap; }
-.detail-muted { color: var(--color-text-disabled); }
+.detail-muted { color: var(--color-text-muted); }
 .detail-tags { display: flex; flex-wrap: wrap; gap: 5px; }
 .detail-tag { font-size: var(--text-2xs); padding: var(--space-1) var(--space-4); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-secondary); }
 .detail-perms { display: flex; flex-direction: column; gap: var(--space-4); }

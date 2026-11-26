@@ -43,7 +43,8 @@ describe('classifyTextType', () => {
 })
 
 describe('queryPushForTag', () => {
-  it('image/file 下推成 content_type 整类', () => {
+  it('text/image/file 下推成 content_type 整类', () => {
+    expect(queryPushForTag('text')).toEqual({ push: 'contentType', value: 'text' })
     expect(queryPushForTag('image')).toEqual({ push: 'contentType', value: 'image' })
     expect(queryPushForTag('file')).toEqual({ push: 'contentType', value: 'file' })
   })
@@ -54,9 +55,9 @@ describe('queryPushForTag', () => {
     }
   })
 
-  it('all/favorite 不下推（none）', () => {
+  it('all 不下推；favorite 单独一种下推（需要拉全量再按 isPinned 过滤）', () => {
     expect(queryPushForTag('all')).toEqual({ push: 'none' })
-    expect(queryPushForTag('favorite')).toEqual({ push: 'none' })
+    expect(queryPushForTag('favorite')).toEqual({ push: 'favorite' })
   })
 })
 
@@ -72,9 +73,10 @@ describe('tagPushSignature', () => {
     )
   })
 
-  it('all 与 favorite 都是 none → 签名相同（不必重查）', () => {
-    expect(tagPushSignature(queryPushForTag('all'))).toBe(
-      tagPushSignature(queryPushForTag('favorite')),
+  it('favorite 与 image 的签名不同（all↔favorite 切换必须重查）', () => {
+    // 回归：favorite 曾与 all 同为 none，切换时不会重查，收藏态沿用了 all 的前 1000 条基础集合。
+    expect(tagPushSignature(queryPushForTag('favorite'))).not.toBe(
+      tagPushSignature(queryPushForTag('all')),
     )
   })
 })
@@ -83,6 +85,11 @@ describe('filterByTag', () => {
   it('image 标签筛出全部图片条目（回归：曾因套 text 前置条件而永远为空）', () => {
     const r = filterByTag(sample, 'image')
     expect(r.map(e => e.id)).toEqual(['i1', 'i2', 'i3'])
+  })
+
+  it('text 标签筛出全部文本条目，且不含图片/文件', () => {
+    const r = filterByTag(sample, 'text')
+    expect(r.map(e => e.id)).toEqual(['t1', 't2', 't3', 't4'])
   })
 
   it('file 标签筛出全部文件条目（回归：同上）', () => {

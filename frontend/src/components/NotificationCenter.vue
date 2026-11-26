@@ -563,7 +563,7 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
   border-radius: var(--radius-xs);
   background: var(--color-bg-tertiary); color: var(--color-text-muted);
 }
-.nc-time { font-size: var(--text-2xs); color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
+.nc-time { font-size: var(--text-2xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .nc-dot {
   margin-left: auto; width: 6px; height: 6px; border-radius: 50%;
   background: var(--color-accent);
@@ -574,7 +574,7 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
 }
 .nc-item.unread .nc-item-title { color: var(--color-text-primary); font-weight: 500; }
 .nc-item-body {
-  font-size: var(--text-xs); color: var(--color-text-disabled); line-height: 1.5;
+  font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.5;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden; white-space: pre-wrap;
 }
@@ -583,7 +583,7 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
   flex-shrink: 0; align-self: center;
   display: inline-flex; align-items: center; justify-content: center;
   width: 20px; height: 20px; border-radius: var(--radius-sm);
-  color: var(--color-text-disabled); opacity: 0;
+  color: var(--color-text-muted); opacity: 0;
   transition: opacity var(--transition-fast), color var(--transition-fast);
 }
 .nc-item:hover .nc-del { opacity: 1; }
@@ -591,6 +591,6 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
 
 .nc-empty {
   display: flex; flex-direction: column; align-items: center; gap: var(--space-4);
-  padding: 44px 0; color: var(--color-text-disabled); font-size: var(--text-sm);
+  padding: 44px 0; color: var(--color-text-muted); font-size: var(--text-sm);
 }
 </style>
