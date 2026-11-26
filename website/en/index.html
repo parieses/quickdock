@@ -444,6 +444,23 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">File search speaks Everything syntax, Git draws its own branch graph, idle auto-lock</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>File search now spells out Everything syntax on the page — extension lists (go;ts;vue), paths, size (&gt;10mb), date (today), space for AND, pipe for OR, quotes for exact phrases — plus four one-click presets: changed today, code files, large files, archives. Recent searches are kept, search starts after two characters, Enter runs it immediately, and the footer always shows the Everything connection state and last query time. Preview renders by type, with code highlighting.</li>
+          <li>The Git branch graph no longer uses git's ASCII output: connector-only lines carry no hash, get dropped when parsing, and leave a few broken stubs behind. It now lays out lanes from each commit's parents, curves merges in, covers crossings with dots, and pins colours to lane index so one column never changes colour halfway down. History is a single 28px row (subject, refs, author, date), and there is a new "current branch / all" switch — the list is every ref mixed together, so you can narrow it in place. The repo / worktree / detail columns and the staged / unstaged panes are all draggable; double-click resets.</li>
+          <li>The runtime manager's install flow gained options: pick a mirror, fill in a custom source template, refresh the version list. A version can be set as the global default — its bin directory goes into the user PATH so the terminal switches to it; and when several versions' bin directories sit in PATH at once, the app warns you (whichever wins depends on PATH order) and links straight to the PATH panel to clean up.</li>
+          <li>Schedules gained a run console: hit ▶ on a row and output streams right there, collapsible, with running state, duration and outcome visible; the list also shows run counts and average duration. Monitor latency is no longer a bare number — it is compared against the 24-hour average (slower is flagged), each bar shows how close it is to the timeout threshold, a failed probe raises a banner at the top, and selected monitors can be batch-deleted into the recycle bin.</li>
+          <li>Clipboard history is paged (x–y of n), overflow tags fold into a "more" menu, and long text expands in place. Todo empty states now speak to the situation — nothing today, nothing that day, nothing unscheduled, nothing under this tag — each with a next step, plus a new focus mode. Notes' recent list is capped at five.</li>
+          <li>The command palette's page shortcuts are complete: scripts, bookmarks, downloads, netdrive and credentials were searchable but did nothing on Enter; they now open. Git repos and SSH hosts have their own groups, and picking a host wakes the SSH window already connected. The screen lock can auto-lock after N idle minutes, timed from the last keyboard / mouse input, so watching a video still counts as idle. The netdrive can also connect to an OpenList you already run in Docker or on another machine instead of installing a second copy that fights over port 5244. Across the UI, secondary text is one step brighter (no longer reads as disabled in dark theme), and empty states share one box-and-icon treatment.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.58</span>
+          <span class="log-date">2026-11-25</span>
           <span class="log-title">Import bookmarks straight from your browser, one default workspace, feature-scoped data migration</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -486,24 +503,6 @@
           <li>The dashboard header gained New note / New AI task / New script shortcuts, plus a script card that puts failures first, lists only the most recent runs, and jumps straight to the script you click. It refreshes from events the moment a run finishes.</li>
           <li>Scheduled tasks gained a Run script action: pick an existing script from a dropdown and it runs synchronously at the scheduled time, with status and summary recorded in task history. Renaming a script does not break the task.</li>
           <li>Environment's update overview no longer hammers upstream sources: version lists are cached in memory and on disk, with stale entries refreshed in the background, so hitting an anonymous rate limit can no longer make outdated built-in lists look like the latest release. When the code editor engine fails to load it now falls back to a plain text area that still saves, instead of leaving an empty pane.</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.55</span>
-          <span class="log-date">2026-11-23</span>
-          <span class="log-title">Full UI refresh, more entry points, and a batch of “nothing happened” fixes</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>Visual overhaul: consistent overlays, selection states, layering and icons — four shared components replace the per-page copies</li>
-          <li>Todos gain a four-quadrant view; completing a recurring task can apply to “this one” or “all”, and you can snooze it on the spot</li>
-          <li>Create notes and todos right from the command palette; save AI answers, notes and clipboard entries as a note, a todo, or into the knowledge base</li>
-          <li>Running a scheduled task by hand is now asynchronous: watch which step it is on and cancel it midway</li>
-          <li>Send the current log to AI for analysis in one click; SSH batch runs can export results, retry only the failed hosts, and test reachability of saved hosts</li>
-          <li>The PATH panel in Environment management toggles bin dirs per version; site setup is now a three-step wizard (directory → domain → certificate)</li>
-          <li>A batch of “failure treated as empty state” fixes: a failed lock-status read no longer says “disabled”, a failed note read never overwrites the original with an empty draft, and stale page requests no longer overwrite fresh content</li>
         </ul>
       </details>
 

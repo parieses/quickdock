@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Guide — 快启坞 QuickDock</title>
-<meta name="description" content="QuickDock guide: installation, interface, hotkeys, resources, command palette, clipboard, screenshots, notes, todos, monitors, schedules, runtimes, downloader, AI, SSH, backup, troubleshooting and the startup lock.">
+<meta name="description" content="QuickDock guide: installation, interface, hotkeys, resources, command palette, clipboard, screenshots, notes, todos, monitors, schedules, script tasks, knowledge base, bookmarks, netdisk, Git, plugins, runtimes, downloader, AI, DeepSeek Harness, SSH, backup, troubleshooting, the startup lock and the password vault.">
 <meta name="theme-color" content="#080c15">
 <link rel="icon" href="../assets/img/favicon-64.png">
 <link rel="alternate" hreflang="zh-CN" href="../guide.html">
@@ -72,6 +72,13 @@
         <a href="#s17">17 Downloader</a>
         <a href="#s18">18 Startup lock</a>
         <a href="#s19">19 Password vault</a>
+        <a href="#s20">20 Script tasks</a>
+        <a href="#s21">21 Knowledge base</a>
+        <a href="#s22">22 Bookmarks</a>
+        <a href="#s23">23 Netdisk</a>
+        <a href="#s24">24 Git</a>
+        <a href="#s25">25 Plugins</a>
+        <a href="#s26">26 DeepSeek Harness</a>
       </aside>
 
       <div class="doc-main">
@@ -89,13 +96,14 @@
 
         <section class="doc-sec" id="s2">
           <h2><span>02</span>Interface</h2>
-          <p>The main window is three fixed panes, all aligned on one line.</p>
+          <p>A sidebar on the left, one page on the right. Every page carries a full-width header: title on the left, actions on the right.</p>
           <ul>
-            <li><b>Top bar</b>: workspace switcher on the left, scenario tabs in the middle, Config on the right — the runtime services bound to the current scenario hang there.</li>
-            <li><b>Sidebar</b>: navigation on top (dashboard, workspaces, notes, todos, scheduled tasks, site monitors, clipboard, file search, runtimes, downloader, Git, SSH, AI, DeepSeek Harness, plugins), the scenario list below, a search box between them, and the notification bell plus settings at the bottom.</li>
-            <li><b>Middle</b>: collections in the current scenario, each with a type icon and an item count.</li>
-            <li><b>Right</b>: the items of the selected collection. With nothing selected it shows a hint — that's expected, not a bug.</li>
-            <li><b>Dashboard</b>: the home page. A date bar on top carries the lunar date, solar terms, the day's traditional do's and don'ts and local weather (turn it off from the gear; the lunar calendar and almanac are computed offline). Six readouts sit above eight cards — recent items, the file shelf, today's todos, mail verification codes, ports, resident services, Git and AI usage. Clicking any row lands on that page with the item selected.</li>
+            <li><b>Header</b>: 46px tall, 15px title. At most one solid blue button on the right — it is reserved for what that page is mostly for. The rest are outlined or icon-only, set off from the primary by a short vertical rule.</li>
+            <li><b>Sidebar</b>: top to bottom runs the navigation — dashboard, workspaces, notes, todos, scheduled tasks, script tasks, site monitors, clipboard, file search, knowledge base, bookmarks, runtimes, downloader, netdisk, Git, password vault, SSH, AI, DeepSeek Harness, plugins. Right-click any entry to hide it or move it up and down; hidden ones collect in a Hidden group below and can be brought back at any time. Hiding only trims the sidebar — <kbd>Ctrl</kbd><kbd>K</kbd> still finds the page. The bottom row is fixed: notifications, settings, collapse. Collapsed, the sidebar is icons only.</li>
+            <li><b>Switching pages</b>: the old page fades out before the new one fades in, so the content area is briefly empty — that is the transition, not a failure. Dashboard, notes, todos, scripts and plugins stay alive after you leave: coming back shows the previous content right away and refreshes quietly in the background, with no white reload.</li>
+            <li><b>Workspace</b>: three panes — scenarios, collections, items — each with its own search row and empty state. With no collection selected the right pane shows a hint; that is expected.</li>
+            <li><b>Dashboard</b>: the home page. A date bar on top carries the lunar date, solar terms, the day's traditional do's and don'ts and local weather (turn it off from the gear; the lunar calendar and almanac are computed offline). Below sit the readouts and cards: upcoming schedules, recent items, the file shelf, today's todos, script tasks, mail verification codes, ports, resident services, Git state, site health and AI usage. An abnormal readout turns red and pulses faintly; clicking any row lands on that page with the item selected.</li>
+            <li><b>Settings</b> reopens on the page you left it on; the very first open lands on General. Switching pages inside the panel only swaps the right side — there are no second-level pages.</li>
             <li>The interface scales proportionally under Settings → General. The main window and every detached window zoom together and the proportions stay put.</li>
             <li>The same page picks the window material (Mica, Acrylic or Mica Alt); restart to apply. The main window, the four floating panels, SSH and plugin windows all share one setting. On Windows 10, with system transparency off, or in high contrast, it falls back to solid colours — that is expected.</li>
           </ul>
@@ -121,7 +129,7 @@
           <h2><span>04</span>Resources</h2>
           <p>Four levels: workspaces hold scenarios, scenarios hold collections, collections hold items.</p>
           <ul>
-            <li><b>Workspaces</b> separate contexts — Work and Personal, say — so they never interfere.</li>
+            <li><b>Workspaces</b> are the outermost container: the first launch creates one and every scenario hangs under it. A deleted workspace can be restored from Settings → Recycle bin.</li>
             <li><b>Scenarios</b> are slices of the same resources, with their own tags, icons and colors. Switch to Frontend while writing code, Production while on call.</li>
             <li><b>Collections</b> group by purpose and carry one of four open strategies, which decide whether items open all at once or one by one.</li>
             <li><b>Items</b> come in six types: folder, file, URL, terminal command, application, shortcut with arguments.</li>
@@ -135,7 +143,7 @@
           <h2><span>05</span>Command palette</h2>
           <p><kbd>Ctrl</kbd><kbd>K</kbd> opens it. Type to search, press Enter to run.</p>
           <ul>
-            <li>Results are grouped by source: best match, recent, projects, scenes, workspace collections, quick links, notes, todos, applications, files, plugin commands, runtime services, system commands, clipboard suggestions, plus inline calculator and web results. Scenes and collections open the workspace page at that exact item.</li>
+            <li>Results are grouped by source: best match, recent, projects, scenes, workspace collections, quick links, notes, todos, applications, files, plugin commands, runtime services, system commands, clipboard suggestions, plus inline calculator and web results. Scenes and collections open the workspace page at that exact item. Typing a page name brings up Quick navigation — bookmarks, downloads, netdrive, credentials, scripts and the rest all jump straight there; Git repos and SSH hosts have their own groups, and picking a host wakes the SSH window already connected.</li>
             <li>Type "new note" or "new todo" to create one inline: type a title, press Enter, and the new entry opens right away.</li>
             <li>Todos only return unfinished top-level tasks. Enter switches to the todo page, jumps to that day, clears tag filters when needed and highlights the row for two seconds; the action menu can mark it done.</li>
             <li>Type an expression and the answer appears; paste a URL and it asks whether to save it as a project.</li>
@@ -208,20 +216,20 @@
             <li>Six probe types: HTTP (status code / keyword / regex), TCP port (a connect means up — databases, Redis, MQ), DNS (<code>A:</code>/<code>AAAA:</code>/<code>MX:</code>/<code>CNAME:</code> prefixes), Ping (system ping, no raw sockets), local process (present means up), and custom command (exit code 0 means up).</li>
             <li>HTTP monitors show status code, response time and days left on the SSL certificate. Latency jitter isn't an outage; adjust the threshold in settings so a network hiccup doesn't page you.</li>
             <li>A state flip pushes a desktop notification, or DingTalk, WeCom, Feishu, ServerChan, PushPlus or Telegram.</li>
-            <li>Trend charts cover 24 hours, 7 days and all time; the monitor list exports to CSV. The 24h p95 / p99 response-time percentiles are shown per monitor. A second tab, <b>Status</b>, gives a read-only overview with an exportable single-file HTML snapshot; it refreshes every 60 seconds and never opens a server port.</li>
+            <li>Trend charts cover 24 hours, 7 days and all time; the monitor list exports to CSV. The 24h p95 / p99 response-time percentiles are shown per monitor. Current average latency is compared against the 24h average (slower is flagged), each response bar fills against the timeout threshold, and a failed probe raises a banner above the card. A second tab, <b>Status</b>, gives a read-only overview with an exportable single-file HTML snapshot; it refreshes every 60 seconds and never opens a server port.</li>
             <li>Every notification also lands in the bell at the bottom of the sidebar; the bell can filter by kind and search, and clicking a notification jumps to the exact monitor, scheduled task, todo or AI conversation it came from. AI completion notices stay quiet while the window is in front of you.</li>
             <li>Mail verification codes are set up right on that dashboard card: enter the address (servers for common providers such as QQ, 163, Gmail and Outlook are detected automatically), the port and an app password. New codes then appear on the card and in the bell, and clicking one copies it. The inbox is read-only — nothing is marked as read, no mail is sent or deleted, and bodies only pass through memory while the code is being extracted.</li>
-            <li>With many monitors you can search, tick several to enable or disable, and drag them into order. Deleted ones go to the single app-wide recycle bin (Settings &gt; History &gt; Recycle Bin, linked from the monitor header) and come back with logs and configuration; entries older than 30 days are purged automatically. A one-hour maintenance window pauses checks and alerts.</li>
+            <li>With many monitors you can search, tick several to enable, disable or delete in bulk, and drag them into order. Deleted ones go to the single app-wide recycle bin (Settings &gt; History &gt; Recycle Bin, linked from the monitor header) and come back with logs and configuration; entries older than 30 days are purged automatically. A one-hour maintenance window pauses checks and alerts.</li>
           </ul>
         </section>
 
         <section class="doc-sec" id="s11">
           <h2><span>11</span>Schedules</h2>
-          <p>Five actions and six schedules cover everyday scripts and reminders.</p>
+          <p>Seven actions and six schedules cover everyday scripts and reminders.</p>
           <ul>
-            <li>Actions: open an application, open a folder, open a URL, run a command, send an HTTP request.</li>
+            <li>Actions: open an application, open a folder, open a URL, run a command, send an HTTP request, run a script, or send a prompt to the AI (results append to the same conversation in run order).</li>
             <li>Schedules: once, interval, daily, weekly, monthly (pick a day of month or the last day) and standard five-field cron.</li>
-            <li>Run one immediately from the list instead of waiting for the clock.</li>
+            <li>Run one immediately from the list instead of waiting for the clock. Hitting ▶ on a row streams output into the run console below it — collapsible, with running state, duration and outcome visible, and each row also shows run count and average duration.</li>
             <li>The list searches by name and filters to failed, enabled or disabled; each row shows how long until the next run. The run history filters to failures and exports to CSV.</li>
             <li>Bot addresses are configured once under Settings → Robot Notifications; a task only decides whether to send and through which channel.</li>
             <li>Deleted tasks go to the recycle bin. Restoring recalculates the next run from now, so a task whose time passed long ago doesn't fire the moment it comes back.</li>
@@ -232,8 +240,8 @@
           <h2><span>12</span>Runtimes</h2>
           <p>Open Runtimes from the sidebar: groups on the left, versions and services on the right. aria2 lives in Dev tools too; install and start it before the downloader can work.</p>
           <ul>
-            <li>Install a version by picking it and clicking install; progress streams back live. Switch mirror when one is slow, or point at your own address.</li>
-            <li>Several versions of the same runtime coexist. Switching just moves PATH — nothing is uninstalled or overwritten.</li>
+            <li>Install a version by picking it and clicking install; progress streams back live. Switch mirror when one is slow, or point at your own address; the install dialog also offers mirrors with acceleration, a custom source template, and a refresh of the version list.</li>
+            <li>Several versions of the same runtime coexist. Switching just moves PATH — nothing is uninstalled or overwritten. To make the terminal follow, set a version as the global default: its bin directory goes into the user PATH. When several versions' bin directories sit in PATH at once the app warns you (whichever wins depends on PATH order) and links straight to the PATH panel to clean up.</li>
             <li>Service runtimes — Nginx, MySQL, Redis and the like — start, stop and restart from here. Configs can be edited in the app and reloaded on save.</li>
             <li>Nginx, Apache and Caddy validate their config before starting; a syntax error stops there instead of breaking a live service.</li>
             <li>Every service has live logs (last 8 KB) and a web console entry; the port overview shows which process holds which port.</li>
@@ -330,6 +338,7 @@
             <li>The lock covers the interface only. The main window and every detached window collapse to one unlock box, and panel hotkeys bring up the main window with a hint instead. Everything behind keeps running: monitors, scheduled tasks, mail codes, weather, the clipboard listener, SSH sessions, the MCP listener.</li>
             <li>Clipboard history is hidden while locked, but ordinary copy and paste still works. Window tiling <kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>W</kbd> and screenshots <kbd>F1</kbd> stay allowed — neither reads this app's data.</li>
             <li>It unlocks by itself once the password is fully typed; no Enter needed. Forgotten it? The recovery code clears the password and unlocks, then set a new one.</li>
+            <li>Settings → Security also offers "lock after N idle minutes", timed from the last keyboard / mouse input (watching a video still counts as idle); 0 or blank disables it. It has no effect until a password is set.</li>
             <li>The password lives in local app_state and is deliberately left out of WebDAV backups. Restoring onto another machine leaves you with no password set, so set it again there.</li>
           </ul>
         </section>
@@ -345,6 +354,93 @@
             <li>The extension only offers entries that match the current domain — the whole vault never lands on someone else's screen — and filled values submit correctly on React / Vue sites. After login it offers to save, new passwords save automatically while changes still ask for confirmation, tracked per site so two different logins cannot overwrite each other.</li>
             <li>SSH hosts no longer need a password up front: you get asked at connect time, the answer goes into the vault and the host is remembered. If the password changed, entering the new one overwrites both the host and the vault entry. The host form also has a "fill from vault" button.</li>
             <li>Anything else that needs a password uses the same channel: the caller asks once, a prompt appears inside the app where you can pick a saved entry or type one and save it in passing. Concurrent requests queue up instead of stacking two boxes.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s20">
+          <h2><span>20</span>Script tasks</h2>
+          <p>Sidebar → Script tasks. This page owns the script itself — code, files, variables, dependencies, run history. Scheduled tasks only decide when it runs: pick the "run script" action and choose one.</p>
+          <ul>
+            <li>One script is one directory: the entry file defaults by language (<code>main.py</code> / <code>main.go</code> / <code>main.php</code>, and you can override it) and side files such as config or <code>requirements.txt</code> sit next to it. The editor highlights syntax; <kbd>Ctrl</kbd><kbd>S</kbd> saves.</li>
+            <li>Languages ride on Runtimes: an installed Python / Node / Go / PHP is used, otherwise it falls back to the system PATH. Leave the interpreter blank to pick automatically. Dependencies install with one click, and a changed requirements file is flagged as possibly out of date.</li>
+            <li>Hitting Run streams the output below the editor — filter to errors only, search it, follow it. Finished runs land in History: replay one run, or full-text search every stored log. One instance per script by default; scraping jobs can go up to eight in parallel.</li>
+            <li>Two automatic triggers. HTTP trigger listens on loopback only; outside systems call <code>POST /run/&lt;script id&gt;</code> with a token, which can be rotated so the old URL dies immediately. Watch path runs once when a file or directory changes, and ten seconds of churn counts as one run.</li>
+            <li>Imported scripts need a one-time trust confirmation before the first manual run — a script runs as your user, exactly like typing the command in a terminal. An "allow MCP calls" switch sits on the page and stays off by default.</li>
+            <li>Scripts export to a zip and import back, and can be duplicated. Deleting one that scheduled tasks reference first tells you how many will break. Deleted script directories stay in the recycle area for 30 days.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s21">
+          <h2><span>21</span>Knowledge base</h2>
+          <p>Sidebar → Knowledge base. Register local documents, then search their contents and ask questions over them.</p>
+          <ul>
+            <li>Add files or a whole folder. Nothing is copied — only the path is registered. Word, Excel, PDF and Markdown are among the text formats it can parse.</li>
+            <li>Every document carries an index state: queued, parsing, splitting, building the semantic index, ready. Failures, moved source files and a changed embedding model are called out separately; rebuild one document or all of them.</li>
+            <li>Three tabs on the right: <b>Search</b> (hybrid or keyword-only, three characters minimum), <b>Ask</b> (hands the matching chunks to the AI) and <b>Chunks</b> (how that document was cut up). Chunks are the only way to debug "why doesn't this match" — a table split apart or a PDF turned into noise defeats any search tuning.</li>
+            <li>Hits are labelled keyword match or semantic match, so you can see why one ranked first.</li>
+            <li>Several knowledge bases can coexist, one per project. Removing a document deletes only its index; the file on disk stays, and the confirmation says so.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s22">
+          <h2><span>22</span>Bookmarks</h2>
+          <p>Sidebar → Bookmarks. Import browser bookmarks and keep them tidy. Imported entries are ordinary web-type items living in the Bookmarks workspace, so opening and searching go through the same path as the resource tree.</p>
+          <ul>
+            <li>Reads the bookmarks already stored by installed browsers — no export step. When a browser sits somewhere non-default, use "import from HTML file" with a file exported from its menu.</li>
+            <li>You see a preview before anything is written: how many were read, how many are new, how many duplicates and invalid URLs are skipped, and which collections the folders will become. Confirm, then it writes.</li>
+            <li>Three maintenance jobs: <b>link check</b> (runs the list and marks each status), <b>find duplicates</b> (merge by URL) and <b>insights</b> (which sites you save most). Missing site icons fill in with one click.</li>
+            <li>The list groups by collection and supports search on title and URL, drag ordering, per-entry rename and URL edits, copy URL and open in browser.</li>
+            <li>There is no read/unread state: these entries are things to use, not a read-later queue.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s23">
+          <h2><span>23</span>Netdisk</h2>
+          <p>Sidebar → Netdisk. By default it talks to the OpenList gateway installed on this machine — Baidu, Quark and friends are configured inside that gateway, and QuickDock behaves as a plain WebDAV client — but it can also connect to an OpenList you already run in Docker or on another machine.</p>
+          <ul>
+            <li>First run offers "install OpenList" and starts it for you. Already have one? Choose "connect an existing OpenList" and fill in the address and account (an address like <code>http://host:5244</code> gets <code>/dav</code> appended automatically).</li>
+            <li>Adding drives and scanning QR codes happen in the gateway's admin console; the app does not reimplement a login flow. With the gateway up but no storage added, the root is empty and the page says to add one there.</li>
+            <li>Browse, descend, upload, download, create folders, rename and delete. Downloads go through the system save dialog and progress is pushed into the page — it never picks a destination for you.</li>
+            <li>When the gateway is missing or stopped, the page offers install / start buttons instead of an empty list. Connected to an external gateway, it drops the install / start buttons and shows that address, its reachability and a way to disconnect.</li>
+            <li>Data goes straight between you and your own account; no third-party server in between.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s24">
+          <h2><span>24</span>Git</h2>
+          <p>Sidebar → Git. A window onto history and commits for local repos, not a full Git client.</p>
+          <ul>
+            <li>Three columns: repos and branches on the left, worktree changes next, history and diff on the right. Every boundary drags — between the three columns, between history and the diff below it, and between the staged and unstaged panes; double-click resets.</li>
+            <li>The branch graph next to the history is laid out from each commit's parents rather than git's ASCII graph — connector-only lines in that output carry no hash, get dropped when parsing and leave broken stubs. Merges curve in, dots cover the lines they cross, and each lane keeps one colour. Rows are a single 28px line (subject, refs, author, date). A "current branch / all" switch above the list narrows it: the list is every ref mixed together, so switch to see only the branch you are on.</li>
+            <li>Frequent actions stay on the toolbar: fetch, pull, push, commit. Committing means staging files first (stage all is there), then <kbd>Ctrl</kbd><kbd>Enter</kbd>. The message can be generated from the current diff, and an amend folds it into the previous commit.</li>
+            <li>Rare actions that touch the disk live in the context menu: discard, ignore, stop tracking, tag, revert, create / rename / delete branches.</li>
+            <li>Conflicts get no resolution UI: it tells you plainly how to continue (resolve, then commit) or how to back out (<code>git merge --abort</code>). Interactive rebase, <code>reset --hard</code> and line-level staging are deliberately absent — those belong in a terminal.</li>
+            <li>The status bar always shows the branch, commits ahead / behind, how many files changed and the repository path.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s25">
+          <h2><span>25</span>Plugins</h2>
+          <p>Sidebar → Plugins. Plugins are small features you install and remove; they take effect immediately, no restart.</p>
+          <ul>
+            <li>Two ways in: "install plugin" in the header picks a zip (or drop a zip onto the page), or browse the online marketplace. Marketplace sources are configurable, so an internal mirror works too.</li>
+            <li>A card shows state (running, ready, disabled, crashed), version, category and the permissions it declares. The button in its corner is the one action that applies right now — open its UI, enable it, or view its commands.</li>
+            <li>Hovering a card reveals power (enable / disable), kill, open, reinstall and uninstall in the top corner. Disabling only stops it and keeps its data; uninstalling offers to keep data too.</li>
+            <li>Plugins register commands and hotkeys: the card shows the first two, clicking opens the full list with trigger, hotkey and parameters. Those commands are searchable in the palette and callable by AI and MCP.</li>
+            <li>Before installing, the sensitive capabilities it declares (network, files, shell, clipboard, MCP tools and so on) are listed for confirmation; the line on the card is the same set, still reviewable later. Permissions are self-reported — the host cannot verify them.</li>
+            <li>Execution history at the bottom records success, duration and output for every command, with failures expandable. A crashed plugin backend shows as "crashed" on its card — hover to kill the process and reinstall; when the marketplace has a newer version, the sidebar entry carries an update badge.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s26">
+          <h2><span>26</span>DeepSeek Harness</h2>
+          <p>Sidebar → DeepSeek Harness is not a built-in page: it launches a separate window running DeepSeek's open-source agent framework, where tool calls, file edits and terminal runs happen.</p>
+          <ul>
+            <li>The first click offers to set up the runtime: the app downloads Node, installs DSH and leaves you an "open DeepSeek" button — no terminal needed.</li>
+            <li>On first use you enter a DeepSeek API key in the DSH web UI. It binds <code>127.0.0.1</code> only and exposes no port to the outside.</li>
+            <li>Launching starts a process and waits for the port, so there is a visible delay: the sidebar entry spins and reads "starting…" during it. That is expected.</li>
+            <li>Settings → DeepSeek Harness shows status, start / stop, update checks, DSH plugin install and removal, batch plugin updates with a rollback to the previous set, and log export.</li>
+            <li>It is separate from the built-in AI assistant: that one is the in-app chat and delegation surface, DSH is the full external agent UI. It looks for Node already on the machine (including anything installed under Runtimes) and only downloads its own copy when none is found.</li>
           </ul>
         </section>
 
