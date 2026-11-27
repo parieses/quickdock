@@ -2,8 +2,9 @@
 import { ref, inject, computed, watch, reactive, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../stores/workspace'
-import { Plus, Pencil, Trash2, Play, Search, X, ChevronRight } from '@lucide/vue'
+import { Plus, Pencil, Trash2, Play, ChevronRight } from '@lucide/vue'
 import TypeIcon from './TypeIcon.vue'
+import QdSearchBox from './QdSearchBox.vue'
 import CreateDialog from './CreateDialog.vue'
 import { getErrorMessage } from '../utils/error'
 import { matchesTextOrPinyin } from '../utils/pinyin'
@@ -218,21 +219,14 @@ function onDropCol(e: DragEvent, targetId: string) {
     </div>
     <!-- 局部过滤：只搜当前场景下的集合；ESC 清空。
          与场景/项目栏同位置同高度（无场景时保留输入框但禁用，避免整行消失） -->
-    <div class="qd-panel-search" :class="{ 'is-disabled': !store.activeSceneId || store.hasSearch }">
-      <Search :size="13" class="qd-search-icon" />
-      <input
-        v-model="localQuery"
-        type="text"
-        class="qd-search-input"
-        :placeholder="t('filterCollectionsPh')"
-        autocomplete="off"
-        :disabled="!store.activeSceneId || store.hasSearch"
-        @keydown.esc="localQuery = ''"
-      />
-      <button v-if="filtering" class="qd-search-clear" @click="localQuery = ''" :title="t('clear')">
-        <X :size="12" />
-      </button>
-    </div>
+    <QdSearchBox
+      class="qd-panel-search"
+      v-model="localQuery"
+      :placeholder="t('filterCollectionsPh')"
+      :disabled="!store.activeSceneId || store.hasSearch"
+      esc-to-clear
+      :clear-title="t('clear')"
+    />
     <div class="qd-panel-body">
       <template v-if="visibleCollections.length">
         <template v-for="grp in groupedCollections" :key="grp.name || 'ungrouped'">
@@ -384,7 +378,7 @@ function onDropCol(e: DragEvent, targetId: string) {
 
 /* 右键菜单：与 ItemList / GitPage 同一套视觉（fixed + 透明遮罩） */
 .ctx-backdrop {
-  position: fixed; inset: 0; z-index: 900;
+  position: fixed; inset: 0; z-index: var(--z-ctx-backdrop);
 }
 .ctx-menu {
   position: fixed; min-width: 168px; padding: var(--space-2);

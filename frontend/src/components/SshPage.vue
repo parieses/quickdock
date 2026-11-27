@@ -1,4 +1,5 @@
 <script lang="ts" setup>
+import { downloadBlob } from '../utils/download'
 defineOptions({ name: KEEP_ALIVE.ssh })
 // name 的唯一来源：pages/keepAlive.ts（与 KeepAlive 白名单共用同一常量）
 import { KEEP_ALIVE } from '../pages/keepAlive'
@@ -20,7 +21,7 @@ import { KEEP_ALIVE } from '../pages/keepAlive'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
-import { Download, FolderPlus, ListChecks, MapPin, Network, Plus, Radio, RefreshCw, Search, Send, Server, ShieldCheck, SquareTerminal, X, Zap } from '@lucide/vue'
+import { Download, FolderPlus, ListChecks, MapPin, Network, Plus, Radio, RefreshCw, Send, Server, ShieldCheck, SquareTerminal, Zap } from '@lucide/vue'
 import {
   DeleteHost,
   Disconnect,
@@ -55,6 +56,7 @@ import {
   type SshTab,
 } from '../utils/sshTabs'
 import SshHostTree from './SshHostTree.vue'
+import QdSearchBox from './QdSearchBox.vue'
 import SshHostDialog from './SshHostDialog.vue'
 import SshHostDetailDialog from './SshHostDetailDialog.vue'
 import SshSessionView from './SshSessionView.vue'
@@ -295,15 +297,7 @@ function exportHosts() {
   try {
     const json = JSON.stringify(hosts.value.filter((h) => !h.isFolder), null, 2)
     const blob = new Blob([json], { type: 'application/json;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `quickdock-ssh-hosts-${stamp(new Date())}.json`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    // WebView2 里 a.click() 的下载是异步取流的，立即 revoke 会提前释放 Blob
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    downloadBlob(`quickdock-ssh-hosts-${stamp(new Date())}.json`, blob)
     toastSuccess(t('sshExportHostsDone'))
   } catch (e) {
     toastError(getErrorMessage(e))
@@ -899,42 +893,31 @@ defineExpose({
       <div v-if="loadErr" class="ssh-error">{{ loadErr }}</div>
 
       <!-- 搜索框只在有主机时出现：一台都没有时它的唯一作用是让人困惑 -->
-      <div v-if="hostCount > 0" class="ssh-side-search">
-        <Search :size="12" class="ssh-side-search-icon" />
-        <input
-          v-model="hostKeyword"
-          class="ssh-side-search-input"
-          :placeholder="t('sshSearchHosts')"
-          spellcheck="false"
-        />
-        <button
-          v-if="hostKeyword"
-          class="ssh-side-search-clear"
-          :title="t('clear')"
-          @click="hostKeyword = ''"
-        >
-          <X :size="12" />
-        </button>
-      </div>
+      <QdSearchBox
+        v-if="hostCount > 0"
+        v-model="hostKeyword"
+        class="ssh-side-search"
+        :icon-size="12"
+        :placeholder="t('sshSearchHosts')"
+      />
 
       <!-- 快速连接：始终可见（0 台主机时也能用）。不落库直连走不通，见脚本注释；
            这里解析后把结果预填进新建主机表单，由用户点保存。 -->
-      <div class="ssh-side-search ssh-quick">
-        <input
-          v-model="quickInput"
-          class="ssh-side-search-input"
-          :placeholder="t('sshQuickConnectPlaceholder')"
-          spellcheck="false"
-          @keydown.enter="onQuickConnect"
-        />
-        <button
-          class="ssh-side-search-clear"
-          :title="t('sshQuickConnect')"
-          @click="onQuickConnect"
-        >
-          <Zap :size="12" />
-        </button>
-      </div>
+      <QdSearchBox
+        v-model="quickInput"
+        class="ssh-side-search ssh-quick"
+        :icon-size="12"
+        :show-icon="false"
+        :clearable="false"
+        :placeholder="t('sshQuickConnectPlaceholder')"
+        @submit="onQuickConnect"
+      >
+        <template #trailing>
+          <button class="ssh-side-search-clear" :title="t('sshQuickConnect')" @click="onQuickConnect">
+            <Zap :size="12" />
+          </button>
+        </template>
+      </QdSearchBox>
 
       <SshHostTree
         :tree="tree"
@@ -1189,7 +1172,7 @@ defineExpose({
 
 .ssh-tool:disabled {
   cursor: default;
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
 }
 
 .spinning {
@@ -1212,43 +1195,14 @@ defineExpose({
 }
 
 /* ---- 左侧：主机搜索 ---- */
+/* 搜索框皮肤由 QdSearchBox 的 .qd-search-box 统一提供，这里只留外侧留白。
+   （.sm 变体已废弃：全项目搜索框统一 28px。） */
 .ssh-side-search {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
   flex: 0 0 auto;
   margin: 0 var(--space-4) var(--space-3);
-  padding: var(--space-1) var(--space-3);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xs);
 }
 
-.ssh-side-search:focus-within {
-  border-color: var(--color-border-focus-soft);
-}
-
-.ssh-side-search-icon {
-  flex: 0 0 auto;
-  color: var(--color-text-muted);
-}
-
-.ssh-side-search-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: var(--space-1) 0;
-  font-size: var(--text-sm);
-  font-family: inherit;
-  color: var(--color-text-primary);
-  background: transparent;
-  border: none;
-  outline: none;
-}
-
-.ssh-side-search-input::placeholder {
-  color: var(--color-text-muted);
-}
-
+/* 快速连接行右侧的「连接」按钮；结构上仍在 QdSearchBox 里，所以这里只给按钮本身。 */
 .ssh-side-search-clear {
   display: flex;
   flex: 0 0 auto;

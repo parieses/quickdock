@@ -175,20 +175,20 @@ async function copyTarget() {
           </div>
 
           <footer class="hdd-foot">
-            <button class="hdd-btn" @click="copyTarget">
+            <button class="hdd-btn qd-btn" @click="copyTarget">
               <Check v-if="copied" :size="13" />
               <Copy v-else :size="13" />
               {{ copied ? t('logCopied') : t('sshHostCopyTarget') }}
             </button>
-            <button v-if="host && !host.isFolder" class="hdd-btn" @click="emit('exec', host)">
+            <button v-if="host && !host.isFolder" class="hdd-btn qd-btn" @click="emit('exec', host)">
               <SquareTerminal :size="13" />
               {{ t('sshQuickExec') }}
             </button>
             <span class="hdd-foot-spacer" />
-            <button class="hdd-btn" @click="emit('close')">{{ t('close') }}</button>
+            <button class="hdd-btn qd-btn" @click="emit('close')">{{ t('close') }}</button>
             <button
               v-if="host"
-              class="hdd-btn hdd-btn--primary"
+              class="hdd-btn qd-btn hdd-btn--primary"
               @click="emit('edit', host)"
             >
               <Pencil :size="13" />

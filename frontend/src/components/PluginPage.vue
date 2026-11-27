@@ -94,19 +94,19 @@ function forceClose() {
     <div class="pw-titlebar">
       <span class="pw-title">{{ pluginName }}</span>
       <div class="pw-controls">
-        <button class="pw-btn pw-btn-min" @click="MinimizePluginWindow(props.pluginId)" :title="t('minimize')">
+        <button class="pw-btn qd-btn pw-btn-min" @click="MinimizePluginWindow(props.pluginId)" :title="t('minimize')">
           <Minus :size="13" />
         </button>
-        <button class="pw-btn pw-btn-max" @click="ToggleMaximizePluginWindow(props.pluginId)" :title="t('maximize')">
+        <button class="pw-btn qd-btn pw-btn-max" @click="ToggleMaximizePluginWindow(props.pluginId)" :title="t('maximize')">
           <Square :size="11" />
         </button>
-        <button class="pw-btn pw-btn-refresh" @click="refreshWindow" :title="t('refresh')">
+        <button class="pw-btn qd-btn pw-btn-refresh" @click="refreshWindow" :title="t('refresh')">
           <RotateCw :size="13" />
         </button>
-        <button class="pw-btn pw-btn-kill" @click="forceClose" :title="t('pluginForceClose')">
+        <button class="pw-btn qd-btn pw-btn-kill" @click="forceClose" :title="t('pluginForceClose')">
           <Power :size="13" />
         </button>
-        <button class="pw-btn pw-btn-close" @click="closeWindow" :title="t('close')">
+        <button class="pw-btn qd-btn pw-btn-close" @click="closeWindow" :title="t('close')">
           <X :size="14" />
         </button>
       </div>

@@ -8,9 +8,10 @@ import { KEEP_ALIVE } from '../pages/keepAlive'
 defineOptions({ name: KEEP_ALIVE.todo })
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
-import { useToast } from '../composables/useToast'
+import { writeStored } from '../utils/storage'
 import ConfirmDialog from './ConfirmDialog.vue'
 import EntityLinkPicker from './EntityLinkPicker.vue'
+import QdSearchBox from './QdSearchBox.vue'
 import FocusStatsPanel from './FocusStatsPanel.vue'
 import {
   CreateTodo, ListTodos, UpdateTodo, ToggleTodo, DeleteTodo, ClearCompletedTodos,
@@ -26,11 +27,11 @@ import { matchesTextOrPinyin } from '../utils/pinyin'
 import { invalidateLinkTargets } from '../constants/linkEvents'
 import {
   Plus, Check, Trash2, Pencil, ChevronLeft, ChevronRight, CalendarDays, Bell, Clock, BellRing,
-  RefreshCw, ListTree, Timer, X, Search, ChevronUp, ChevronDown, History, BarChart3, MoreHorizontal,
+  RefreshCw, ListTree, Timer, X, ChevronUp, ChevronDown, History, BarChart3, MoreHorizontal,
 } from '@lucide/vue'
 
+import { reportError } from '../utils/reportError'
 const { t } = useI18n()
-const toast = useToast()
 
 interface Todo {
   id: string
@@ -144,14 +145,13 @@ async function recordFocus(minutes: number, done: boolean, title: string,
   const m = Math.round(minutes)
   if (!m) return
   focusHistory.value = [{ ts: endedAt, minutes: m, done, title }, ...focusHistory.value].slice(0, MAX_FOCUS_HISTORY)
-  try { localStorage.setItem(FOCUS_HISTORY_KEY, JSON.stringify(focusHistory.value)) } catch { /* 配额/隐私模式忽略 */ }
+  writeStored(FOCUS_HISTORY_KEY, JSON.stringify(focusHistory.value))
   if (!done) return
   try {
     unwrap(await SaveFocusSession(todoId, title, toRFC3339(startedAt), toRFC3339(endedAt), m, true))
     focusStatsRefresh.value++
   } catch (e) {
-    logErr('TodoPage', e)
-    toast.error(getErrorMessage(e) || t('focusSyncFailed'))
+    reportError(e, 'TodoPage', { fallback: t('focusSyncFailed') })
   }
 }
 // 今日统计只算真正走完的会话（done=true），中途放弃不计入「今天专注 N 次」
@@ -992,7 +992,7 @@ async function quickCreate() {
     invalidateLinkTargets() // 新待办立刻可当互链目标
     await refresh()
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'TodoPage.quickCreate')
   } finally {
     quickBusy.value = false
   }
@@ -1377,11 +1377,7 @@ onUnmounted(() => {
         <span class="qd-page-sub">{{ t('todoSubtitle') }}</span>
       </template>
       <div class="qd-page-fill">
-        <div class="qd-input-wrap todo-search">
-          <Search :size="14" />
-          <input v-model="searchQuery" class="qd-input ts-input" :placeholder="t('todoSearchPh')" />
-          <button v-if="searchQuery" class="ts-clear" @click="searchQuery = ''"><X :size="13" /></button>
-        </div>
+        <QdSearchBox v-model="searchQuery" class="todo-search" :icon-size="14" :placeholder="t('todoSearchPh')" />
         <div class="cal-nav">
           <button class="qd-icon-btn" @click="prevMonth" :title="t('prevMonth')"><ChevronLeft :size="16" /></button>
           <span class="cal-month">{{ monthLabel }}</span>
@@ -1980,11 +1976,10 @@ onUnmounted(() => {
 /* flex-shrink:0：右栏加了自定义时长输入与历史按钮后，页头中间变挤，
    若让 cal-nav 被压缩，其内容会溢出压到「今天」按钮与右侧 25 档按钮上（重叠） */
 .cal-nav { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
-/* 页内搜索：只搜标题/备注/标签，跨日期；宽度与笔记页搜索一致 */
-/* 空间不足时优先压缩搜索框（它可窄到 120px），保住日历导航不被挤压 */
+/* 页内搜索：只搜标题/备注/标签，跨日期；宽度与笔记页搜索一致。
+   皮肤由 QdSearchBox 统一提供，这里只定宽——空间不足时优先压缩它（可窄到 120px），
+   保住日历导航不被挤压。 */
 .todo-search { width: 220px; flex-shrink: 1; min-width: 120px; margin-right: var(--space-3); }
-.ts-input { padding-left: 28px; padding-right: 26px; }
-.ts-clear { position: absolute; right: 6px; border: none; background: none; color: var(--color-text-muted); cursor: pointer; display: flex; align-items: center; }
 /* 专注时长：一个带秒表图标的触发器 + 浮层，替代原来一排 25/45/60 裸数字 */
 .focus-dur-wrap { position: relative; }
 .focus-dur-trigger {
@@ -2034,9 +2029,9 @@ onUnmounted(() => {
 .focus-dur-custom:focus { border-color: var(--color-border-focus-soft); }
 .focus-hist-wrap { position: relative; display: flex; align-items: center; margin-left: var(--space-2); }
 .focus-hist-btn { position: relative; }
-.focus-hist-btn.active { color: var(--color-accent); }
+.focus-hist-btn.active { color: var(--color-accent-ink); }
 .focus-stats-btn { margin-left: var(--space-1); }
-.focus-stats-btn.active { color: var(--color-accent); }
+.focus-stats-btn.active { color: var(--color-accent-ink); }
 /* 统计浮层只负责定位/滚动/投影，卡片外观由 FocusStatsPanel 自带的 .fsp 提供 */
 .focus-stats-pop {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: var(--z-dropdown); width: 320px;
@@ -2164,7 +2159,7 @@ onUnmounted(() => {
 
 /* 面板右上角「更多」：低频操作（清除已完成 / 测试提醒）收在这里，底部不再挂灰字 */
 .panel-more-wrap { position: relative; display: flex; align-items: center; }
-.panel-more-wrap .qd-icon-btn.active { color: var(--color-accent); }
+.panel-more-wrap .qd-icon-btn.active { color: var(--color-accent-ink); }
 .panel-more-pop {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: var(--z-dropdown);
   display: flex; flex-direction: column; gap: 2px; width: 208px; padding: var(--space-2);
@@ -2179,7 +2174,7 @@ onUnmounted(() => {
 }
 .pm-item:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .pm-item.danger:hover:not(:disabled) { color: var(--color-danger); background: var(--color-danger-bg); }
-.pm-item:disabled { opacity: 0.5; cursor: default; }
+.pm-item:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .pm-hint {
   margin: var(--space-1) 0 0; padding: var(--space-2) var(--space-3) 0;
   border-top: 1px solid var(--color-border);
@@ -2235,14 +2230,14 @@ onUnmounted(() => {
 .sub-move { display: flex; align-items: center; gap: 1px; opacity: 0; }
 .sub-item:hover .sub-move { opacity: 1; }
 .sub-act { width: 18px; height: 18px; }
-.sub-act:disabled { opacity: 0.25; cursor: default; }
+.sub-act:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .sub-add { margin-top: var(--space-1); }
 .sub-input { height: 28px; font-size: var(--text-sm); }
 
 /* 单独设截止日：日期按钮与上下移同一套 hover 作息；已设日期的常显一个小色点提示 */
 .sub-due { opacity: 0; }
 .sub-item:hover .sub-due { opacity: 1; }
-.sub-due.active { opacity: 1; color: var(--color-accent); }
+.sub-due.active { opacity: 1; color: var(--color-accent-ink); }
 .sub-date {
   height: 20px; padding: 0 var(--space-2); border: 1px solid var(--color-accent);
   border-radius: var(--radius-xs); background: var(--color-bg-tertiary);

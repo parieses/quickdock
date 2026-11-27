@@ -33,7 +33,7 @@ async function openMain() {
       <div class="notice-icon"><Lock :size="20" :stroke-width="2" /></div>
       <h1 class="notice-title">{{ t('lockTitle') }}</h1>
       <p class="notice-desc">{{ t('lockNoticeDesc') }}</p>
-      <button class="notice-btn" @click="openMain">{{ t('lockNoticeOpen') }}</button>
+      <button class="notice-btn qd-btn" @click="openMain">{{ t('lockNoticeOpen') }}</button>
     </div>
   </div>
 </template>

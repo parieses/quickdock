@@ -7,7 +7,6 @@ import { useI18n } from 'vue-i18n'
 import { Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { copyToClipboard } from '../utils/clipboard'
-import { getErrorMessage } from '../utils/error'
 import {
   SitesList, SitesCreate, SitesUpdate, SitesDelete,
   SitesSyncHosts, SitesGenConfig, SitesSetModules,
@@ -17,6 +16,7 @@ import { CopyText } from '../../bindings/quickdock/services/clipboard/clipboards
 import { EnvCertStatus, EnvCertInstallRoot } from '../../bindings/quickdock/services/env/environmentservice'
 import type { ToastAPI } from '../types'
 
+import { reportError } from '../utils/reportError'
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 
@@ -124,7 +124,7 @@ async function pickDir() {
     const dir = unwrap<string | null>(await PickFolderPath(t('pickDirTitle')))
     if (dir) form.value.dir = dir
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'SitesPanel.pickDir')
   }
 }
 
@@ -144,7 +144,7 @@ async function submit() {
     closeForm()
     await load()
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'SitesPanel.submit')
   } finally {
     busy.value = false
   }
@@ -155,7 +155,7 @@ async function toggleEnabled(s: SiteItem) {
     unwrap(await SitesUpdate(s.id, s.name, s.domain, s.dir, !s.enabled, s.docRoot ?? ''))
     await load()
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'SitesPanel.toggleEnabled')
   }
 }
 
@@ -166,7 +166,7 @@ async function remove(s: SiteItem) {
     await load()
     toast.success(t('deleted'))
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'SitesPanel.remove')
   }
 }
 
@@ -176,7 +176,7 @@ async function syncHosts() {
     await load()
     toast.success(t('siteHostsSynced'))
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'SitesPanel.syncHosts')
   }
 }
 
@@ -187,7 +187,7 @@ async function copyHostsBlock() {
     await CopyText(status.value.hostsBlock)
     toast.success(t('siteHostsCopied'))
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'SitesPanel.copyHostsBlock')
   }
 }
 
@@ -197,7 +197,7 @@ async function trustCA() {
     await loadCert()
     toast.success(t('siteCATrusted'))
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'SitesPanel.trustCA')
   }
 }
 
@@ -211,8 +211,7 @@ function siteURL(s: SiteItem): string {
 //（可能被拦、也可能在应用内开新窗口），而用户要的就是「在常用浏览器里看」。
 function openSite(s: SiteItem) {
   Browser.OpenURL(siteURL(s)).catch((e: any) => {
-    logErr('SitesPanel.openSite', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'SitesPanel.openSite')
   })
 }
 
@@ -300,7 +299,7 @@ async function refreshGen(useSnippet = true) {
   } catch (e: any) {
     gen.value.data = null
     gen.value.text = ''
-    toast.error(getErrorMessage(e))
+    reportError(e, 'SitesPanel.refreshGen')
   }
 }
 
@@ -340,7 +339,7 @@ async function saveGen() {
       toast.success(t('siteConfWritten', { path: res?.writtenPath ?? '' }))
     }
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'SitesPanel.saveGen')
   } finally {
     busy.value = false
   }
@@ -455,7 +454,7 @@ async function applyTemplate(id: string) {
       const updated = unwrap<SiteItem>(await SitesUpdate(s.id, s.name, s.domain, s.dir, s.enabled, wantRoot))
       if (updated) gen.value.site = { ...s, ...updated }
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'SitesPanel.applyTemplate')
     }
   }
   await persistMods() // 内部会 refreshGen()，编辑器换成新生成的内容
@@ -477,7 +476,7 @@ async function persistMods() {
     unwrap(await SitesSetModules(s.id, genMods.value, Number(genProxyPort.value) || 0))
     await refreshGen()
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'SitesPanel.persistMods')
   }
 }
 
@@ -536,15 +535,15 @@ onMounted(() => { load(); loadCert() })
           <span class="status-label">{{ t('siteCATrust') }}</span>
           <span :class="['status-value', caTrusted ? 'ok' : 'off']">
             {{ caTrusted ? t('siteCATrustedShort') : t('siteCANotTrusted') }}
-            <button v-if="!caTrusted" class="link-btn" @click="trustCA">{{ t('siteCATrustAction') }}</button>
+            <button v-if="!caTrusted" class="link-btn qd-btn" @click="trustCA">{{ t('siteCATrustAction') }}</button>
           </span>
         </div>
         <div class="status-item">
           <span class="status-label">{{ t('siteHosts') }}</span>
           <span :class="['status-value', status.hostsOk ? 'ok' : 'off']">
             {{ status.hostsOk ? t('siteHostsOK') : (status.hostsError || t('siteHostsPending')) }}
-            <button v-if="!status.hostsOk" class="link-btn" @click="syncHosts">{{ t('siteHostsSync') }}</button>
-            <button v-if="!status.hostsOk" class="link-btn" @click="copyHostsBlock">{{ t('siteHostsCopy') }}</button>
+            <button v-if="!status.hostsOk" class="link-btn qd-btn" @click="syncHosts">{{ t('siteHostsSync') }}</button>
+            <button v-if="!status.hostsOk" class="link-btn qd-btn" @click="copyHostsBlock">{{ t('siteHostsCopy') }}</button>
           </span>
         </div>
       </div>
@@ -564,7 +563,7 @@ onMounted(() => { load(); loadCert() })
       <div class="block-head">
         <span class="block-title">{{ t('siteList') }}</span>
         <button
-          class="link-btn"
+          class="link-btn qd-btn"
           :disabled="!serverAvailable"
           :title="serverAvailable ? '' : t('siteNeedServer')"
           @click="openCreate"
@@ -582,14 +581,14 @@ onMounted(() => { load(); loadCert() })
             <span v-if="!s.enabled" class="site-off">{{ t('siteDisabled') }}</span>
           </div>
           <div class="site-ops">
-            <button class="op-btn" @click="toggleEnabled(s)">{{ s.enabled ? t('siteDisable') : t('siteEnable') }}</button>
-            <button class="op-btn" @click="openGen(s)">{{ t('siteGenConf') }}</button>
-            <button class="op-btn" @click="openEdit(s)">{{ t('edit') }}</button>
-            <button class="op-btn danger" @click="remove(s)">{{ t('deleteVersion') }}</button>
+            <button class="op-btn qd-btn" @click="toggleEnabled(s)">{{ s.enabled ? t('siteDisable') : t('siteEnable') }}</button>
+            <button class="op-btn qd-btn" @click="openGen(s)">{{ t('siteGenConf') }}</button>
+            <button class="op-btn qd-btn" @click="openEdit(s)">{{ t('edit') }}</button>
+            <button class="op-btn qd-btn danger" @click="remove(s)">{{ t('deleteVersion') }}</button>
           </div>
         </div>
       </div>
-      <div v-else class="empty-state">
+      <div v-else class="empty-state qd-empty">
         <div class="empty-icon">∅</div>
         <div class="empty-text">{{ t('siteNoSite') }}</div>
       </div>
@@ -601,7 +600,7 @@ onMounted(() => { load(); loadCert() })
         <div class="gen-panel form-panel" @mousedown.stop>
           <div class="gen-head">
             <span class="block-title">{{ editingId ? t('siteEdit') : t('siteAdd') }}</span>
-            <button class="link-btn" @click="closeForm">{{ t('cancel') }}</button>
+            <button class="link-btn qd-btn" @click="closeForm">{{ t('cancel') }}</button>
           </div>
           <div class="gen-body">
             <label class="form-row">
@@ -617,7 +616,7 @@ onMounted(() => { load(); loadCert() })
               <span class="form-label">{{ t('siteDirLabel') }}</span>
               <span class="form-inline">
                 <input v-model="form.dir" class="env-input" :placeholder="t('siteDirPlaceholder')" readonly />
-                <button class="op-btn" @click="pickDir">{{ t('siteChooseDir') }}</button>
+                <button class="op-btn qd-btn" @click="pickDir">{{ t('siteChooseDir') }}</button>
               </span>
             </div>
             <label class="form-row">
@@ -628,8 +627,8 @@ onMounted(() => { load(); loadCert() })
             <p class="block-hint">{{ t('siteDomainHint') }}</p>
           </div>
           <div class="gen-foot">
-            <button class="op-btn" @click="closeForm">{{ t('cancel') }}</button>
-            <button class="op-btn primary" :disabled="busy" @click="submit">
+            <button class="op-btn qd-btn" @click="closeForm">{{ t('cancel') }}</button>
+            <button class="op-btn qd-btn primary" :disabled="busy" @click="submit">
               {{ editingId ? t('save') : t('siteCreate') }}
             </button>
           </div>
@@ -643,7 +642,7 @@ onMounted(() => { load(); loadCert() })
         <div class="gen-panel" @mousedown.stop>
           <div class="gen-head">
             <span class="block-title">{{ t('siteGenConf') }} · {{ gen.site?.domain }}</span>
-            <button class="link-btn" @click="gen.open = false">{{ t('cancel') }}</button>
+            <button class="link-btn qd-btn" @click="gen.open = false">{{ t('cancel') }}</button>
           </div>
           <div class="gen-tabs">
             <button
@@ -732,9 +731,9 @@ onMounted(() => { load(); loadCert() })
             <p v-if="hasSavedCustom && !gen.custom" class="block-hint">{{ t('siteGenSavedHint') }}</p>
           </div>
           <div class="gen-foot">
-            <button class="op-btn" :disabled="!gen.text" @click="copySnippet">{{ t('siteCopy') }}</button>
-            <button class="op-btn" @click="regenerate">{{ t('siteGenRegen') }}</button>
-            <button class="op-btn primary" :disabled="busy || !gen.text.trim()" @click="saveGen">{{ t('siteGenSave') }}</button>
+            <button class="op-btn qd-btn" :disabled="!gen.text" @click="copySnippet">{{ t('siteCopy') }}</button>
+            <button class="op-btn qd-btn" @click="regenerate">{{ t('siteGenRegen') }}</button>
+            <button class="op-btn qd-btn primary" :disabled="busy || !gen.text.trim()" @click="saveGen">{{ t('siteGenSave') }}</button>
           </div>
         </div>
       </div>
@@ -813,7 +812,7 @@ onMounted(() => { load(); loadCert() })
 .op-btn:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .op-btn.danger { color: var(--color-danger); }
 .op-btn.primary { background: var(--color-accent); color: var(--color-accent-text); border-color: transparent; }
-.op-btn:disabled { opacity: 0.5; cursor: default; }
+.op-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .link-btn {
   background: none; border: none; padding: 0; font-size: var(--text-sm); font-family: inherit;
   color: var(--color-accent); cursor: pointer;
@@ -840,7 +839,7 @@ onMounted(() => { load(); loadCert() })
 
 /* 配置生成弹窗：Teleport 到 body，避免被面板的 overflow 裁掉 */
 .gen-overlay {
-  position: fixed; inset: 0; z-index: 9000;
+  position: fixed; inset: 0; z-index: var(--z-modal);
   background: var(--color-bg-overlay);
   display: flex; align-items: center; justify-content: center;
 }
@@ -886,7 +885,7 @@ onMounted(() => { load(); loadCert() })
   padding: var(--space-3) var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); cursor: pointer;
 }
-.gen-mod.disabled { opacity: 0.45; cursor: not-allowed; }
+.gen-mod.disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
 .gen-mod input { grid-row: 1 / 3; width: 14px; height: 14px; align-self: center; }
 .gen-mod-label { font-size: var(--text-sm); color: var(--color-text-primary); }
 .gen-mod-desc { font-size: var(--text-2xs); color: var(--color-text-muted); line-height: 1.3; }

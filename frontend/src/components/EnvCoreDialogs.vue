@@ -32,8 +32,8 @@ const { t } = useI18n()
   <textarea v-model="ctx.editing.note" class="env-textarea" :placeholder="t('envNotePlaceholder')" rows="3"></textarea>
   <template #footer>
     <div class="modal-actions">
-      <button class="op-btn" @click="ctx.editing.open = false">{{ t('cancel') }}</button>
-      <button class="env-install-btn" @click="ctx.saveAlias">{{ t('save') }}</button>
+      <button class="op-btn qd-btn" @click="ctx.editing.open = false">{{ t('cancel') }}</button>
+      <button class="env-install-btn qd-btn" @click="ctx.saveAlias">{{ t('save') }}</button>
     </div>
   </template>
 </QdModal>
@@ -53,8 +53,8 @@ const { t } = useI18n()
   </label>
   <template #footer>
     <div class="modal-actions">
-      <button class="op-btn" @click="ctx.confirmDelete.open = false">{{ t('cancel') }}</button>
-      <button class="env-install-btn danger" @click="ctx.doDelete">{{ t('deleteVersion') }}</button>
+      <button class="op-btn qd-btn" @click="ctx.confirmDelete.open = false">{{ t('cancel') }}</button>
+      <button class="env-install-btn qd-btn danger" @click="ctx.doDelete">{{ t('deleteVersion') }}</button>
     </div>
   </template>
 </QdModal>
@@ -70,8 +70,8 @@ const { t } = useI18n()
   <p class="modal-text">{{ t('ollamaConfirmDelete', { name: ctx.ollamaDelTarget.name, size: ctx.ollamaSize(ctx.ollamaDelTarget.size) }) }}</p>
   <template #footer>
     <div class="modal-actions">
-      <button class="op-btn" @click="ctx.ollamaDelTarget = null">{{ t('cancel') }}</button>
-      <button class="env-install-btn danger" @click="ctx.deleteOllamaModel">{{ t('delete') }}</button>
+      <button class="op-btn qd-btn" @click="ctx.ollamaDelTarget = null">{{ t('cancel') }}</button>
+      <button class="env-install-btn qd-btn danger" @click="ctx.deleteOllamaModel">{{ t('delete') }}</button>
     </div>
   </template>
 </QdModal>
@@ -100,7 +100,7 @@ const { t } = useI18n()
   </div>
   <template #footer>
     <div class="modal-actions">
-      <button class="op-btn" @click="ctx.closeLogModal()">{{ t('cancel') }}</button>
+      <button class="op-btn qd-btn" @click="ctx.closeLogModal()">{{ t('cancel') }}</button>
     </div>
   </template>
 </QdModal>
@@ -137,11 +137,11 @@ const { t } = useI18n()
 
   <template #footer>
     <div class="modal-actions">
-      <button class="op-btn" @click="ctx.taskModal.open = false">{{ t('close') }}</button>
-      <button v-if="ctx.taskModal.output" class="op-btn" @click="ctx.copyTaskOutput">{{ t('copy') }}</button>
+      <button class="op-btn qd-btn" @click="ctx.taskModal.open = false">{{ t('close') }}</button>
+      <button v-if="ctx.taskModal.output" class="op-btn qd-btn" @click="ctx.copyTaskOutput">{{ t('copy') }}</button>
       <button
         v-if="ctx.taskModal.needsConfirm || ctx.taskModal.error"
-        class="env-install-btn"
+        class="env-install-btn qd-btn"
         :class="{ busy: ctx.taskModal.busy, danger: ctx.taskModal.kind === 'danger' }"
         :disabled="ctx.taskModal.busy"
         @click="ctx.runTask"
@@ -174,9 +174,9 @@ const { t } = useI18n()
         :placeholder="t('projectCheckPh')"
         @keyup.enter="ctx.runProjectCheck"
       />
-      <button class="op-btn" @click="ctx.pickProjectDir">{{ t('projectCheckPick') }}</button>
+      <button class="op-btn qd-btn" @click="ctx.pickProjectDir">{{ t('projectCheckPick') }}</button>
       <button
-        class="op-btn"
+        class="op-btn qd-btn"
         :disabled="ctx.projectCheck.loading || !ctx.projectCheck.dir.trim()"
         @click="ctx.runProjectCheck"
       >{{ ctx.projectCheck.loading ? t('checking') : t('projectCheckRun') }}</button>
@@ -343,7 +343,7 @@ const { t } = useI18n()
 
 .svc-port-link:hover { color: var(--color-accent); text-decoration: underline; }
 
-.svc-port-link.disabled { cursor: default; opacity: 0.5; }
+.svc-port-link.disabled { cursor: default; opacity: var(--opacity-disabled); }
 
 .svc-port-link.disabled:hover { color: var(--color-text-disabled); text-decoration: none; }
 
@@ -380,20 +380,8 @@ const { t } = useI18n()
 
 .muted { color: var(--color-text-muted); }
 
-.op-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
-  font-size: var(--text-xs); height: 24px; padding: 0 var(--space-4); border-radius: var(--radius-sm); cursor: pointer;
-  border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
-  font-family: inherit; transition: background var(--transition-fast), color var(--transition-fast);
-  white-space: nowrap;
-}
-
-.op-btn:hover { background: var(--color-bg-primary); color: var(--color-text-primary); }
-
-.op-btn.on { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-border-focus); }
-
-.op-btn.danger:hover { background: var(--color-danger-bg); color: var(--color-danger); border-color: var(--color-danger); }
-
-.op-btn:disabled { opacity: 0.4; cursor: default; }
+/* .op-btn / .log-btn 基干已抽到 styles/app.css，这里只留组件自己的差异项。 */
+.op-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 .op-btn.small { border-radius: var(--radius-sm); padding: var(--space-1) 9px; font-size: var(--text-xs); }
 
@@ -415,7 +403,7 @@ const { t } = useI18n()
 
 .modal-check { display: flex; align-items: center; gap: var(--space-4); margin: 10px 0 var(--space-1); font-size: var(--text-sm); color: var(--color-text-primary); cursor: pointer; user-select: none; }
 
-.empty-state { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); padding: 26px 0; }
+/* .empty-state 基干已抽到 app.css */
 
 /* 空态图标（∅ 符号）：44 方底 + 细边，与各页空状态同一套语汇 */
 .empty-icon {
@@ -468,7 +456,7 @@ const { t } = useI18n()
 
 .env-install-btn.busy { opacity: 0.7; cursor: default; }
 
-.env-install-btn:disabled { opacity: 0.4; cursor: default; }
+.env-install-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 @keyframes env-indet { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
 
@@ -519,15 +507,6 @@ const { t } = useI18n()
 
 .task-hint { margin: var(--space-3) 0 0; font-size: var(--text-xs); color: var(--color-text-muted); }
 
-.log-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
-  height: 28px; padding: 0 11px; font-size: var(--text-sm); cursor: pointer;
-  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
-  border: 1px solid var(--color-border); border-radius: var(--radius-sm); white-space: nowrap;
-}
-
-.log-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
-
-.log-btn.active { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
 
 .ev-test-row .env-input { flex: 1; }
 

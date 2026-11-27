@@ -26,8 +26,10 @@ import {
 } from '@lucide/vue'
 import QdModal from './QdModal.vue'
 import QdTabs from './QdTabs.vue'
+import QdSearchBox from './QdSearchBox.vue'
 import { useToast } from '../composables/useToast'
 import { unwrap } from '../utils/api'
+import { formatBytes } from '../utils/bytes'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { SelectLocalFiles, SelectLocalDirectory } from '../../bindings/quickdock/services/appservice'
@@ -37,6 +39,7 @@ import {
   ListKBLibraries, CreateKBLibrary, RenameKBLibrary, DeleteKBLibrary, MoveKBSource,
 } from '../../bindings/quickdock/services/kb/kbservice'
 
+import { reportError } from '../utils/reportError'
 // 与 internal/kb.SupportedExts 对齐（后端是权威，这里只是选择器过滤）。
 const KB_PICK_FILTER = [
   '*.md', '*.markdown',
@@ -278,13 +281,6 @@ const suggestedPrompts = computed(() => {
   return out
 })
 
-function humanSize(n?: number) {
-  if (!n || n <= 0) return ''
-  if (n < 1024) return n + ' B'
-  if (n < 1024 * 1024) return (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB'
-  return (n / 1048576).toFixed(1) + ' MB'
-}
-
 function relTime(ts?: number) {
   if (!ts) return ''
   const sec = Math.max(0, Math.floor(Date.now() / 1000 - ts))
@@ -347,8 +343,7 @@ async function loadSources() {
     // 失败时清空并标记，避免把「加载失败」渲染成「这个库是空的」
     sources.value = []
     sourcesFailed.value = true
-    toast.error(getErrorMessage(e))
-    logErr('kb', e)
+    reportError(e, 'kb')
   } finally {
     if (libId.value === want) loading.value = false
   }
@@ -366,8 +361,7 @@ async function loadStatus() {
   } catch (e) {
     // 与 loadSources 一样要喊一声：只 logErr 的话，状态区停在空值上，
     // 看起来和「这个库还什么都没有」完全一样，用户不会想到是接口挂了。
-    toast.error(getErrorMessage(e))
-    logErr('kb', e)
+    reportError(e, 'kb')
   }
 }
 
@@ -383,8 +377,7 @@ async function loadSettings() {
     }
   } catch (e) {
     // 读取失败要让用户知道：否则弹窗里是一份空表单，看起来就像「配置全丢了」。
-    toast.error(getErrorMessage(e))
-    logErr('kb', e)
+    reportError(e, 'kb')
   }
 }
 
@@ -442,8 +435,7 @@ async function saveLibrary() {
     libraryModal.open = false
     await refreshAll()
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('kb', e)
+    reportError(e, 'kb')
   } finally {
     librarySaving.value = false
   }
@@ -464,8 +456,7 @@ async function removeLibrary(lib: KBLibrary) {
     await refreshAll()
     toast.success(t('deleted'))
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('kb', e)
+    reportError(e, 'kb')
   }
 }
 
@@ -485,8 +476,7 @@ async function moveSelected(ev: Event) {
       previewOpen.value = false
     }
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('kb', e)
+    reportError(e, 'kb')
   }
 }
 
@@ -505,8 +495,7 @@ async function addFiles() {
     }
     await refreshAll()
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('kb', e)
+    reportError(e, 'kb')
   }
 }
 
@@ -518,8 +507,7 @@ async function addFolder() {
     if (res && res.added > 0) toast.success(t('kbAddedCount', { n: res.added }))
     await refreshAll()
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('kb', e)
+    reportError(e, 'kb')
   }
 }
 
@@ -532,8 +520,7 @@ async function rescan() {
     }
     await refreshAll()
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('kb', e)
+    reportError(e, 'kb')
   }
 }
 
@@ -543,8 +530,7 @@ async function reindexAll() {
     toast.success(t('kbReindexStarted'))
     await refreshAll()
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('kb', e)
+    reportError(e, 'kb')
   }
 }
 
@@ -555,8 +541,7 @@ async function reindexOne(src: KBSource, ev: Event) {
     toast.success(t('kbReindexStarted'))
     await refreshAll()
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('kb', e)
+    reportError(e, 'kb')
   }
 }
 
@@ -574,8 +559,7 @@ async function removeOne(src: KBSource, ev: Event) {
     await refreshAll()
     toast.success(t('deleted'))
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('kb', e)
+    reportError(e, 'kb')
   }
 }
 
@@ -587,8 +571,7 @@ async function stopIndex() {
     unwrap(await CancelKBIndex())
     toast.success(t('kbStopDone'))
   } catch (e) {
-    logErr('kb.stopIndex', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'kb.stopIndex')
   } finally {
     indexStopping.value = false
   }
@@ -623,8 +606,7 @@ async function loadChunksFor(id: string) {
     if (seq !== chunksSeq) return
     // 失败要清空：否则抽屉里继续显示上一篇的分段，看着像新文档的内容
     chunks.value = []
-    toast.error(getErrorMessage(e))
-    logErr('kb', e)
+    reportError(e, 'kb')
   } finally {
     if (seq === chunksSeq) chunksLoading.value = false
   }
@@ -738,7 +720,7 @@ async function runSearch() {
       // 只在仍是最新查询时清结果并提示：旧请求的失败不该干扰新查询的展示。
       hits.value = []
       searched.value = true
-      toast.error(getErrorMessage(e))
+      reportError(e, 'KnowledgePage.runSearch')
     }
     logErr('kb', e)
   } finally {
@@ -846,8 +828,7 @@ async function saveSettings() {
     toast.success(t('save'))
     await refreshAll()
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('kb', e)
+    reportError(e, 'kb')
   } finally {
     settingsSaving.value = false
   }
@@ -888,7 +869,7 @@ function docMetaLine(s: KBSource) {
   if (s.status === 'failed' && s.err) return s.err
   const parts = [
     s.chunkCount > 0 ? t('kbChunkCount', { n: s.chunkCount }) : t(statusKey(s.status)),
-    humanSize(s.size),
+    formatBytes(s.size, ''),
     relTime(s.mtime),
   ].filter(Boolean)
   return parts.join(' · ')
@@ -1151,19 +1132,15 @@ onScopeDispose(() => {
         <div v-show="tab === 'search'" class="kb-pane">
           <div class="kb-pane-top">
             <div class="kb-pane-inner">
-              <div class="kb-search">
-                <Search :size="14" class="kb-search-icon" />
-                <input
-                  v-model="query"
-                  class="kb-search-input"
-                  :placeholder="t('kbSearchPlaceholder')"
-                  spellcheck="false"
-                />
-                <Loader2 v-if="searching" :size="14" class="kb-spin" />
-                <button v-else-if="query" class="kb-search-clear" :title="t('kbSearchClear')" @click="clearQuery">
-                  <X :size="13" />
-                </button>
-              </div>
+              <QdSearchBox
+                v-model="query"
+                class="kb-search"
+                :icon-size="14"
+                :loading="searching"
+                :clear-title="t('kbSearchClear')"
+                :placeholder="t('kbSearchPlaceholder')"
+                @clear="clearQuery"
+              />
               <p v-if="query.trim().length > 0 && query.trim().length < 3" class="kb-hint">{{ t('kbSearchTooShort') }}</p>
               <p v-if="searchFallback" class="kb-hint warn">{{ t('kbSearchFallback') }}</p>
             </div>
@@ -1181,8 +1158,8 @@ onScopeDispose(() => {
                       <span class="kb-ov-name" :title="selectedSource.path">{{ selectedSource.name }}</span>
                       <span class="kb-ov-meta">
                         <span>{{ t('kbChunkCount', { n: selectedSource.chunkCount }) }}</span>
-                        <template v-if="humanSize(selectedSource.size)">
-                          <span class="kb-ov-sep">·</span><span>{{ humanSize(selectedSource.size) }}</span>
+                        <template v-if="formatBytes(selectedSource.size, '')">
+                          <span class="kb-ov-sep">·</span><span>{{ formatBytes(selectedSource.size, '') }}</span>
                         </template>
                         <template v-if="selectedSource.pageCount">
                           <span class="kb-ov-sep">·</span><span>{{ t('kbPageCount', { n: selectedSource.pageCount }) }}</span>
@@ -1886,54 +1863,10 @@ onScopeDispose(() => {
   padding: var(--space-4) var(--space-6) var(--space-6);
 }
 
-/* ---- 检索 ---- */
+/* ---- 检索 ----
+   盒子皮肤交给 QdSearchBox（无边框 / 28px / bg-tertiary），这里只留外层留白。 */
 .kb-search {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
-  transition: border-color var(--transition-fast);
-}
-
-.kb-search:focus-within {
-  border-color: var(--color-border-focus);
-}
-
-.kb-search-icon {
-  color: var(--color-text-muted);
   flex-shrink: 0;
-}
-
-.kb-search-input {
-  flex: 1;
-  min-width: 0;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--color-text-primary);
-  font-family: inherit;
-  font-size: var(--text-sm);
-}
-
-.kb-search-clear {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  padding: var(--space-1);
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-}
-
-.kb-search-clear:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
 }
 
 .kb-result-count {
@@ -2164,7 +2097,7 @@ onScopeDispose(() => {
   color: var(--color-accent);
 }
 
-.kb-scope-chip:disabled { opacity: 0.45; cursor: default; }
+.kb-scope-chip:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 .kb-scope-name {
   overflow: hidden;
@@ -2495,7 +2428,7 @@ onScopeDispose(() => {
 }
 
 .kb-ov-ask-send:disabled {
-  opacity: 0.4;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 
@@ -2766,7 +2699,7 @@ onScopeDispose(() => {
 }
 
 .kb-lib-chip.active .kb-lib-count {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .kb-lib-new {

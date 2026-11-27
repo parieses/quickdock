@@ -927,7 +927,7 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 }
 
 .ai-panel-send:disabled {
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 

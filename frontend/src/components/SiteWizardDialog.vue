@@ -27,6 +27,7 @@ import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { openExternal } from '../utils/externalLinks'
 
+import { reportError } from '../utils/reportError'
 const emit = defineEmits<{
   (e: 'update:modelValue', v: boolean): void
   (e: 'created'): void
@@ -65,8 +66,7 @@ async function pickDir() {
     const picked = unwrap<string | null>(await PickFolderPath(t('pickDirTitle')))
     if (picked) dir.value = picked
   } catch (e) {
-    logErr('siteWizard.pickDir', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'siteWizard.pickDir')
   }
 }
 
@@ -116,7 +116,7 @@ async function nextFromService() {
   } catch (e) {
     logErr('siteWizard.createService', e)
     err.value = getErrorMessage(e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'SiteWizardDialog.nextFromService')
   } finally {
     busy.value = false
   }
@@ -145,7 +145,7 @@ async function startServer() {
   } catch (e) {
     logErr('siteWizard.startService', e)
     err.value = getErrorMessage(e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'SiteWizardDialog.startServer')
   } finally {
     busy.value = false
   }
@@ -156,8 +156,7 @@ async function openSite() {
   try {
     await openExternal('http://localhost:' + serverPort.value + '/')
   } catch (e) {
-    logErr('siteWizard.openSite', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'siteWizard.openSite')
   }
 }
 </script>
@@ -283,7 +282,7 @@ async function openSite() {
 <style scoped>
 .wiz-steps { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-bottom: var(--space-3); }
 .wiz-step { font-size: var(--text-xs); color: var(--color-text-muted); }
-.wiz-step.on { color: var(--color-accent); font-weight: 600; }
+.wiz-step.on { color: var(--color-accent-ink); font-weight: 600; }
 .wiz-step.past { color: var(--color-text-secondary); }
 .wiz-progress { height: 4px; border-radius: var(--radius-2xs); background: var(--color-bg-active); overflow: hidden; }
 .wiz-progress-fill { height: 100%; background: var(--color-accent); transition: width var(--transition-base); }

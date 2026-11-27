@@ -420,7 +420,7 @@ const { t } = useI18n()
 
 .pb-btn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); }
 
-.pb-btn:disabled { opacity: .5; cursor: default; }
+.pb-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 .spin { animation: git-spin 900ms linear infinite; }
 
@@ -484,7 +484,7 @@ const { t } = useI18n()
 
 .rm-x:hover:not(:disabled) { color: var(--color-danger); background: var(--color-danger-bg); }
 
-.rm-x:disabled { opacity: .5; cursor: default; }
+.rm-x:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 .rm-add {
   display: flex; align-items: center; gap: var(--space-3);

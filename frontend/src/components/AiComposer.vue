@@ -424,6 +424,6 @@ defineExpose({
 
 /* 发送 / 插入 / 停止按钮的盒模型已抽到 AiSendButton（落地页共用）。
    这里只保留 + 按钮运行中的禁用态。 */
-.ai-plus-btn:disabled { opacity: 0.4; cursor: default; }
+.ai-plus-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .ai-plus-btn:disabled:hover { background: transparent; color: var(--color-text-muted); }
 </style>

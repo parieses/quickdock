@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import PageHeader from './PageHeader.vue'
 import QdModal from './QdModal.vue'
+import QdSearchBox from './QdSearchBox.vue'
 defineOptions({ name: KEEP_ALIVE.plugins })
 // name 的唯一来源：pages/keepAlive.ts（与 KeepAlive 白名单共用同一常量）
 import { KEEP_ALIVE } from '../pages/keepAlive'
@@ -8,7 +9,7 @@ import { logErr, logWarn } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, watch, inject } from 'vue'
 import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Puzzle, Power, PowerOff, Trash2, RefreshCw, RotateCcw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe, Square, Loader2, Search, DownloadCloud, X, Play, Terminal } from '@lucide/vue'
+import { Puzzle, Power, PowerOff, Trash2, RefreshCw, RotateCcw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe, Square, Loader2, Search, DownloadCloud, Play, Terminal } from '@lucide/vue'
 
 import {
   ListPlugins,
@@ -44,6 +45,7 @@ import { usePluginPermissions } from '../composables/usePluginPermissions'
 import { usePluginMarketSources, type MarketSource } from '../composables/usePluginMarketSources'
 import type { ToastAPI, PluginInfo, PluginExecLog, PluginCommand } from '../types'
 
+import { reportError } from '../utils/reportError'
 const { t, locale } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 
@@ -276,7 +278,7 @@ async function checkUpdates() {
     if (n > 0) toast.success(t('pluginUpdatesFound', { n }))
     else toast.success(t('pluginNoUpdates'))
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'PluginManagerPage.checkUpdates')
   } finally {
     checkingUpdates.value = false
   }
@@ -904,11 +906,7 @@ onUnmounted(() => {
           @click="selectedCategory = cat"
         >{{ cat }} <span class="cat-count">{{ plugins.filter(p => p.category === cat).length }}</span></button>
       </div>
-      <div class="plugin-search">
-        <Search :size="12" class="plugin-search-icon" />
-        <input v-model="pluginQuery" class="plugin-search-input" :placeholder="t('pluginSearchPh')" />
-        <button v-if="pluginQuery" class="plugin-search-clear" @click="pluginQuery = ''"><X :size="11" /></button>
-      </div>
+      <QdSearchBox v-model="pluginQuery" class="plugin-search" :icon-size="12" :placeholder="t('pluginSearchPh')" />
     </div>
 
     <!-- 加载中 -->
@@ -1336,14 +1334,16 @@ onUnmounted(() => {
 /* 能双击打开的卡片给出可点光标；禁用 / 无界面 / 未就绪的保持默认光标 */
 .plugin-card.card-openable { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
-  .plugin-card { transition: border-color var(--transition-fast), box-shadow var(--transition-fast); }
+  /* 只保留颜色/阴影的过渡（状态反馈），位移仍由全局兜底关掉。
+     必须 !important：style.css 的全局 reduced-motion 兜底也带 !important。 */
+  .plugin-card { transition: border-color var(--transition-fast), box-shadow var(--transition-fast) !important; }
   .plugin-card:hover { transform: none; }
 }
 
 /* 「新」角标：贴在图标右上角，不占头部宽度 */
 .new-badge {
   position: absolute; top: -5px; right: -5px;
-  font-size: 9px; line-height: 13px; font-weight: 700;
+  font-size: var(--text-2xs); line-height: 13px; font-weight: 700;
   padding: 0 4px; border-radius: var(--radius-sm);
   background: var(--color-accent); color: var(--color-accent-text);
   letter-spacing: 0.3px;
@@ -1396,7 +1396,7 @@ onUnmounted(() => {
   position: relative;
   width: 38px; height: 38px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
 }
@@ -1558,28 +1558,16 @@ onUnmounted(() => {
   color: var(--color-accent);
 }
 .card-cta.is-primary:hover { background: var(--color-accent); border-color: transparent; color: var(--color-accent-text); }
-.card-cta:disabled { opacity: 0.6; cursor: default; }
+.card-cta:disabled { opacity: var(--opacity-disabled-soft); cursor: default; }
 
 /* ---- 分类 Tabs ---- */
 /* 搜索框跟分类 tab 同一行靠右：装得多时先搜再筛，比先筛再翻更快 */
+/* 搜索框跟分类同一行靠右：装得多时先搜再筛，比先筛再翻更快。
+   皮肤由 QdSearchBox 统一提供，这里只定宽 + 靠右。 */
 .plugin-search {
-  display: flex; align-items: center; gap: 5px; margin-left: auto;
-  height: 26px; padding: 0 var(--space-4); min-width: 150px;
-  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  margin-left: auto;
+  width: 200px;
 }
-.plugin-search:focus-within { border-color: var(--color-border-focus-soft); }
-.plugin-search-icon { color: var(--color-text-muted); flex-shrink: 0; }
-.plugin-search-input {
-  flex: 1; min-width: 0; border: none; outline: none; background: none;
-  color: var(--color-text-primary); font-size: var(--text-xs); font-family: inherit;
-}
-.plugin-search-input::placeholder { color: var(--color-text-disabled); }
-.plugin-search-clear {
-  display: flex; padding: 0; border: none; background: none;
-  color: var(--color-text-muted); cursor: pointer;
-}
-.plugin-search-clear:hover { color: var(--color-text-primary); }
 
 /* ---- 分类 Tabs（分段控制器） ---- */
 /* 搜索框跟分类同一行靠右：装得多时先搜再筛，比先筛再翻更快。

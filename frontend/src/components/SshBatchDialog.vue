@@ -805,12 +805,12 @@ onBeforeUnmount(() => {
                 </select>
                 <span v-if="!commands.length" class="batch-snip-empty">{{ t('sshCmdEmpty') }}</span>
                 <button
-                  class="batch-snip-btn"
+                  class="batch-snip-btn qd-btn"
                   :disabled="running || !command.trim() || savingCmd"
                   @click="startSaveCmd"
                 >{{ t('sshCmdSave') }}</button>
                 <button
-                  class="batch-snip-btn"
+                  class="batch-snip-btn qd-btn"
                   :disabled="running || !pickedCmdId || savingCmd"
                   @click="requestDeleteCmd"
                 >{{ t('sshCmdDelete') }}</button>
@@ -825,11 +825,11 @@ onBeforeUnmount(() => {
                   :disabled="running"
                 />
                 <button
-                  class="batch-snip-btn"
+                  class="batch-snip-btn qd-btn"
                   :disabled="running || !newCmdName.trim()"
                   @click="confirmSaveCmd"
                 >{{ t('sshCmdSaveConfirm') }}</button>
-                <button class="batch-snip-btn" :disabled="running" @click="cancelSaveCmd">
+                <button class="batch-snip-btn qd-btn" :disabled="running" @click="cancelSaveCmd">
                   {{ t('sshCmdCancel') }}
                 </button>
               </div>
@@ -894,7 +894,7 @@ onBeforeUnmount(() => {
                 <span v-if="runHint" class="batch-run-hint">{{ runHint }}</span>
                 <button
                   v-if="running"
-                  class="batch-btn batch-stop"
+                  class="batch-btn qd-btn batch-stop"
                   @click="stop"
                 >
                   <Square :size="12" />
@@ -902,7 +902,7 @@ onBeforeUnmount(() => {
                 </button>
                 <button
                   v-else
-                  class="batch-btn batch-run"
+                  class="batch-btn qd-btn batch-run"
                   :class="{ danger: needsConfirm }"
                   :disabled="!canRun"
                   @click="onRunClick"
@@ -1109,7 +1109,7 @@ onBeforeUnmount(() => {
 
 .batch-mini:disabled {
   cursor: default;
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
 }
 
 .batch-pick-list {
@@ -1149,7 +1149,7 @@ onBeforeUnmount(() => {
 
 .batch-pick-row:disabled {
   cursor: default;
-  opacity: 0.6;
+  opacity: var(--opacity-disabled-soft);
 }
 
 /* 自绘勾选框：原生 checkbox 在暗色主题下与整体风格完全脱节，
@@ -1420,7 +1420,7 @@ onBeforeUnmount(() => {
 
 .batch-run:disabled {
   cursor: default;
-  opacity: 0.45;
+  opacity: var(--opacity-disabled);
 }
 
 .batch-stop {
@@ -1502,7 +1502,7 @@ onBeforeUnmount(() => {
 }
 
 .batch-results-tool:disabled {
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 
@@ -1647,7 +1647,7 @@ onBeforeUnmount(() => {
   outline: none;
 }
 .batch-snip-select:focus { border-color: var(--color-border-focus-soft); }
-.batch-snip-select:disabled { opacity: 0.45; cursor: default; }
+.batch-snip-select:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .batch-snip-empty { font-size: var(--text-xs); color: var(--color-text-muted); }
 .batch-snip-btn {
   flex: 0 0 auto;
@@ -1666,7 +1666,7 @@ onBeforeUnmount(() => {
   background: var(--color-danger-bg);
   border-color: var(--color-danger-border);
 }
-.batch-snip-btn:disabled { opacity: 0.45; cursor: default; }
+.batch-snip-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .batch-snip-save { display: flex; align-items: center; gap: var(--space-2); }
 .batch-snip-input {
   flex: 1 1 auto;

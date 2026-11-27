@@ -254,7 +254,7 @@ watch(() => props.visible, (v) => {
 }
 .skill-check:disabled {
   cursor: not-allowed;
-  opacity: 0.6;
+  opacity: var(--opacity-disabled-soft);
 }
 .skill-act {
   display: grid;

@@ -1,12 +1,14 @@
 <script setup lang="ts">
+import { downloadBlob } from '../utils/download'
 import PageHeader from './PageHeader.vue'
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, inject, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { KEEP_ALIVE } from '../pages/keepAlive'
 defineOptions({ name: KEEP_ALIVE.clipboard })
-import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight, ChevronDown, ListTodo, FilePlus, Sparkles, FolderSearch, ImageDown, ClipboardPaste, AlignLeft, ListPlus, Layers, Play, SkipForward, CheckSquare, Ban, Loader2, AlertCircle, MoreHorizontal, BookMarked, Copy, Check, Clock, Monitor } from '@lucide/vue'
+import { ClipboardList, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight, ChevronDown, ListTodo, FilePlus, Sparkles, FolderSearch, ImageDown, ClipboardPaste, AlignLeft, ListPlus, Layers, Play, SkipForward, CheckSquare, Ban, Loader2, AlertCircle, MoreHorizontal, BookMarked, Copy, Check, Clock, Monitor } from '@lucide/vue'
 import ClipboardAiPanel from './ClipboardAiPanel.vue'
+import QdSearchBox from './QdSearchBox.vue'
 import { clipboardCodeView } from '../utils/clipboardCode'
 import '../styles/hljs-theme.css'
 import {
@@ -42,6 +44,7 @@ import { pinyinOf } from '../utils/pinyin'
 import { filterByTag, queryPushForTag, tagPushSignature } from '../utils/clipboardFilter'
 import type { ToastAPI } from '../types'
 
+import { reportError } from '../utils/reportError'
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 const sa = useSaveAs()
@@ -79,7 +82,9 @@ const imageCache = ref<Record<string, string>>({})
 const imageLoading = ref<Record<string, boolean>>({})
 const listRef = ref<HTMLElement | null>(null)
 const selectedIndex = ref(0)
-const searchInputRef = ref<HTMLInputElement | null>(null)
+const searchBoxRef = ref<InstanceType<typeof QdSearchBox> | null>(null)
+/** 真实 input 元素：键盘处理要区分「光标在搜索框里按 Enter」和「在卡片上按 Enter」。 */
+const searchInputEl = () => searchBoxRef.value?.inputEl ?? null
 const activeTag = ref<string>('all')
 // 按来源筛选：sourceApp 存的是复制时的前台窗口标题。列表里给出出现过的来源，
 // 选一个就只看该来源的历史；「屏蔽此来源」把它写进已有的入库前忽略列表，
@@ -300,7 +305,7 @@ async function blockSource(source: string) {
     toast.success(t('cbSourceBlocked', { name }) + ' · ' + t('clipBlockByTitleNote'))
     if (sourceFilter.value === name) sourceFilter.value = 'all'
   } catch (e) {
-    toast.error(getErrorMessage(e)); logErr('clipboard/blockSource', e)
+    reportError(e, 'clipboard/blockSource')
   }
 }
 // 但筛选结果变少时页码可能越界（比如删到只剩 1 页），这时要收回到最后一页，
@@ -525,7 +530,7 @@ async function revealEntry(entry: ClipboardEntry) {
   try {
     unwrap(await RevealInExplorer(first))
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'ClipboardPanel.revealEntry')
   } finally {
     revealBusyId.value = ''
   }
@@ -542,20 +547,13 @@ async function saveImageAs(entry: ClipboardEntry) {
     // data URL → Blob → 交给浏览器的下载通道（WebView2 会落到「下载」目录）。
     // 不用后端另开保存对话框：一条链条两个进程，且这条路径失败时无从提示。
     const blob = await (await fetch(dataUrl)).blob()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
     // createdAt 是毫秒时间戳（不是字符串）：文件名自己拼，避免非法字符
     const d = new Date(entry.createdAt || Date.now())
     const p2 = (n: number) => String(n).padStart(2, '0')
-    a.download = `clipboard-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}.png`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    setTimeout(() => URL.revokeObjectURL(url), 0)
+    downloadBlob(`clipboard-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}.png`, blob)
     toast.success(t('clipboardImageSaved'))
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'ClipboardPanel.saveImageAs')
   }
 }
 
@@ -648,7 +646,7 @@ async function pasteAs(entry: ClipboardEntry, fmt: PasteFormat) {
     await ensurePasteTarget()
     unwrap(await PasteClipboardText(out))
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'ClipboardPanel.pasteAs')
   }
 }
 
@@ -855,14 +853,14 @@ async function runPasteQueue() {
       try {
         unwrap(await PasteClipboardEntry(item.id))
       } catch (e) {
-        toast.error(getErrorMessage(e))
+        reportError(e, 'ClipboardPanel.runPasteQueue')
       }
       pasteDone.value++
       if (gen !== pasteGen || !pasteQueue.value.length) break
       await sleep(PASTE_QUEUE_GAP_MS)
     }
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'ClipboardPanel.runPasteQueue')
   } finally {
     pasteRunning.value = false
     pasteTotal.value = 0
@@ -889,9 +887,7 @@ async function handleTogglePin(entry: ClipboardEntry) {
     const nowPinned = unwrap<boolean>(await TogglePinClipboardEntry(entry.id))
     entry.isPinned = nowPinned ? 1 : 0
   } catch (e) {
-    if (toast?.error) {
-      toast.error(getErrorMessage(e))
-    }
+    reportError(e, 'ClipboardPanel.handleTogglePin')
   }
 }
 
@@ -915,9 +911,7 @@ async function saveNote(entry: ClipboardEntry) {
     NOTE_INPUT.value = ''
     toast?.success?.(t('clipboardNoteSaved'))
   } catch (e) {
-    if (toast?.error) {
-      toast.error(getErrorMessage(e))
-    }
+    reportError(e, 'ClipboardPanel.saveNote')
   }
 }
 
@@ -939,12 +933,7 @@ async function exportClipboard() {
   try {
     const data = unwrap<any[]>(await ExportClipboard())
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `quickdock-clipboard-${new Date().toISOString().slice(0, 10)}.json`
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadBlob(`quickdock-clipboard-${new Date().toISOString().slice(0, 10)}.json`, blob)
     if (toast?.success) toast.success(t('clipboardExported'))
   } catch (e) {
     if (toast?.error) toast.error(t('exportFailed') + ': ' + getErrorMessage(e))
@@ -1096,13 +1085,13 @@ function onPanelKeydown(e: KeyboardEvent) {
   if (
     (e.key === 'Enter' || e.key === ' ') &&
     target &&
-    target !== searchInputRef.value &&
+    target !== searchInputEl() &&
     target.closest('button, a[href], input, textarea, select, [contenteditable="true"]')
   ) {
     return
   }
 
-  if (e.key === 'Enter' && e.target === searchInputRef.value) {
+  if (e.key === 'Enter' && e.target === searchInputEl()) {
     e.preventDefault()
     e.stopPropagation()
     handleCopy(list[safeIndex(list.length)])
@@ -1254,18 +1243,13 @@ onUnmounted(() => {
         <span v-if="!compact" class="qd-page-sub">{{ t('clipboardSubtitle') }}</span>
       </template>
       <div class="qd-page-fill">
-        <div class="qd-input-wrap cb-search">
-          <Search :size="14" />
-          <input
-            ref="searchInputRef"
-            v-model="searchQuery"
-            class="qd-input"
-            :placeholder="t('searchClipboard')"
-          />
-          <button v-if="searchQuery" class="cb-clear" @click="searchQuery = ''">
-            <X :size="13" />
-          </button>
-        </div>
+        <QdSearchBox
+          ref="searchBoxRef"
+          v-model="searchQuery"
+          class="cb-search"
+          :icon-size="14"
+          :placeholder="t('searchClipboard')"
+        />
       </div>
       <!-- 页头只留「选择 / 刷新 / 更多」三件：导出与清空是低频且危险的动作，
            摊在页头里既挤又容易误点，收进「更多」后每个动作都带文字标签。 -->
@@ -1689,19 +1673,8 @@ onUnmounted(() => {
 }
 
 /* 搜索框：页头里不铺满整行，封顶 260px —— 窗口拉宽时搜索框不该吃掉整条页头，
-   右侧三个图标按钮也要保持贴着右缘。 */
+   右侧三个图标按钮也要保持贴着右缘。皮肤由 QdSearchBox 统一提供。 */
 .cb-search { flex: 0 1 260px; min-width: 140px; }
-.cb-search > .qd-input { padding-right: 26px; }
-
-/* 清空按钮：压在输入框右内侧，比 .qd-icon-btn 再小一号 */
-.cb-clear {
-  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
-  display: flex; align-items: center; justify-content: center;
-  width: 20px; height: 20px; padding: 0;
-  background: none; border: none; border-radius: var(--radius-xs);
-  color: var(--color-text-muted); cursor: pointer;
-}
-.cb-clear:hover { color: var(--color-text-secondary); background: var(--color-bg-hover); }
 
 /* 浮窗（compact）只有 480px 宽（clipWinWidth），会命中 app.css 里
    max-width:900px 的页头换行规则 —— 浮窗没有第二行的高度，必须复原成单行：
@@ -1756,7 +1729,7 @@ onUnmounted(() => {
 .time-btn.active {
   color: var(--color-accent);
   background: var(--color-accent-bg);
-  border-color: var(--color-accent-border, var(--color-accent-bg));
+  border-color: var(--color-accent-border);
 }
 .cb-time {
   display: flex; align-items: center; gap: var(--space-1); flex-shrink: 0;
@@ -1807,7 +1780,7 @@ onUnmounted(() => {
 .cb-src-menu { max-width: 320px; }
 .cb-src-menu-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cb-menu-check { color: var(--color-accent); margin-left: var(--space-3); flex-shrink: 0; }
-.save-menu-item.is-active { color: var(--color-accent); }
+.save-menu-item.is-active { color: var(--color-accent-ink); }
 
 /* 页头「更多」：导出 / 清空 */
 .cb-head-menu { min-width: 150px; }
@@ -1837,7 +1810,7 @@ onUnmounted(() => {
 }
 .cb-batch-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
 .cb-batch-btn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); background: var(--color-danger-bg); }
-.cb-batch-btn:disabled { opacity: 0.45; cursor: default; }
+.cb-batch-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 /* 搜索命中高亮：明显区分 —— 主题蓝字 + 半粗 + 极淡蓝底，
    一眼能看清命中词，又不刺眼 */
@@ -1979,7 +1952,7 @@ onUnmounted(() => {
 }
 .cb-card:hover .cb-file-reveal { opacity: 1; }
 .cb-file-reveal:hover { color: var(--color-accent); background: var(--color-accent-bg); }
-.cb-file-reveal:disabled { opacity: 0.4; cursor: default; }
+.cb-file-reveal:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 /* ---- 元数据：图标 + 提亮一档的次要色 ---- */
 .cb-meta { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; min-width: 0; }
@@ -2111,7 +2084,7 @@ onUnmounted(() => {
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .clipboard-pagination .page-btn:hover:not(:disabled) { background: var(--color-bg-active); color: var(--color-text-primary); }
-.clipboard-pagination .page-btn:disabled { opacity: 0.35; cursor: default; }
+.clipboard-pagination .page-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .clipboard-pagination .page-btn.active { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
 .clipboard-pagination .page-ellipsis { color: var(--color-text-muted); font-size: var(--text-xs); width: 18px; text-align: center; }
 .clipboard-pagination .page-total { margin-left: var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); }
@@ -2192,7 +2165,7 @@ onUnmounted(() => {
   border-color: var(--color-accent-border);
   background: var(--color-accent-bg);
 }
-.qd-icon-btn:disabled { opacity: 0.4; cursor: default; }
+.qd-icon-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 /* 粘贴队列条：贴在标签栏下方，队列为空时整条不渲染。 */
 .cb-queue-bar {

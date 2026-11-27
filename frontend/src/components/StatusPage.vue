@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { downloadBlob } from '../utils/download'
 /**
  * 「网站监控」里的第三个视图（状态页）：本机只读的监控汇总，对标 Uptime Kuma 的展示形态。
  * 不单独占侧栏导航 —— 配置监控与查看整体状态属于同一件事。
@@ -426,15 +427,7 @@ ${sections}
 
 function exportSnapshot() {
   const blob = new Blob([buildSnapshotHtml()], { type: 'text/html;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = 'quickdock-status-' + stamp(new Date()) + '.html'
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  // WebView2 里 a.click() 的下载是异步取流的，立即 revoke 会提前释放 Blob；留一拍。
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  downloadBlob('quickdock-status-' + stamp(new Date()) + '.html', blob)
 }
 </script>
 

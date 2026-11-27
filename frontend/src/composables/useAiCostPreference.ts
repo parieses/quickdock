@@ -13,6 +13,7 @@
  * 的 aiStatCost），新做的气泡标签不该让用户升级后反而看不到钱。
  */
 import { ref, watch } from 'vue'
+import { writeStored } from '../utils/storage'
 
 const KEY = 'quickdock.ai.showMsgCost'
 
@@ -30,11 +31,8 @@ const showMsgCost = ref(readInitial())
 
 watch(showMsgCost, (v) => {
   if (typeof localStorage === 'undefined') return
-  try {
-    localStorage.setItem(KEY, v ? '1' : '0')
-  } catch {
-    // 写不进去就退化为「仅本次运行有效」，不影响功能
-  }
+  // 写不进去就退化为「仅本次运行有效」，不影响功能
+  writeStored(KEY, v ? '1' : '0')
 })
 
 export function useAiCostPreference() {

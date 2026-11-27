@@ -24,6 +24,7 @@ import {
   EnvRefresh,
 } from '../../bindings/quickdock/services/env/environmentservice'
 
+import { reportError } from '../utils/reportError'
 export interface EverythingStatusInfo {
   installed: boolean
   hasEsExe: boolean
@@ -143,7 +144,7 @@ export function useEnvEverything(deps: EnvEverythingDeps) {
       await loadEverything()
       deps.onStateChanged()
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useEnvEverything.evStart')
     } finally { evBusy.value = false }
   }
 
@@ -156,7 +157,7 @@ export function useEnvEverything(deps: EnvEverythingDeps) {
       await loadEverything()
       deps.onStateChanged()
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useEnvEverything.evStop')
     } finally { evBusy.value = false }
   }
 
@@ -170,7 +171,7 @@ export function useEnvEverything(deps: EnvEverythingDeps) {
       await loadEverything()
       deps.onStateChanged()
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useEnvEverything.evInstall')
     } finally { evBusy.value = false }
   }
 
@@ -184,16 +185,16 @@ export function useEnvEverything(deps: EnvEverythingDeps) {
       await loadEverything()
       deps.onStateChanged()
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useEnvEverything.evInstallEs')
     } finally { evBusy.value = false }
   }
 
   // 兜底：跳转官网手动下载（次要入口，主路径是上面的程序托管下载）
   async function evOpenDownload() {
-    try { unwrap(await EnvEverythingOpenDownload()) } catch (e: any) { toast.error(getErrorMessage(e)) }
+    try { unwrap(await EnvEverythingOpenDownload()) } catch (e: any) { reportError(e, 'useEnvEverything.evOpenDownload') }
   }
   async function evOpenCliDownload() {
-    try { unwrap(await EnvEverythingOpenCliDownload()) } catch (e: any) { toast.error(getErrorMessage(e)) }
+    try { unwrap(await EnvEverythingOpenCliDownload()) } catch (e: any) { reportError(e, 'useEnvEverything.evOpenCliDownload') }
   }
 
   async function evSaveSettings() {
@@ -208,7 +209,7 @@ export function useEnvEverything(deps: EnvEverythingDeps) {
       toast.success(t('evSaved'))
       await loadEverything()
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useEnvEverything.evSaveSettings')
     } finally { evBusy.value = false }
   }
 

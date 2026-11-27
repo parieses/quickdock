@@ -16,10 +16,10 @@ import { X } from '@lucide/vue'
 import { AICompactConversation, AIContextStats } from '../../bindings/quickdock/services/ai/aiservice'
 import { useDialogFocus } from '../composables/useDialogFocus'
 import { unwrap } from '../utils/api'
-import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { useToast } from '../composables/useToast'
 
+import { reportError } from '../utils/reportError'
 // 返回体嵌在 ApiResult.Data 里，不在绑定模型里（方法签名是 *services.ApiResult），
 // 所以这里手写一份字段说明，与 services/ai/ai_context_stats.go 的 json tag 对齐。
 interface ContextStats {
@@ -157,8 +157,7 @@ async function compactNow() {
   } catch (e) {
     // 压缩失败 ≠ 统计读不出来：把 stats 清掉会让弹框从「有数字」变成
     // 「读取失败，稍后再试」，用户根本分不清是哪一步坏了。
-    logErr('AiContextDialog.compact', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AiContextDialog.compact')
   } finally {
     compacting.value = false
   }

@@ -744,7 +744,7 @@ function onKeydown(e: KeyboardEvent) {
 .hd-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1055,7 +1055,7 @@ select.fd-input {
 
 .btn:disabled {
   cursor: default;
-  opacity: 0.45;
+  opacity: var(--opacity-disabled);
 }
 
 .btn-outline {

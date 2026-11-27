@@ -159,7 +159,7 @@ onUnmounted(() => {
           {{ t('winmgrPeers', { n: target.Peers }) }}
         </span>
       </div>
-      <button class="wm-icon-btn" title="Esc" @click="close">
+      <button class="wm-icon-btn qd-icon-btn" title="Esc" @click="close">
         <X :size="15" />
       </button>
     </div>

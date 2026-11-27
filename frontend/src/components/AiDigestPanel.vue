@@ -104,7 +104,7 @@ const { t } = useI18n()
   border: 1px solid var(--color-accent-border); border-radius: var(--radius-sm);
 }
 
-.ai-digest-gen:disabled { opacity: .55; cursor: default; }
+.ai-digest-gen:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 .ai-digest-hint { margin: var(--space-3) 0 var(--space-2); font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.4; }
 

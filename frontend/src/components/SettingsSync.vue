@@ -3,8 +3,8 @@ import { ref, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RotateCcw, Trash2 } from '@lucide/vue'
 import { unwrap } from '../utils/api'
+import { formatBytes } from '../utils/bytes'
 import { getErrorMessage } from '../utils/error'
-import { logErr } from '../utils/logger'
 import {
   GetSyncConfig,
   SetSyncConfig,
@@ -18,6 +18,7 @@ import {
 import type { ToastAPI } from '../types'
 import { useWorkspaceStore } from '../stores/workspace'
 
+import { reportError } from '../utils/reportError'
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 const store = useWorkspaceStore()
@@ -52,8 +53,7 @@ async function loadBackends() {
     backends.value = list ?? []
   } catch (e) {
     backends.value = []
-    toast.error(getErrorMessage(e))
-    logErr('SettingsSync.loadBackends', e)
+    reportError(e, 'SettingsSync.loadBackends')
   }
 }
 
@@ -193,7 +193,7 @@ watch(() => props.visible, (v) => {
         <div class="snapshot-item-info">
           <span class="snapshot-item-label">{{ b.name }}</span>
           <span class="snapshot-item-meta">
-            {{ b.size ? Math.round(b.size / 1024) + ' KB' : '' }}
+            {{ formatBytes(b.size, '') }}
             <template v-if="b.time"> · {{ b.time }}</template>
           </span>
         </div>

@@ -132,7 +132,7 @@ function buildOption() {
     tooltip: {
       trigger: 'axis',
       // 与 QdBarChart 保持一致：留在图表容器（定位最稳），靠 overflow:visible 放行。
-      extraCssText: 'z-index:2147483647;box-shadow:var(--shadow-md);border-radius:var(--radius-sm);padding:var(--space-3) var(--space-4);line-height:1.6;white-space:nowrap;pointer-events:none;',
+      extraCssText: 'z-index:var(--z-dropdown);box-shadow:var(--shadow-md);border-radius:var(--radius-sm);padding:var(--space-3) var(--space-4);line-height:1.6;white-space:nowrap;pointer-events:none;',
       axisPointer: {
         type: 'cross',
         lineStyle: { color: c.borderLight },

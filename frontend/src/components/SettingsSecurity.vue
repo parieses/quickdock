@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { copyToClipboard } from '../utils/clipboard'
 /**
  * 设置 → 安全：启动密码。
  *
@@ -155,12 +156,10 @@ async function changeAutoLock(e: Event) {
 }
 
 async function copyRecovery() {
-  try {
-    await navigator.clipboard.writeText(recoveryCode.value)
+  if (await copyToClipboard(recoveryCode.value)) {
     setMsg(t('securityCopied'), true)
-  } catch (e) {
-    // 剪贴板权限被拒时至少让用户能手动选中：不静默失败
-    logErr('SettingsSecurity.copy', e)
+  } else {
+    // 剪贴板写入失败时让用户手动选中：不静默失败
     setMsg(t('securityCopyFailed'), false)
   }
 }
@@ -271,7 +270,7 @@ function dismissRecovery() {
   color: var(--color-text-muted);
 }
 .sec-state.is-on {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .sec-recovery {

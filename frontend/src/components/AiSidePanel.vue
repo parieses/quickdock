@@ -15,13 +15,14 @@ import { artifactSigOf, changedArtifactPaths } from '../utils/aiArtifactSig'
 import { clampSideWidth, parseStoredWidth } from '../utils/aiSideWidth'
 import { writeStorageDebounced } from '../utils/storageQueue'
 import { unwrap } from '../utils/api'
-import { getErrorMessage } from '../utils/error'
+import { formatBytes } from '../utils/bytes'
 import { importWithRetry } from '../utils/lazyImport'
 import { AIReadPreviewFile, AISavePreviewFile } from '../../bindings/quickdock/services/ai/aiservice'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 import type { AIArtifact } from '../types/ai'
 import type { ToastAPI } from '../types'
 
+import { reportError } from '../utils/reportError'
 const props = defineProps<{
   // 面板开合。状态留在父组件：工具栏按钮的 is-active 与 Ctrl+Shift+B 都要读它
   open: boolean
@@ -160,12 +161,6 @@ function revealArtifact(p: AIFilePreview) {
   void RevealInExplorer(p.path).catch(() => { /* 打不开多半是目录已不存在，静默即可 */ })
 }
 
-function formatPreviewSize(bytes: number): string {
-  if (bytes >= 1 << 20) return (bytes / (1 << 20)).toFixed(1) + ' MB'
-  if (bytes >= 1 << 10) return (bytes / (1 << 10)).toFixed(1) + ' KB'
-  return bytes + ' B'
-}
-
 function newTab() {
   const tab: SideTab = { id: tabSeq++, kind: 'home', title: '' }
   tabs.value.push(tab)
@@ -221,7 +216,7 @@ async function openArtifact(a: AIArtifact) {
     }
   } catch (e) {
     tab.loading = false
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AiSidePanel.openArtifact')
     closeTab(tab.id)
   }
 }
@@ -337,7 +332,7 @@ watch(
       })
       if (!tab.data.truncated) cmHandle.focus()
     } catch (e) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'AiSidePanel.destroyCm')
       tab.editing = false // 加载失败退回空白提示，别卡在空编辑态
     }
   },
@@ -418,7 +413,7 @@ async function saveEdit() {
     toast.success(t('aiFileSaved'))
   } catch (e) {
     d.saving = false
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AiSidePanel.saveEdit')
   }
 }
 
@@ -469,7 +464,7 @@ defineExpose({ ensureTab, openArtifact })
     <div v-if="activeTab" class="ai-side-body">
       <!-- 首页：本任务的产物列表 -->
       <div v-if="activeTab.kind === 'home'" class="ai-side-home">
-        <div v-if="!artifacts.length" class="ai-side-home-empty">{{ t('aiSideHomeEmpty') }}</div>
+        <div v-if="!artifacts.length" class="ai-side-home-empty qd-empty">{{ t('aiSideHomeEmpty') }}</div>
         <template v-else>
           <div class="ai-side-home-title">{{ t('aiArtifactsCount', { n: artifacts.length }) }}</div>
           <div class="ai-artifacts-list">
@@ -483,11 +478,11 @@ defineExpose({ ensureTab, openArtifact })
       </div>
       <!-- 文件标签页：与弹层预览同一套读取结果，只是渲染面更大 -->
       <template v-else>
-        <div v-if="activeTab.loading" class="ai-side-home-empty">{{ t('aiPreviewLoading') }}</div>
+        <div v-if="activeTab.loading" class="ai-side-home-empty qd-empty">{{ t('aiPreviewLoading') }}</div>
         <template v-else-if="activeTab.data">
           <div class="ai-side-filebar">
             <span class="ai-side-filebar-name" :title="activeTab.data.path">
-              {{ activeTab.data.name }} · {{ formatPreviewSize(activeTab.data.size) }}
+              {{ activeTab.data.name }} · {{ formatBytes(activeTab.data.size) }}
               <template v-if="codeDirty"> · {{ t('aiFileUnsaved') }}</template>
               <template v-if="activeTab.data.truncated"> · {{ t('aiPreviewTruncated') }}</template>
             </span>

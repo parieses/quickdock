@@ -11,12 +11,11 @@ import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { PreviewPath } from '../../bindings/quickdock/services/item/itemservice'
 import { unwrap } from '../utils/api'
-import { getErrorMessage } from '../utils/error'
-import { logErr } from '../utils/logger'
-import { useToast } from '../composables/useToast'
+import { formatBytes } from '../utils/bytes'
 import { installMathOnce } from '../utils/mathMarkdown'
 import '../styles/hljs-theme.css'
 
+import { reportError } from '../utils/reportError'
 // searching 由父组件持有：Esc 是文档级 capture 监听，子组件收不到（也拦不住），
 // 所以「先退出预览内搜索、再关面板」这个收起顺序只能由父组件的 Esc 分支判断。
 //
@@ -28,7 +27,6 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const toast = useToast()
 
 // 与 Go 侧 fsview.Result 字段一一对应。改结构时两边一起改。
 interface PreviewEntry {
@@ -96,8 +94,7 @@ async function load(p: string) {
     if (my !== seq) return
     failed.value = true
     res.value = null
-    toast.error(getErrorMessage(e))
-    logErr('fsview/preview', e)
+    reportError(e, 'fsview/preview')
   } finally {
     if (my === seq) loading.value = false
   }
@@ -203,20 +200,6 @@ const imageStyle = computed(() => ({ transform: `scale(${zoom.value})` }))
 // 模板里刻意不写 Math.round(...)：Vue 模板的全局白名单虽然放行 Math，
 // 但这类表达式 vue-tsc 不校验，拼错要等运行时才暴露。
 const zoomText = computed(() => `${Math.round(zoom.value * 100)}%`)
-
-// 目录项 / 压缩包条目的体积展示。后端只给字节数，这里按 1024 进位格式化。
-function formatBytes(n: number): string {
-  if (!n || n < 0) return ''
-  if (n < 1024) return `${n} B`
-  const units = ['KB', 'MB', 'GB', 'TB']
-  let v = n / 1024
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i++
-  }
-  return `${v.toFixed(1)} ${units[i]}`
-}
 
 // ---- 目录下钻 ----
 // 保留原路径的分隔符风格：Windows 路径混进正斜杠虽然能 stat，但显示出来很难看。
@@ -483,7 +466,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
         <div v-else-if="res.entries.length === 0" class="fp-hint">{{ t('previewFailed') }}</div>
         <div v-for="(e, i) in res.entries" :key="i" class="fp-entry">
           <span class="fp-entry-name" :class="{ 'is-dir': e.isDir }">{{ e.name }}</span>
-          <span v-if="!e.isDir" class="fp-entry-size">{{ formatBytes(e.size) }}</span>
+          <span v-if="!e.isDir" class="fp-entry-size">{{ formatBytes(e.size, '') }}</span>
         </div>
         <div v-if="res.entryTotal > res.entries.length" class="fp-note">
           {{ t('previewMoreEntries', { n: res.entryTotal - res.entries.length }) }}

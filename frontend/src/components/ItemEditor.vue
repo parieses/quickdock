@@ -464,7 +464,7 @@ function onKeydown(e: KeyboardEvent) {
 
 <style scoped>
 .editor-overlay {
-  position: fixed; inset: 0; z-index: 9000;
+  position: fixed; inset: 0; z-index: var(--z-modal);
   background: var(--color-bg-overlay);
   display: flex; align-items: center; justify-content: center;
 }

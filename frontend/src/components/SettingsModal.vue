@@ -2,7 +2,7 @@
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, toRef, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X, Palette, Keyboard, Database, Info, Sun, Moon, Monitor as MonitorIcon, RotateCcw, Bot, Wrench, ExternalLink, ScrollText, History, ListOrdered, Search, Clipboard, Bell, ShieldCheck, Settings } from '@lucide/vue'
+import { X, Palette, Keyboard, Database, Info, Sun, Moon, Monitor as MonitorIcon, RotateCcw, Bot, Wrench, ExternalLink, ScrollText, History, ListOrdered, Clipboard, Bell, ShieldCheck, Settings } from '@lucide/vue'
 import { useFocusTrap } from '../utils/focusTrap'
 import { useTheme } from '../composables/useTheme'
 import { unwrap } from '../utils/api'
@@ -17,6 +17,7 @@ import SettingsClipboardRules from './SettingsClipboardRules.vue'
 import SettingsHistory from './SettingsHistory.vue'
 import QdTabs from './QdTabs.vue'
 import QdSwitch from './QdSwitch.vue'
+import QdSearchBox from './QdSearchBox.vue'
 import QdModal from './QdModal.vue'
 import SettingsAI from './SettingsAI.vue'
 import SettingsSnapshot from './SettingsSnapshot.vue'
@@ -54,6 +55,7 @@ import { parseReleaseNotes } from '../utils/releaseNotes'
 // 官方站点地址唯一来源：关于页与工作空间引导共用一份（见 utils/siteLinks.ts）
 import { SITE_GUIDE_URL, SITE_GUIDE_TEXT } from '../utils/siteLinks'
 
+import { reportError } from '../utils/reportError'
 const props = defineProps<{
   visible: boolean
   initialPage?: string
@@ -96,7 +98,6 @@ watch(activePage, (p) => {
 const panelRef = ref<HTMLElement | null>(null)
 const { onKeydown: onKeydownTrap } = useFocusTrap(toRef(props, 'visible'), panelRef)
 const hotkeyRef = ref<InstanceType<typeof HotkeySettings> | null>(null)
-const searchRef = ref<HTMLInputElement | null>(null)
 
 // ---- 窗口材质 ----
 // 能力探测决定「有没有这个设置项」：Win10 / 非 Windows 下 supported 恒为 false，
@@ -422,7 +423,7 @@ async function clearSkippedUpdates() {
   const cleared = [...skippedVersions.value]
   try {
     unwrap(await SetValue(SKIPPED_VERSIONS_KEY, '[]'))
-  } catch (e) { logErr('SettingsModal:clearSkipped', e); toast.error(getErrorMessage(e)); return }
+  } catch (e) {; reportError(e, 'SettingsModal:clearSkipped'); return }
   skippedVersions.value = []
   for (const v of cleared) {
     try { localStorage.removeItem('qd_update_skip_' + v) } catch (e) { logErr('SettingsModal:unmirrorSkip', e) }
@@ -528,7 +529,9 @@ const migratePercent = computed(() => {
   return migratePhase.value === 'done' ? 100 : 0
 })
 
-/** 已复制的体积文案。 */
+/** 已复制的体积文案。
+    这里刻意不走 formatBytes：文案是「x / y MB」，单位由 i18n 固定写死，
+    自动进档会出现「1.5 GB / 2 MB」这种单位错位。 */
 const migrateSizeText = computed(() => {
   const mb = (n: number) => (n / 1024 / 1024).toFixed(1)
   if (migrateTotalBytes.value > 0) return `${mb(migrateDoneBytes.value)} / ${mb(migrateTotalBytes.value)} MB`
@@ -658,7 +661,7 @@ async function pickStorageDir() {
       await updateStorageTargetHint()
     }
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'SettingsModal.pickStorageDir')
   }
 }
 
@@ -760,8 +763,7 @@ async function exportData() {
     exportZipPath.value = dest
     exportScopeOpen.value = true
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
-    logErr('Settings.exportData', e)
+    reportError(e, 'Settings.exportData')
   }
 }
 
@@ -790,8 +792,7 @@ async function confirmExportScope() {
     toast.success(t('dataExportStarted'))
   } catch (e: any) {
     dataTransferBusy.value = false
-    toast.error(getErrorMessage(e))
-    logErr('Settings.exportData', e)
+    reportError(e, 'Settings.exportData')
   }
 }
 
@@ -828,8 +829,7 @@ async function pickImportZip() {
       storageMsg.value = t('dataImportReady', { dir: info.sourceDir })
     }
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
-    logErr('Settings.pickImportZip', e)
+    reportError(e, 'Settings.pickImportZip')
   }
 }
 
@@ -850,8 +850,7 @@ async function importData() {
     toast.success(t('dataImportStarted'))
   } catch (e: any) {
     dataTransferBusy.value = false
-    toast.error(getErrorMessage(e))
-    logErr('Settings.importData', e)
+    reportError(e, 'Settings.importData')
   }
 }
 
@@ -1044,8 +1043,7 @@ async function setLocale(newLocale: string) {
     // 持久化失败就回滚到旧语言，界面与下次启动的落库状态保持一致，别留下「假切换」。
     currentLocale.value = oldLocale
     i18n.global.locale.value = oldLocale as 'zh-CN' | 'en-US'
-    toast.error(getErrorMessage(e) || t('settingLocaleFailed'))
-    logErr('SettingsModal.setLocale', e)
+    reportError(e, 'SettingsModal.setLocale', { fallback: t('settingLocaleFailed') })
   }
 }
 
@@ -1224,24 +1222,20 @@ async function toggleAutoStart() {
         <div class="settings-sidebar">
           <div class="settings-sidebar-header">
             <span class="sidebar-header-title">{{ t('settings') }}</span>
-            <button class="close-btn" :title="t('settingsCloseEsc')" @click="close">
+            <button class="close-btn qd-icon-btn" :title="t('settingsCloseEsc')" @click="close">
               <X :size="18" />
             </button>
           </div>
 
           <!-- 设置项搜索：根菜单常驻；进了具体设置页也留着，回来时不用重输 -->
           <div class="settings-search">
-            <div class="settings-search-box">
-              <Search :size="14" class="settings-search-icon" />
-              <input
-                ref="searchRef"
-                v-model="settingsQuery"
-                type="text"
-                :placeholder="t('settingsSearchPh')"
-                autocomplete="off"
-                @keydown="onSearchKeydown"
-              />
-            </div>
+            <QdSearchBox
+              v-model="settingsQuery"
+              class="settings-search-box"
+              :icon-size="14"
+              :placeholder="t('settingsSearchPh')"
+              @keydown="onSearchKeydown"
+            />
           </div>
 
           <div class="settings-menu">

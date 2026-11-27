@@ -2,6 +2,7 @@
 import PageHeader from './PageHeader.vue'
 import QdTabs from './QdTabs.vue'
 import QdModal from './QdModal.vue'
+import QdSearchBox from './QdSearchBox.vue'
 /**
  * 下载器页面：QuickDock 只做「遥控器 + 仪表盘」。
  * 添加任务 → Go 门面转 JSON-RPC → aria2c 下载并直接写盘；
@@ -20,8 +21,9 @@ import {
   Shield, Zap, ExternalLink, Hash, Cpu, Radio, Check, FolderInput, Save, Power,
 } from '@lucide/vue'
 import {
-  useDownloadTasks, formatBytes, formatSpeed, formatEta, formatTime, formatRatio,
+  useDownloadTasks, formatSpeed, formatEta, formatTime, formatRatio,
 } from '../composables/useDownloadTasks'
+import { formatBytes } from '../utils/bytes'
 import type {
   DlTask, DlDetail, DlOptionsView, DlEngineInfo, DlProbeResult,
   DlImportItem, DlImportPreview, DlImportResult,
@@ -36,6 +38,7 @@ import { logErr } from '../utils/logger'
 import { ReadText } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import { Events } from '@wailsio/runtime'
 
+import { reportError } from '../utils/reportError'
 const { t } = useI18n()
 const toast = useToast()
 const sa = useSaveAs()
@@ -189,8 +192,7 @@ async function doProbe() {
     probe.value = r
     await refreshDisk()
   } catch (e) {
-    logErr('download/probe', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'download/probe')
     probeError.value = t('dlProbeFailed', { error: getErrorMessage(e) })
   } finally {
     probing.value = false
@@ -417,8 +419,7 @@ async function submitImport() {
       toast.error(t('dlImportDone', { added: 0, skipped: r.skipped }))
     }
   } catch (e) {
-    logErr('download/importCommit', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'download/importCommit')
     importError.value = getErrorMessage(e)
   } finally {
     importSubmitting.value = false
@@ -819,8 +820,7 @@ async function pasteLinks() {
       if (lines.length > 1) toast.success(t('dlPasteMultiHint', { count: lines.length }))
     }
   } catch (e) {
-    logErr('download/paste', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'download/paste')
   }
 }
 
@@ -1342,11 +1342,13 @@ onUnmounted(() => {
                 <input ref="selectAllEl" type="checkbox" class="dl-check" :checked="allChecked" :disabled="!visible.length" @change="toggleAll" />
                 <span>{{ t('dlSelectAll') }}</span>
               </label>
-              <div class="qd-input-wrap dl-search">
-                <Search :size="14" />
-                <input v-model="query" class="qd-input" :placeholder="t('dlSearchPlaceholder')" />
-                <button v-if="query" class="qd-icon-btn dl-search-clear" :title="t('dlClearSearch')" @click="query = ''"><X :size="14" /></button>
-              </div>
+              <QdSearchBox
+                v-model="query"
+                class="dl-search"
+                :icon-size="14"
+                :clear-title="t('dlClearSearch')"
+                :placeholder="t('dlSearchPlaceholder')"
+              />
               <select v-model="sortKey" class="qd-input dl-sort" :aria-label="t('dlSortLabel')">
                 <option value="default">{{ t('dlSortDefault') }}</option>
                 <option value="createdAt">{{ t('dlSortTime') }}</option>
@@ -2215,8 +2217,6 @@ onUnmounted(() => {
 }
 .dl-check-all { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--color-text-secondary); }
 .dl-search { flex: 1 1 180px; max-width: 280px; }
-.dl-search .qd-input { padding-right: 28px; }
-.dl-search-clear { position: absolute; right: 2px; }
 .dl-sort { width: 140px; font-size: var(--text-xs); }
 .dl-grow { flex: 1; }
 .dl-count { font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap; }
@@ -2380,7 +2380,7 @@ onUnmounted(() => {
 .dl-ctx-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 /* 引擎未运行时暂停/继续这类项留在菜单里但压灰：直接隐藏会让菜单项忽有忽无，
    用户以为是 bug；压灰 + title 说明原因才读得懂。 */
-.dl-ctx-item:disabled { opacity: 0.45; cursor: default; }
+.dl-ctx-item:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .dl-ctx-item:disabled:hover { background: none; color: var(--color-text-secondary); }
 .dl-ctx-item.is-danger { color: var(--color-danger); }
 .dl-ctx-sep { height: 1px; margin: var(--space-1) 0; background: var(--color-border); }

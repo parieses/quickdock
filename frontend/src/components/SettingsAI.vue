@@ -14,6 +14,7 @@ import { unwrap } from '../utils/api'
 import { profileNeedsKey } from '../utils/aiKey'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
+import { fmtCost, fmtTokens } from '../utils/format'
 import { logErr } from '../utils/logger'
 import { localISO } from '../utils/lunar'
 import { useAiCostPreference } from '../composables/useAiCostPreference'
@@ -52,6 +53,7 @@ import type {
 } from '../types/ai'
 import type { ToastAPI } from '../types'
 
+import { reportError } from '../utils/reportError'
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 // 单条费用显示开关：与消息列表共享同一份偏好（见 useAiCostPreference），
@@ -414,8 +416,7 @@ async function revokeGrant(g: AIGrantView) {
     unwrap(await AIDeleteApprovalGrant(g.tool, g.kind, g.value, g.scope, g.workspace))
     await loadGrants()
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('settings:revokeGrant', e)
+    reportError(e, 'settings:revokeGrant')
   }
 }
 
@@ -510,8 +511,7 @@ async function toggleExtTools(s: AIExtServerState) {
     const list = unwrap<ExtToolInfo[]>(await AIListExtTools(s.name)) ?? []
     if (seq === extToolsSeq) extTools.value = list
   } catch (e) {
-    logErr('[SettingsAI] AIListExtTools:', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, '[SettingsAI] AIListExtTools:')
     // 这里不能再调 resetExtTools：它会推进 extToolsSeq，finally 就判不出
     // 「还是本次请求」而漏掉关 loading，展开行会一直转圈。
     if (seq === extToolsSeq) {
@@ -533,8 +533,7 @@ async function toggleExtTool(tool: ExtToolInfo) {
     unwrap(await AISetToolEnabled(tool.name, tool.disabled))
     tool.disabled = !tool.disabled
   } catch (e) {
-    logErr('[SettingsAI] AISetToolEnabled:', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, '[SettingsAI] AISetToolEnabled:')
   } finally {
     extToolsBusy.value = ''
   }
@@ -1105,22 +1104,6 @@ async function reloadExt() {
   }
 }
 
-// token 数量级跨得很大（几百 ~ 上千万），统一折算成 k/M，否则表格列宽会被撑爆。
-function fmtTokens(n: number): string {
-  if (!n) return '0'
-  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 1 : 2) + 'M'
-  if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k'
-  return String(n)
-}
-
-// 单次问答常在 0.001 元量级，固定两位小数会全变成「¥0.00」，故按数量级自适应。
-function fmtCost(n: number): string {
-  if (!n) return '¥0'
-  if (n >= 1) return '¥' + n.toFixed(2)
-  if (n >= 0.01) return '¥' + n.toFixed(3)
-  return '¥' + n.toFixed(4)
-}
-
 // 日期轴只写 M/D 才排得下，完整日期由 dailyTooltipTitle 放 tooltip 首行。
 function fmtDay(day: string): string {
   const p = day.split('-')
@@ -1235,7 +1218,7 @@ async function onToggleMemoryAuto(on: boolean) {
   } catch (e) {
     // 回滚到改之前的勾选状态，别让界面显示一个没存进去的值
     memoryAuto.value = !on
-    toast.error(getErrorMessage(e))
+    reportError(e, 'SettingsAI.onToggleMemoryAuto')
   } finally {
     memoryAutoSaving.value = false
   }
@@ -1330,7 +1313,7 @@ async function ensurePlainKey(): Promise<string> {
     keyPlain.value = res?.apiKey || ''
     return keyPlain.value
   } catch (e) {
-    toast.error(getErrorMessage(e) || t('aiKeyRevealFailed'))
+    reportError(e, 'SettingsAI.ensurePlainKey', { fallback: t('aiKeyRevealFailed') })
     return ''
   } finally {
     keyBusy.value = false

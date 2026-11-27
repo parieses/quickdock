@@ -33,6 +33,34 @@ describe('debounce', () => {
     vi.advanceTimersByTime(1)
     expect(fn).toHaveBeenCalledTimes(1)
   })
+
+  it('cancel() 丢弃待触发调用', () => {
+    const fn = vi.fn()
+    const d = debounce(fn, 100)
+    d('a')
+    d.cancel()
+    vi.advanceTimersByTime(200)
+    expect(fn).not.toHaveBeenCalled()
+  })
+
+  it('cancel() 之后再调用仍能正常执行', () => {
+    const fn = vi.fn()
+    const d = debounce(fn, 100)
+    d('a')
+    d.cancel()
+    d('b')
+    vi.advanceTimersByTime(100)
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(fn).toHaveBeenCalledWith('b')
+  })
+
+  it('没有待触发调用时 cancel() 是无操作', () => {
+    const fn = vi.fn()
+    const d = debounce(fn, 100)
+    d.cancel()
+    d.cancel()
+    expect(fn).not.toHaveBeenCalled()
+  })
 })
 
 describe('throttle', () => {
@@ -70,5 +98,15 @@ describe('throttle', () => {
     vi.advanceTimersByTime(150)
     t()
     expect(fn).toHaveBeenCalledTimes(2)
+  })
+
+  it('cancel() 丢弃窗口结束的尾部执行', () => {
+    const fn = vi.fn()
+    const t = throttle(fn, 100)
+    t() // 首次立即执行
+    t() // 登记尾部
+    t.cancel()
+    vi.advanceTimersByTime(200)
+    expect(fn).toHaveBeenCalledTimes(1)
   })
 })

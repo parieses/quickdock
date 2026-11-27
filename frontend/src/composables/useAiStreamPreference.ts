@@ -12,6 +12,7 @@
  * 默认流式：只有用户显式关过才是一次性，读不到存储时也按流式走。
  */
 import { ref, watch } from 'vue'
+import { writeStored } from '../utils/storage'
 
 const KEY = 'quickdock.ai.stream'
 
@@ -30,11 +31,8 @@ const streamEnabled = ref(readInitial())
 
 watch(streamEnabled, (v) => {
   if (typeof localStorage === 'undefined') return
-  try {
-    localStorage.setItem(KEY, v ? '1' : '0')
-  } catch {
-    // 隐私模式/存储被禁：写不进去就退化为「仅本次运行有效」，不影响功能
-  }
+  // 隐私模式/存储被禁：写不进去就退化为「仅本次运行有效」，不影响功能
+  writeStored(KEY, v ? '1' : '0')
 })
 
 export function useAiStreamPreference() {

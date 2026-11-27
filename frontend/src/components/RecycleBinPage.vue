@@ -340,7 +340,7 @@ onMounted(load)
   color: var(--color-text-primary); font-family: inherit;
 }
 .rc-btn:hover:not(:disabled) { background: var(--color-bg-active); }
-.rc-btn:disabled { opacity: 0.4; cursor: default; }
+.rc-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .rc-btn.restore:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
 .rc-btn.danger { border-radius: var(--radius-sm); padding: 3px var(--space-3); color: var(--color-text-muted); }
 .rc-btn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger-border); }

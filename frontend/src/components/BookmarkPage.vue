@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { copyToClipboard } from '../utils/clipboard'
 import PageHeader from './PageHeader.vue'
 // BookmarkPage.vue — 浏览器书签导入与维护页
 //
@@ -16,10 +17,11 @@ import { useI18n } from 'vue-i18n'
 import { KEEP_ALIVE } from '../pages/keepAlive'
 import {
   ArrowLeft, ArrowUpDown, Bookmark, Check, CheckSquare, Copy, CopyCheck, ExternalLink, FilePlus2,
-  Folder, Globe, Globe2, GripVertical, Link2Off, Loader2, Pencil, Plus, RefreshCw, Search, Sparkles,
-  Trash2, X,
+  Folder, Globe, Globe2, GripVertical, Link2Off, Loader2, Pencil, Plus, RefreshCw, Sparkles,
+  Trash2,
 } from '@lucide/vue'
 import QdModal from './QdModal.vue'
+import QdSearchBox from './QdSearchBox.vue'
 import QdTabs from './QdTabs.vue'
 import { useToast } from '../composables/useToast'
 import { unwrap } from '../utils/api'
@@ -35,6 +37,7 @@ import {
   PreviewImport, StartLinkCheck,
 } from '../../bindings/quickdock/services/bookmark/bookmarkservice'
 
+import { reportError } from '../utils/reportError'
 defineOptions({ name: KEEP_ALIVE.bookmarks })
 
 const { t } = useI18n()
@@ -446,8 +449,7 @@ async function confirmRename() {
     await load(true)
     toast.success(t('bmRenamed'))
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('bookmark.rename', e)
+    reportError(e, 'bookmark.rename')
   } finally {
     renameBusy.value = false
   }
@@ -470,8 +472,7 @@ async function confirmDelete() {
     await load(true)
     toast.success(t('bmFolderDeleted'))
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('bookmark.delete', e)
+    reportError(e, 'bookmark.delete')
   } finally {
     deleteBusy.value = false
   }
@@ -534,8 +535,7 @@ async function onDrop(c: Card) {
     await load(true)
     toast.success(t('bmReordered'))
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('bookmark.reorder', e)
+    reportError(e, 'bookmark.reorder')
   }
 }
 function onDragEnd() {
@@ -599,8 +599,7 @@ async function load(silent = false) {
     for (const h of hs) map[h.itemId] = h
     health.value = map
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('bookmark', e)
+    reportError(e, 'bookmark')
   } finally {
     loading.value = false
   }
@@ -635,17 +634,15 @@ async function openBookmark(r: BookmarkRow) {
   try {
     unwrap(await OpenItem(r.id))
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('bookmark', e)
+    reportError(e, 'bookmark')
   }
 }
 
 async function copyUrl(r: BookmarkRow) {
-  try {
-    await navigator.clipboard.writeText(r.value)
+  if (await copyToClipboard(r.value)) {
     toast.success(t('bmCopied'))
-  } catch (e) {
-    logErr('bookmark', e)
+  } else {
+    toast.error(t('copyFailed'))
   }
 }
 
@@ -664,8 +661,7 @@ async function loadSources() {
   try {
     sources.value = unwrap<SourceInfo[]>(await ListBrowserSources()) ?? []
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('bookmark', e)
+    reportError(e, 'bookmark')
   } finally {
     sourcesLoading.value = false
   }
@@ -684,8 +680,7 @@ async function previewSource(s: SourceInfo) {
     if (!p) return
     applyPreview(p, s.key, s.profile ? `${s.browser} · ${s.profile}` : s.browser)
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('bookmark', e)
+    reportError(e, 'bookmark')
   }
 }
 
@@ -697,8 +692,7 @@ async function pickFile() {
     if (!p) return
     applyPreview(p, '', '')
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('bookmark', e)
+    reportError(e, 'bookmark')
   }
 }
 
@@ -716,8 +710,7 @@ async function confirmImport() {
     await load()
     void fillIcons()
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('bookmark', e)
+    reportError(e, 'bookmark')
   } finally {
     importing.value = false
   }
@@ -730,8 +723,7 @@ async function startCheck() {
     checking.value = st ?? null
     poll()
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('bookmark', e)
+    reportError(e, 'bookmark')
   }
 }
 
@@ -768,8 +760,7 @@ async function applyMoved(h: HealthRow) {
     unwrap(await ApplyMovedURL(h.itemId, h.finalUrl))
     await load(true)
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('bookmark', e)
+    reportError(e, 'bookmark')
   }
 }
 
@@ -784,8 +775,7 @@ async function openDuplicates() {
     dupGroups.value.forEach((g, i) => { choice[i] = g.items[0]?.id ?? '' })
     keepChoice.value = choice
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('bookmark', e)
+    reportError(e, 'bookmark')
   }
 }
 
@@ -801,8 +791,7 @@ async function mergeGroup(i: number) {
     dupExtra.value = Math.max(0, dupExtra.value - drops.length)
     await load(true)
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('bookmark', e)
+    reportError(e, 'bookmark')
   }
 }
 
@@ -814,8 +803,7 @@ async function openInsight() {
     )
     insight.value = res ?? null
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('bookmark', e)
+    reportError(e, 'bookmark')
   }
 }
 
@@ -863,13 +851,13 @@ onMounted(() => {
     </PageHeader>
 
     <div class="qd-toolbar bm-toolbar">
-      <div class="qd-input-wrap bm-search">
-        <Search :size="14" />
-        <input v-model="keyword" class="qd-input" :placeholder="t('bmSearchPlaceholder')" />
-        <button v-if="keyword" class="qd-icon-btn bm-clear" :title="t('bmClear')" @click="keyword = ''">
-          <X :size="14" />
-        </button>
-      </div>
+      <QdSearchBox
+        v-model="keyword"
+        class="bm-search"
+        :icon-size="14"
+        :clear-title="t('bmClear')"
+        :placeholder="t('bmSearchPlaceholder')"
+      />
 
       <!-- 视图：文件夹 / 域名。域名视图把散落在各文件夹里的同一站点收成一堆 -->
       <QdTabs v-model="viewMode" :tabs="viewTabs" class="bm-view" :aria-label="t('bmViewLabel')">
@@ -1332,7 +1320,6 @@ onMounted(() => {
 /* 只写本页独有的布局偏移与元素；页头、按钮、输入框、行、空状态一律用全局类。 */
 .bm-toolbar { gap: var(--space-3); flex-wrap: wrap; }
 .bm-search { width: 240px; flex-shrink: 1; min-width: 150px; }
-.bm-clear { position: absolute; right: 2px; width: 22px; height: 22px; }
 .bm-view { flex-shrink: 0; }
 
 /* 健康筛选的色点：死链红、无法访问橙、地址已变蓝、内容已变蓝。
@@ -1371,7 +1358,7 @@ onMounted(() => {
   font-size: var(--text-sm); text-align: left; cursor: pointer;
 }
 .bm-menu-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.bm-menu-item.active { color: var(--color-accent); }
+.bm-menu-item.active { color: var(--color-accent-ink); }
 .bm-menu-tick { display: inline-flex; width: 14px; flex-shrink: 0; }
 
 /* ---- 后台任务条 ---- */
@@ -1494,7 +1481,7 @@ onMounted(() => {
   display: flex; align-items: center; justify-content: center;
   width: 14px; height: 14px; border-radius: 2px;
   background: var(--color-bg-tertiary); color: var(--color-text-muted);
-  font-size: 9px; font-weight: 600; text-transform: uppercase;
+  font-size: var(--text-2xs); font-weight: 600; text-transform: uppercase;
 }
 .bm-fav-more { font-size: var(--text-2xs); color: var(--color-text-muted); }
 

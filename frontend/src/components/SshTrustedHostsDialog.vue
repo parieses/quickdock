@@ -160,7 +160,7 @@ function onKeydown(e: KeyboardEvent) {
               <span class="th-spinner" />
             </div>
 
-            <div v-else-if="!hasAny && !loadErr" class="th-empty">
+            <div v-else-if="!hasAny && !loadErr" class="th-empty qd-empty">
               <ShieldCheck :size="20" class="th-empty-icon" />
               <p class="th-empty-text">{{ t('sshTrustedEmpty') }}</p>
             </div>
@@ -209,7 +209,7 @@ function onKeydown(e: KeyboardEvent) {
 .th-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1200;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -416,7 +416,7 @@ function onKeydown(e: KeyboardEvent) {
 
 .th-forget:disabled {
   cursor: default;
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
 }
 
 .th-key {

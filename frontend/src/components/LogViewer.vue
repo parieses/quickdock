@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ScrollText, FolderOpen, RefreshCw, Search, Copy, Check, AlertTriangle, Trash2, HardDrive, Radio, Plus, X, Pause, Play, Sparkles } from '@lucide/vue'
+import { ScrollText, FolderOpen, RefreshCw, Copy, Check, AlertTriangle, Trash2, HardDrive, Radio, Plus, X, Pause, Play, Sparkles } from '@lucide/vue'
+import QdSearchBox from './QdSearchBox.vue'
 import { ListLogFiles, ReadLogFile, ListCrashFiles, ClearCrashFiles, GetLogStorage, ClearLogs } from '../../bindings/quickdock/services/diag/diagservice'
 import { OpenLogsDir, GetLogsInfo } from '../../bindings/quickdock/services/system/systemservice'
 import { SelectLocalFile } from '../../bindings/quickdock/services/appservice'
@@ -11,7 +12,7 @@ import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { copyToClipboard } from '../utils/clipboard'
-import { formatBytes } from '../utils/ssh'
+import { formatBytes } from '../utils/bytes'
 import { useToast } from '../composables/useToast'
 import { navigateTo, pendingAskText } from '../composables/bridge'
 
@@ -649,7 +650,7 @@ onUnmounted(() => {
         <p v-if="!crashFiles.length" class="log-empty">{{ t('crashEmpty') }}</p>
       </div>
       <div v-if="crashFiles.length" class="crash-actions">
-        <button class="log-btn" @click="clearCrash">
+        <button class="log-btn qd-btn" @click="clearCrash">
           <Trash2 :size="13" />
           {{ t('crashClear') }}
         </button>
@@ -705,7 +706,7 @@ onUnmounted(() => {
         <div class="log-context-stats">
           <button
             v-if="props.newCrashCount"
-            class="log-btn crash-jump"
+            class="log-btn qd-btn crash-jump"
             :title="t('crashBadgeFromHere')"
             @click="focusCrash"
           >
@@ -742,10 +743,7 @@ onUnmounted(() => {
               @click="levels[lv] = !levels[lv]"
             >{{ lv }}</button>
           </div>
-          <div class="log-search">
-            <Search :size="13" class="log-search-icon" />
-            <input v-model="keyword" :placeholder="t('logSearch')" class="log-search-input" />
-          </div>
+          <QdSearchBox class="log-search" v-model="keyword" :placeholder="t('logSearch')" :clearable="false" />
           <label v-if="!isTail" class="log-follow">
             <input type="checkbox" :checked="follow" @change="toggleFollow" />
             {{ t('logFollow') }}
@@ -753,28 +751,28 @@ onUnmounted(() => {
           <!-- 尾随模式：读取的是订阅流而不是静态文件，所以不需要「刷新/跟随」，
                换成暂停（真的停止后端读取）与清空（丢弃已攒的行） -->
           <template v-else-if="activeTab">
-            <button class="log-btn" @click="toggleTabPause(activeTab)">
+            <button class="log-btn qd-btn" @click="toggleTabPause(activeTab)">
               <Pause v-if="!activeTab.paused" :size="13" />
               <Play v-else :size="13" />
               {{ activeTab.paused ? t('ltResume') : t('ltPause') }}
             </button>
-            <button class="log-btn" @click="clearTail">
+            <button class="log-btn qd-btn" @click="clearTail">
               <Trash2 :size="13" />
               {{ t('ltClear') }}
             </button>
           </template>
         </div>
         <div class="log-toolbar-right">
-          <button v-if="!isTail" class="log-btn" :disabled="loading" @click="loadContent">
+          <button v-if="!isTail" class="log-btn qd-btn" :disabled="loading" @click="loadContent">
             <RefreshCw :size="13" /> {{ t('logRefresh') }}
           </button>
-          <button class="log-btn" @click="OpenLogsDir()">
+          <button class="log-btn qd-btn" @click="OpenLogsDir()">
             <FolderOpen :size="13" /> {{ t('logOpenDir') }}
           </button>
-          <button class="log-btn" :title="t('logAskAI')" @click="askAIAboutLogs">
+          <button class="log-btn qd-btn" :title="t('logAskAI')" @click="askAIAboutLogs">
             <Sparkles :size="13" /> {{ t('logAskAI') }}
           </button>
-          <button class="log-btn" @click="copyAll" :title="t('logCopyLine')">
+          <button class="log-btn qd-btn" @click="copyAll" :title="t('logCopyLine')">
             <Copy v-if="!copied" :size="13" />
             <Check v-else :size="13" />
             {{ copied ? t('logCopied') : t('logCopy') }}
@@ -838,7 +836,7 @@ onUnmounted(() => {
         <div v-else class="storage-facts">{{ t('logStorageEmpty') }}</div>
         <div class="storage-actions">
           <button
-            class="log-btn"
+            class="log-btn qd-btn"
             :title="t('logCleanupOldTitle')"
             @click="runCleanup('old')"
           >
@@ -846,7 +844,7 @@ onUnmounted(() => {
             {{ t('logCleanupOld') }}
           </button>
           <button
-            class="log-btn"
+            class="log-btn qd-btn"
             :title="t('logCleanupAllTitle')"
             @click="runCleanup('all')"
           >
@@ -953,7 +951,7 @@ onUnmounted(() => {
   font-size: var(--text-2xs); line-height: 1.4;
   color: var(--color-text-muted); font-variant-numeric: tabular-nums;
 }
-.log-file.active .log-file-meta { color: var(--color-accent); opacity: 0.7; }
+.log-file.active .log-file-meta { color: var(--color-accent-ink); opacity: 0.7; }
 
 .crash-badge {
   display: inline-block; flex-shrink: 0;
@@ -1135,13 +1133,6 @@ onUnmounted(() => {
   transition: border-color var(--transition-fast);
 }
 .log-search:focus-within { border-color: var(--color-border-focus-soft); }
-.log-search-icon { flex-shrink: 0; }
-.log-search-input {
-  flex: 1; min-width: 0;
-  border: none; outline: none; background: transparent;
-  font-family: var(--font-family); font-size: var(--text-sm);
-  color: var(--color-text-primary);
-}
 
 .log-follow {
   display: flex; align-items: center; gap: 5px; flex-shrink: 0;
@@ -1164,7 +1155,7 @@ onUnmounted(() => {
               border-color var(--transition-fast);
 }
 .log-btn:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.log-btn:disabled { opacity: 0.5; cursor: default; }
+.log-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 /* === 日志正文 === */
 .log-body {

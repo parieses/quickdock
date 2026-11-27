@@ -21,6 +21,7 @@ import { unwrap } from '../utils/api'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 
+import { reportError } from '../utils/reportError'
 export interface MCPToolInfo {
   name: string
   description: string
@@ -143,7 +144,7 @@ export function useMCPPanel(selectedId: Ref<string>) {
         config: x.config || '',
       }))
     } catch (e) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useMCPPanel.loadMCP')
     } finally {
       mcpLoading.value = false
     }
@@ -171,7 +172,7 @@ export function useMCPPanel(selectedId: Ref<string>) {
       toast.success(t(mcpToken.require ? 'mcpTokenEnabled' : 'mcpTokenDisabled'))
     } catch (err) {
       input.checked = mcpToken.require
-      toast.error(getErrorMessage(err))
+      reportError(err, 'useMCPPanel.setMCPTokenRequired')
     } finally {
       mcpToken.busy = false
     }
@@ -191,7 +192,7 @@ export function useMCPPanel(selectedId: Ref<string>) {
       await loadMCP()
       toast.success(t('mcpTokenRotated'))
     } catch (err) {
-      toast.error(getErrorMessage(err))
+      reportError(err, 'useMCPPanel.rotateMCPToken')
     } finally {
       mcpToken.busy = false
     }
@@ -219,7 +220,7 @@ export function useMCPPanel(selectedId: Ref<string>) {
       await loadMCP()
       toast.success(t('mcpStarted'))
     } catch (e) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useMCPPanel.startMCP')
     } finally {
       mcpBusy.value = false
     }
@@ -233,7 +234,7 @@ export function useMCPPanel(selectedId: Ref<string>) {
       await loadMCP()
       toast.success(t('mcpStopped'))
     } catch (e) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useMCPPanel.stopMCP')
     } finally {
       mcpBusy.value = false
     }
@@ -248,7 +249,7 @@ export function useMCPPanel(selectedId: Ref<string>) {
       await loadMCP()
       toast.success(t('mcpRestarted'))
     } catch (e) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useMCPPanel.restartMCP')
     } finally {
       mcpBusy.value = false
     }
@@ -265,7 +266,7 @@ export function useMCPPanel(selectedId: Ref<string>) {
       mcpCheck.text = ''
       await loadMCP()
     } catch (e) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useMCPPanel.setMCPLevel')
     } finally {
       mcpBusy.value = false
     }
@@ -283,7 +284,7 @@ export function useMCPPanel(selectedId: Ref<string>) {
       mcpCheck.text = ''
       await loadMCP()
     } catch (e) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useMCPPanel.setMCPToolEnabled')
     } finally {
       mcpBusy.value = false
     }

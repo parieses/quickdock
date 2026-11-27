@@ -428,16 +428,16 @@ async function confirmDeleteVar(name: string) {
         <button class="op-btn" :disabled="ctx.diskUsage.loading" @click="ctx.loadDiskUsage">
           {{ ctx.diskUsage.loading ? t('loading') : t('maintDiskRefresh') }}
         </button>
-        <span v-if="ctx.diskUsage.totalBytes" class="maint-summary">{{ t('maintDiskTotal', { size: ctx.formatSize(ctx.diskUsage.totalBytes) }) }}</span>
+        <span v-if="ctx.diskUsage.totalBytes" class="maint-summary">{{ t('maintDiskTotal', { size: ctx.formatBytes(ctx.diskUsage.totalBytes) }) }}</span>
       </div>
       <div v-if="ctx.diskUsage.items.length" class="disk-list">
         <div v-for="d in ctx.diskUsage.items" :key="d.runtime" class="disk-row">
           <div class="disk-head">
             <span class="disk-name">{{ d.name }}</span>
-            <span class="disk-size">{{ ctx.formatSize(d.bytes) }}</span>
+            <span class="disk-size">{{ ctx.formatBytes(d.bytes) }}</span>
           </div>
           <div class="disk-chips">
-            <span v-for="v in d.versions" :key="v.version" class="disk-chip">{{ v.version }} · {{ ctx.formatSize(v.bytes) }}</span>
+            <span v-for="v in d.versions" :key="v.version" class="disk-chip">{{ v.version }} · {{ ctx.formatBytes(v.bytes) }}</span>
           </div>
         </div>
       </div>
@@ -577,20 +577,9 @@ async function confirmDeleteVar(name: string) {
 
 .modal-actions-top .modal-text { margin: var(--space-2) 0 0; }
 
-.op-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
-  font-size: var(--text-xs); height: 24px; padding: 0 var(--space-4); border-radius: var(--radius-sm); cursor: pointer;
-  border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
-  font-family: inherit; transition: background var(--transition-fast), color var(--transition-fast);
-  white-space: nowrap;
-}
-
-.op-btn:hover { background: var(--color-bg-primary); color: var(--color-text-primary); }
-
-.op-btn.on { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-border-focus); }
-
-.op-btn.danger:hover { background: var(--color-danger-bg); color: var(--color-danger); border-color: var(--color-danger); }
-
-.op-btn:disabled { opacity: 0.4; cursor: default; }
+/* .op-btn 基干已抽到 styles/app.css（与 EnvCoreDialogs / EnvironmentPage 三份逐字重复），
+   这里只留组件自己的差异项。 */
+.op-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 .op-btn.small { border-radius: var(--radius-sm); padding: var(--space-1) 9px; font-size: var(--text-xs); }
 
@@ -695,7 +684,7 @@ async function confirmDeleteVar(name: string) {
 
 .env-install-btn.busy { opacity: 0.7; cursor: default; }
 
-.env-install-btn:disabled { opacity: 0.4; cursor: default; }
+.env-install-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 @keyframes env-indet { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
 
@@ -817,15 +806,7 @@ async function confirmDeleteVar(name: string) {
 
 .env-cfg-embed :deep(.ce) { flex: 1 1 auto; margin: 0; min-height: 0; }
 
-.log-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
-  height: 28px; padding: 0 11px; font-size: var(--text-sm); cursor: pointer;
-  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
-  border: 1px solid var(--color-border); border-radius: var(--radius-sm); white-space: nowrap;
-}
-
-.log-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
-
-.log-btn.active { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
+/* .log-btn 基干同样在 app.css，这里不留重复声明。 */
 
 .ext-list { display: flex; flex-direction: column; gap: var(--space-1); max-height: 300px; overflow: auto; }
 

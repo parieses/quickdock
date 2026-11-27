@@ -10,7 +10,6 @@
 import { ref, computed, watch, inject, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
-import { getErrorMessage } from '../utils/error'
 import { matchesTextOrPinyin } from '../utils/pinyin'
 import { LINK_TARGETS_INVALIDATED } from '../constants/linkEvents'
 import { pendingOpenNoteId, pendingOpenTodoId, navigate, navigateTo } from '../composables/bridge'
@@ -26,6 +25,7 @@ import {
 import { Link2, FileText, ListTodo, Box, Trash2, Search, Plus, ArrowUpRight, ChevronDown } from '@lucide/vue'
 import type { EntityLink, EntityType, LinkTarget, LinkTargetGroups, ToastAPI, WikiTarget } from '../types'
 
+import { reportError } from '../utils/reportError'
 const props = withDefaults(defineProps<{
   srcType: EntityType
   srcId: string
@@ -139,7 +139,7 @@ async function ensureTargets() {
     // 档位依赖各类型的候选数量，候选到位后才能判断该不该收成单档
     if (!typeTabs.value.some(x => x.key === activeType.value)) autoPickType()
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EntityLinkPicker.ensureTargets')
   } finally {
     targetsLoading.value = false
   }
@@ -248,7 +248,7 @@ async function loadAll() {
     links.value = unwrap<EntityLink[]>(a) || []
     backlinks.value = unwrap<BacklinkRow[]>(b) || []
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EntityLinkPicker.loadAll')
   } finally {
     loading.value = false
   }
@@ -297,7 +297,7 @@ async function addLink() {
     candsOpen.value = false
     await loadAll()
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EntityLinkPicker.addLink')
   }
 }
 
@@ -306,7 +306,7 @@ async function removeLink(id: string) {
     unwrap(await RemoveEntityLink(id))
     await loadAll()
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EntityLinkPicker.removeLink')
   }
 }
 
@@ -318,7 +318,7 @@ async function openLink(l: EntityLink) {
       const target = unwrap<WikiTarget | null>(await ResolveWikiTarget(l.dstLabel))
       if (target && jump(target.type, target.id)) return
     } catch (e) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'EntityLinkPicker.openLink')
       return
     }
   }
@@ -363,7 +363,7 @@ function openBacklink(b: BacklinkRow) {
             @blur="candsOpen = false"
             @keydown.esc="candsOpen = false"
           />
-          <button type="button" class="elp-add-btn" :disabled="!selectedTarget" :title="t('add')" @click="addLink">
+          <button type="button" class="elp-add-btn qd-btn" :disabled="!selectedTarget" :title="t('add')" @click="addLink">
             <Plus :size="13" />
           </button>
         </div>
@@ -381,7 +381,7 @@ function openBacklink(b: BacklinkRow) {
               @click="activeType = tab.key"
             >{{ tab.label }}<span class="elp-tab-n">{{ tab.n }}</span></button>
           </div>
-          <div v-if="!filteredTargets.length" class="elp-empty">{{ t('linkEmpty') }}</div>
+          <div v-if="!filteredTargets.length" class="elp-empty qd-empty">{{ t('linkEmpty') }}</div>
           <button
             v-for="c in filteredTargets"
             :key="c.type + ':' + c.id"
@@ -401,7 +401,7 @@ function openBacklink(b: BacklinkRow) {
       </div>
 
       <div class="elp-sec">{{ t('linkForward') }}<span class="elp-n">{{ manual.length + wiki.length }}</span></div>
-      <div v-if="!manual.length && !wiki.length" class="elp-empty">{{ t('linkEmpty') }}</div>
+      <div v-if="!manual.length && !wiki.length" class="elp-empty qd-empty">{{ t('linkEmpty') }}</div>
       <div v-key-click v-for="l in manual" :key="'m-' + l.id" class="elp-row" @click="openLink(l)">
         <component :is="iconFor(l.dstType)" :size="12" class="elp-row-icon" />
         <span class="elp-type">{{ typeLabel(l.dstType) }}</span>
@@ -420,7 +420,7 @@ function openBacklink(b: BacklinkRow) {
       </div>
 
       <div class="elp-sec">{{ t('linkBacklinks') }}<span class="elp-n">{{ backlinks.length }}</span></div>
-      <div v-if="!backlinks.length" class="elp-empty">{{ t('linkEmpty') }}</div>
+      <div v-if="!backlinks.length" class="elp-empty qd-empty">{{ t('linkEmpty') }}</div>
       <div v-key-click v-for="b in backlinks" :key="'b-' + b.id" class="elp-row" @click="openBacklink(b)">
         <ArrowUpRight :size="12" class="elp-row-icon" />
         <component :is="iconFor(b.srcType)" :size="12" class="elp-row-icon" />
@@ -472,7 +472,7 @@ function openBacklink(b: BacklinkRow) {
 .elp-add-input:focus { border-color: var(--color-border-focus-soft); }
 .elp-add-btn { flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-secondary); cursor: pointer; }
 .elp-add-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent-border); }
-.elp-add-btn:disabled { opacity: 0.4; cursor: default; }
+.elp-add-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 .elp-cands { max-height: 132px; overflow-y: auto; margin-top: var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-primary); }
 /* 一级类型栏吸顶：候选一多要滚，类型档位不能跟着滚出去 */

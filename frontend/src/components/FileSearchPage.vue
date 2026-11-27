@@ -28,6 +28,7 @@ import { useToast } from '../composables/useToast'
 import { useSaveAs } from '../composables/useSaveAs'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { removeStored, writeStored } from '../utils/storage'
 import { logErr } from '../utils/logger'
 import { EnvEverythingSearch } from '../../bindings/quickdock/services/env/environmentservice'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
@@ -35,6 +36,7 @@ import { CopyText } from '../../bindings/quickdock/services/clipboard/clipboards
 import { LaunchInstalledApp } from '../../bindings/quickdock/services/appservice'
 import type { FileSearchResult } from '../types'
 
+import { reportError } from '../utils/reportError'
 const { t } = useI18n()
 const toast = useToast()
 const sa = useSaveAs()
@@ -101,11 +103,11 @@ function pushRecent(q: string) {
   const s = q.trim()
   if (s.length < 2) return
   recentSearches.value = [s, ...recentSearches.value.filter(x => x !== s)].slice(0, RECENT_MAX)
-  try { localStorage.setItem(RECENT_KEY, JSON.stringify(recentSearches.value)) } catch { /* ignore */ }
+  writeStored(RECENT_KEY, JSON.stringify(recentSearches.value))
 }
 function clearRecent() {
   recentSearches.value = []
-  try { localStorage.removeItem(RECENT_KEY) } catch { /* ignore */ }
+  removeStored(RECENT_KEY)
 }
 
 // 快捷检索预设：全部是 Everything 原生语法，点一下就填进搜索框并立即检索。
@@ -239,7 +241,7 @@ async function copyText(text: string) {
     unwrap(await CopyText(text))
     toast.success(t('fileSearchCopied'))
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'FileSearchPage.copyText')
   }
 }
 async function copyField(field: 'path' | 'name') {
@@ -650,7 +652,7 @@ function onKeydown(e: KeyboardEvent) {
 </template>
 
 <style scoped>
-.fs-page { height: 100%; }
+.fs-page { height: 100%; min-height: 0; }
 .fs-toolbar { flex-wrap: wrap; gap: var(--space-4); }
 
 /* ---- 搜索框：整页唯一的主操作，给它一档更高的重量 ---- */
@@ -966,14 +968,14 @@ function onKeydown(e: KeyboardEvent) {
 .fs-mock-body { display: flex; flex-direction: column; gap: 6px; padding: 12px; }
 .fs-mock-line {
   height: 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-2xs);
   background: var(--color-border-light);
   opacity: 0.5;
 }
 .fs-mock-kw,
-.fs-mock-str { display: block; height: 100%; border-radius: 3px; }
+.fs-mock-str { display: block; height: 100%; border-radius: var(--radius-2xs); }
 .fs-mock-kw { width: 30%; background: var(--color-accent); opacity: 0.55; }
-.fs-mock-str { width: 45%; background: var(--color-cat-ai, var(--color-accent)); opacity: 0.5; }
+.fs-mock-str { width: 45%; background: var(--color-cat-ai); opacity: 0.5; }
 .fs-mock-foot { display: flex; gap: 6px; padding: 0 12px 12px; }
 .fs-mock-thumb {
   flex: 1;

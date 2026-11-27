@@ -433,12 +433,12 @@ onBeforeUnmount(() => {
               </select>
               <span v-if="!commands.length" class="qex-snip-empty">{{ t('sshCmdEmpty') }}</span>
               <button
-                class="qex-snip-btn"
+                class="qex-snip-btn qd-btn"
                 :disabled="running || !command.trim() || savingCmd"
                 @click="startSaveCmd"
               >{{ t('sshCmdSave') }}</button>
               <button
-                class="qex-snip-btn"
+                class="qex-snip-btn qd-btn"
                 :disabled="running || !pickedCmdId || savingCmd"
                 @click="requestDeleteCmd"
               >{{ t('sshCmdDelete') }}</button>
@@ -453,11 +453,11 @@ onBeforeUnmount(() => {
                 :disabled="running"
               />
               <button
-                class="qex-snip-btn"
+                class="qex-snip-btn qd-btn"
                 :disabled="running || !newCmdName.trim()"
                 @click="confirmSaveCmd"
               >{{ t('sshCmdSaveConfirm') }}</button>
-              <button class="qex-snip-btn" :disabled="running" @click="cancelSaveCmd">
+              <button class="qex-snip-btn qd-btn" :disabled="running" @click="cancelSaveCmd">
                 {{ t('sshCmdCancel') }}
               </button>
             </div>
@@ -547,7 +547,7 @@ onBeforeUnmount(() => {
 .qex-overlay {
   position: fixed;
   inset: 0;
-  z-index: 3100;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -730,7 +730,7 @@ onBeforeUnmount(() => {
   background: var(--color-danger-bg);
   border-color: var(--color-danger-border);
 }
-.qex-run:disabled { cursor: default; opacity: 0.45; }
+.qex-run:disabled { cursor: default; opacity: var(--opacity-disabled); }
 
 .qex-spin { animation: qex-spin 900ms linear infinite; }
 @keyframes qex-spin { to { transform: rotate(360deg); } }
@@ -807,7 +807,7 @@ onBeforeUnmount(() => {
   outline: none;
 }
 .qex-snip-select:focus { border-color: var(--color-border-focus-soft); }
-.qex-snip-select:disabled { opacity: 0.45; cursor: default; }
+.qex-snip-select:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .qex-snip-empty { font-size: var(--text-xs); color: var(--color-text-muted); }
 .qex-snip-btn {
   flex: 0 0 auto;
@@ -826,7 +826,7 @@ onBeforeUnmount(() => {
   background: var(--color-danger-bg);
   border-color: var(--color-danger-border);
 }
-.qex-snip-btn:disabled { opacity: 0.45; cursor: default; }
+.qex-snip-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .qex-snip-save { display: flex; align-items: center; gap: var(--space-2); }
 .qex-snip-input {
   flex: 1 1 auto;

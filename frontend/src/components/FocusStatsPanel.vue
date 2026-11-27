@@ -8,17 +8,14 @@
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
-import { getErrorMessage } from '../utils/error'
-import { logErr } from '../utils/logger'
-import { useToast } from '../composables/useToast'
 import {
   FocusStats, ListFocusSessions,
 } from '../../bindings/quickdock/services/appservice'
 
+import { reportError } from '../utils/reportError'
 const props = withDefaults(defineProps<{ refreshToken?: number }>(), { refreshToken: 0 })
 
 const { t } = useI18n()
-const toast = useToast()
 
 interface TodoStat { todoId: string; title: string; minutes: number; sessions: number }
 interface DayStat { day: string; minutes: number; sessions: number }
@@ -91,8 +88,7 @@ async function load() {
     records.value = unwrap<FocusRecord[]>(listRes) || []
   } catch (e) {
     if (seq !== loadSeq) return
-    logErr('FocusStatsPanel', e)
-    toast.error(getErrorMessage(e) || t('focusLoadFailed'))
+    reportError(e, 'FocusStatsPanel', { fallback: t('focusLoadFailed') })
   } finally {
     if (seq === loadSeq) loading.value = false
   }
@@ -127,7 +123,7 @@ watch([range, () => props.refreshToken], () => { void load() }, { immediate: tru
       </div>
 
       <div class="fsp-sec">{{ t('focusByTodo') }}</div>
-      <div v-if="!stats.byTodo.length" class="fsp-sub-empty">—</div>
+      <div v-if="!stats.byTodo.length" class="fsp-sub-empty qd-empty">—</div>
       <div v-for="b in stats.byTodo" :key="b.todoId" class="fsp-row">
         <span class="fsp-row-title">{{ b.title || t('focusTimerTitle') }}</span>
         <span class="fsp-row-num">{{ b.minutes }}{{ t('focusStatsMinutesUnit') }}</span>
@@ -135,7 +131,7 @@ watch([range, () => props.refreshToken], () => { void load() }, { immediate: tru
       </div>
 
       <div class="fsp-sec">{{ t('focusRecords') }}</div>
-      <div v-if="!records.length" class="fsp-sub-empty">—</div>
+      <div v-if="!records.length" class="fsp-sub-empty qd-empty">—</div>
       <div v-for="rec in records.slice(0, 20)" :key="rec.id" class="fsp-row">
         <span class="fsp-row-title">{{ rec.title || t('focusTimerTitle') }}</span>
         <span class="fsp-row-num">{{ rec.minutes }}{{ t('focusStatsMinutesUnit') }}</span>

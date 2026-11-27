@@ -9,6 +9,7 @@ import { reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToast } from './useToast'
 import { unwrap } from '../utils/api'
+import { formatBytes } from '../utils/bytes'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import {
@@ -26,6 +27,7 @@ import {
   EnvUserEnvSetVar,
 } from '../../bindings/quickdock/services/env/environmentservice'
 
+import { reportError } from '../utils/reportError'
 interface SourceCheckItem {
   runtime: string
   name: string
@@ -133,8 +135,7 @@ export function useEnvMaintenance(deps: Deps = {}) {
       if (next) runtimeMirror[r.id] = next
       toast.success(enable ? t('mirrorEnabledToast') : t('mirrorDisabledToast'))
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
-      logErr('env/mirror', e)
+      reportError(e, 'env/mirror')
     } finally {
       mirrorBusy.value = ''
     }
@@ -176,8 +177,7 @@ export function useEnvMaintenance(deps: Deps = {}) {
       githubAccel.enabled = next
       toast.success(next ? t('ghAccelOn') : t('ghAccelOff'))
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
-      logErr('env/maint', e)
+      reportError(e, 'env/maint')
     } finally {
       githubAccel.busy = false
     }
@@ -516,25 +516,10 @@ export function useEnvMaintenance(deps: Deps = {}) {
         toast.success(t('maintManifestApplied', { n: manifestPanel.applied.length }))
       await deps.onEnvChanged?.()
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
-      logErr('env/maint', e)
+      reportError(e, 'env/maint')
     } finally {
       manifestPanel.busy = false
     }
-  }
-
-  // formatSize 人性化字节数（磁盘统计面板用；与进程占用的 formatBytes 分开，
-  // 后者只输出 MB/GB 且 0 值显示为「—」，语义不同）
-  function formatSize(n: number): string {
-    if (!n || n <= 0) return '0 B'
-    const units = ['B', 'KB', 'MB', 'GB', 'TB']
-    let i = 0
-    let v = n
-    while (v >= 1024 && i < units.length - 1) {
-      v /= 1024
-      i++
-    }
-    return (i === 0 ? v.toFixed(0) : v.toFixed(v >= 100 ? 0 : 1)) + ' ' + units[i]
   }
 
   return {
@@ -573,6 +558,6 @@ export function useEnvMaintenance(deps: Deps = {}) {
     pickManifestFile,
     onManifestFile,
     applyManifestActive,
-    formatSize,
+    formatBytes,
   }
 }

@@ -8,9 +8,10 @@
 import type { Component } from 'vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlarmClock, ChevronDown, ChevronRight, Copy, Folder, FolderOpen, Loader2, Pencil, Play, Plus, Search, Star, Terminal, Trash2, X, Zap } from '@lucide/vue'
+import { AlarmClock, ChevronDown, ChevronRight, Copy, Folder, FolderOpen, Loader2, Pencil, Play, Plus, Search, Star, Terminal, Trash2, Zap } from '@lucide/vue'
 import type { AIConvHit, AIConversation, AISpace } from '../types/ai'
 import AiConvRunDot from './AiConvRunDot.vue'
+import QdSearchBox from './QdSearchBox.vue'
 
 interface SpaceGroup { space: AISpace; tasks: AIConversation[] }
 
@@ -138,11 +139,9 @@ function isSshSpace(s: AISpace): boolean {
   return s.kind === 'ssh'
 }
 
-// 三个 v-model 走 input 事件而不是 defineModel：项目 Vue 是 ^3.2，
+// 两个 v-model 走 input 事件而不是 defineModel：项目 Vue 是 ^3.2，
 // defineModel 要 3.4+，这里宁可多两行也不押依赖版本。
-function onConvQueryInput(e: Event) {
-  emit('update:convQuery', (e.target as HTMLInputElement).value)
-}
+// （会话搜索框已换成 QdSearchBox，事件签名由它统一提供，不再需要手写转换。）
 function onRenameTextInput(e: Event) {
   emit('update:renameText', (e.target as HTMLInputElement).value)
 }
@@ -276,14 +275,17 @@ onBeforeUnmount(() => {
 
 <template>
   <aside class="ai-sidebar">
-    <button class="ai-new-btn" @click="openNewTask">
+    <button class="ai-new-btn qd-btn" @click="openNewTask">
       <Plus :size="14" /> {{ t('aiNewTask') }}
     </button>
-    <div v-if="conversations.length > 5" class="ai-conv-search">
-      <Search :size="12" class="ai-conv-search-icon" />
-      <input :value="convQuery" class="ai-conv-search-input" @input="onConvQueryInput" :placeholder="t('aiSearchConvPh')" />
-      <button v-if="convQuery" class="ai-conv-search-clear" @click="emit('update:convQuery', '')"><X :size="11" /></button>
-    </div>
+    <QdSearchBox
+      v-if="conversations.length > 5"
+      :model-value="convQuery"
+      class="ai-conv-search"
+      :icon-size="12"
+      :placeholder="t('aiSearchConvPh')"
+      @update:model-value="emit('update:convQuery', $event)"
+    />
     <div class="ai-conv-list">
       <!-- 星标：横切任务与空间，所以单独一组放最上面。
            原位置不移走 —— 星标是快捷入口，不是搬进收藏夹。 -->
@@ -774,24 +776,10 @@ onBeforeUnmount(() => {
 .ai-conv-empty { padding: var(--space-8) var(--space-5); text-align: center; color: var(--color-text-muted); font-size: var(--text-sm); }
 
 /* 会话搜索：与新建按钮同宽，同一视觉层级 */
+/* 皮肤由 QdSearchBox 统一提供（无边框 / 28px / bg-tertiary），这里只留外侧留白。 */
 .ai-conv-search {
-  display: flex; align-items: center; gap: 5px;
-  margin: var(--space-3) var(--space-4) var(--space-1); padding: 0 7px; height: 26px;
-  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm); flex-shrink: 0;
+  margin: var(--space-3) var(--space-4) var(--space-1);
 }
-.ai-conv-search:focus-within { border-color: var(--color-border-focus-soft); }
-.ai-conv-search-icon { color: var(--color-text-muted); flex-shrink: 0; }
-.ai-conv-search-input {
-  flex: 1; min-width: 0; border: none; outline: none; background: none;
-  color: var(--color-text-primary); font-size: var(--text-xs); font-family: inherit;
-}
-.ai-conv-search-input::placeholder { color: var(--color-text-disabled); }
-.ai-conv-search-clear {
-  display: flex; padding: 0; border: none; background: none;
-  color: var(--color-text-muted); cursor: pointer;
-}
-.ai-conv-search-clear:hover { color: var(--color-text-primary); }
 /* 加载更多：整行按钮，不要做成小链接——点中的概率太低 */
 .ai-conv-more {
   margin: var(--space-1) var(--space-4) var(--space-4); padding: 5px 0; flex-shrink: 0;
@@ -800,7 +788,7 @@ onBeforeUnmount(() => {
   font-family: inherit; cursor: pointer;
 }
 .ai-conv-more:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
-.ai-conv-more:disabled { opacity: 0.6; cursor: default; }
+.ai-conv-more:disabled { opacity: var(--opacity-disabled-soft); cursor: default; }
 /* 空间内的「更多」跟着任务缩进，否则会和空间名对齐，看着像另一个空间 */
 .ai-conv-more.is-in-space { margin-left: 26px; margin-right: 0; }
 
@@ -852,7 +840,7 @@ onBeforeUnmount(() => {
 }
 .ai-conv-ctx-item:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .ai-conv-ctx-item:hover:not(:disabled) .ai-conv-ctx-ico { opacity: 1; }
-.ai-conv-ctx-item:disabled { opacity: 0.38; cursor: default; }
+.ai-conv-ctx-item:disabled { opacity: var(--opacity-disabled); cursor: default; }
 /* 删除：平时就用危险色，hover 再加一层淡红底——比「和别的项一样、只是字更红」更容易辨认 */
 .ai-conv-ctx-item.danger { color: var(--color-danger); }
 .ai-conv-ctx-item.danger:hover:not(:disabled) { background: var(--color-danger-bg); color: var(--color-danger); }

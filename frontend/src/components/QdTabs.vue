@@ -125,7 +125,7 @@ function onTabKey(e: KeyboardEvent, i: number) {
   background: var(--color-accent-bg);
   color: var(--color-accent);
 }
-.qd-tab:disabled { opacity: 0.5; cursor: default; }
+.qd-tab:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .qd-tab-badge {
   font-size: var(--text-2xs);
   color: var(--color-text-muted);

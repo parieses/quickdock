@@ -107,12 +107,12 @@ const startedClock = computed(() => {
       </button>
     </div>
     <div class="ai-toolbar-right">
-      <button v-if="props.activeId" class="ai-icon-btn" :title="t('aiRegenTitle')" :aria-label="t('aiRegenTitle')" @click="emit('regen-title')">
+      <button v-if="props.activeId" class="ai-icon-btn qd-icon-btn" :title="t('aiRegenTitle')" :aria-label="t('aiRegenTitle')" @click="emit('regen-title')">
         <RefreshCw :size="13" />
       </button>
       <button
         v-if="props.activeId"
-        class="ai-icon-btn"
+        class="ai-icon-btn qd-icon-btn"
         :class="{ 'is-active': !!props.activeConv?.starred }"
         :title="t(props.activeConv?.starred ? 'aiStarOff' : 'aiStarOn')"
         :aria-label="t(props.activeConv?.starred ? 'aiStarOff' : 'aiStarOn')"
@@ -123,7 +123,7 @@ const startedClock = computed(() => {
       </button>
       <button
         v-if="props.activeId"
-        class="ai-icon-btn"
+        class="ai-icon-btn qd-icon-btn"
         :class="{ 'is-active': props.digestOpen }"
         :title="t('aiOutline')"
         :aria-label="t('aiOutline')"
@@ -134,7 +134,7 @@ const startedClock = computed(() => {
       <!-- 后台任务：只要有任务在跑就一直亮着，和当前会话无关——
            这类进程是宿主级的，用户在别处聊天时也该知道它还在跑。 -->
       <button
-        class="ai-icon-btn ai-jobs-btn"
+        class="ai-icon-btn qd-icon-btn ai-jobs-btn"
         :class="{ 'is-active': props.jobsOpen }"
         :title="startedClock ? `${t('aiJobsTitle')} · ${t('aiJobStartedAt', { time: props.runningJobStartedAt })}` : t('aiJobsTitle')"
         :aria-label="t('aiJobsTitle')"
@@ -144,7 +144,7 @@ const startedClock = computed(() => {
         <span v-if="props.runningJobs" class="ai-jobs-badge">{{ props.runningJobs }}</span>
         <span v-if="startedClock" class="ai-jobs-started">{{ startedClock }}</span>
       </button>
-      <button v-if="props.activeId" class="ai-icon-btn" :title="t('aiExportMd')" :aria-label="t('aiExportMd')" @click="emit('export-md')">
+      <button v-if="props.activeId" class="ai-icon-btn qd-icon-btn" :title="t('aiExportMd')" :aria-label="t('aiExportMd')" @click="emit('export-md')">
         <Download :size="13" />
       </button>
       <!-- 清理辅助文件（WP18）：删 `<工作目录>/quickdock/`。
@@ -153,7 +153,7 @@ const startedClock = computed(() => {
            没有工作目录时不显示——那种情况下 AI 的产物在数据目录里，不归这里管。 -->
       <button
         v-if="props.canCleanScratch"
-        class="ai-icon-btn"
+        class="ai-icon-btn qd-icon-btn"
         :class="{ 'is-armed': props.scratchArmed }"
         :title="t(props.scratchArmed ? 'aiScratchCleanConfirm' : 'aiScratchClean')"
         :aria-label="t(props.scratchArmed ? 'aiScratchCleanConfirm' : 'aiScratchClean')"
@@ -162,7 +162,7 @@ const startedClock = computed(() => {
         <Eraser :size="13" />
       </button>
       <!-- 右侧面板开关：常驻最右（与常见 AI 工作台同位同快捷键） -->
-      <button class="ai-icon-btn" :class="{ 'is-active': props.sideOpen }" :title="t(props.sideOpen ? 'aiSideClose' : 'aiSideOpen')" :aria-label="t(props.sideOpen ? 'aiSideClose' : 'aiSideOpen')" @click="emit('toggle-side')">
+      <button class="ai-icon-btn qd-icon-btn" :class="{ 'is-active': props.sideOpen }" :title="t(props.sideOpen ? 'aiSideClose' : 'aiSideOpen')" :aria-label="t(props.sideOpen ? 'aiSideClose' : 'aiSideOpen')" @click="emit('toggle-side')">
         <PanelRight :size="13" />
       </button>
     </div>
@@ -283,7 +283,7 @@ const startedClock = computed(() => {
 /* 清理按钮的「已上膛」态：与普通激活态区分开——它表示「再点一次就真删」，
    用 warning 而不是 accent，避免和「面板已打开」那种无害的激活混淆。 */
 .ai-icon-btn.is-armed { color: var(--color-warning); border-color: var(--color-warning); background: transparent; }
-.ai-icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ai-icon-btn:disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
 
 /* 后台任务按钮：运行中数量做成右上角的小徽标。
    不用「(2)」写在图标旁边——那会让按钮变宽，工具栏右组在窄窗口下要换行。 */

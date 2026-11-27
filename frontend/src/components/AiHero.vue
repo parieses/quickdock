@@ -386,10 +386,10 @@ onBeforeUnmount(() => {
           <div class="ai-hero-bar-right">
             <!-- 当前权限：落地页也能切，第一句就按这个口径执行 -->
             <AiPermissionBadge :level="props.permissionLevel" @change="emit('change-permission', $event)" />
-            <button v-if="props.allowFileImage" class="ai-tool-btn" :title="t('aiAttachImage')" @click="emit('open-file-picker')">
+            <button v-if="props.allowFileImage" class="ai-tool-btn qd-btn" :title="t('aiAttachImage')" @click="emit('open-file-picker')">
               <ImageIcon :size="17" />
             </button>
-            <button v-if="props.allowUrlImage" class="ai-tool-btn" :title="t('aiAddImageUrl')" @click="emit('toggle-url')">
+            <button v-if="props.allowUrlImage" class="ai-tool-btn qd-btn" :title="t('aiAddImageUrl')" @click="emit('toggle-url')">
               <Link2 :size="17" />
             </button>
             <AiSendButton

@@ -111,8 +111,8 @@ function onKeydown(e: KeyboardEvent) {
           </div>
 
           <footer class="fd-foot">
-            <button class="fd-btn" @click="emit('cancel')">{{ t('cancel') }}</button>
-            <button class="fd-btn fd-btn--primary" @click="submit">{{ t('create') }}</button>
+            <button class="fd-btn qd-btn" @click="emit('cancel')">{{ t('cancel') }}</button>
+            <button class="fd-btn qd-btn fd-btn--primary" @click="submit">{{ t('create') }}</button>
           </footer>
         </div>
       </div>
@@ -124,7 +124,7 @@ function onKeydown(e: KeyboardEvent) {
 .fd-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1600;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;

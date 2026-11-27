@@ -106,7 +106,7 @@ function indentStyle(level: number): { paddingLeft: string } {
       <button type="button" class="qd-outline-tool" @click="expandAll">{{ t('outlineExpandAll') }}</button>
     </div>
 
-    <div v-if="!headings.length" class="qd-outline-empty">{{ t('outlineEmpty') }}</div>
+    <div v-if="!headings.length" class="qd-outline-empty qd-empty">{{ t('outlineEmpty') }}</div>
 
     <ul v-else class="qd-outline-list" :aria-label="t('outlineTitle')">
       <li
@@ -254,7 +254,7 @@ function indentStyle(level: number): { paddingLeft: string } {
 
 /* active 规则写在 hover 之后：当前标题的高亮不该被鼠标划过冲掉 */
 .qd-outline-item.is-active .qd-outline-row { background: var(--color-select-bg); }
-.qd-outline-item.is-active .qd-outline-text { color: var(--color-accent); }
+.qd-outline-item.is-active .qd-outline-text { color: var(--color-accent-ink); }
 
 .qd-outline-caret {
   flex: none;

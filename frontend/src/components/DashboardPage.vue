@@ -28,8 +28,9 @@ defineOptions({ name: KEEP_ALIVE.dashboard })
 import { Events, Dialogs } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { copyToClipboard } from '../utils/clipboard'
-import { getErrorMessage, isDialogCanceled } from '../utils/error'
+import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
+import { reportError } from '../utils/reportError'
 import { openExternal } from '../utils/externalLinks'
 import { navigate, navigateTo, pendingTarget, pendingOpenTodoId, pendingCreateTodo, pendingCreateNote, pendingNewAiTask, pendingCreateScript, pendingOpenScriptId } from '../composables/bridge'
 import { dashPrefs, DASH_CARDS, type DashCardId } from '../composables/useDashPrefs'
@@ -470,7 +471,7 @@ async function dismissCode(id: string) {
   try {
     unwrap(await Dismiss(id))
     await loadMailCodes()
-  } catch (e) { toast.error(getErrorMessage(e)); logErr('dashboard.mailDismiss', e) }
+  } catch (e) { reportError(e, 'dashboard.mailDismiss') }
 }
 
 // ---- 邮件原文查看（单击整行打开，不占操作列）----
@@ -595,7 +596,7 @@ async function removeMailAccount(a: MailAccount) {
     await loadMailConfig()
     await loadMailCodes()
     toast.success(t('mailRemoved'))
-  } catch (e) { toast.error(getErrorMessage(e)); logErr('dashboard.mailRemove', e) }
+  } catch (e) { reportError(e, 'dashboard.mailRemove') }
 }
 
 async function saveMailConfig() {
@@ -614,7 +615,7 @@ async function saveMailConfig() {
     scrollMailBodyTop()
     toast.success(t('mailSaved'))
     if (mailEnabled.value) void refreshMailCodes()
-  } catch (e) { toast.error(getErrorMessage(e)); logErr('dashboard.mailSave', e) }
+  } catch (e) { reportError(e, 'dashboard.mailSave') }
 }
 
 async function testMailConfig() {
@@ -685,9 +686,7 @@ async function addShelf(dir: boolean) {
     await loadShelf()
   } catch (e) {
     // 用户点取消不是失败：Wails 会把它当错误抛出来，这里吞掉。
-    if (isDialogCanceled(e)) return
-    toast.error(getErrorMessage(e))
-    logErr('dashboard.shelfAdd', e)
+    reportError(e, 'dashboard.shelfAdd', { suppressCancel: true })
   }
 }
 
@@ -695,19 +694,19 @@ async function openShelfItem(it: ShelfItem) {
   try {
     unwrap(await OpenShelf(it.id))
     void loadShelf()
-  } catch (e) { toast.error(getErrorMessage(e)); logErr('dashboard.shelfOpen', e) }
+  } catch (e) { reportError(e, 'dashboard.shelfOpen') }
 }
 
 async function revealShelfItem(it: ShelfItem) {
   try { unwrap(await RevealShelf(it.id)) }
-  catch (e) { toast.error(getErrorMessage(e)); logErr('dashboard.shelfReveal', e) }
+  catch (e) { reportError(e, 'dashboard.shelfReveal') }
 }
 
 async function removeShelfItem(it: ShelfItem) {
   try {
     unwrap(await RemoveShelf(it.id))
     await loadShelf()
-  } catch (e) { toast.error(getErrorMessage(e)); logErr('dashboard.shelfRemove', e) }
+  } catch (e) { reportError(e, 'dashboard.shelfRemove') }
 }
 
 function dragHasFiles(e: DragEvent) {
@@ -1447,8 +1446,7 @@ async function saveDayPrefs() {
   try {
     unwrap(await SetValue(DAY_PREFS_KEY, JSON.stringify(dayPrefs.value)))
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('dashboard.dayPrefsSave', e)
+    reportError(e, 'dashboard.dayPrefsSave')
   }
 }
 
@@ -1480,8 +1478,7 @@ async function saveWeatherCfg() {
     unwrap(await SetValue(WEATHER_CFG_KEY, JSON.stringify(weatherCfg.value)))
     await setWeatherConfig(weatherCfg.value)
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('dashboard.weatherCfgSave', e)
+    reportError(e, 'dashboard.weatherCfgSave')
   }
 }
 
@@ -1548,8 +1545,7 @@ async function doSearchCity() {
     cityHits.value = await searchCities(q, locale.value === 'en-US' ? 'en' : 'zh')
     citySearched.value = true
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('dashboard.citySearch', e)
+    reportError(e, 'dashboard.citySearch')
   } finally {
     cityBusy.value = false
   }
@@ -1684,8 +1680,7 @@ async function toggleTodo(x: Todo) {
     unwrap(await ToggleTodo(x.id))
     await loadTodos()
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('dashboard.toggleTodo', e)
+    reportError(e, 'dashboard.toggleTodo')
   }
 }
 
@@ -1714,8 +1709,7 @@ async function commitInlineQuicklink() {
   try {
     unwrap(await OpenItemWithQuery(it.id, q))
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('dashboard.openItem', e)
+    reportError(e, 'dashboard.openItem')
   }
   inlineQuicklink.value = null
   inlineQuery.value = ''
@@ -1725,8 +1719,7 @@ async function openItemDirect(it: CollectionItem) {
   try {
     unwrap(await OpenItem(it.id))
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('dashboard.openItem', e)
+    reportError(e, 'dashboard.openItem')
   }
 }
 
@@ -3663,7 +3656,7 @@ onUnmounted(() => {
 }
 .db-icon-btn:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-accent); }
 .db-icon-btn:focus-visible { outline: 1px solid var(--color-accent-border-strong); outline-offset: 2px; }
-.db-icon-btn:disabled { cursor: default; opacity: .45; }
+.db-icon-btn:disabled { cursor: default; opacity: var(--opacity-disabled); }
 .db-text-btn {
   background: none; border: 0; padding: 0; cursor: pointer;
   font: inherit; font-size: var(--text-xs); color: var(--color-accent);

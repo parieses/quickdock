@@ -17,6 +17,7 @@ import {
   GetExtraNotifyChannels, SetExtraNotifyChannels, SendWebhookMessage,
 } from '../../bindings/quickdock/services/appservice'
 
+import { reportError } from '../utils/reportError'
 const { t } = useI18n()
 // 扩展渠道的保存/加载/测试反馈统一走应用级 toast（App.vue provide），与设置页其它面板一致；
 // 原有 6 家渠道的内联 msg 反馈保持不动，两套不混用。
@@ -193,7 +194,7 @@ async function saveExtra() {
     await unwrap(await SetExtraNotifyChannels(JSON.stringify(payload)))
     toast.success(t('saved'))
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'SettingsNotify.saveExtra')
   } finally {
     extraSaving.value = false
   }
@@ -209,7 +210,7 @@ async function testExtra(ch: ExtraNotifyChannel) {
     unwrap(await TestWebhook(ch.kind, url))
     toast.success(t('mon_nf_test_ok'))
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'SettingsNotify.testExtra')
   } finally {
     extraTesting.value = ''
   }
@@ -254,7 +255,7 @@ async function send() {
       await SendWebhookMessage(title, sendBody.value, sendChannel.value)
     ) ?? { sent: 0, ok: 0, results: [] }
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'SettingsNotify.send')
   } finally {
     sending.value = false
   }

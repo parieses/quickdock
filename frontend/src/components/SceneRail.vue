@@ -10,8 +10,9 @@ import { useSceneFields } from '../composables/useSceneFields'
 import { useDragSort } from '../composables/useDragSort'
 import type { Scene, ToastAPI } from '../types'
 import {
-  Search, X, Plus, Pencil, Trash2, ChevronRight,
+  Plus, Pencil, Trash2, ChevronRight,
 } from '@lucide/vue'
+import QdSearchBox from './QdSearchBox.vue'
 
 const store = useWorkspaceStore()
 const { t } = useI18n()
@@ -97,11 +98,6 @@ function handleInput() {
   store.setSearch(searchText.value)
 }
 
-function clearSearch() {
-  searchText.value = ''
-  store.clearSearch()
-}
-
 // 场景对话框
 const showSceneDialog = ref(false)
 // 字段定义与引导页共用（composables/useSceneFields），不在此处重复声明
@@ -165,19 +161,13 @@ function openCreate() {
     </div>
 
     <!-- 搜索栏：与集合/项目同位置同高度（此前三栏各写一套，位置还不一样） -->
-    <div class="qd-panel-search">
-      <Search :size="13" class="qd-search-icon" />
-      <input
-        v-model="searchText"
-        type="text"
-        class="qd-search-input"
-        :placeholder="t('search')"
-        @input="handleInput"
-      />
-      <button v-if="searchText" class="qd-search-clear" @click="clearSearch" :title="t('clear')">
-        <X :size="12" />
-      </button>
-    </div>
+    <QdSearchBox
+      class="qd-panel-search"
+      v-model="searchText"
+      :placeholder="t('search')"
+      :clear-title="t('clear')"
+      @update:model-value="handleInput"
+    />
 
     <!-- 搜索结果提示 -->
     <div v-if="store.hasSearch && store.searchResults" class="qd-search-hint">

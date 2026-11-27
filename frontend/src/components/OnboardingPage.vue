@@ -48,7 +48,7 @@ function openSettings() {
       <p class="ob-desc">{{ t('welcomeDesc') }}</p>
 
       <!-- 开始按钮 -->
-      <button class="ob-start-btn" :class="{ disabled: isCreating }" :disabled="isCreating" @click="handleGetStarted">
+      <button class="ob-start-btn qd-btn" :class="{ disabled: isCreating }" :disabled="isCreating" @click="handleGetStarted">
         <Play :size="18" />
         <span>{{ t('getStarted') }}</span>
       </button>
@@ -88,7 +88,7 @@ function openSettings() {
 
       <!-- 底部操作 -->
       <div class="ob-footer">
-        <button class="ob-link-btn" @click="openSettings">
+        <button class="ob-link-btn qd-btn" @click="openSettings">
           <Globe2 :size="14" />
           {{ t('importFromSnapshot') }}
         </button>

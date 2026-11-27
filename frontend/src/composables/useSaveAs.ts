@@ -25,9 +25,9 @@ import {
 import { navBadges } from './useNavBadges'
 import { invalidateLinkTargets } from '../constants/linkEvents'
 import { useToast } from './useToast'
-import { getErrorMessage } from '../utils/error'
 import { i18n } from '../i18n'
 
+import { reportError } from '../utils/reportError'
 /** 模块级文案：composable 不在 setup 上下文里，用导出的 i18n 实例取 t。 */
 const t = (key: string) => i18n.global.t(key)
 
@@ -98,7 +98,7 @@ async function saveToNote(p: {
     feedback(res, t('saveAsSavedNote'))
     invalidateLinkTargets()
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'useSaveAs.saveToNote')
   }
 }
 
@@ -125,7 +125,7 @@ async function saveToTodo(p: {
     feedback(res, t('saveAsSavedTodo'))
     navBadges().refreshNow()
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'useSaveAs.saveToTodo')
   }
 }
 
@@ -150,7 +150,7 @@ async function addToKB(p: {
       feedback(res, t('saveAsSavedKB'))
     }
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'useSaveAs.addToKB')
   }
 }
 

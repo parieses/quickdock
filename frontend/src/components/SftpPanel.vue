@@ -40,7 +40,7 @@ import {
 } from '@lucide/vue'
 import SftpFileEditor from './SftpFileEditor.vue'
 import type { SshHost } from '../utils/ssh'
-import { formatBytes } from '../utils/ssh'
+import { formatBytes } from '../utils/bytes'
 import {
   SftpCancelTransfer,
   SftpChmod,
@@ -1363,7 +1363,7 @@ async function copyPath(e: SftpEntry) {
 
 .sftp-tool:disabled {
   cursor: default;
-  opacity: 0.4;
+  opacity: var(--opacity-disabled);
 }
 
 .sftp-tool--danger:hover:not(:disabled) {
@@ -1523,7 +1523,7 @@ async function copyPath(e: SftpEntry) {
 }
 
 .sftp-progress-cancel:disabled {
-  opacity: 0.55;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 
@@ -1600,7 +1600,7 @@ async function copyPath(e: SftpEntry) {
 }
 
 .sftp-selbtn:disabled {
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
   cursor: not-allowed;
 }
 
@@ -1822,7 +1822,7 @@ async function copyPath(e: SftpEntry) {
 
 .op:disabled {
   cursor: default;
-  opacity: 0.4;
+  opacity: var(--opacity-disabled);
 }
 
 .sftp-note {
@@ -1925,7 +1925,7 @@ async function copyPath(e: SftpEntry) {
 
 .sfp-btn--primary:disabled {
   cursor: default;
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
 }
 
 /* ---- 行右键菜单 ---- */

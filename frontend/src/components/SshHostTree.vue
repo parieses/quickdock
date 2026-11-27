@@ -29,9 +29,6 @@ import {
 import { SelectLocalFile } from '../../bindings/quickdock/services/appservice'
 import { ImportSshConfig, TestHost } from '../../bindings/quickdock/services/sshx/sshservice'
 import { apiErrorCode, apiErrorData, unwrap } from '../utils/api'
-import { getErrorMessage } from '../utils/error'
-import { logErr } from '../utils/logger'
-import { useToast } from '../composables/useToast'
 import { isAppLocked } from '../utils/appLock'
 import {
   SSH_ERR,
@@ -53,8 +50,8 @@ import {
   type SshTreeNode,
 } from '../utils/sshTree'
 
+import { reportError } from '../utils/reportError'
 const { t } = useI18n()
-const toast = useToast()
 
 const props = defineProps<{
   tree: SshTreeNode[]
@@ -300,8 +297,7 @@ async function importSshConfig() {
     }
     emit('refresh')
   } catch (e) {
-    logErr('SshHostTree.importSshConfig', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'SshHostTree.importSshConfig')
   } finally {
     importing.value = false
   }
@@ -1063,12 +1059,12 @@ function onTestTrusted() {
 .tree-folder-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1900;
+  z-index: var(--z-ctx-backdrop);
 }
 
 .tree-folder-menu {
   position: fixed;
-  z-index: 2000;
+  z-index: calc(var(--z-ctx-backdrop) + 1);
   min-width: 168px;
   padding: var(--space-1);
   background: var(--color-popover-bg);

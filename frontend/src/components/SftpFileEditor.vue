@@ -26,7 +26,7 @@ import { apiErrorCode, unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { useToast } from '../composables/useToast'
-import { formatBytes } from '../utils/ssh'
+import { formatBytes } from '../utils/bytes'
 import { isPreviewable, looksBinary, type SftpEntry } from '../utils/sshSftp'
 
 const props = defineProps<{
@@ -193,7 +193,7 @@ onMounted(load)
             <span class="sfe-name">{{ entry.name }}</span>
             <span class="sfe-path" :title="entry.path">{{ entry.path }}</span>
           </div>
-          <button class="sfe-icon-btn" :title="t('close')" @click="requestClose">
+          <button class="sfe-icon-btn qd-icon-btn" :title="t('close')" @click="requestClose">
             <X :size="15" />
           </button>
         </header>
@@ -208,7 +208,7 @@ onMounted(load)
         <div v-else-if="binary" class="sfe-state">
           <AlertTriangle :size="18" class="sfe-warn-icon" />
           <p class="sfe-state-text">{{ t('sshFileEditorBinary') }}</p>
-          <button class="sfe-btn" @click="emit('download', entry)">
+          <button class="sfe-btn qd-btn" @click="emit('download', entry)">
             <Download :size="13" />
             <span>{{ t('sshFileDownload') }}</span>
           </button>
@@ -230,9 +230,9 @@ onMounted(load)
 
         <footer class="sfe-foot">
           <span v-if="dirty" class="sfe-dirty">{{ t('sshFileEditorDirty') }}</span>
-          <button class="sfe-btn" @click="requestClose">{{ t('close') }}</button>
+          <button class="sfe-btn qd-btn" @click="requestClose">{{ t('close') }}</button>
           <button
-            class="sfe-btn sfe-btn--primary"
+            class="sfe-btn qd-btn sfe-btn--primary"
             :disabled="!canSave"
             :title="canSave ? t('sshFileEditorSaveHint') : ''"
             @click="save"
@@ -250,7 +250,7 @@ onMounted(load)
 .sfe-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1400;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -422,7 +422,7 @@ onMounted(load)
 
 .sfe-btn--primary:disabled {
   cursor: default;
-  opacity: 0.45;
+  opacity: var(--opacity-disabled);
 }
 
 .spinning {

@@ -568,10 +568,10 @@ onBeforeUnmount(() => {
                     v-for="(step, si) in stepsForChild(c.id).steps"
                     :key="step.key"
                     class="trace-step"
-                    :class="`is-${step.kind}`"
+                    :class="[`is-${step.kind}`, { 'is-err': !step.ok }]"
                   >
                     <span class="trace-step-idx">{{ si + 1 }}</span>
-                    <div v-key-click class="trace-step-main" @click="stepHasDetail(step) && toggleStep(step.key)">
+                    <div v-key-click class="trace-step-main" :class="{ 'is-clickable': stepHasDetail(step) }" @click="stepHasDetail(step) && toggleStep(step.key)">
                       <div class="trace-step-line">
                         <span class="trace-step-title">{{ stepTitle(step) }}</span>
                         <span v-if="step.kind === 'tool' && stepTarget(step)" class="trace-step-target" :title="step.path || traceText(step.args)">
@@ -634,10 +634,10 @@ onBeforeUnmount(() => {
                   v-for="(step, si) in stepsOfRun(r).steps"
                   :key="step.key"
                   class="trace-step"
-                  :class="`is-${step.kind}`"
+                  :class="[`is-${step.kind}`, { 'is-err': !step.ok }]"
                 >
                   <span class="trace-step-idx">{{ si + 1 }}</span>
-                  <div v-key-click class="trace-step-main" @click="stepHasDetail(step) && toggleStep(step.key)">
+                  <div v-key-click class="trace-step-main" :class="{ 'is-clickable': stepHasDetail(step) }" @click="stepHasDetail(step) && toggleStep(step.key)">
                     <div class="trace-step-line">
                       <span class="trace-step-title">{{ stepTitle(step) }}</span>
                       <span v-if="step.kind === 'tool' && stepTarget(step)" class="trace-step-target" :title="step.path || traceText(step.args)">
@@ -706,10 +706,10 @@ onBeforeUnmount(() => {
                     v-for="(step, si) in stepsByNode.get(n.id)?.steps ?? []"
                     :key="step.key"
                     class="trace-step"
-                    :class="`is-${step.kind}`"
+                    :class="[`is-${step.kind}`, { 'is-err': !step.ok }]"
                   >
                     <span class="trace-step-idx">{{ si + 1 }}</span>
-                    <div v-key-click class="trace-step-main" @click="stepHasDetail(step) && toggleStep(step.key)">
+                    <div v-key-click class="trace-step-main" :class="{ 'is-clickable': stepHasDetail(step) }" @click="stepHasDetail(step) && toggleStep(step.key)">
                       <div class="trace-step-line">
                         <span class="trace-step-title">{{ stepTitle(step) }}</span>
                         <span v-if="step.kind === 'tool' && stepTarget(step)" class="trace-step-target" :title="step.path || traceText(step.args)">
@@ -1096,7 +1096,7 @@ onBeforeUnmount(() => {
 }
 .trace-child-badge.is-done { background: var(--color-success-bg); color: var(--color-success); }
 .trace-child-badge.is-failed { background: var(--color-danger-bg); color: var(--color-danger); }
-.trace-child-badge.is-canceled { background: var(--color-warning-bg, var(--color-bg-hover)); color: var(--color-warning); }
+.trace-child-badge.is-canceled { background: var(--color-warning-bg); color: var(--color-warning); }
 .trace-child-badge.is-running { background: var(--color-accent-bg); color: var(--color-accent-text); }
 /* 副行：role 胶囊 + token/耗时，等宽数值对齐，不挤主行。 */
 .trace-child-task-sub {
@@ -1148,7 +1148,7 @@ onBeforeUnmount(() => {
 .trace-child-stop:hover { color: var(--color-danger); background: var(--color-bg-hover); }
 /* 键盘用户不触发 hover：聚焦时也显形，且给个明确的焦点环。 */
 .trace-child-stop:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
-.trace-child-stop:disabled { opacity: .4; cursor: default; }
+.trace-child-stop:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 .trace-child-task-detail {
   padding: var(--space-2);
@@ -1279,8 +1279,7 @@ onBeforeUnmount(() => {
   cursor: default;
 }
 
-.trace-step-main:has(.trace-step-detail),
-.trace-step-main:has(.trace-node-caret) { cursor: pointer; }
+.trace-step-main.is-clickable { cursor: pointer; }
 .trace-step-main:hover { background: var(--color-bg-hover); }
 
 .trace-step-line {
@@ -1298,12 +1297,13 @@ onBeforeUnmount(() => {
 
 .trace-step.is-note .trace-step-title { color: var(--color-text-muted); }
 /* 失败的工具/错误事件归在 note 类里，仅靠下方红字不够醒目：
-   把序号圆点和标题一起标红，长串时间线里也能立刻定位到出错那一步。 */
-.trace-step:has(.trace-step-err) .trace-step-idx {
+   把序号圆点和标题一起标红，长串时间线里也能立刻定位到出错那一步。
+   is-err 由 !step.ok 显式加，不用 :has()（旧 WebView2 整条规则会静默失效）。 */
+.trace-step.is-err .trace-step-idx {
   background: var(--color-danger-bg);
   color: var(--color-danger);
 }
-.trace-step:has(.trace-step-err) .trace-step-title { color: var(--color-danger); }
+.trace-step.is-err .trace-step-title { color: var(--color-danger); }
 
 .trace-step-target {
   flex: 1;

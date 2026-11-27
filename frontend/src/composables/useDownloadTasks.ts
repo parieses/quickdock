@@ -7,6 +7,7 @@ import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
+import { formatBytes } from '../utils/bytes'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { useToast } from './useToast'
@@ -24,6 +25,7 @@ import {
 } from '../../bindings/quickdock/services/download/downloadservice'
 import { SelectLocalFile, SelectLocalDirectory } from '../../bindings/quickdock/services/appservice'
 
+import { reportError } from '../utils/reportError'
 // DlBatch 的返回结构：ApiResult.data 是 any，Wails 不会为它生成模型，
 // 与 DlDiskSpace 一样由前端手写，字段名与 Go 的 json tag 对齐。
 export interface DlBatchAction {
@@ -253,18 +255,6 @@ export interface DlEngineInfo {
   options: Record<string, string>
 }
 
-export function formatBytes(n: number): string {
-  if (!n || n < 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let i = 0
-  let v = n
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i++
-  }
-  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
-}
-
 export function formatSpeed(n: number): string {
   return `${formatBytes(n)}/s`
 }
@@ -443,8 +433,7 @@ export function useDownloadTasks() {
       await refreshTasks()
       poll.start()
     } catch (e) {
-      toast.error(getErrorMessage(e))
-      logErr('download/enable', e)
+      reportError(e, 'download/enable')
     } finally {
       busy.value = false
     }
@@ -458,8 +447,7 @@ export function useDownloadTasks() {
       await refreshStatus()
       poll.stop()
     } catch (e) {
-      toast.error(getErrorMessage(e))
-      logErr('download/disable', e)
+      reportError(e, 'download/disable')
     } finally {
       busy.value = false
     }
@@ -473,8 +461,7 @@ export function useDownloadTasks() {
       await refreshTasks()
       return true
     } catch (e) {
-      toast.error(getErrorMessage(e))
-      logErr('download/add', e)
+      reportError(e, 'download/add')
       return false
     }
   }
@@ -491,9 +478,9 @@ export function useDownloadTasks() {
       }
       return true
     } catch (e) {
-      // silent 由调用方（多行按目录分组）汇总失败组名统一提示，这里不再逐组弹 toast。
-      if (!silent) toast.error(getErrorMessage(e))
-      logErr('download/batch', e)
+      // silent 由调用方（多行按目录分组）汇总失败组名统一提示，这里不再逐组弹 toast；
+      // 日志仍要留，否则多行添加整组失败时无处可查。
+      reportError(e, 'download/batch', { silent })
       return false
     }
   }
@@ -504,8 +491,7 @@ export function useDownloadTasks() {
       const p = unwrap<string>(await SelectLocalDirectory(title))
       return typeof p === 'string' ? p : ''
     } catch (e) {
-      logErr('download/pickDir', e)
-      toast.error(getErrorMessage(e))
+      reportError(e, 'download/pickDir')
       return ''
     }
   }
@@ -529,8 +515,7 @@ export function useDownloadTasks() {
       await refreshTasks()
       return true
     } catch (e) {
-      toast.error(getErrorMessage(e))
-      logErr('download/addTorrent', e)
+      reportError(e, 'download/addTorrent')
       return false
     }
   }
@@ -543,8 +528,7 @@ export function useDownloadTasks() {
       await refreshTasks()
       return true
     } catch (e) {
-      toast.error(getErrorMessage(e))
-      logErr('download/addMetalink', e)
+      reportError(e, 'download/addMetalink')
       return false
     }
   }
@@ -554,7 +538,7 @@ export function useDownloadTasks() {
       unwrap(await DlPause(gid))
       await refreshTasks()
     } catch (e) {
-      toast.error(getErrorMessage(e)); logErr('download/pause', e)
+      reportError(e, 'download/pause')
     }
   }
 
@@ -563,7 +547,7 @@ export function useDownloadTasks() {
       unwrap(await DlForcePause(gid))
       await refreshTasks()
     } catch (e) {
-      toast.error(getErrorMessage(e)); logErr('download/forcePause', e)
+      reportError(e, 'download/forcePause')
     }
   }
 
@@ -572,7 +556,7 @@ export function useDownloadTasks() {
       unwrap(await DlResume(gid))
       await refreshTasks()
     } catch (e) {
-      toast.error(getErrorMessage(e)); logErr('download/resume', e)
+      reportError(e, 'download/resume')
     }
   }
 
@@ -582,7 +566,7 @@ export function useDownloadTasks() {
       toast.success(t('dlRemoved'))
       await refreshTasks()
     } catch (e) {
-      toast.error(getErrorMessage(e)); logErr('download/remove', e)
+      reportError(e, 'download/remove')
     }
   }
 
@@ -600,7 +584,7 @@ export function useDownloadTasks() {
       }
       return r.succeeded
     } catch (e) {
-      toast.error(getErrorMessage(e)); logErr('download/batch', e)
+      reportError(e, 'download/batch')
       return 0
     }
   }
@@ -623,7 +607,7 @@ export function useDownloadTasks() {
         unwrap(await DlForgetHistory(gid))
         ok++
       } catch (e) {
-        toast.error(getErrorMessage(e)); logErr('download/forget', e)
+        reportError(e, 'download/forget')
       }
     }
     await refreshTasks()
@@ -650,7 +634,7 @@ export function useDownloadTasks() {
       await refreshTasks()
       return true
     } catch (e) {
-      toast.error(getErrorMessage(e)); logErr('download/pauseAll', e)
+      reportError(e, 'download/pauseAll')
       return false
     }
   }
@@ -661,7 +645,7 @@ export function useDownloadTasks() {
       await refreshTasks()
       return true
     } catch (e) {
-      toast.error(getErrorMessage(e)); logErr('download/resumeAll', e)
+      reportError(e, 'download/resumeAll')
       return false
     }
   }
@@ -672,7 +656,7 @@ export function useDownloadTasks() {
       await refreshTasks()
       return true
     } catch (e) {
-      toast.error(getErrorMessage(e)); logErr('download/purge', e)
+      reportError(e, 'download/purge')
       return false
     }
   }
@@ -683,7 +667,7 @@ export function useDownloadTasks() {
       await refreshTasks()
       return true
     } catch (e) {
-      toast.error(getErrorMessage(e)); logErr('download/position', e)
+      reportError(e, 'download/position')
       return false
     }
   }
@@ -694,7 +678,7 @@ export function useDownloadTasks() {
       await refreshTasks()
       return true
     } catch (e) {
-      toast.error(getErrorMessage(e)); logErr('download/changeUri', e)
+      reportError(e, 'download/changeUri')
       return false
     }
   }
@@ -716,7 +700,7 @@ export function useDownloadTasks() {
       await refreshTasks()
       return true
     } catch (e) {
-      toast.error(getErrorMessage(e)); logErr('download/setTaskOption', e)
+      reportError(e, 'download/setTaskOption')
       return false
     }
   }
@@ -728,7 +712,7 @@ export function useDownloadTasks() {
       await refreshTasks()
       return true
     } catch (e) {
-      toast.error(getErrorMessage(e)); logErr('download/selectFile', e)
+      reportError(e, 'download/selectFile')
       return false
     }
   }
@@ -749,7 +733,7 @@ export function useDownloadTasks() {
       toast.success(t('dlSaved'))
       return true
     } catch (e) {
-      toast.error(getErrorMessage(e)); logErr('download/setGlobalOption', e)
+      reportError(e, 'download/setGlobalOption')
       return false
     }
   }
@@ -769,7 +753,7 @@ export function useDownloadTasks() {
       await refreshStatus()
       return true
     } catch (e) {
-      toast.error(getErrorMessage(e)); logErr('download/shutdown', e)
+      reportError(e, 'download/shutdown')
       return false
     }
   }
@@ -778,7 +762,7 @@ export function useDownloadTasks() {
     try {
       unwrap(await DlReveal(target))
     } catch (e) {
-      toast.error(getErrorMessage(e)); logErr('download/reveal', e)
+      reportError(e, 'download/reveal')
     }
   }
 
@@ -790,7 +774,7 @@ export function useDownloadTasks() {
       await refreshStatus()
       return true
     } catch (e) {
-      toast.error(getErrorMessage(e)); logErr('download/saveOptions', e)
+      reportError(e, 'download/saveOptions')
       return false
     }
   }

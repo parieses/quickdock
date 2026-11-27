@@ -20,6 +20,7 @@ import { setMarketOffline, marketRefreshSignal } from '../composables/usePluginM
 import { logWarn } from '../utils/logger'
 import type { ToastAPI } from '../types'
 import QdModal from './QdModal.vue'
+import QdSearchBox from './QdSearchBox.vue'
 
 const { t, locale } = useI18n()
 const toast = inject<ToastAPI>('toast')!
@@ -366,15 +367,12 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
     </div>
 
     <div v-if="plugins.length" class="market-toolbar">
-      <div class="market-search">
-        <Search :size="14" class="search-icon" />
-        <input
-          v-model="searchText"
-          type="text"
-          class="market-search-input"
-          :placeholder="t('pluginMarketSearchPlaceholder')"
-        />
-      </div>
+      <QdSearchBox
+        v-model="searchText"
+        class="market-search"
+        :icon-size="14"
+        :placeholder="t('pluginMarketSearchPlaceholder')"
+      />
       <select v-model="activeCat" class="market-cat-select">
         <option value="">{{ t('pluginMarketAll') }}</option>
         <option v-for="c in categories" :key="c.cat" :value="c.cat">{{ c.cat }} ({{ c.count }})</option>
@@ -593,29 +591,21 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 }
 .filter-chip:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
 .filter-chip.active { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent); }
-.filter-chip:disabled { opacity: .45; cursor: default; }
+.filter-chip:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .chip-count {
   font-size: var(--text-2xs); padding: 0 var(--space-3); border-radius: var(--radius-md); background: var(--color-accent-bg);
   color: var(--color-accent); font-weight: 600;
 }
 .market-toolbar { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
+/* 搜索框皮肤由 QdSearchBox 统一提供（无边框 / 28px / bg-tertiary），这里只留占位宽度。
+   同行的两个下拉跟着降到 28px / text-sm：三件并排时高度字号参差比「统一」更显眼。 */
 .market-search {
-  display: flex; align-items: center; gap: 7px; flex: 1; min-width: 180px;
-  height: 32px; padding: 0 10px; border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border); background: var(--color-bg-secondary);
-  color: var(--color-text-muted);
+  flex: 1; min-width: 180px;
 }
-.market-search:focus-within { border-color: var(--color-border-focus-soft); }
-.search-icon { flex: none; }
-.market-search-input {
-  flex: 1; min-width: 0; border: 0; background: transparent; outline: none;
-  font: inherit; font-size: var(--text-md); color: var(--color-text-primary);
-}
-.market-search-input::placeholder { color: var(--color-text-disabled); }
 .market-cat-select {
-  height: 32px; padding: 0 var(--space-4); border-radius: var(--radius-sm); cursor: pointer;
+  height: 28px; padding: 0 var(--space-3); border-radius: var(--radius-sm); cursor: pointer;
   border: 1px solid var(--color-border); background: var(--color-bg-secondary);
-  color: var(--color-text-primary); font: inherit; font-size: var(--text-md);
+  color: var(--color-text-primary); font: inherit; font-size: var(--text-sm);
 }
 .market-cat-select:focus { outline: none; border-color: var(--color-border-focus-soft); }
 .market-result { font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap; }
@@ -711,7 +701,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
   font-size: var(--text-sm); cursor: pointer; transition: all .15s;
 }
 .action-btn:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
-.action-btn:disabled { opacity: .6; cursor: default; }
+.action-btn:disabled { opacity: var(--opacity-disabled-soft); cursor: default; }
 .btn-install { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
 .btn-install:hover:not(:disabled) { opacity: .9; color: var(--color-accent-text); }
 .btn-upgrade { background: var(--color-warning-bg); color: var(--color-warning); border-color: var(--color-warning-border); }
@@ -728,7 +718,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
   font-family: inherit; transition: background .15s, color .15s; white-space: nowrap;
 }
 .op-btn:hover { background: var(--color-bg-primary); color: var(--color-text-primary); }
-.op-btn:disabled { opacity: .4; cursor: default; }
+.op-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .detail-head { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-5); }
 .detail-icon { width: 44px; height: 44px; border-radius: var(--radius-md); background: var(--color-bg-tertiary); padding: var(--space-3); }
 .detail-icon-fallback { color: var(--color-text-muted); }

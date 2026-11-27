@@ -43,9 +43,10 @@ import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { useToast } from '../composables/useToast'
 import { openExternal } from '../utils/externalLinks'
-import { formatBytes } from '../utils/envFormat'
+import { formatBytes } from '../utils/bytes'
 import { RUNTIME_DOCS } from '../utils/runtimeDocs'
 import ConfirmDialog from './ConfirmDialog.vue'
+import QdSearchBox from './QdSearchBox.vue'
 import CreateDialog from './CreateDialog.vue'
 import type { CreateField } from './CreateDialog.vue'
 import {
@@ -70,6 +71,7 @@ import {
   NetdiskUpload,
 } from '../../bindings/quickdock/services/netdisk/netdiskservice'
 
+import { reportError } from '../utils/reportError'
 const { t } = useI18n()
 const toast = useToast()
 
@@ -203,9 +205,8 @@ async function refreshStatus(silent = false) {
     }
     if (ready.value) await loadDir(dir.value)
   } catch (e) {
-    logErr('NetdiskPage.refreshStatus', e)
-    // 轮询失败不弹 toast：网关长时间崩溃时不能每 30s 刷一条错误。
-    if (!silent) toast.error(getErrorMessage(e))
+    // 轮询失败不弹 toast：网关长时间崩溃时不能每 30s 刷一条错误。日志照记。
+    reportError(e, 'NetdiskPage.refreshStatus', { silent })
     // 状态探测失败不能让页面继续停在过期的「运行中」：切到已停止态并清掉旧列表，
     // 下次轮询 / 手动刷新恢复后再重新拉。
     if (gw.value?.running) {
@@ -238,8 +239,7 @@ async function loadDir(path: string) {
     selected.value = []
   } catch (e) {
     if (seq !== listSeq) return
-    logErr('NetdiskPage.loadDir', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NetdiskPage.loadDir')
   } finally {
     if (seq === listSeq) loading.value = false
   }
@@ -265,8 +265,7 @@ async function installGateway() {
     unwrap(await EnvInstall('openlist', '', '', ''))
   } catch (e) {
     busy.value = ''
-    logErr('NetdiskPage.install', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NetdiskPage.install')
   }
 }
 
@@ -284,8 +283,7 @@ async function startGateway() {
     await new Promise((r) => setTimeout(r, 1200))
     await refreshStatus()
   } catch (e) {
-    logErr('NetdiskPage.start', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NetdiskPage.start')
   } finally {
     busy.value = ''
   }
@@ -303,8 +301,7 @@ async function restartGateway() {
     await new Promise((r) => setTimeout(r, 1500))
     await refreshStatus()
   } catch (e) {
-    logErr('NetdiskPage.restart', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NetdiskPage.restart')
   } finally {
     busy.value = ''
   }
@@ -318,8 +315,7 @@ async function testGateway() {
     unwrap(await NetdiskTest())
     toast.success(t('netdiskTestOk'))
   } catch (e) {
-    logErr('NetdiskPage.test', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NetdiskPage.test')
   } finally {
     testing.value = false
   }
@@ -346,8 +342,7 @@ async function downloadFile(e: Entry) {
       ...jobs.value,
     ]
   } catch (err) {
-    logErr('NetdiskPage.download', err)
-    toast.error(getErrorMessage(err))
+    reportError(err, 'NetdiskPage.download')
   }
 }
 
@@ -401,8 +396,7 @@ async function runSearch() {
     if (!found.length) toast.success(t('netdiskSearchEmpty', { kw }))
   } catch (e) {
     if (seq !== listSeq) return
-    logErr('NetdiskPage.search', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NetdiskPage.search')
   } finally {
     if (seq === listSeq) searching.value = false
   }
@@ -429,8 +423,7 @@ async function submitMkdir(values: Record<string, string>) {
     toast.success(t('netdiskMkdirDone', { name }))
     await refreshAfterChange()
   } catch (e) {
-    logErr('NetdiskPage.mkdir', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NetdiskPage.mkdir')
   }
 }
 
@@ -448,8 +441,7 @@ async function submitRename(values: Record<string, string>) {
     toast.success(t('netdiskRenameDone', { name }))
     await refreshAfterChange()
   } catch (e) {
-    logErr('NetdiskPage.rename', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NetdiskPage.rename')
   }
 }
 
@@ -483,8 +475,7 @@ async function confirmDelete() {
     selected.value = []
     await refreshAfterChange()
   } catch (e) {
-    logErr('NetdiskPage.delete', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NetdiskPage.delete')
   }
 }
 
@@ -501,8 +492,7 @@ async function uploadFiles() {
     uploadPending.value += paths.length
     toast.success(t('netdiskUploadStarted', { count: paths.length }))
   } catch (e) {
-    logErr('NetdiskPage.upload', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NetdiskPage.upload')
   }
 }
 
@@ -518,8 +508,7 @@ async function downloadSelected() {
     unwrap(await NetdiskDownloadBatch(JSON.stringify(files.map((f) => f.path)), destDir))
     toast.success(t('netdiskBatchStarted', { count: files.length }))
   } catch (e) {
-    logErr('NetdiskPage.downloadBatch', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NetdiskPage.downloadBatch')
   }
 }
 
@@ -547,8 +536,7 @@ async function sendToDownloader(items: Entry[]) {
     }
     toast.success(t('netdiskSentToDownloader', { count: res?.added ?? files.length }))
   } catch (e) {
-    logErr('NetdiskPage.sendToDownloader', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NetdiskPage.sendToDownloader')
   }
 }
 
@@ -637,8 +625,7 @@ async function openAdmin() {
   try {
     await openExternal(url)
   } catch (e) {
-    logErr('NetdiskPage.openAdmin', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NetdiskPage.openAdmin')
   }
 }
 
@@ -719,8 +706,7 @@ async function connectExternal(values: Record<string, string>) {
     toast.success(t('netdiskExternalConnected'))
     await refreshStatus()
   } catch (e) {
-    logErr('NetdiskPage.connectExternal', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NetdiskPage.connectExternal')
   } finally {
     externalBusy.value = false
   }
@@ -732,8 +718,7 @@ async function disconnectExternal() {
     toast.success(t('netdiskExternalDisconnected'))
     await refreshStatus()
   } catch (e) {
-    logErr('NetdiskPage.disconnectExternal', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NetdiskPage.disconnectExternal')
   }
 }
 
@@ -1029,25 +1014,26 @@ function shortTime(s: string): string {
           </template>
         </nav>
         <div class="nd-tools">
-          <div class="nd-search">
-            <Search :size="13" class="nd-search-icon" />
-            <input
-              v-model="keyword"
-              class="nd-search-input"
-              :placeholder="t('netdiskSearchPlaceholder')"
-              @keyup.enter="runSearch"
-            />
-            <!-- 输入后出现：当前目录过滤是实时的，深搜要按这个 -->
-            <button
-              v-if="keyword.trim()"
-              class="nd-search-deep"
-              :title="t('netdiskSearchDeep')"
-              :disabled="searching"
-              @click="runSearch"
-            >
-              {{ searching ? '…' : t('netdiskSearchDeepShort') }}
-            </button>
-          </div>
+          <QdSearchBox
+            v-model="keyword"
+            class="nd-search"
+            :clearable="false"
+            :placeholder="t('netdiskSearchPlaceholder')"
+            @submit="runSearch"
+          >
+            <template #trailing>
+              <!-- 输入后出现：当前目录过滤是实时的，深搜要按这个 -->
+              <button
+                v-if="keyword.trim()"
+                class="nd-search-deep"
+                :title="t('netdiskSearchDeep')"
+                :disabled="searching"
+                @click="runSearch"
+              >
+                {{ searching ? '…' : t('netdiskSearchDeepShort') }}
+              </button>
+            </template>
+          </QdSearchBox>
           <button class="qd-btn qd-btn-sm qd-btn-ghost nd-tool" :title="t('netdiskNewFolder')" @click="openMkdir">
             <FolderPlus :size="14" /><span class="nd-tool-text">{{ t('netdiskNewFolder') }}</span>
           </button>
@@ -1368,7 +1354,7 @@ function shortTime(s: string): string {
   cursor: pointer;
 }
 .nd-text-link:hover { text-decoration: underline; }
-.nd-text-link:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
+.nd-text-link:disabled { opacity: var(--opacity-disabled); cursor: default; text-decoration: none; }
 
 .nd-cta { min-width: 180px; }
 /* 页头纯图标按钮（断开外部网关）：qd-btn 自带左右 padding，收成方形 */
@@ -1438,31 +1424,10 @@ function shortTime(s: string): string {
   gap: var(--space-3);
   flex: none;
 }
+/* 皮肤由 QdSearchBox 统一提供；宽度原来靠内部 input 固定 148px 撑开，现落在盒子上
+   （深搜按钮出现时 input 自动压缩，比原来一路变宽挤页头更稳）。 */
 .nd-search {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 0 var(--space-3);
-  height: 28px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
-}
-.nd-search:focus-within {
-  border-color: var(--color-accent);
-}
-.nd-search-icon {
-  color: var(--color-text-muted);
-  flex: none;
-}
-.nd-search-input {
-  width: 148px;
-  border: none;
-  outline: none;
-  background: none;
-  color: var(--color-text-primary);
-  font-size: var(--text-sm);
-  font-family: inherit;
+  width: 240px;
 }
 .nd-search-deep {
   flex: none;
@@ -1819,7 +1784,7 @@ function shortTime(s: string): string {
   height: 100%;
   overflow: auto;
   padding: var(--space-5);
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-family: var(--font-mono);
   font-size: var(--text-sm);
   line-height: 1.65;
   color: var(--color-media-text);

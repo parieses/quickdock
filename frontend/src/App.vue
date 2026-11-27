@@ -554,10 +554,9 @@ const activeConfirm = computed(() =>
     <ClipboardPanel compact />
   </div>
 
-  <!-- 快捷笔记独立窗口：复用剪贴板窗口，导航到 #/note -->
-  <div v-else-if="isNoteWindow" class="note-standalone">
-    <NotePanel />
-  </div>
+  <!-- 快捷笔记独立窗口：NotePanel 根节点自带 .note-standalone 撑满样式，
+       不再套一层同名外壳（原双层只为材质选择器服务，已改由组件根直接承载）。 -->
+  <NotePanel v-else-if="isNoteWindow" />
 
   <!-- 窗口管理浮层：选模板→分配窗口→一键排版 -->
   <div v-else-if="isWinmgrWindow" class="winmgr-standalone">

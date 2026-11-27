@@ -962,13 +962,13 @@ onUnmounted(() => {
   <!-- Inline 插件模式 -->
   <div v-if="inlinePluginId" class="palette-root palette-plugin-mode" @click.self="closeInlinePlugin">
     <div class="palette-plugin-header">
-      <button class="plugin-back-btn" @click="closeInlinePlugin">
+      <button class="plugin-back-btn qd-btn" @click="closeInlinePlugin">
         <ChevronLeft :size="16" />
         <span>{{ t('back') }}</span>
       </button>
       <span class="plugin-title">{{ inlinePluginName }}</span>
       <div class="plugin-header-actions">
-        <button class="plugin-detach-btn" @click="detachPlugin" :title="t('pluginDetach')">
+        <button class="plugin-detach-btn qd-btn" @click="detachPlugin" :title="t('pluginDetach')">
           <ExternalLink :size="14" />
         </button>
       </div>

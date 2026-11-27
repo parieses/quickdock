@@ -26,13 +26,14 @@ import {
   StopSshForward,
 } from '../../bindings/quickdock/services/sshx/sshservice'
 import type { SshForwardInput } from '../../bindings/quickdock/services/sshx/models'
-import { formatBytes } from '../utils/ssh'
+import { formatBytes } from '../utils/bytes'
 import type { SshForwardView, SshHost } from '../utils/ssh'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { useToast } from '../composables/useToast'
 import { logErr } from '../utils/logger'
 
+import { reportError } from '../utils/reportError'
 const props = withDefaults(
   defineProps<{
     /** 抽屉是否打开；关闭时停轮询 */
@@ -438,8 +439,8 @@ onBeforeUnmount(() => {
       <p v-if="formErr" class="sfp-err sfp-form-err">{{ formErr }}</p>
 
       <div class="sfp-foot">
-        <button class="sfp-btn" @click="closeForm()">{{ t('sshForwardCancel') }}</button>
-        <button class="sfp-btn sfp-btn--primary" :disabled="saving" @click="save()">{{ t('sshForwardSave') }}</button>
+        <button class="sfp-btn qd-btn" @click="closeForm()">{{ t('sshForwardCancel') }}</button>
+        <button class="sfp-btn qd-btn sfp-btn--primary" :disabled="saving" @click="save()">{{ t('sshForwardSave') }}</button>
       </div>
     </div>
 
@@ -484,8 +485,8 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div v-if="!forwards.length && !loading" class="sfp-empty">{{ t('sshForwardEmpty') }}</div>
-      <div v-if="errMsg" class="sfp-empty is-err">{{ errMsg }}</div>
+      <div v-if="!forwards.length && !loading" class="sfp-empty qd-empty">{{ t('sshForwardEmpty') }}</div>
+      <div v-if="errMsg" class="sfp-empty qd-empty is-err">{{ errMsg }}</div>
     </div>
   </div>
 </template>
@@ -630,6 +631,6 @@ onBeforeUnmount(() => {
 .sfp-btn:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .sfp-btn--primary { color: var(--color-accent-text); background: var(--color-accent); border-color: var(--color-accent); }
 .sfp-btn--primary:hover { color: var(--color-accent-text); background: var(--color-accent-hover); }
-.sfp-btn--primary:disabled { opacity: 0.5; cursor: default; }
+.sfp-btn--primary:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .sfp-btn--danger { color: var(--color-danger-text); background: var(--color-danger); border-color: var(--color-danger); }
 </style>

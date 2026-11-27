@@ -6,6 +6,7 @@ let cachedDshSvc: any = null
 </script>
 
 <script setup lang="ts">
+import { downloadBlob } from '../utils/download'
 import { ref, computed, watch, inject, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Terminal, Download, ExternalLink, Plug, CheckCircle2, AlertCircle, Copy, FileDown, Trash2, RefreshCw, Loader2 } from '@lucide/vue'
@@ -454,14 +455,7 @@ function exportLogs() {
     .map((l) => `[${new Date().toLocaleTimeString()}] ${l.level === 'error' ? 'ERROR' : 'INFO'} ${l.message}`)
     .join('\r\n')
   const blob = new Blob(['\uFEFF' + text], { type: 'text/plain;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `dsh-${stamp}.log`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  setTimeout(() => URL.revokeObjectURL(url), 0)
+  downloadBlob(`dsh-${stamp}.log`, blob)
 }
 
 async function copyLogs() {
@@ -999,7 +993,7 @@ watch(() => props.visible, async (v) => {
   border-color: var(--color-border-focus-soft);
 }
 .plugin-input:disabled {
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
 }
 .plugin-batch {
   padding-top: var(--space-4);
@@ -1044,7 +1038,7 @@ watch(() => props.visible, async (v) => {
   color: var(--color-text-primary);
 }
 .dsh-plugin-reload:disabled {
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 .dsh-plugin-empty {
@@ -1115,7 +1109,7 @@ watch(() => props.visible, async (v) => {
   color: var(--color-danger);
 }
 .dsh-plugin-del:disabled {
-  opacity: 0.4;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 .dsh-spin {

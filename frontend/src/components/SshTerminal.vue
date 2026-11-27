@@ -39,7 +39,7 @@ import { logErr } from '../utils/logger'
 import { useThemeName } from '../composables/useThemeName'
 import { sshFontSize, setSshFontSize, SSH_FONT_MIN, SSH_FONT_MAX, SSH_FONT_DEFAULT } from '../composables/useSshFont'
 import { useToast } from '../composables/useToast'
-import { debounce } from '../utils/debounce'
+import { debounce, type Debounced } from '../utils/debounce'
 import { openExternal } from '../utils/externalLinks'
 import { isMultiLinePaste } from '../utils/ssh'
 
@@ -878,6 +878,9 @@ function handleInput(data: string) {
 let offData: (() => void) | null = null
 let offState: (() => void) | null = null
 let observer: ResizeObserver | null = null
+// ResizeObserver 回调要防抖（拖窗口时每帧都会回调），但防抖的尾巴得能在卸载时掐掉，
+// 否则组件销毁后 120ms 内仍会跑一次 fitAddon.fit()。
+let resizeFit: Debounced<() => void> | null = null
 
 onMounted(async () => {
   if (!hostEl.value) return
@@ -1046,12 +1049,11 @@ onMounted(async () => {
     if (state?.sessionId) emit('state', state)
   })
 
-  observer = new ResizeObserver(
-    debounce(() => {
-      if (!term || !fitAddon) return
-      fitAddon.fit()
-    }, 120),
-  )
+  resizeFit = debounce(() => {
+    if (!term || !fitAddon) return
+    fitAddon.fit()
+  }, 120)
+  observer = new ResizeObserver(resizeFit)
   observer.observe(hostEl.value)
 
   // 右键菜单的文档级关闭监听：点菜单外 / 滚动 / Esc。
@@ -1094,6 +1096,8 @@ onBeforeUnmount(() => {
   offState?.()
   observer?.disconnect()
   observer = null
+  resizeFit?.cancel()
+  resizeFit = null
   document.removeEventListener('mousedown', onDocMouseDown)
   document.removeEventListener('keydown', onDocKeydown, true)
   document.removeEventListener('scroll', onDocScroll, true)
@@ -1184,20 +1188,20 @@ defineExpose({
         />
         <span class="term-search-count">{{ searchCountText }}</span>
         <button
-          class="term-search-btn"
+          class="term-search-btn qd-icon-btn"
           :title="t('sshTermSearchPrev')"
           @click="runSearch('prev')"
         >
           <ChevronUp :size="12" />
         </button>
         <button
-          class="term-search-btn"
+          class="term-search-btn qd-icon-btn"
           :title="t('sshTermSearchNext')"
           @click="runSearch('next')"
         >
           <ChevronDown :size="12" />
         </button>
-        <button class="term-search-btn" :title="t('cancel')" @click="closeSearch">
+        <button class="term-search-btn qd-icon-btn" :title="t('cancel')" @click="closeSearch">
           <X :size="12" />
         </button>
       </div>
@@ -1329,7 +1333,7 @@ defineExpose({
    不拦截指针事件，免得鼠标移到提示上就触发 link 的 leave 把提示自己关掉。 */
 .term-link-tip {
   position: fixed;
-  z-index: 2100;
+  z-index: var(--z-context);
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
@@ -1462,7 +1466,7 @@ defineExpose({
    也避开任意祖先的 stacking context。 */
 .term-menu {
   position: fixed;
-  z-index: 2000;
+  z-index: var(--z-context);
   min-width: 160px;
   padding: var(--space-1);
   background: var(--color-popover-bg);

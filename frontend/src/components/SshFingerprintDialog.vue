@@ -194,7 +194,7 @@ function onKeydown(e: KeyboardEvent) {
 .fp-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1500;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -427,7 +427,7 @@ function onKeydown(e: KeyboardEvent) {
 
 .btn:disabled {
   cursor: default;
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
 }
 
 .btn-danger {

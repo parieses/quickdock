@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import NavBadge from './NavBadge.vue'
 import NotificationCenter from './NotificationCenter.vue'
 import { getErrorMessage } from '../utils/error'
+import { writeStored } from '../utils/storage'
 import type { ToastAPI } from '../types'
 import { Events } from '@wailsio/runtime'
 // 导航项图标已收敛到 pages/registry（纯数据），侧边栏仅保留仍在本文件直接使用的图标
@@ -138,7 +139,7 @@ const collapsed = ref(localStorage.getItem('qd_sidebar_collapsed') === '1')
 function toggleCollapse() {
   collapsed.value = !collapsed.value
   // 写盘失败只影响下次启动的折叠态，静默降级即可（隐私模式 / 配额满），不打断交互。
-  try { localStorage.setItem('qd_sidebar_collapsed', collapsed.value ? '1' : '0') } catch { /* ignore */ }
+  writeStored('qd_sidebar_collapsed', collapsed.value ? '1' : '0')
 }
 
 // ---- 导航项视图模型 ----
@@ -266,7 +267,7 @@ const navItems = computed<NavItemView[]>(() =>
            通知是「刚才发生了什么」，混在一起会让导航项的顺序失去意义。 -->
       <NotificationCenter @navigate="(p) => emit('navigate', p)" @open-settings="openSettingsPage" />
       <button
-        class="settings-btn"
+        class="settings-btn qd-icon-btn"
         @click="openSettings"
         :title="settingsBadge ? t('settings') + ' · ' + t(settingsBadge.titleKey, { n: settingsBadge.count }) : t('settings')"
       >
@@ -279,7 +280,7 @@ const navItems = computed<NavItemView[]>(() =>
           :title="t(settingsBadge.titleKey, { n: settingsBadge.count })"
         >{{ settingsBadge.count > 99 ? '99+' : settingsBadge.count }}</span>
       </button>
-      <button class="collapse-btn" @click="toggleCollapse" :title="collapsed ? t('expandSidebar') : t('collapseSidebar')">
+      <button class="collapse-btn qd-icon-btn" @click="toggleCollapse" :title="collapsed ? t('expandSidebar') : t('collapseSidebar')">
         <ChevronLeft v-if="!collapsed" :size="16" />
         <ChevronRight v-else :size="16" />
       </button>
@@ -511,7 +512,7 @@ const navItems = computed<NavItemView[]>(() =>
 /* 导航右键菜单 */
 .nav-menu {
   position: fixed;
-  z-index: 200;
+  z-index: var(--z-dropdown);
   min-width: 150px;
   padding: var(--space-2);
   background: var(--color-popover-bg);
@@ -546,7 +547,7 @@ const navItems = computed<NavItemView[]>(() =>
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 .nav-menu button:hover:not(:disabled) { background: var(--color-bg-active); color: var(--color-text-primary); }
-.nav-menu button:disabled { opacity: 0.4; cursor: default; }
+.nav-menu button:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .nav-menu button.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 .nav-menu-divider { height: 1px; background: var(--color-border); margin: var(--space-2) var(--space-1); }
 

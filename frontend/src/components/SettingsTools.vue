@@ -158,7 +158,7 @@ async function setDefault(tool: OpenTool) {
 
     <div v-if="loading" class="tool-loading">{{ t('loading') }}…</div>
 
-    <div v-else-if="groupedTools.length === 0" class="tool-empty">
+    <div v-else-if="groupedTools.length === 0" class="tool-empty qd-empty">
       {{ t('noTools') }}
     </div>
 

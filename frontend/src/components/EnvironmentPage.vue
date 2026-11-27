@@ -75,9 +75,11 @@ import { useWebDAVPanel } from '../composables/useWebDAVPanel'
 // D9：品牌色 / 内置工具组标识色集中到 palette（主题扩展表），组件不再散落硬编码
 import { openExternal } from '../utils/externalLinks'
 import { RUNTIME_COLORS, SPECIAL_ITEM_COLORS } from '../utils/palette'
-import { cmpVer, formatBytes, formatEta, formatSpeed, percent } from '../utils/envFormat'
+import { cmpVer, formatEta, formatSpeed, percent } from '../utils/envFormat'
+import { formatBytes } from '../utils/bytes'
 import { RUNTIME_DOCS } from '../utils/runtimeDocs'
 
+import { reportError } from '../utils/reportError'
 const { t, locale } = useI18n()
 const toast = inject<{ error: (m: string) => void; success: (m: string) => void }>('toast')!
 
@@ -829,7 +831,7 @@ function svcUsage(r: RuntimeInfo, version: string): string {
   if (!st || !st.running) return ''
   const parts: string[] = []
   if (typeof st.cpuPercent === 'number') parts.push(st.cpuPercent.toFixed(1) + '%')
-  if (st.memBytes) parts.push(formatBytes(st.memBytes))
+  if (st.memBytes) parts.push(formatBytes(st.memBytes, '—'))
   return parts.join(' · ')
 }
 
@@ -843,7 +845,7 @@ function svcUsageTitle(r: RuntimeInfo, version: string): string {
     : t('svcSampling')
   const lines = [
     `${t('svcCPU')}: ${cpu}`,
-    `${t('svcMem')}: ${formatBytes(st.memBytes || 0)}`,
+    `${t('svcMem')}: ${formatBytes(st.memBytes || 0, '—')}`,
   ]
   if ((st.procCount || 0) > 1) lines.push(`${t('svcProcCount')}: ${st.procCount}`)
   return lines.join('\n')
@@ -918,7 +920,7 @@ async function saveAlias() {
     editing.open = false
     await load()
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EnvironmentPage.saveAlias')
   }
 }
 
@@ -968,7 +970,7 @@ async function togglePathEntry(id: string, version: string, inPath: boolean) {
     }
     await load()
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EnvironmentPage.togglePathEntry')
   }
 }
 
@@ -1119,7 +1121,7 @@ async function doDelete() {
     confirmDelete.open = false
     await load()
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EnvironmentPage.doDelete')
   }
 }
 
@@ -1132,7 +1134,7 @@ async function importExisting(r: RuntimeInfo) {
     toast.success(t('imported') + ' ' + r.name + ' ' + version)
     await load()
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EnvironmentPage.importExisting')
   }
 }
 
@@ -1150,7 +1152,7 @@ async function reveal(path: string) {
   try {
     unwrap(await RevealInExplorer(path))
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EnvironmentPage.reveal')
   }
 }
 
@@ -1214,7 +1216,7 @@ async function toggleDshAutoStart(on: boolean) {
     toast.success(t('navDsh') + ' ' + (on ? t('svcWatchOn') : t('svcWatchOff')))
   } catch (e: any) {
     dshAutoStart.value = !on // 失败回滚
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EnvironmentPage.toggleDshAutoStart')
   } finally {
     settingDshAutoStart.value = false
   }
@@ -1237,7 +1239,7 @@ async function pickHTTPDir() {
     const dir = unwrap<string | null>(await PickFolderPath(t('pickDirTitle')))
     if (dir) httpForm.dir = dir
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EnvironmentPage.pickHTTPDir')
   }
 }
 async function createHTTPServer() {
@@ -1248,20 +1250,20 @@ async function createHTTPServer() {
     httpForm.name = ''; httpForm.dir = ''; httpForm.port = 0
     await loadHTTPServers()
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EnvironmentPage.createHTTPServer')
   }
 }
 async function startHTTP(id: string) {
   try { unwrap(await HTTPServeStart(id)); httpRunning[id] = true; toast.success(t('httpStarted')) }
-  catch (e: any) { toast.error(getErrorMessage(e)) }
+  catch (e: any) { reportError(e, 'EnvironmentPage.startHTTP') }
 }
 async function stopHTTP(id: string) {
   try { unwrap(await HTTPServeStop(id)); httpRunning[id] = false; toast.success(t('httpStopped')) }
-  catch (e: any) { toast.error(getErrorMessage(e)) }
+  catch (e: any) { reportError(e, 'EnvironmentPage.stopHTTP') }
 }
 async function deleteHTTP(id: string) {
   try { unwrap(await HTTPServeDelete(id)); await loadHTTPServers(); toast.success(t('deleted')) }
-  catch (e: any) { toast.error(getErrorMessage(e)) }
+  catch (e: any) { reportError(e, 'EnvironmentPage.deleteHTTP') }
 }
 // 走系统浏览器而不是 window.open：后者在 WebView 里要么被拦、要么在应用内开窗口，
 // 而本地服务页面同样会把主界面顶掉（与站点面板的 openSite 同一套约定）。
@@ -1269,8 +1271,7 @@ async function openHTTP(s: HTTPServerItem) {
   try {
     await openExternal('http://localhost:' + s.port + '/')
   } catch (e: any) {
-    logErr('EnvironmentPage.openHTTP', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EnvironmentPage.openHTTP')
   }
 }
 
@@ -1334,7 +1335,7 @@ async function refresh() {
   try {
     unwrap(await EnvRefresh())
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EnvironmentPage.refresh')
   } finally {
     refreshing.value = false
   }
@@ -1805,7 +1806,7 @@ async function toggleEnabled(r: RuntimeInfo, on: boolean) {
   } catch (e: any) {
     // 失败回滚乐观状态
     if (target) target.enabled = !on
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EnvironmentPage.toggleEnabled')
   } finally {
     settingEnabled[r.id] = false
   }
@@ -1842,7 +1843,7 @@ async function startService(r: RuntimeInfo, ins: Install) {
     refreshRuntimeCacheNow(r)
     refreshOllamaPanel()
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EnvironmentPage.startService')
   } finally {
     starting[key] = false
   }
@@ -1866,7 +1867,7 @@ async function stopService(r: RuntimeInfo, ins: Install) {
     refreshRuntimeCacheNow(r)
     refreshOllamaPanel()
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EnvironmentPage.stopService')
   } finally {
     stopping[key] = false
   }
@@ -1884,7 +1885,7 @@ async function restartService(r: RuntimeInfo, ins: Install) {
     refreshRuntimeCacheNow(r)
     refreshOllamaPanel(1200)
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EnvironmentPage.restartService')
   } finally {
     restarting[key] = false
   }
@@ -1901,8 +1902,7 @@ async function openConsole(port: number) {
   try {
     await openExternal('http://127.0.0.1:' + port + '/')
   } catch (e: any) {
-    logErr('EnvironmentPage.openConsole', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EnvironmentPage.openConsole')
   }
 }
 
@@ -1965,7 +1965,6 @@ const {
   startEditVar, cancelEditVar, commitEditVar, deleteUserVar,
   openMaintenance, runSourceCheck, onSourceCheckEvent, onSourceCheckDone,
   loadDiskUsage, exportManifest, pickManifestFile, onManifestFile, applyManifestActive,
-  formatSize,
 } = useEnvMaintenance({ onEnvChanged: () => load() })
 
 // ---- 项目体检：版本要求 + 依赖状态 ----
@@ -2059,7 +2058,7 @@ async function setActiveFromProject(row: ProjectReqRow, version: string) {
     toast.success(t('saved'))
     await load()
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EnvironmentPage.setActiveFromProject')
   }
 }
 
@@ -2177,7 +2176,7 @@ const dialogCtx = reactive({
   editing,
   editorRef,
   exportManifest,
-  formatSize,
+  formatBytes,
   ftpModal,
   githubAccel,
   goEnvModal,
@@ -3404,8 +3403,11 @@ const dialogCtx = reactive({
             </div>
           </div>
 
-          <!-- 单版本：未安装 → 一键装最新；已安装 → 当前版本 + 一键更新（更新提示由 newestUpdate 统一驱动） -->
-          <div v-else class="install-grid">
+          <!-- 单版本：未安装 → 一键装最新；已安装 → 当前版本 + 一键更新（更新提示由 newestUpdate 统一驱动）。
+               这里必须是 v-if="singleVersion"，不能写 v-else：v-else 会去配对上面 install-adv 的
+               v-if="!singleVersion && advOpen"，导致多版本运行时只要高级选项折叠，就多渲染出一行
+               「当前版本 + 安装新版本」——与上面的版本下拉/安装按钮重复。 -->
+          <div v-if="selected.singleVersion" class="install-grid">
             <template v-if="!selected.installed.length">
               <button
                 class="env-install-btn"
@@ -3450,7 +3452,7 @@ const dialogCtx = reactive({
             <div class="env-progress-text">
               <span>{{ stateFor(selected.id, selected).stage }}</span>
               <span v-if="percent(stateFor(selected.id, selected)) >= 0">{{ percent(stateFor(selected.id, selected)) }}%</span>
-              <span v-else-if="stateFor(selected.id, selected).written > 0">{{ (stateFor(selected.id, selected).written / 1048576).toFixed(1) }} MB</span>
+              <span v-else-if="stateFor(selected.id, selected).written > 0">{{ formatBytes(stateFor(selected.id, selected).written) }}</span>
               <span v-if="percent(stateFor(selected.id, selected)) >= 0 && stateFor(selected.id, selected).speed > 0">{{ formatSpeed(stateFor(selected.id, selected).speed) }} · {{ formatEta(stateFor(selected.id, selected).eta) }}</span>
             </div>
             <button class="link-btn env-cancel-install" @click="cancelInstall(selected)">
@@ -3598,7 +3600,7 @@ const dialogCtx = reactive({
    资料卡内容变长：限高 + 内部滚动，避免长要点把卡片顶出屏幕；
    script 的 onDocScroll 会放行浮层自己内部的滚动。 */
 .doc-pop {
-  position: fixed; z-index: 9000;
+  position: fixed; z-index: var(--z-dropdown);
   width: 368px; max-width: calc(100vw - 16px);
   max-height: calc(100vh - 16px); overflow-y: auto;
   padding: 14px var(--space-6); border-radius: var(--radius-md);
@@ -3670,7 +3672,7 @@ const dialogCtx = reactive({
 .svc-switch { display: inline-flex; align-items: center; gap: var(--space-3); margin-left: var(--space-2); cursor: pointer; user-select: none; -webkit-user-select: none; }
 /* 开关本体已换成 QdSwitch（34×18 几何完全一致），这里只留行内布局与文案。 */
 .svc-switch-label { font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap; }
-.svc-switch.on .svc-switch-label { color: var(--color-accent); }
+.svc-switch.on .svc-switch-label { color: var(--color-accent-ink); }
 .svc-switch.busy { opacity: .6; pointer-events: none; }
 
 /* 详情卡片：圆角收到与全站卡片一致（14 在这套 13px 界面里偏"圆润"），
@@ -3886,7 +3888,7 @@ const dialogCtx = reactive({
 .svc-btn.restart { background: var(--color-accent-bg); color: var(--color-accent); }
 .svc-btn.console { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .svc-btn:hover { opacity: 0.9; }
-.svc-btn:disabled { opacity: 0.55; cursor: default; }
+.svc-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .svc-port { font-size: var(--text-xs); color: var(--color-text-muted); }
 
 .port-conflict-banner {
@@ -3914,23 +3916,15 @@ const dialogCtx = reactive({
   transition: color var(--transition-fast);
 }
 .svc-port-link:hover { color: var(--color-accent); text-decoration: underline; }
-.svc-port-link.disabled { cursor: default; opacity: 0.5; }
+.svc-port-link.disabled { cursor: default; opacity: var(--opacity-disabled); }
 .svc-port-link.disabled:hover { color: var(--color-text-disabled); text-decoration: none; }
 
 /* 端口全景弹窗 */
 .mono { font-family: var(--font-mono); }
 
 .col-ops { position: relative; display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; }
-.op-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
-  font-size: var(--text-xs); height: 24px; padding: 0 var(--space-4); border-radius: var(--radius-sm); cursor: pointer;
-  border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
-  font-family: inherit; transition: background var(--transition-fast), color var(--transition-fast);
-  white-space: nowrap;
-}
-.op-btn:hover { background: var(--color-bg-primary); color: var(--color-text-primary); }
-.op-btn.on { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-border-focus); }
-.op-btn.danger:hover { background: var(--color-danger-bg); color: var(--color-danger); border-color: var(--color-danger); }
-.op-btn:disabled { opacity: 0.4; cursor: default; }
+/* .op-btn 基干已抽到 styles/app.css，这里只留本页差异项。 */
+.op-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .op-btn.small { border-radius: var(--radius-sm); padding: var(--space-1) 9px; font-size: var(--text-xs); }
 .op-btn.primary { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
 .op-btn.primary:hover:not(:disabled) { background: var(--color-accent-hover); }
@@ -3993,6 +3987,14 @@ const dialogCtx = reactive({
 .mcp-tool-name { font-family: var(--font-mono); color: var(--color-text-primary); flex: none; min-width: 140px; }
 .mcp-tool-desc { flex: 1; min-width: 0; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cert-sub { font-weight: 400; color: var(--color-text-muted); font-size: var(--text-sm); }
+
+/* 窄窗：MCP 配置区的三处固定宽度会把整页撑出横向滚动条。
+   1100px 以下改弹性，保留下限避免控件挤成一条线。 */
+@media (max-width: 1100px) {
+  .mcp-select { min-width: 0; flex: 1 1 200px; }
+  .mcp-client-actions .mcp-client-select { width: auto; min-width: 160px; max-width: none; flex: 1 1 160px; }
+  .mcp-tool-name { min-width: 100px; }
+}
 .cert-grid { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: var(--space-4) var(--space-5); margin: 10px 0 var(--space-2); }
 .cert-label { font-size: var(--text-sm); color: var(--color-text-secondary); text-align: right; white-space: nowrap; }
 .cert-actions { display: flex; align-items: flex-start; gap: var(--space-5); flex-wrap: wrap; }
@@ -4005,7 +4007,7 @@ const dialogCtx = reactive({
 .menu-trigger { display: inline-flex; align-items: center; gap: var(--space-2); }
 .caret { font-size: var(--text-2xs); opacity: 0.7; }
 .op-menu {
-  position: absolute; z-index: 30; min-width: 160px;
+  position: absolute; z-index: calc(var(--z-ctx-backdrop) + 1); min-width: 160px;
   background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-sm); padding: var(--space-2); margin-top: var(--space-2);
   box-shadow: 0 8px 28px var(--color-bg-overlay);
@@ -4019,17 +4021,17 @@ const dialogCtx = reactive({
   font-family: inherit; cursor: pointer; white-space: nowrap;
 }
 .op-item:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
-.op-item.on { color: var(--color-accent); }
+.op-item.on { color: var(--color-accent-ink); }
 .op-item.danger:hover { background: var(--color-danger-bg); color: var(--color-danger); }
-.op-item:disabled { opacity: 0.4; cursor: default; }
-.menu-backdrop { position: fixed; inset: 0; z-index: 20; }
+.op-item:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.menu-backdrop { position: fixed; inset: 0; z-index: var(--z-ctx-backdrop); }
 .env-install-btn.danger { background: var(--color-danger); }
 .env-install-btn.danger:hover { opacity: 0.9; }
 .env-header-actions { display: flex; align-items: center; gap: var(--space-4); }
 .path-flag.ok { color: var(--color-success); background: var(--color-success-bg); }
 .path-summary-dot.ok { background: var(--color-success); }
 
-.empty-state { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); padding: 26px 0; }
+/* .empty-state 基干已抽到 app.css */
 .empty-actions { margin-top: 10px; }
 /* 空态图标：44 方底 + 细边，与 .qd-empty-icon 一致；图标本身只用 20 */
 .empty-icon {
@@ -4183,7 +4185,7 @@ const dialogCtx = reactive({
   font-family: inherit; transition: background var(--transition-fast);
 }
 .link-btn:hover { background: var(--color-accent-bg); }
-.link-btn:disabled { opacity: 0.5; cursor: default; }
+.link-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .link-btn.danger { color: var(--color-danger); border-color: var(--color-danger); }
 .link-btn.danger:hover { background: var(--color-danger-bg); }
 .env-install-btn {
@@ -4193,7 +4195,7 @@ const dialogCtx = reactive({
 }
 .env-install-btn:hover { opacity: 0.9; }
 .env-install-btn.busy { opacity: 0.7; cursor: default; }
-.env-install-btn:disabled { opacity: 0.4; cursor: default; }
+.env-install-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 .env-progress { display: flex; flex-direction: column; gap: 5px; margin-top: var(--space-5); }
 .env-progress-bar { height: 6px; background: var(--color-bg-tertiary); border-radius: var(--radius-xs); overflow: hidden; }

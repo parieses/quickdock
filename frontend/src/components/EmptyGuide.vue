@@ -22,10 +22,10 @@ import { getErrorMessage } from '../utils/error'
 // 首次使用教程入口：地址与「设置 → 关于」共用一份（见 utils/siteLinks.ts）
 import { openExternal } from '../utils/externalLinks'
 import { SITE_GUIDE_URL, SITE_GUIDE_TEXT } from '../utils/siteLinks'
-import { logErr } from '../utils/logger'
 import CreateDialog from './CreateDialog.vue'
 import type { ToastAPI } from '../types'
 
+import { reportError } from '../utils/reportError'
 const props = defineProps<{ variant: 'scene' | 'collection' }>()
 
 const { t } = useI18n()
@@ -95,8 +95,7 @@ async function handleCreate(values: Record<string, string>) {
 // 不用裸 <a href>：WebView 会把这套 SPA 整个导航走，用户回不到应用（见 utils/externalLinks）。
 function openGuide() {
   openExternal(SITE_GUIDE_URL).catch((e: unknown) => {
-    logErr('EmptyGuide.openGuide', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'EmptyGuide.openGuide')
   })
 }
 </script>

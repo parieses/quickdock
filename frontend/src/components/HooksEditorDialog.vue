@@ -16,6 +16,7 @@ import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 
+import { reportError } from '../utils/reportError'
 const props = defineProps<{ cwd: string; hooks: AIHooksInfo | null }>()
 const emit = defineEmits<{
   (e: 'update:modelValue', v: boolean): void
@@ -47,7 +48,7 @@ async function save() {
   } catch (e) {
     logErr('hooksEditor.save', e)
     err.value = getErrorMessage(e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'HooksEditorDialog.save')
   } finally {
     busy.value = false
   }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { copyToClipboard } from '../utils/clipboard'
 import GitDialogs from './GitDialogs.vue'
 /**
  * Git 面板（对位 SourceTree 的布局，而不是「三张卡片」）：
@@ -35,6 +36,7 @@ import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
 import type { ApiResult } from '../../bindings/quickdock/services/models'
 import { getErrorMessage } from '../utils/error'
+import { removeStored, writeStored } from '../utils/storage'
 import { logErr } from '../utils/logger'
 import { useToast } from '../composables/useToast'
 import { navigateTo, pendingTarget } from '../composables/bridge'
@@ -67,6 +69,7 @@ import {
   ArrowUp, ArrowDown,
 } from '@lucide/vue'
 
+import { reportError } from '../utils/reportError'
 // 返回值里的结构由后端 JSON 直接给出，Wails 绑定生成器不会为它们单独生成类型
 // （与 MonitorPage 的 MonitorLog 同一处理），故在此本地声明，字段与 json tag 一致。
 interface RepoRef { path: string; name: string; addedAt: string }
@@ -223,7 +226,7 @@ const logScope = ref<'current' | 'all'>(recallScope())
 function setLogScope(v: 'current' | 'all') {
   if (logScope.value === v) return
   logScope.value = v
-  try { localStorage.setItem(SCOPE_KEY, v) } catch { /* 记不住就算了，本次切换仍然生效 */ }
+  writeStored(SCOPE_KEY, v) // 记不住就算了，本次切换仍然生效
 }
 /** 后端一条都没标（detached HEAD / 空仓库 / 老进程）时不筛，否则列表会空成一片。 */
 const headMarked = computed(() => commits.value.some(c => c.onHead))
@@ -505,8 +508,7 @@ async function loadRemotes() {
   try {
     remotes.value = (unwrap(await GitRemotes(activePath.value)) as RemoteEntry[] | null) || []
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.remotes', e)
+    reportError(e, 'git.remotes')
   }
 }
 
@@ -527,7 +529,7 @@ async function saveRemote(r: RemoteEntry) {
     toast.success(t('git_remote_saved'))
     await loadRepo(true)
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'GitPage.saveRemote')
     await loadRemotes() // 改失败时把输入框里的脏值刷回真实值
     logErr('git.remoteSet', e)
   } finally {
@@ -549,8 +551,7 @@ async function addRemote() {
     toast.success(t('git_remote_added'))
     await loadRepo(true)
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.remoteAdd', e)
+    reportError(e, 'git.remoteAdd')
   } finally {
     remoteBusy.value = ''
   }
@@ -566,8 +567,7 @@ async function removeRemote(r: RemoteEntry) {
         toast.success(t('git_remote_removed'))
         await loadRepo(true)
       } catch (e) {
-        toast.error(getErrorMessage(e))
-        logErr('git.remoteRemove', e)
+        reportError(e, 'git.remoteRemove')
       } finally {
         remoteBusy.value = ''
       }
@@ -663,8 +663,7 @@ async function addRepo() {
     await loadRepo()
     toast.success(t('git_added'))
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.addRepo', e)
+    reportError(e, 'git.addRepo')
   }
 }
 
@@ -750,8 +749,7 @@ function removeRepo(r: RepoRef) {
           await loadRepo()
         }
       } catch (e) {
-        toast.error(getErrorMessage(e))
-        logErr('git.removeRepo', e)
+        reportError(e, 'git.removeRepo')
       }
     })()
   })
@@ -786,8 +784,7 @@ async function selectCommit(c: Commit) {
   } catch (e) {
     if (selectedHash.value !== c.hash) return
     detailFailed.value = true
-    toast.error(getErrorMessage(e))
-    logErr('git.commitDetail', e)
+    reportError(e, 'git.commitDetail')
   }
 }
 
@@ -893,8 +890,7 @@ async function toggleStage(f: WorkFile, isStaged: boolean) {
     else unwrap(await GitStage(activePath.value, [f.path]))
     await loadRepo(true)
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.toggleStage', e)
+    reportError(e, 'git.toggleStage')
   } finally {
     busy.value = ''
   }
@@ -907,8 +903,7 @@ async function stageAll() {
     unwrap(await GitStage(activePath.value, []))
     await loadRepo(true)
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.stageAll', e)
+    reportError(e, 'git.stageAll')
   } finally {
     busy.value = ''
   }
@@ -921,8 +916,7 @@ async function unstageAll() {
     unwrap(await GitUnstage(activePath.value, []))
     await loadRepo(true)
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.unstageAll', e)
+    reportError(e, 'git.unstageAll')
   } finally {
     busy.value = ''
   }
@@ -1004,8 +998,7 @@ async function aiCommitMessage() {
       toast.success(t('git_ai_done', { scope: r.scope || '' }))
     }
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.aiMessage', e)
+    reportError(e, 'git.aiMessage')
   } finally {
     aiWriting.value = false
   }
@@ -1045,8 +1038,7 @@ async function performCommit() {
     }
   } catch (e) {
     // hook 失败 / 身份未配置 的原因都在 msg 里，原样给用户（后端已透出 stderr）
-    toast.error(getErrorMessage(e))
-    logErr('git.commit', e)
+    reportError(e, 'git.commit')
   } finally {
     committing.value = false
   }
@@ -1063,8 +1055,7 @@ async function doPush() {
     await loadRepo(true)
   } catch (e) {
     await holdSpin(startedAt)
-    toast.error(getErrorMessage(e))
-    logErr('git.push', e)
+    reportError(e, 'git.push')
   } finally {
     busy.value = ''
   }
@@ -1086,8 +1077,7 @@ async function doCheckout(b: BranchInfo) {
     await loadRepo(true)
   } catch (e) {
     // 有未提交改动时 git 会拒绝并说明原因，原样透出比藏起来有用
-    toast.error(getErrorMessage(e))
-    logErr('git.checkout', e)
+    reportError(e, 'git.checkout')
   } finally {
     busy.value = ''
     checkoutName.value = ''
@@ -1122,8 +1112,7 @@ async function doFetch() {
     await loadRepo(true)
   } catch (e) {
     await holdSpin(startedAt)
-    toast.error(getErrorMessage(e))
-    logErr('git.fetch', e)
+    reportError(e, 'git.fetch')
   } finally {
     busy.value = ''
   }
@@ -1143,8 +1132,7 @@ async function doPull() {
     await loadRepo(true)
   } catch (e) {
     await holdSpin(startedAt)
-    toast.error(getErrorMessage(e))
-    logErr('git.pull', e)
+    reportError(e, 'git.pull')
   } finally {
     busy.value = ''
   }
@@ -1300,8 +1288,7 @@ async function runGitOp(fn: () => Promise<ApiResult | null>) {
     if (r?.msg) toast.success(r.msg)
     return true
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.op', e)
+    reportError(e, 'git.op')
     return false
   }
 }
@@ -1339,17 +1326,15 @@ async function revealFile(f: WorkFile) {
   try {
     unwrap(await RevealInExplorer(absPath(f.path)))
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.reveal', e)
+    reportError(e, 'git.reveal')
   }
 }
 
 async function copyText(s: string) {
-  try {
-    await navigator.clipboard.writeText(s)
+  if (await copyToClipboard(s)) {
     toast.success(t('copied'))
-  } catch (e) {
-    toast.error(getErrorMessage(e))
+  } else {
+    toast.error(t('copyFailed'))
   }
 }
 
@@ -1415,8 +1400,7 @@ async function selectStash(s: StashEntry) {
   } catch (e) {
     if (selectedStash.value?.ref !== s.ref) return
     detailFailed.value = true
-    toast.error(getErrorMessage(e))
-    logErr('git.stashShow', e)
+    reportError(e, 'git.stashShow')
   }
 }
 
@@ -1441,8 +1425,7 @@ async function loadFileCommits() {
   try {
     fileCommits.value = (unwrap<Commit[]>(await GitFileHistory(activePath.value, f.path, f.rev, 100)) as Commit[] | null) || []
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.fileHistory', e)
+    reportError(e, 'git.fileHistory')
   }
 }
 
@@ -1461,8 +1444,7 @@ async function doLogSearch() {
   try {
     searchResults.value = (unwrap<Commit[]>(await GitSearchLog(activePath.value, q, 200)) as Commit[] | null) || []
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.searchLog', e)
+    reportError(e, 'git.searchLog')
   } finally {
     searching.value = false
   }
@@ -1508,8 +1490,7 @@ async function restoreFileVersion() {
     await loadRepo(true)
     toast.success(t('git_restored', { f: v.file }))
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.restoreFile', e)
+    reportError(e, 'git.restoreFile')
   }
 }
 
@@ -1559,8 +1540,7 @@ async function archiveAt(rev: string) {
     unwrap(r)
     toast.success(r?.msg || t('git_archive_done'))
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.archive', e)
+    reportError(e, 'git.archive')
   }
 }
 
@@ -1619,8 +1599,7 @@ async function loadSubmodules() {
   try {
     subs.value = (unwrap<Submodule[]>(await GitSubmodules(activePath.value)) as Submodule[] | null) || []
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.submodules', e)
+    reportError(e, 'git.submodules')
   }
 }
 
@@ -1634,8 +1613,7 @@ async function subUpdate(s: Submodule, remote: boolean) {
     await loadRepo(true)
     if (r?.msg) toast.success(r.msg)
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.subUpdate', e)
+    reportError(e, 'git.subUpdate')
   } finally {
     subBusy.value = ''
   }
@@ -1649,8 +1627,7 @@ async function subSync() {
     unwrap(r)
     if (r?.msg) toast.success(r.msg)
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.subSync', e)
+    reportError(e, 'git.subSync')
   } finally {
     subBusy.value = ''
   }
@@ -1689,8 +1666,7 @@ async function subAdd() {
     await loadRepo(true)
     if (r?.msg) toast.success(r.msg)
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.subAdd', e)
+    reportError(e, 'git.subAdd')
   } finally {
     subBusy.value = ''
   }
@@ -1718,8 +1694,7 @@ async function openSSH() {
       if (known) sshHost.value = known
     }
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.sshStatus', e)
+    reportError(e, 'git.sshStatus')
   } finally {
     sshBusy.value = ''
   }
@@ -1741,17 +1716,15 @@ async function doSSHGenerate() {
     if (r?.key) {
       sshGenerated.value = r.key
       // 顺手把公钥放到剪贴板：下一步就是去网页上粘贴，少一次点击
-      try { await navigator.clipboard.writeText(r.key.publicKey) } catch (e) {
+      if (!(await copyToClipboard(r.key.publicKey))) {
         // 自动复制失败要告诉用户，否则下一步直接去网页粘贴会贴出旧内容。
-        logErr('git.copyPublicKey', e)
-        toast.error(getErrorMessage(e))
+        toast.error(t('copyFailed'))
       }
     }
     sshStatus.value = unwrap<SSHStatus>(await GitSSHStatus()) || sshStatus.value
     toast.success(t('git_ssh_gen_done'))
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.sshGenerate', e)
+    reportError(e, 'git.sshGenerate')
   } finally {
     sshBusy.value = ''
   }
@@ -1783,8 +1756,7 @@ async function remoteToSSH() {
     if (r?.msg) toast.success(r.msg)
     sshRemote.value = unwrap<RemoteInfo>(await GitRemoteInfo(activePath.value)) || null
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('git.remoteToSSH', e)
+    reportError(e, 'git.remoteToSSH')
   } finally {
     sshBusy.value = ''
   }
@@ -2136,7 +2108,7 @@ function startColSplit(e: MouseEvent, which: ColKey) {
     document.body.style.cursor = ''
     document.body.style.userSelect = ''
     dragCol.value = ''
-    try { localStorage.setItem(conf.key, String(colW[which])) } catch { /* 存不下就算了，本次拖动仍然生效 */ }
+    writeStored(conf.key, String(colW[which])) // 存不下就算了，本次拖动仍然生效
   }
   window.addEventListener('mousemove', move)
   window.addEventListener('mouseup', up)
@@ -2147,7 +2119,7 @@ function startColSplit(e: MouseEvent, which: ColKey) {
 /** 双击分隔条回到样式表的默认宽度（窄屏另有默认值，所以是「清掉自定义」而不是写死 240）。 */
 function resetColSplit(which: ColKey) {
   colW[which] = 0
-  try { localStorage.removeItem(COL_CONF[which].key) } catch { /* 同上 */ }
+  removeStored(COL_CONF[which].key)
 }
 
 // ---- 展示辅助 ----
@@ -3519,19 +3491,14 @@ const dialogCtx = reactive({
 /* ---- 右栏 ---- */
 .git-main {
   flex: 1; min-width: 0; display: flex; flex-direction: column;
-  /* 提交图 lane 配色：借语义色 + 三个额外色相凑够 6 条。浅色主题下要压深，
-     否则 #22d3ee 这类亮色在白底上几乎看不见（见下方 [data-theme=light] 覆盖）。 */
+  /* 提交图 lane 配色：借语义色 + 三个额外色相凑够 6 条。
+     色值统一在 style.css 双主题定义，这里只做别名。 */
   --git-lane-1: var(--color-accent);
   --git-lane-2: var(--color-warning);
-  --git-lane-3: #a78bfa;
+  --git-lane-3: var(--color-git-lane-3);
   --git-lane-4: var(--color-success);
-  --git-lane-5: #f472b6;
-  --git-lane-6: #22d3ee;
-}
-[data-theme='light'] .git-main {
-  --git-lane-3: #7c3aed;
-  --git-lane-5: #db2777;
-  --git-lane-6: #0891b2;
+  --git-lane-5: var(--color-git-lane-5);
+  --git-lane-6: var(--color-git-lane-6);
 }
 
 /* 筛选行：紧跟工作区入口条之后。做成「一条细线」而不是输入框方框，
@@ -3733,7 +3700,7 @@ const dialogCtx = reactive({
   font: inherit; font-size: var(--text-2xs); color: var(--color-text-muted); cursor: pointer;
 }
 .pane-act:hover:not(:disabled) { color: var(--color-accent); }
-.pane-act:disabled { opacity: .5; cursor: default; }
+.pane-act:disabled { opacity: var(--opacity-disabled); cursor: default; }
 /* 「全部暂存」后面紧跟的丢弃按钮不该再抢一次 auto 边距，否则两个动作被推到两端 */
 .pane-act + .pane-ic { margin-left: 0; }
 
@@ -3756,7 +3723,7 @@ const dialogCtx = reactive({
 }
 .cb-mini:first-of-type { margin-left: auto; }
 .cb-mini:hover:not(:disabled) { color: var(--color-accent); background: var(--color-accent-bg); }
-.cb-mini:disabled { opacity: .5; cursor: default; }
+.cb-mini:disabled { opacity: var(--opacity-disabled); cursor: default; }
 /* amend 是开关，选中态要与悬停态一眼区分 */
 .cb-mini.is-on { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent); }
 .cb-input {
@@ -3855,7 +3822,7 @@ const dialogCtx = reactive({
 .tree-dir .file-quick { margin-left: auto; }
 .tree-dir:hover .file-quick, .tree-dir:focus-within .file-quick { display: grid; }
 .file-quick:hover { color: var(--color-accent); background: var(--color-accent-bg); }
-.file-quick:disabled { opacity: .5; cursor: default; }
+.file-quick:disabled { opacity: var(--opacity-disabled); cursor: default; }
 /* 目录行：只承担分组与折叠，不参与选中（点它折叠/展开） */
 .tree-dir {
   display: flex; align-items: center; gap: 3px; min-height: 20px;
@@ -3963,7 +3930,7 @@ const dialogCtx = reactive({
 .pane-ic.lead { margin-left: 0; margin-right: 2px; }
 .pane-ic.lead.on { color: var(--color-accent); background: var(--color-accent-bg); }
 .pane-ic.danger:hover:not(:disabled) { color: var(--color-danger); background: var(--color-danger-bg); }
-.pane-ic:disabled { opacity: .5; cursor: default; }
+.pane-ic:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .pane-ic + .pane-act { margin-left: var(--space-3); }
 .pick-bar {
   position: sticky; bottom: 8px; z-index: 3; margin: var(--space-2) var(--space-4) 0;
@@ -3981,7 +3948,7 @@ const dialogCtx = reactive({
 }
 .pb-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
 .pb-btn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); }
-.pb-btn:disabled { opacity: .5; cursor: default; }
+.pb-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .pb-x {
   margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
   width: 20px; height: 20px; border: 0; background: none; cursor: pointer;
@@ -4033,7 +4000,7 @@ const dialogCtx = reactive({
 .state-actions { display: flex; gap: var(--space-2); }
 
 /* 菜单固定在鼠标位置，透明遮罩负责「点外面关闭」，与项目内其它浮层同一套语言 */
-.ctx-backdrop { position: fixed; inset: 0; z-index: 900; }
+.ctx-backdrop { position: fixed; inset: 0; z-index: var(--z-ctx-backdrop); }
 .ctx-menu {
   position: fixed; min-width: 208px; padding: var(--space-2);
   background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);

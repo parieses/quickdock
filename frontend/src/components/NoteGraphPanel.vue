@@ -4,21 +4,19 @@
  * 数据由后端 GraphData 一次性构图；节点与边坐标全部在本组件内计算，
  * 用 requestAnimationFrame 分帧推进仿真，避免同步循环阻塞 UI。
  */
-import { ref, shallowRef, triggerRef, computed, watch, inject, onMounted, onBeforeUnmount } from 'vue'
+import { ref, shallowRef, triggerRef, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
-import { getErrorMessage } from '../utils/error'
-import { logErr } from '../utils/logger'
 import { GraphData } from '../../bindings/quickdock/services/appservice'
-import { RefreshCw, Maximize2, RotateCcw, Search, X, ArrowUpRight, Link2 } from '@lucide/vue'
-import type { ToastAPI } from '../types'
+import { RefreshCw, Maximize2, RotateCcw, X, ArrowUpRight, Link2 } from '@lucide/vue'
+import QdSearchBox from './QdSearchBox.vue'
 
+import { reportError } from '../utils/reportError'
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'openTarget', type: string, id: string, label: string): void
 }>()
 const { t } = useI18n()
-const toast = inject<ToastAPI>('toast')!
 
 // 后端边数上限，同时也是前端渲染节点上限：力导向是 O(n^2)，
 // 打开「显示孤立节点」后候选可能上千，截断后由 graphTooMany 提示。
@@ -152,8 +150,7 @@ async function load() {
     selectedId.value = null
     rebuild(true)
   } catch (e) {
-    logErr('NoteGraphPanel', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NoteGraphPanel')
     loadFailed.value = true
     rawNodes.value = []
     rawLinks.value = []
@@ -462,34 +459,23 @@ onBeforeUnmount(() => {
       <span class="qd-graph-count">{{ t('graphLinks') }} {{ renderLinks.length }}</span>
       <span class="qd-graph-spacer" />
 
-      <div class="qd-graph-search">
-        <Search :size="12" class="qd-graph-search-icon" />
-        <input
-          v-model="query"
-          class="qd-graph-search-input"
-          :placeholder="t('graphSearch')"
-          spellcheck="false"
-        />
-        <button v-if="query" type="button" class="qd-graph-icon-btn" @click="query = ''">
-          <X :size="12" />
-        </button>
-      </div>
+      <QdSearchBox v-model="query" class="qd-graph-search" :icon-size="12" :placeholder="t('graphSearch')" />
 
       <label class="qd-graph-toggle">
         <input v-model="showIsolated" type="checkbox" class="qd-graph-toggle-input" />
         <span>{{ t('graphIsolated') }}</span>
       </label>
 
-      <button type="button" class="qd-graph-icon-btn" :title="t('graphRefresh')" :disabled="loading" @click="refresh">
+      <button type="button" class="qd-graph-icon-btn qd-icon-btn" :title="t('graphRefresh')" :disabled="loading" @click="refresh">
         <RefreshCw :size="13" :class="{ 'qd-graph-spin': loading }" />
       </button>
-      <button type="button" class="qd-graph-icon-btn" :title="t('graphFit')" @click="fit">
+      <button type="button" class="qd-graph-icon-btn qd-icon-btn" :title="t('graphFit')" @click="fit">
         <Maximize2 :size="13" />
       </button>
-      <button type="button" class="qd-graph-icon-btn" :title="t('graphReset')" @click="resetLayout">
+      <button type="button" class="qd-graph-icon-btn qd-icon-btn" :title="t('graphReset')" @click="resetLayout">
         <RotateCcw :size="13" />
       </button>
-      <button type="button" class="qd-graph-icon-btn" @click="emit('close')">
+      <button type="button" class="qd-graph-icon-btn qd-icon-btn" @click="emit('close')">
         <X :size="13" />
       </button>
     </div>
@@ -548,7 +534,7 @@ onBeforeUnmount(() => {
         <div v-if="loadFailed" class="qd-graph-overlay">
           <div class="qd-graph-overlay-card">
             <span class="qd-graph-overlay-text">{{ t('graphLoadFailed') }}</span>
-            <button type="button" class="qd-graph-overlay-btn" @click="refresh">
+            <button type="button" class="qd-graph-overlay-btn qd-icon-btn" @click="refresh">
               {{ t('graphRefresh') }}
             </button>
           </div>
@@ -582,7 +568,7 @@ onBeforeUnmount(() => {
         <div class="qd-graph-side-sec">
           {{ t('graphLinks') }} <span class="qd-graph-side-n">{{ sideRows.length }}</span>
         </div>
-        <div v-if="!sideRows.length" class="qd-graph-side-empty">{{ t('graphEmpty') }}</div>
+        <div v-if="!sideRows.length" class="qd-graph-side-empty qd-empty">{{ t('graphEmpty') }}</div>
         <div v-for="(row, i) in sideRows" :key="'s-' + i" class="qd-graph-side-row">
           <ArrowUpRight
             :size="12"
@@ -624,26 +610,10 @@ onBeforeUnmount(() => {
 .qd-graph-title { font-weight: 600; color: var(--color-text-primary); font-size: var(--text-md); }
 .qd-graph-count { color: var(--color-text-muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
 .qd-graph-spacer { flex: 1; min-width: var(--space-2); }
+/* 皮肤由 QdSearchBox 统一提供；宽度原来靠内部 input 的 140px 撑开，改组件后落在盒子上。 */
 .qd-graph-search {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 0 var(--space-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-tertiary);
+  width: 172px;
 }
-.qd-graph-search-icon { color: var(--color-text-muted); flex-shrink: 0; }
-.qd-graph-search-input {
-  width: 140px;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--color-text-primary);
-  font-size: var(--text-xs);
-  font-family: inherit;
-}
-.qd-graph-search-input::placeholder { color: var(--color-text-disabled); }
 .qd-graph-toggle {
   display: flex;
   align-items: center;
@@ -671,7 +641,7 @@ onBeforeUnmount(() => {
   color: var(--color-accent);
   border-color: var(--color-accent-border);
 }
-.qd-graph-icon-btn:disabled { opacity: 0.4; cursor: default; }
+.qd-graph-icon-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .qd-graph-spin { animation: qd-graph-rotate 0.9s linear infinite; }
 @keyframes qd-graph-rotate { to { transform: rotate(360deg); } }
 

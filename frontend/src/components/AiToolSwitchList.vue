@@ -7,14 +7,14 @@
  * 界面文案必须把这件事说清，否则用户会以为「关了一处、两边都没了」——
  * 那正是这次要修掉的老行为。
  */
-import { computed, inject, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, RefreshCw } from '@lucide/vue'
 import QdSwitch from './QdSwitch.vue'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
-import type { ToastAPI } from '../types'
+import { reportError } from '../utils/reportError'
 import {
   AISetDomainEnabled,
   AISetToolEnabled,
@@ -54,7 +54,6 @@ interface PolicyData {
 }
 
 const { t } = useI18n()
-const toast = inject<ToastAPI>('toast')!
 
 const data = ref<PolicyData>({ maxLevel: 1, disabled: [], tools: [], domains: [] })
 const loading = ref(false)
@@ -124,8 +123,7 @@ async function setLevel(level: number) {
     unwrap(await AISetToolMaxLevel(level))
     await load()
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('ai-tools', e)
+    reportError(e, 'ai-tools')
   } finally {
     busy.value = ''
   }
@@ -141,8 +139,7 @@ async function toggleTool(tool: ToolRow, on: boolean) {
     await load()
   } catch (e) {
     tool.enabled = !on
-    toast.error(getErrorMessage(e))
-    logErr('ai-tools', e)
+    reportError(e, 'ai-tools')
   } finally {
     busy.value = ''
   }
@@ -155,8 +152,7 @@ async function toggleDomain(domain: string, on: boolean) {
     unwrap(await AISetDomainEnabled(domain, on))
     await load()
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('ai-tools', e)
+    reportError(e, 'ai-tools')
   } finally {
     busy.value = ''
   }

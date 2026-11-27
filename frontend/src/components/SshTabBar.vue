@@ -397,7 +397,7 @@ function clearDrag() {
 
 .tabs-act:disabled {
   cursor: default;
-  opacity: 0.4;
+  opacity: var(--opacity-disabled);
 }
 
 /* 字号控制：三个元素紧贴成一组，与右侧文件面板按钮之间留一条分隔线，
@@ -432,12 +432,12 @@ function clearDrag() {
 .tab-menu-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: var(--z-ctx-backdrop);
 }
 
 .tab-menu {
   position: fixed;
-  z-index: 1001;
+  z-index: calc(var(--z-ctx-backdrop) + 1);
   min-width: 168px;
   padding: var(--space-1);
   background: var(--color-bg-primary);

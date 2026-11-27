@@ -275,8 +275,8 @@ onUnmounted(stopPoll)
         <div v-if="openLog === j.id && logTruncated" class="ai-job-trunc">{{ t('aiJobLogTail') }}</div>
       </div>
 
-      <div v-if="!jobs.length && !loading" class="ai-jobs-empty">{{ t('aiJobsEmpty') }}</div>
-      <div v-if="errMsg" class="ai-jobs-empty is-err">{{ errMsg }}</div>
+      <div v-if="!jobs.length && !loading" class="ai-jobs-empty qd-empty">{{ t('aiJobsEmpty') }}</div>
+      <div v-if="errMsg" class="ai-jobs-empty qd-empty is-err">{{ errMsg }}</div>
     </div>
 
     <p class="ai-jobs-hint">{{ t('aiJobsHint') }}</p>
@@ -476,7 +476,7 @@ onUnmounted(stopPoll)
 }
 
 .ai-job-act:disabled {
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 

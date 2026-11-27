@@ -179,7 +179,7 @@ const stepText = computed(() => {
   border-color: var(--color-border);
   background: var(--color-bg-tertiary);
 }
-.ai-sched-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.ai-sched-btn:disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
 
 .spin { animation: ai-sched-spin 1s linear infinite; }
 @keyframes ai-sched-spin { to { transform: rotate(360deg); } }

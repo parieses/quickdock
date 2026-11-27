@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { copyToClipboard } from '../utils/clipboard'
 import { ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Keyboard, X, Copy, Check } from '@lucide/vue'
@@ -8,7 +9,6 @@ import {
 } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
 import { useToast } from '../composables/useToast'
-import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import type { HotkeyConfig } from '../types'
 
@@ -105,15 +105,13 @@ function buildMarkdown(): string {
 }
 
 async function copyMarkdown() {
-  try {
-    await navigator.clipboard.writeText(buildMarkdown())
-    copied.value = true
-    if (copyTimer) clearTimeout(copyTimer)
-    copyTimer = setTimeout(() => { copied.value = false; copyTimer = null }, 1800)
-  } catch (e) {
-    logErr('CheatSheet:copy', e)
-    toast.error(getErrorMessage(e))
+  if (!(await copyToClipboard(buildMarkdown()))) {
+    toast.error(t('copyFailed'))
+    return
   }
+  copied.value = true
+  if (copyTimer) clearTimeout(copyTimer)
+  copyTimer = setTimeout(() => { copied.value = false; copyTimer = null }, 1800)
 }
 
 function goHotkeySettings() {
@@ -131,7 +129,7 @@ function goHotkeySettings() {
           <h3 class="cs-title">{{ t('cheatSheet') }}</h3>
           <p class="cs-desc">{{ t('cheatSheetDesc') }}</p>
         </div>
-        <button class="cs-icon-btn" :title="t('cancel')" :aria-label="t('cancel')" @click="emit('close')">
+        <button class="cs-icon-btn qd-icon-btn" :title="t('cancel')" :aria-label="t('cancel')" @click="emit('close')">
           <X :size="16" />
         </button>
       </div>
@@ -164,7 +162,7 @@ function goHotkeySettings() {
       </div>
 
       <div class="cs-foot">
-        <button class="cs-btn" @click="copyMarkdown">
+        <button class="cs-btn qd-btn" @click="copyMarkdown">
           <Check v-if="copied" :size="13" />
           <Copy v-else :size="13" />
           <span>{{ copied ? t('cheatSheetCopied') : t('cheatSheetCopy') }}</span>

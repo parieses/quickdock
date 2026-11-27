@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Bell, BellOff, CheckCheck, Trash2, X, Search } from '@lucide/vue'
+import { Bell, BellOff, CheckCheck, Trash2, X } from '@lucide/vue'
+import QdSearchBox from './QdSearchBox.vue'
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { useToast } from '../composables/useToast'
-import { getErrorMessage } from '../utils/error'
-import { logErr } from '../utils/logger'
 // 页面跳转统一复用 bridge 的 navigateTo / pendingTarget 深链，不再走组件自定义
 // emit('navigate') 那条事件链：后者只能切页、带不了 refId，还得绕过 Sidebar 转发一次。
 import { navigate, navigateTo, pendingOpenTodoId } from '../composables/bridge'
@@ -15,6 +14,7 @@ import { findContentPage } from '../pages/registry'
 import {
   NotifyList, NotifyUnread, NotifyMarkRead, NotifyMarkAllRead, NotifyDelete, NotifyClear, NotifyKinds,
 } from '../../bindings/quickdock/services/notify/notifyservice'
+import { reportError } from '../utils/reportError'
 // 通知条目的形状。刻意在本地声明而不是从 bindings 引：
 // Wails 的模型生成只为「出现在方法签名里的具名类型」产出接口，经 ApiResult.Data
 // 传回来的结构一律是 any；本文件夹里 LogFile / CrashFile 等也都是本地声明，
@@ -227,8 +227,7 @@ async function activate(n: NotifyItem) {
         // before 会把并发新增的未读一起抹掉。
         n.read = false
         unread.value += decrement
-        logErr('notify.markRead', e)
-        toast.error(getErrorMessage(e))
+        reportError(e, 'notify.markRead')
       }
     }
     close()
@@ -256,8 +255,7 @@ async function markAll() {
     items.value = items.value.map((n) => ({ ...n, read: true }))
     unread.value = 0
   } catch (e) {
-    logErr('notify.markAll', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'notify.markAll')
   } finally {
     busy.value = false
   }
@@ -273,8 +271,7 @@ async function clearAll() {
     items.value = []
     unread.value = 0
   } catch (e) {
-    logErr('notify.clearAll', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'notify.clearAll')
   } finally {
     busy.value = false
   }
@@ -288,8 +285,7 @@ async function removeOne(n: NotifyItem) {
     items.value = items.value.filter((x) => x.id !== n.id)
     if (!n.read) unread.value = Math.max(0, unread.value - 1)
   } catch (e) {
-    logErr('notify.removeOne', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'notify.removeOne')
   } finally {
     busy.value = false
   }
@@ -345,7 +341,7 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
           <span class="nc-head-title">{{ t('ncTitle') }}</span>
           <span v-if="hasUnread" class="nc-head-count">{{ unread }}</span>
           <button
-            class="nc-icon-btn"
+            class="nc-icon-btn qd-icon-btn"
             :disabled="!hasUnread || busy"
             :title="t('ncMarkAll')"
             @click="markAll"
@@ -353,14 +349,14 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
             <CheckCheck :size="14" />
           </button>
           <button
-            class="nc-icon-btn"
+            class="nc-icon-btn qd-icon-btn"
             :disabled="busy"
             :title="t('ncClear')"
             @click="clearAll"
           >
             <Trash2 :size="14" />
           </button>
-          <button class="nc-icon-btn" :title="t('close')" @click="close">
+          <button class="nc-icon-btn qd-icon-btn" :title="t('close')" @click="close">
             <X :size="14" />
           </button>
         </div>
@@ -382,13 +378,12 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
           >{{ t('ncUnread') }}<span v-if="unread" class="nc-chip-count">{{ unread }}</span></button>
         </div>
 
-        <div class="nc-searchbar">
-          <Search :size="13" />
-          <input v-model="search" class="nc-search-input" type="text" :placeholder="t('ncSearch')" />
-          <button v-if="search" class="nc-search-clear" :title="t('ncSearchClear')" @click="search = ''">
-            <X :size="12" />
-          </button>
-        </div>
+        <QdSearchBox
+          v-model="search"
+          class="nc-searchbar"
+          :clear-title="t('ncSearchClear')"
+          :placeholder="t('ncSearch')"
+        />
 
         <div class="nc-list">
           <button
@@ -416,7 +411,7 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
             ><X :size="12" /></span>
           </button>
 
-          <div v-if="!shown.length" class="nc-empty">
+          <div v-if="!shown.length" class="nc-empty qd-empty">
             <BellOff :size="22" />
             <span>{{ emptyText }}</span>
           </div>
@@ -492,7 +487,7 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
   transition: background var(--transition-fast), color var(--transition-fast);
 }
 .nc-icon-btn:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.nc-icon-btn:disabled { opacity: 0.35; cursor: default; }
+.nc-icon-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 .nc-filters { display: flex; gap: var(--space-2); padding: var(--space-4) var(--space-5); flex-wrap: wrap; }
 .nc-chip {
@@ -514,25 +509,10 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
 /* 未读与类型是两个独立维度，用竖线隔开，避免被读成同一组互斥单选项 */
 .nc-sep { width: 1px; align-self: stretch; margin: var(--space-1) 3px; background: var(--color-border); }
 
+/* 皮肤由 QdSearchBox 统一提供，这里只留外侧留白。 */
 .nc-searchbar {
-  display: flex; align-items: center; gap: var(--space-3);
-  margin: 0 var(--space-5) var(--space-4); padding: 0 var(--space-4); height: 26px;
-  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
+  margin: 0 var(--space-5) var(--space-4);
 }
-.nc-search-input {
-  flex: 1; min-width: 0;
-  border: none; outline: none; background: transparent;
-  font-family: inherit; font-size: var(--text-xs); color: var(--color-text-primary);
-}
-.nc-search-input::placeholder { color: var(--color-text-disabled); }
-.nc-search-clear {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 16px; height: 16px; padding: 0;
-  border: none; border-radius: var(--radius-xs);
-  background: transparent; color: var(--color-text-muted); cursor: pointer;
-}
-.nc-search-clear:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 
 .nc-list { flex: 1; overflow-y: auto; padding: 0 var(--space-4) var(--space-4); }
 

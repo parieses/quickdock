@@ -319,7 +319,7 @@ function writeBack(mode: 'insert' | 'replace' | 'append') {
 }
 
 .note-ai-action:disabled {
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 

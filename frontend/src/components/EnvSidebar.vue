@@ -9,6 +9,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronDown, ChevronRight } from '@lucide/vue'
+import QdSearchBox from './QdSearchBox.vue'
 
 /** 侧栏的一项：运行时分两类，special 是 git / everything 这种非服务入口 */
 interface SidebarItem {
@@ -82,12 +83,14 @@ watch(() => props.selectedId, () => { void nextTick(revealActive) }, { immediate
 <template>
   <aside class="env-cats" ref="rootEl">
     <div class="cats-title">{{ t('envCategories') }}</div>
-    <div class="cats-search">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input :value="props.query" class="cats-search-input" :placeholder="t('envSearchPh')" @input="emit('update:query', ($event.target as HTMLInputElement).value)" />
-      <button v-if="props.query" class="cats-search-clear" @click="emit('update:query', '')" :title="t('clear')">×</button>
-    </div>
-    <div v-if="searching && props.groups.length === 0" class="cats-empty">{{ t('envNoMatch') }}</div>
+    <QdSearchBox
+      :model-value="props.query"
+      class="cats-search"
+      :icon-size="12"
+      :placeholder="t('envSearchPh')"
+      @update:model-value="emit('update:query', $event)"
+    />
+    <div v-if="searching && props.groups.length === 0" class="cats-empty qd-empty">{{ t('envNoMatch') }}</div>
     <template v-for="grp in props.groups" :key="grp.key">
       <button class="cats-group-label" type="button" @click="emit('toggle-group', grp.key)">
         <span v-if="grp.running" class="cat-dot" :title="t('svcRunning')"></span>
@@ -130,35 +133,11 @@ watch(() => props.selectedId, () => { void nextTick(revealActive) }, { immediate
 /* 搜索框：31 个运行时要靠它定位，原来用 bg-tertiary + 弱边框，在深色底上
    几乎与背景融成一片。抬到 secondary 底色、加高一档、图标提亮，
    聚焦时边框染强调色，才看得出这是个输入框。 */
+/* 皮肤由 QdSearchBox 统一提供（无边框 / 28px / bg-tertiary），这里只留外侧留白。
+   原来手写的内联 SVG 放大镜和「×」字符一并收掉：同一套图标才有同一套线宽。 */
 .cats-search {
-  display: flex; align-items: center; gap: 6px; margin: 0 var(--space-3) var(--space-5);
-  padding: 0 8px; height: 30px; flex-shrink: 0;
-  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm); color: var(--color-text-muted);
-  transition: border-color var(--transition-fast), background var(--transition-fast);
+  margin: 0 var(--space-3) var(--space-5);
 }
-
-.cats-search:hover { border-color: var(--color-border-focus-soft); }
-
-.cats-search:focus-within {
-  border-color: var(--color-accent);
-  background: var(--color-bg-primary);
-  color: var(--color-accent);
-}
-
-.cats-search-input {
-  flex: 1; min-width: 0; border: none; outline: none; background: none;
-  color: var(--color-text-primary); font-size: var(--text-xs); font-family: inherit;
-}
-
-.cats-search-input::placeholder { color: var(--color-text-disabled); }
-
-.cats-search-clear {
-  padding: 0; border: none; background: none; color: var(--color-text-muted);
-  font-size: var(--text-base); line-height: 1; cursor: pointer;
-}
-
-.cats-search-clear:hover { color: var(--color-text-primary); }
 
 .cats-empty {
   padding: var(--space-6) 10px; font-size: var(--text-xs); text-align: center;

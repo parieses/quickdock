@@ -3,6 +3,7 @@ import { ref, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { HardDrive, RotateCcw, Trash2, Plus, Eye, X } from '@lucide/vue'
 import { unwrap } from '../utils/api'
+import { formatBytes } from '../utils/bytes'
 import { getErrorMessage } from '../utils/error'
 import { CreateSnapshot, ListSnapshots, DeleteSnapshot, RestoreSnapshot, GetSnapshot } from '../../bindings/quickdock/services/snapshot/snapshotservice'
 import { GetValue, SetValue } from '../../bindings/quickdock/services/appservice'
@@ -192,12 +193,6 @@ async function handleDeleteSnapshot(id: string) {
   }
 }
 
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-}
-
 function formatDate(iso: string): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -268,7 +263,7 @@ function formatDate(iso: string): string {
             <!-- 自动快照的 label 是后端写的哨兵串，后台拿不到 t()，在这里翻译 -->
             <span class="snapshot-item-label">{{ s.label === 'auto' ? t('snapshotAutoLabel') : (s.label || t('snapshot')) }}</span>
             <span v-if="s.note" class="snapshot-item-note">{{ s.note }}</span>
-            <span class="snapshot-item-meta">{{ formatDate(s.created_at) }} · {{ formatSize(s.size) }}</span>
+            <span class="snapshot-item-meta">{{ formatDate(s.created_at) }} · {{ formatBytes(s.size) }}</span>
           </div>
           <div class="snapshot-item-actions">
             <button class="action-btn" :class="{ 'enabled-btn': previewId === s.id }" @click="togglePreview(s)" :title="t('snapshotPreviewAction')">

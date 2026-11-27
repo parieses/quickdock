@@ -157,11 +157,11 @@ onUnmounted(() => { if (copyTimer) clearTimeout(copyTimer) })
           </div>
 
           <footer class="md-footer">
-            <button class="md-btn" :disabled="!shownText" @click="copyAll">
+            <button class="md-btn qd-btn" :disabled="!shownText" @click="copyAll">
               <Check v-if="copied" :size="13" /><Copy v-else :size="13" />
               {{ copied ? t('mailDetailCopied') : t('mailDetailCopy') }}
             </button>
-            <button class="md-btn primary" @click="emit('close')">{{ t('close') }}</button>
+            <button class="md-btn qd-btn primary" @click="emit('close')">{{ t('close') }}</button>
           </footer>
         </div>
       </div>
@@ -262,7 +262,7 @@ onUnmounted(() => { if (copyTimer) clearTimeout(copyTimer) })
   color: var(--color-text-secondary); font-family: inherit; font-size: var(--text-sm); cursor: pointer;
 }
 .md-btn:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.md-btn:disabled { opacity: .4; cursor: default; }
+.md-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .md-btn.primary { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent); }
 
 .dialog-enter-active { transition: opacity .2s ease-out, transform .2s ease-out; }

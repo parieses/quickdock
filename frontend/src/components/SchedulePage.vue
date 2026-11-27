@@ -2,6 +2,7 @@
 import PageHeader from './PageHeader.vue'
 import QdTabs from './QdTabs.vue'
 import QdSwitch from './QdSwitch.vue'
+import QdSearchBox from './QdSearchBox.vue'
 import QdModal from './QdModal.vue'
 import { ref, computed, onMounted, onBeforeUnmount, onActivated, onDeactivated, watch, nextTick, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -938,10 +939,7 @@ async function openTaskFromCalendar(id: string) {
 
     <!-- 搜索 / 状态筛选 -->
     <div v-if="tasks.length && viewMode === 'list'" class="sched-toolbar">
-      <div class="sched-search">
-        <Search :size="13" class="sched-search-icon" />
-        <input v-model="query" class="sched-search-input" :placeholder="t('sched_search_ph')" />
-      </div>
+      <QdSearchBox class="sched-search" v-model="query" :placeholder="t('sched_search_ph')" :clearable="false" />
       <div class="sched-filters">
         <button v-for="f in STATUS_FILTERS" :key="f.v" type="button"
                 :class="['qd-btn', 'qd-btn-sm', { 'is-on': statusFilter === f.v }]"
@@ -1374,12 +1372,6 @@ async function openTaskFromCalendar(id: string) {
   border-radius: var(--radius-sm); flex: 1 1 180px; max-width: 320px;
 }
 .sched-search:focus-within { border-color: var(--color-border-focus-soft); }
-.sched-search-icon { color: var(--color-text-muted); flex-shrink: 0; }
-.sched-search-input {
-  flex: 1; min-width: 0; border: none; outline: none; background: none;
-  color: var(--color-text-primary); font-size: var(--text-sm); font-family: inherit;
-}
-.sched-search-input::placeholder { color: var(--color-text-disabled); }
 .sched-filters { display: flex; align-items: center; gap: var(--space-2); }
 .sched-count { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 
@@ -1435,7 +1427,7 @@ async function openTaskFromCalendar(id: string) {
   border: 1px solid var(--color-border); border-radius: var(--radius-sm); cursor: pointer;
 }
 .sched-run-cancel:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); }
-.sched-run-cancel:disabled { opacity: 0.5; cursor: default; }
+.sched-run-cancel:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 /* 弹窗内校验提示：与页面级 .sched-error 同色系，但去掉外边距（弹窗有自己的内边距） */
 .form-err {
@@ -1524,7 +1516,7 @@ async function openTaskFromCalendar(id: string) {
   border-radius: var(--radius-md); transition: background var(--transition-fast);
 }
 .sched-item:hover { background: var(--color-bg-hover); }
-.sched-item.disabled { opacity: 0.55; }
+.sched-item.disabled { opacity: var(--opacity-disabled); }
 /* 拖拽：抓起来的半透明、落点给一条左侧高亮 */
 .sched-item.dragging { opacity: 0.45; }
 .sched-item.drag-over { border-color: var(--color-accent); box-shadow: inset 0 2px 0 var(--color-accent); }
@@ -1552,7 +1544,7 @@ async function openTaskFromCalendar(id: string) {
 .item-icon.a-command,
 .item-icon.a-script { background: var(--color-cat-command); }
 .item-icon.a-http { background: var(--color-cat-http); }
-.item-icon.a-ai { background: var(--color-cat-ai); color: #06232b; }
+.item-icon.a-ai { background: var(--color-cat-ai); color: var(--color-cat-ai-text); }
 
 .item-main { flex: 1; min-width: 0; }
 .item-line1 { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
@@ -1608,7 +1600,7 @@ async function openTaskFromCalendar(id: string) {
   border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .act:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-active); }
-.act:disabled { opacity: 0.4; cursor: default; }
+.act:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .act.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 /* 行操作默认收起，只留启用开关（状态信号）。
    disabled 的「立即执行」常驻可见，同步阻塞期间的转圈才有落点。 */

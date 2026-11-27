@@ -30,6 +30,7 @@ import { SetAIPageVisible, RunScheduledTaskNow, ListScheduledTasks } from '../..
 import type { ScheduledTask } from '../../bindings/quickdock/internal/db/models'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
+import { fmtCost, fmtTokens } from '../utils/format'
 import { downloadText, safeFileName } from '../utils/download'
 import { useAiMarkdownBlocks } from '../composables/useAiMarkdownBlocks'
 import { useAiAttachments } from '../composables/useAiAttachments'
@@ -117,6 +118,7 @@ import {
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 
+import { reportError } from '../utils/reportError'
 // 这个 name 是 App.vue 里 <KeepAlive :include> 的匹配依据，改它等于让 AI 页失去保活。
 // 为什么必须显式声明：页面是经 defineAsyncComponent(import(...)) 注册的，而 KeepAlive 判断
 // 异步组件时读的是 `vnode.type.__asyncResolved`（内层 SFC 定义）上的名字 ——
@@ -342,8 +344,7 @@ async function approveHooks(on: boolean) {
     aiHooks.value = null
   } catch (e) {
     // 静默会让「钩子明明点了批准却仍不生效」变成一个没有出口的困惑，必须给可见反馈。
-    logErr('ai.approveHooks', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'ai.approveHooks')
   }
 }
 
@@ -479,7 +480,7 @@ async function restoreCheckpoint(cp: AICheckpointView) {
       void loadCheckpoints(activeId.value)
     }
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.restoreCheckpoint')
   }
 }
 
@@ -506,7 +507,7 @@ async function approveTool(tc: AIToolCall, decision: 'allow' | 'deny', remember 
   } catch (e) {
     tc.approval = 'pending'
     tc.denied = false
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.approveTool')
   }
 }
 
@@ -536,8 +537,7 @@ async function rememberGrantAndAllow(tc: AIToolCall) {
   } catch (e) {
     // 沉淀失败就不放行这次：用户点的是「以后都允许」，规则没落成却执行了，
     // 等于点了一个只有一次效果、下次照样弹的按钮。
-    toast.error(getErrorMessage(e))
-    logErr('ai:addApprovalGrant', e)
+    reportError(e, 'ai:addApprovalGrant')
     return
   }
   await approveTool(tc, 'allow', true)
@@ -559,7 +559,7 @@ async function runPlan(m: AIMessage) {
       const c = conversations.value.find((x) => x.id === convID)
       if (c) c.mode = 'chat'
     } catch (e) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'AIPage.runPlan')
       return
     }
   }
@@ -1117,7 +1117,7 @@ async function loadMoreConversations() {
     // 取满一页才可能有下一页；不足即已到末尾，把「加载更多」收掉。
     hasMoreConv.value = next.length === CONV_PAGE_SIZE
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.loadMoreConversations')
   } finally {
     loadingMoreConv.value = false
   }
@@ -1167,7 +1167,7 @@ async function loadMessages(convID: string, full = false) {
     checkpoints.value = []
     pageError.value = getErrorMessage(e)
     pageErrorRetry.value = () => { void loadMessages(convID, full) }
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.loadMessages')
     return
   }
   // 只保留当前会话的消息缓存：按 id 记忆化没有容量上限，
@@ -1208,7 +1208,7 @@ async function loadEarlierMessages() {
     // 取满整个窗口才可能还有更早；不足即到头。
     hasMoreEarlier.value = fresh.length >= nextWindow
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.loadEarlierMessages')
   } finally {
     loadingEarlier.value = false
   }
@@ -1325,7 +1325,7 @@ async function openCwd() {
   try {
     unwrap(await RevealInExplorer(convCwd.value))
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.openCwd')
   }
 }
 
@@ -1347,7 +1347,7 @@ async function openDir(dir: string) {
   try {
     unwrap(await RevealInExplorer(dir))
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.openDir')
   }
 }
 
@@ -1492,7 +1492,7 @@ async function onChangePermission(level: string) {
     // 落库失败就退回原状：留在「界面写着完全访问、实际每条都在问」的状态里，
     // 比切不成功更让人困惑。
     permLevel.value = prev
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.onChangePermission')
   }
 }
 
@@ -1566,8 +1566,7 @@ async function removeWorktree() {
       if (data?.cwd) convCwd.value = data.cwd
       toast.success(t('aiWorktreeRemoved'))
     } catch (e2) {
-      toast.error(getErrorMessage(e2))
-      logErr('AIPage:removeWorktree', e2)
+      reportError(e2, 'AIPage:removeWorktree')
       return
     }
   }
@@ -1602,7 +1601,7 @@ async function loadSkills() {
   try {
     applySkills(unwrap(await AIGetSkills()) as { dir?: string; skills?: AISkill[] } | null)
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.loadSkills')
   }
 }
 
@@ -1672,8 +1671,7 @@ async function loadPrompts() {
     const data = unwrap(await AIGetPrompts()) as { prompts?: AIPrompt[] } | null
     prompts.value = data?.prompts || []
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('AIPage:loadPrompts', e)
+    reportError(e, 'AIPage:loadPrompts')
   }
 }
 
@@ -1732,7 +1730,7 @@ async function loadConnectors() {
   try {
     connectors.value = mapConnectors(unwrap(await AIGetExtServers()))
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.loadConnectors')
   }
 }
 
@@ -1762,7 +1760,7 @@ async function toggleConnector(c: AIConnector) {
   try {
     connectors.value = mapConnectors(unwrap(await AISetExtServerEnabled(c.name, c.disabled)))
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.toggleConnector')
   }
 }
 
@@ -1777,7 +1775,7 @@ async function installSkill() {
     unwrap(await RevealInExplorer(skillsDir.value))
     toast.success(t('aiInstallSkillHint'))
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.installSkill')
   }
 }
 
@@ -1882,8 +1880,7 @@ async function cleanScratch() {
     const msg = unwrap<string>(await AICleanScratch(convCwd.value))
     toast.success(msg || t('aiScratchCleanDone'))
   } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('ai:cleanScratch', e)
+    reportError(e, 'ai:cleanScratch')
   } finally {
     scratchBusy.value = false
   }
@@ -2230,7 +2227,7 @@ async function pickNewTaskDir() {
   try {
     dir = unwrap<string | null>(await PickFolderPath(t('aiPickFolderTitle')))
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.pickNewTaskDir')
     return
   }
   if (!dir) {
@@ -2318,7 +2315,7 @@ async function heroSend() {
     mode.value = 'chat'
     revealSpace(target.spaceId)
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.heroSend')
     return
   }
   await send()
@@ -2406,7 +2403,7 @@ async function runTaskFromSpace(s: AISpace) {
     markSpaceRunning(taskID)
     toast.success(t('aiSpaceRunStarted'))
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.runTaskFromSpace')
   }
 }
 
@@ -2452,7 +2449,7 @@ async function delSpace(s: AISpace) {
     await Promise.all([loadConversations(), loadSpaces()])
     toast.success(t('aiMovedToRecycle'))
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.delSpace')
   }
 }
 
@@ -2488,7 +2485,7 @@ async function commitRenameSpace(s: AISpace) {
   try {
     unwrap<string>(await AIRenameSpace(id, name))
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.commitRenameSpace')
   }
   // 无论成败都重取：失败时界面若停在用户改过的样子，会与库里的名字不一致。
   await loadSpaces()
@@ -2528,7 +2525,7 @@ async function delConv(id: string) {
     await loadConversations()
     toast.success(t('aiMovedToRecycle'))
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.delConv')
   }
 }
 
@@ -2559,7 +2556,7 @@ async function onModelChange() {
     }
     lastActiveProfile = want
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.onModelChange')
     aiActive.value = restore
   }
 }
@@ -2601,7 +2598,7 @@ async function regenTitle() {
       else loadConversations()
     }
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.regenTitle')
   }
 }
 
@@ -2618,7 +2615,7 @@ async function toggleStar(c: AIConversation) {
     unwrap(await AISetConversationStar(c.id, next))
     c.starred = next
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.toggleStar')
   } finally {
     starBusy.value = ''
   }
@@ -2818,7 +2815,7 @@ async function runDigest() {
     // unwrap 的返回类型带 null（后端可能给空 data），而 summary 是非可空字符串
     if (i >= 0 && text) conversations.value[i].summary = text
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.runDigest')
   } finally {
     digestBusy.value = false
   }
@@ -2906,7 +2903,7 @@ async function commitRename(c: AIConversation) {
     const i = conversations.value.findIndex((x) => x.id === id)
     if (i >= 0 && saved) conversations.value[i].title = saved
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AIPage.commitRename')
     // 失败时拉回真实值：界面上的标题若停在用户改过的样子，会与库里不一致。
     await loadConversations()
   }
@@ -2949,23 +2946,6 @@ function formatStat(stat: AIStreamStat): string {
   // 这里就不显示——与设置页「未知模型不计价」保持同一口径。
   if (stat.cost && stat.cost > 0) parts.push(t('aiStatCost', { c: fmtCost(stat.cost) }))
   return parts.join(' · ')
-}
-
-// token 数折算成 k/M：真实对话的输入常是几万到几十万，原样打印会把这一行拖得很长
-function fmtTokens(n: number): string {
-  if (!n) return '0'
-  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 1 : 2) + 'M'
-  if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k'
-  return String(n)
-}
-
-// 费用格式化：与设置页用量面板同一口径（小额多给两位小数，否则 ¥0.00 会把
-// 「这条几乎不要钱」和「这条免费」显示成一个样子）。
-function fmtCost(n: number): string {
-  if (!n) return '¥0'
-  if (n >= 1) return '¥' + n.toFixed(2)
-  if (n >= 0.01) return '¥' + n.toFixed(3)
-  return '¥' + n.toFixed(4)
 }
 
 // 单条消息要显示的统计：优先用本次会话内存里的（含耗时/首字），
@@ -4276,7 +4256,7 @@ onUnmounted(() => {
 
 /* 图 / 公式的右键菜单（position 由 floating-ui 注入） */
 .ai-ctx {
-  z-index: 700;
+  z-index: var(--z-context);
   display: flex; flex-direction: column;
   min-width: 132px; padding: var(--space-2);
   border: 1px solid var(--color-border);
@@ -4301,7 +4281,7 @@ onUnmounted(() => {
 /* html 代码块预览：铺满窗口的遮罩 + 白色画布（示例页大多假设白底，
    跟随应用深色主题会把没写背景的示例页变成黑底黑字）。 */
 .ai-html-preview {
-  position: fixed; inset: 0; z-index: 800;
+  position: fixed; inset: 0; z-index: var(--z-modal);
   display: flex; align-items: center; justify-content: center;
   padding: var(--space-8);
   background: var(--color-bg-overlay);
@@ -4341,7 +4321,7 @@ onUnmounted(() => {
 .ai-img-viewer {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: var(--z-modal);
   background: var(--color-bg-overlay-deep);
   display: flex;
   align-items: center;

@@ -22,10 +22,10 @@ import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { requestCredential } from '../composables/useCredential'
 import { SSH_ERR } from '../utils/ssh'
+import { formatBytes } from '../utils/bytes'
 import { useAIAvailability } from '../composables/useAIAvailability'
 import { useToast } from '../composables/useToast'
 import {
-  formatBytes,
   formatDuration,
   isFingerprintError,
   sshErrorText,
@@ -744,11 +744,11 @@ defineExpose({
         <i class="sess-dot" />
         {{ stateText }}
       </span>
-      <button v-if="phase === 'connected'" class="sess-btn" @click="onDisconnectClick">
+      <button v-if="phase === 'connected'" class="sess-btn qd-btn" @click="onDisconnectClick">
         <Unplug :size="13" />
         <span>{{ t('sshDisconnect') }}</span>
       </button>
-      <button v-else-if="phase === 'error' || phase === 'closed'" class="sess-btn" @click="reconnect">
+      <button v-else-if="phase === 'error' || phase === 'closed'" class="sess-btn qd-btn" @click="reconnect">
         <RotateCw :size="13" />
         <span>{{ t('sshReconnect') }}</span>
       </button>
@@ -766,7 +766,7 @@ defineExpose({
          新 shell 不继承 vim/sudo/top/前台进程，静默连上等于骗用户。 -->
     <div v-if="autoNotice" class="sess-auto" :class="{ 'is-warn': !autoRetrying }">
       <span>{{ autoNotice }}</span>
-      <button class="sess-btn sess-btn--sm" @click="dismissAutoNotice">
+      <button class="sess-btn qd-btn sess-btn--sm" @click="dismissAutoNotice">
         {{ t('sshAutoReconnectCancel') }}
       </button>
     </div>
@@ -808,7 +808,7 @@ defineExpose({
             <p class="sess-card-title">{{ t('sshConnectFailed') }}</p>
             <p class="sess-card-msg">{{ errMsg }}</p>
             <div class="sess-card-actions">
-              <button class="sess-btn" @click="reconnect">{{ t('sshReconnect') }}</button>
+              <button class="sess-btn qd-btn" @click="reconnect">{{ t('sshReconnect') }}</button>
             </div>
           </div>
         </div>
@@ -819,7 +819,7 @@ defineExpose({
             <span>{{ errMsg || stateText }}</span>
             <em v-if="endHint" class="sess-banner-hint">{{ endHint }}</em>
           </div>
-          <button class="sess-btn sess-btn--sm" @click="reconnect">{{ t('sshReconnect') }}</button>
+          <button class="sess-btn qd-btn sess-btn--sm" @click="reconnect">{{ t('sshReconnect') }}</button>
         </div>
 
         <SshPasteDialog

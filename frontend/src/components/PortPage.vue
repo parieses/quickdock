@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Network, RefreshCw, Search, Trash2 } from '@lucide/vue'
+import { Network, RefreshCw, Trash2 } from '@lucide/vue'
 import { ListListeningPorts, KillProcess } from '../../bindings/quickdock/services/port/portservice'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import ConfirmDialog from './ConfirmDialog.vue'
+import QdSearchBox from './QdSearchBox.vue'
 
 const { t } = useI18n()
 
@@ -94,12 +95,9 @@ onUnmounted(() => {
         <span class="qd-page-sub port-sub">{{ t('portsDesc') }}</span>
       </div>
       <div class="qd-page-actions port-tools">
-        <div class="port-search">
-          <Search :size="13" />
-          <input v-model="kw" :placeholder="t('portsSearch')" class="port-search-input" />
-        </div>
-        <button class="port-btn" :class="{ 'is-loading': loading }" :disabled="loading" @click="load()">
-          <RefreshCw :size="13" class="port-btn-icon" />
+        <QdSearchBox v-model="kw" class="port-search" :placeholder="t('portsSearch')" />
+        <button class="port-btn qd-btn" :class="{ 'is-loading': loading }" :disabled="loading" @click="load()">
+          <RefreshCw :size="13" class="port-btn-icon qd-icon-btn" />
           <span v-if="loading && ports.length">{{ t('portsRefreshing') }}</span>
           <span v-else>{{ t('portsRefresh') }}</span>
         </button>
@@ -113,7 +111,7 @@ onUnmounted(() => {
         <span class="port-spinner" />
         <p>{{ t('portsLoading') }}</p>
       </div>
-      <div v-else-if="!filtered.length" class="port-empty">
+      <div v-else-if="!filtered.length" class="port-empty qd-empty">
         <Network :size="20" class="empty-icon" />
         <p>{{ error ? t('portsLoadFail') : t('portsEmpty') }}</p>
       </div>
@@ -164,10 +162,10 @@ onUnmounted(() => {
 /* 标题字号由 .qd-page-title 统一给出（--text-lg），不再用 --text-xl 另起一档 */
 .port-title-wrap { display: flex; align-items: baseline; gap: var(--space-3); }
 .port-tools { display: flex; align-items: center; gap: var(--space-3); margin-left: auto; }
-.port-search { display: flex; align-items: center; gap: 5px; padding: 5px 9px; border-radius: var(--radius-sm); background: var(--color-bg-secondary); color: var(--color-text-muted); min-width: 200px; }
-.port-search-input { flex: 1; border: none; outline: none; background: transparent; color: var(--color-text-primary); font-size: var(--text-md); }
+/* 盒子皮肤由 QdSearchBox 统一提供；这里只保底宽，避免在页头动作区被压成一条。 */
+.port-search { min-width: 200px; }
 .port-btn { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); height: 28px; padding: 0 11px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--color-border); background: var(--color-bg-secondary); color: var(--color-text-primary); }
-.port-btn:disabled { opacity: 0.5; cursor: default; }
+.port-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .port-btn.is-loading .port-btn-icon { animation: port-spin 0.8s linear infinite; }
 @keyframes port-spin { to { transform: rotate(360deg); } }
 
@@ -210,5 +208,5 @@ onUnmounted(() => {
 .port-path { flex: 1.6; min-width: 0; font-size: var(--text-sm); color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .port-kill { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); padding: var(--space-2) 9px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--color-border); background: transparent; color: var(--color-danger); transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast); }
 .port-kill:hover { background: var(--color-danger-bg); border-color: var(--color-danger-border); }
-.port-kill:disabled { opacity: .5; cursor: default; }
+.port-kill:disabled { opacity: var(--opacity-disabled); cursor: default; }
 </style>

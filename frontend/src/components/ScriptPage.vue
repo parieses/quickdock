@@ -17,6 +17,7 @@
 import PageHeader from './PageHeader.vue'
 import QdModal from './QdModal.vue'
 import QdSwitch from './QdSwitch.vue'
+import QdSearchBox from './QdSearchBox.vue'
 import ConfigEditor from './ConfigEditor.vue'
 import { KEEP_ALIVE } from '../pages/keepAlive'
 defineOptions({ name: KEEP_ALIVE.script })
@@ -1276,10 +1277,7 @@ onBeforeUnmount(() => {
       <!-- 空状态时整条工具栏都没有意义（没有可搜/可筛/可刷新的数据），
            只留标题 + 全屏引导页，避免出现两颗「新建」按钮 -->
       <div v-if="scripts.length" class="scr-head-actions">
-        <label class="scr-search">
-          <Search :size="14" />
-          <input v-model="keyword" :placeholder="t('scr_search')" />
-        </label>
+        <QdSearchBox v-model="keyword" class="scr-search" :icon-size="14" :placeholder="t('scr_search')" />
         <!-- 语言筛选与「只看失败」统一成胶囊，宽度和高度跟搜索框齐平 -->
         <label class="scr-pill" :class="{ on: !!langFilter }" :title="t('scr_allLangs')">
           <span>{{ langFilter ? langText(langFilter) : t('scr_allLangs') }}</span>
@@ -1603,13 +1601,12 @@ onBeforeUnmount(() => {
               <button class="scr-btn ghost sm" @click="clearRuns"><Trash2 :size="12" /> {{ t('scr_clearRuns') }}</button>
             </div>
             <div class="scr-logsearch">
-              <label class="scr-search grow">
-                <Search :size="13" />
-                <input
-                  v-model="logSearchKeyword" :placeholder="t('scr_logSearchPh')"
-                  @keyup.enter="searchLogs"
-                />
-              </label>
+              <QdSearchBox
+                v-model="logSearchKeyword"
+                class="scr-search grow"
+                :placeholder="t('scr_logSearchPh')"
+                @submit="searchLogs"
+              />
               <button class="scr-btn sm" :disabled="logSearchBusy" @click="searchLogs">
                 <LoaderCircle v-if="logSearchBusy" :size="12" class="spin" />
                 <Search v-else :size="12" />
@@ -1726,10 +1723,7 @@ onBeforeUnmount(() => {
           <span v-if="running" class="scr-running-dot" />
         </span>
         <div class="scr-tabs-gap" />
-        <label class="scr-search sm">
-          <Search :size="12" />
-          <input v-model="logFilter" :placeholder="t('scr_logFilterPh')" />
-        </label>
+        <QdSearchBox v-model="logFilter" class="scr-search sm" :icon-size="12" :placeholder="t('scr_logFilterPh')" />
         <button class="scr-btn ghost sm" :class="{ active: logErrOnly }" @click="logErrOnly = !logErrOnly">
           {{ t('scr_logErrOnly') }}
         </button>
@@ -1880,7 +1874,7 @@ onBeforeUnmount(() => {
   transition: border-color var(--transition-fast), background-color var(--transition-fast);
 }
 .scr-tpl:hover:not(:disabled) { border-color: var(--color-accent-border); background: var(--color-bg-hover); }
-.scr-tpl:disabled { opacity: 0.6; cursor: default; }
+.scr-tpl:disabled { opacity: var(--opacity-disabled-soft); cursor: default; }
 .scr-tpl-head { display: flex; align-items: center; justify-content: space-between; }
 .scr-tpl-lang {
   padding: 0 6px; line-height: 16px; border-radius: var(--radius-full);
@@ -1890,15 +1884,17 @@ onBeforeUnmount(() => {
 .scr-tpl:hover:not(:disabled) .scr-tpl-arrow { color: var(--color-accent); transform: translateX(2px); }
 .scr-tpl-name { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); }
 .scr-tpl-desc { font-size: var(--text-xs); line-height: 1.5; color: var(--color-text-muted); }
-.scr-search { display: flex; align-items: center; gap: var(--space-2); background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 0 var(--space-3); height: 30px; color: var(--color-text-muted); }
-.scr-search input { background: transparent; border: none; outline: none; color: var(--color-text-primary); font-size: var(--text-sm); width: 150px; }
+/* 搜索框皮肤由 QdSearchBox 统一提供（无边框 / 28px / bg-tertiary）。
+   原来宽度是靠内部 input 的 width 撑开的，改组件后 input 是 flex:1，
+   所以宽度必须落在盒子上，否则会在 flex 行里塌成 0。 */
+.scr-search { width: 150px; }
 .scr-btn { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-secondary); font-size: var(--text-sm); font-family: inherit; cursor: pointer; }
 .scr-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .scr-btn.primary { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent); }
 .scr-btn.danger { color: var(--color-danger); }
 .scr-btn.sm { height: 26px; font-size: var(--text-xs); padding: 0 var(--space-2); }
 .scr-btn.ghost { background: transparent; border-color: transparent; }
-.scr-btn:disabled { opacity: .6; cursor: default; }
+.scr-btn:disabled { opacity: var(--opacity-disabled-soft); cursor: default; }
 .scr-btn.ghost.active { background: var(--color-accent-bg); color: var(--color-accent); }
 /* 筛选胶囊：语言下拉与「只看失败」共用一套外观，替代原来的裸 select + 复选框 */
 .scr-pill {
@@ -1918,10 +1914,8 @@ onBeforeUnmount(() => {
 }
 .scr-args { width: 132px; height: 30px; background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-text-primary); font-size: var(--text-xs); padding: 0 var(--space-2); }
 .scr-args::placeholder { color: var(--color-text-muted); }
-.scr-search.sm { height: 26px; padding: 0 var(--space-2); }
-.scr-search.sm input { width: 110px; font-size: var(--text-xs); }
-.scr-search.grow { flex: 1 1 auto; }
-.scr-search.grow input { width: 100%; }
+.scr-search.sm { width: 110px; }
+.scr-search.grow { flex: 1 1 auto; width: auto; }
 .scr-banner { display: flex; align-items: center; gap: var(--space-2); margin: 0 var(--space-4) var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-secondary); font-size: var(--text-xs); color: var(--color-text-secondary); }
 .scr-banner.warn { border-color: var(--color-warning); color: var(--color-warning); }
 .scr-banner span { flex: 1 1 auto; }
@@ -1930,7 +1924,7 @@ onBeforeUnmount(() => {
 .scr-binding-name { color: var(--color-text-primary); }
 .scr-logsearch { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
 .scr-hits { list-style: none; margin: 0 0 var(--space-3); padding: 0; max-height: 180px; overflow: auto; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
-.scr-hits li { display: flex; gap: var(--space-3); padding: 3px var(--space-2); font-size: 11.5px; cursor: pointer; border-bottom: 1px solid var(--color-border); }
+.scr-hits li { display: flex; gap: var(--space-3); padding: 3px var(--space-2); font-size: var(--text-xs); cursor: pointer; border-bottom: 1px solid var(--color-border); }
 .scr-hits li:last-child { border-bottom: none; }
 .scr-hits li:hover { background: var(--color-bg-hover); }
 .scr-hit-text { white-space: pre-wrap; word-break: break-all; color: var(--color-text-secondary); }
@@ -1976,8 +1970,8 @@ onBeforeUnmount(() => {
 .scr-tabs { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-2) var(--space-5) 0; border-bottom: 1px solid var(--color-border); }
 .scr-tabs > button:not(.scr-btn) { padding: var(--space-2) var(--space-3); background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--color-text-muted); font-size: var(--text-sm); font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
 .scr-tabs > button:not(.scr-btn):hover { color: var(--color-text-primary); }
-.scr-tabs > button.active { color: var(--color-accent); border-bottom-color: var(--color-accent); }
-.scr-badge { font-size: 10px; background: var(--color-bg-tertiary); border-radius: 8px; padding: 0 5px; }
+.scr-tabs > button.active { color: var(--color-accent-ink); border-bottom-color: var(--color-accent); }
+.scr-badge { font-size: var(--text-2xs); background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 5px; }
 .scr-tabs-gap { flex: 1 1 auto; }
 
 .scr-code { flex: 1 1 auto; display: flex; min-height: 0; }

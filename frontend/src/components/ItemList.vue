@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import { copyToClipboard } from '../utils/clipboard'
 import { ref, inject, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../stores/workspace'
-import { Plus, Pencil, Trash2, Play, Link, Search, X, ArrowLeft } from '@lucide/vue'
+import { Plus, Pencil, Trash2, Play, Link, ArrowLeft } from '@lucide/vue'
 import TypeIcon from './TypeIcon.vue'
+import QdSearchBox from './QdSearchBox.vue'
 import ItemEditor from './ItemEditor.vue'
 import CreateDialog, { type CreateField } from './CreateDialog.vue'
 import { useCollectionFields } from '../composables/useCollectionFields'
@@ -16,6 +18,7 @@ import { DeleteItem, UpdateItem } from '../../bindings/quickdock/services/item/i
 import { matchesTextOrPinyin } from '../utils/pinyin'
 import type { CollectionItem, ToastAPI } from '../types'
 
+import { reportError } from '../utils/reportError'
 const store = useWorkspaceStore()
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
@@ -290,11 +293,10 @@ function isLocalPath(v: string): boolean {
 }
 
 async function copyItemValue(item: CollectionItem) {
-  try {
-    await navigator.clipboard.writeText(item.value || '')
+  if (await copyToClipboard(item.value || '')) {
     toast.success(t('copied'))
-  } catch (e) {
-    toast.error(getErrorMessage(e))
+  } else {
+    toast.error(t('copyFailed'))
   }
 }
 
@@ -302,7 +304,7 @@ async function revealItemPath(item: CollectionItem) {
   try {
     unwrap(await RevealInExplorer(item.value))
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'ItemList.revealItemPath')
   }
 }
 
@@ -458,21 +460,14 @@ defineExpose({ flashItemById })
     </div>
     <!-- 局部过滤：只搜当前集合内的条目；ESC 清空。
          与场景/集合栏同位置同高度（无集合时保留输入框但禁用，避免整行消失） -->
-    <div class="qd-panel-search" :class="{ 'is-disabled': !store.activeCollectionId || store.hasSearch }">
-      <Search :size="13" class="qd-search-icon" />
-      <input
-        v-model="localQuery"
-        type="text"
-        class="qd-search-input"
-        :placeholder="t('filterItemsPh')"
-        autocomplete="off"
-        :disabled="!store.activeCollectionId || store.hasSearch"
-        @keydown.esc="localQuery = ''"
-      />
-      <button v-if="filtering" class="qd-search-clear" @click="localQuery = ''" :title="t('clear')">
-        <X :size="12" />
-      </button>
-    </div>
+    <QdSearchBox
+      class="qd-panel-search"
+      v-model="localQuery"
+      :placeholder="t('filterItemsPh')"
+      :disabled="!store.activeCollectionId || store.hasSearch"
+      esc-to-clear
+      :clear-title="t('clear')"
+    />
     <!-- 批量操作条：勾选任意条目后出现。移动目标限同场景其它集合 -->
     <div v-if="selIds.size" class="item-batch">
       <label class="item-selall" :title="t('wsSelAll')">
@@ -694,7 +689,7 @@ defineExpose({ flashItemById })
 /* 打开次数徽标 */
 /* 右键菜单：fixed 定位 + 透明遮罩，与项目内其它浮层同一套语言 */
 .ctx-backdrop {
-  position: fixed; inset: 0; z-index: 900;
+  position: fixed; inset: 0; z-index: var(--z-ctx-backdrop);
 }
 .ctx-menu {
   position: fixed; min-width: 168px; padding: var(--space-2);
@@ -747,8 +742,21 @@ defineExpose({ flashItemById })
 /* ---- 多选批量 ---- */
 .item-check { flex-shrink: 0; width: 14px; height: 14px; opacity: 0; cursor: pointer; }
 .qd-row:hover .item-check, .item-check:checked { opacity: 1; }
-/* 勾选行的高亮（WebView2 不支持 :has()，勾选态用行上的 picked 类表达） */
-.qd-row.picked { background: var(--color-bg-hover); }
+/* 勾选行的高亮（WebView2 不支持 :has()，勾选态用行上的 picked 类表达）。
+   必须和 hover 分开：勾选是持久状态，用 select-bg + 左缘竖条（同 .qd-row.active），
+   hover 只是临时指向，用更淡的 bg-hover。共用底色时看不出哪些行已勾选。 */
+.qd-row.picked { background: var(--color-select-bg); }
+.qd-row.picked::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+}
 
 .item-batch {
   display: flex; align-items: center; gap: var(--space-2);

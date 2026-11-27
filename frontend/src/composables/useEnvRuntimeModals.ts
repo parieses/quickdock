@@ -28,6 +28,7 @@ import {
   EnvPHPConfigSet,
 } from '../../bindings/quickdock/services/env/environmentservice'
 
+import { reportError } from '../utils/reportError'
 interface InstallLike {
   version: string
   scope: string
@@ -115,7 +116,7 @@ export function useEnvRuntimeModals(deps: Deps) {
       phpModal.open = true
       deps.closeMenu()
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useEnvRuntimeModals.openPHPConfig')
     }
   }
 
@@ -137,7 +138,7 @@ export function useEnvRuntimeModals(deps: Deps) {
       toast.success(t('saved'))
       phpModal.open = false
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useEnvRuntimeModals.savePHPConfig')
     }
   }
 
@@ -308,7 +309,7 @@ export function useEnvRuntimeModals(deps: Deps) {
       // 会把 RuntimeLogView 的 split/逐行高亮/截断全部重算一遍。
       if (next !== redisModal.log) redisModal.log = next
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useEnvRuntimeModals.fetchRedisLog')
     } finally {
       redisLogFetching = false
     }
@@ -347,7 +348,7 @@ export function useEnvRuntimeModals(deps: Deps) {
       deps.closeMenu()
       startLogAuto()
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useEnvRuntimeModals.openRedisConfig')
     }
   }
 
@@ -359,7 +360,7 @@ export function useEnvRuntimeModals(deps: Deps) {
       toast.success(t('saved'))
       closeRedisModal()
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useEnvRuntimeModals.saveRedisConfig')
     }
   }
 
@@ -411,7 +412,7 @@ export function useEnvRuntimeModals(deps: Deps) {
       configModal.open = true
       deps.closeMenu()
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useEnvRuntimeModals.openConfig')
     }
   }
 
@@ -422,7 +423,7 @@ export function useEnvRuntimeModals(deps: Deps) {
       toast.success(t('saved'))
       configModal.open = false
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useEnvRuntimeModals.saveConfig')
     }
   }
 
@@ -497,7 +498,7 @@ export function useEnvRuntimeModals(deps: Deps) {
       ftpModal.open = true
       deps.closeMenu()
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useEnvRuntimeModals.openFTPConfig')
     }
   }
 
@@ -512,7 +513,7 @@ export function useEnvRuntimeModals(deps: Deps) {
       toast.success(t('saved'))
       ftpModal.open = false
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useEnvRuntimeModals.saveFTPConfig')
     }
   }
 
@@ -543,7 +544,7 @@ export function useEnvRuntimeModals(deps: Deps) {
       logModal.open = true
       deps.closeMenu()
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useEnvRuntimeModals.openLog')
     }
   }
 
@@ -555,7 +556,7 @@ export function useEnvRuntimeModals(deps: Deps) {
       const next = unwrap<string>(await EnvLogGet(logModal.runtime, logModal.version)) || ''
       if (next !== logModal.log) logModal.log = next
     } catch (e: any) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useEnvRuntimeModals.refreshLogModal')
     } finally {
       logModalFetching = false
     }

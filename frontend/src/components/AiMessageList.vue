@@ -25,6 +25,7 @@ import type { LiveBlock } from '../composables/useAiMarkdownBlocks'
 import type { AICompact, AIRun } from '../utils/aiRuns'
 import { pickActiveRun } from '../utils/aiRuns'
 import { fmtElapsed } from '../utils/aiRunTree'
+import { fmtCost, fmtTokens } from '../utils/format'
 import type {
   AIArtifact, AICheckpointView, AIJobRow, AIMessage, AIMsgImage, AIRuleFile, AISource, AIStreamStat, AIToolCall,
 } from '../types/ai'
@@ -216,22 +217,6 @@ function saveAsMsg(e: MouseEvent, m: AIMessage) {
 // —— 不会每来一个 chunk 重算一次；done 落库那一刻才重算一次，正好是「消息定格」。
 // 结果按消息 id 存成 Map，模板里只做一次 .get，不在模板里拼字符串或调格式化。
 const { showMsgCost } = useAiCostPreference()
-
-// 与 SettingsAI.vue 的 fmtTokens / fmtCost 逐行一致：设置页总量、每日柱、模型表
-// 都用这套口径，气泡上的单条金额必须一眼看得出是同一种钱。
-function fmtTokens(n: number): string {
-  if (!n) return '0'
-  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 1 : 2) + 'M'
-  if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k'
-  return String(n)
-}
-
-function fmtCost(n: number): string {
-  if (!n) return '¥0'
-  if (n >= 1) return '¥' + n.toFixed(2)
-  if (n >= 0.01) return '¥' + n.toFixed(3)
-  return '¥' + n.toFixed(4)
-}
 
 // 关掉开关时给一个稳定空 Map：每次渲染换新引用会让 v-memo 依赖白 diff 一遍。
 const NO_COST_LINES: ReadonlyMap<string, string> = new Map<string, string>()
@@ -1669,7 +1654,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   cursor: pointer;
 }
 .ai-load-older:hover { color: var(--color-text-primary); border-color: var(--color-border-light); }
-.ai-load-older:disabled { opacity: 0.6; cursor: default; }
+.ai-load-older:disabled { opacity: var(--opacity-disabled-soft); cursor: default; }
 
 .ai-msg.user { align-self: flex-end; align-items: flex-end; }
 

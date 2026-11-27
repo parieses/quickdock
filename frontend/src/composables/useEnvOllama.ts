@@ -13,6 +13,7 @@ import type { Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToast } from './useToast'
 import { unwrap } from '../utils/api'
+import { formatBytes } from '../utils/bytes'
 import { getErrorMessage } from '../utils/error'
 import { logWarn } from '../utils/logger'
 import { copyToClipboard } from '../utils/clipboard'
@@ -25,6 +26,7 @@ import {
   EnvOllamaCheckUpdate,
 } from '../../bindings/quickdock/services/env/environmentservice'
 
+import { reportError } from '../utils/reportError'
 export interface OllamaModel {
   name: string
   size: number
@@ -137,11 +139,9 @@ export function useEnvOllama(deps: EnvOllamaDeps) {
 
   function copyOllamaModel(name: string) { copyOllamaText(name) }
 
-  /** 把字节格式化成人类可读体积。模型都以 GB 计，小于 1 GB 才降到 MB。 */
+  /** Ollama 模型体积：口径同全站 formatBytes，只是 0 值显示破折号（未采集到）。 */
   function ollamaSize(n: number): string {
-    if (!n) return '—'
-    const gb = n / 1024 ** 3
-    return gb >= 1 ? gb.toFixed(2) + ' GB' : (n / 1024 ** 2).toFixed(0) + ' MB'
+    return formatBytes(n, '—')
   }
   function ollamaTime(s: string): string {
     if (!s) return '—'
@@ -209,7 +209,7 @@ export function useEnvOllama(deps: EnvOllamaDeps) {
       ollamaDelTarget.value = null
       await loadOllama()
     } catch (e) {
-      toast.error(getErrorMessage(e))
+      reportError(e, 'useEnvOllama.deleteOllamaModel')
     }
   }
 

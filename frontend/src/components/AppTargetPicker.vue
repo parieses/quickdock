@@ -5,15 +5,14 @@
 // 3. 「已装应用」下拉列出后端 ScanInstalledApps 扫描到的开始菜单应用，
 //    点选回填安装路径。扫描有后端缓存，首次可能要几秒（面板内有 loading 提示）。
 // 供定时任务（action=app）与工作空间项目（类型=应用）两处复用。
-import { ref, computed, inject, onBeforeUnmount } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
-import { getErrorMessage } from '../utils/error'
-import { logErr } from '../utils/logger'
 import { ScanInstalledApps, SelectLocalFile } from '../../bindings/quickdock/services/appservice'
-import type { ToastAPI } from '../types'
-import { ChevronDown, FolderOpen, AppWindow, LoaderCircle, Search } from '@lucide/vue'
+import { ChevronDown, FolderOpen, AppWindow, LoaderCircle } from '@lucide/vue'
+import QdSearchBox from './QdSearchBox.vue'
 
+import { reportError } from '../utils/reportError'
 interface InstalledApp { name: string; path: string; category: string; iconBase64?: string }
 
 const props = defineProps<{
@@ -26,7 +25,6 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const toast = inject<ToastAPI>('toast')!
 
 const open = ref(false)
 const loading = ref(false)
@@ -57,8 +55,7 @@ async function loadApps() {
     apps.value = unwrap<InstalledApp[]>(await ScanInstalledApps()) ?? []
     loaded.value = true
   } catch (e) {
-    logErr('AppTargetPicker.scan', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AppTargetPicker.scan')
   } finally {
     loading.value = false
   }
@@ -75,8 +72,7 @@ async function browse() {
     const p = unwrap<string>(await SelectLocalFile(t('appPickerBrowseTitle'))) ?? ''
     if (p) emit('update:modelValue', p)
   } catch (e) {
-    logErr('AppTargetPicker.browse', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'AppTargetPicker.browse')
   }
 }
 
@@ -102,11 +98,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
         :placeholder="props.placeholder"
         @input="onInput"
       />
-      <button type="button" class="ap-btn" :class="{ active: open }" :title="t('appPickerChooseApp')" @click="toggle">
+      <button type="button" class="ap-btn qd-btn" :class="{ active: open }" :title="t('appPickerChooseApp')" @click="toggle">
         <AppWindow :size="14" />
         <ChevronDown :size="11" />
       </button>
-      <button type="button" class="ap-btn" :title="t('appPickerBrowse')" @click="browse">
+      <button type="button" class="ap-btn qd-btn" :title="t('appPickerBrowse')" @click="browse">
         <FolderOpen :size="14" />
       </button>
     </div>
@@ -116,8 +112,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
       <div class="ap-mask" @click="close"></div>
       <div class="ap-panel">
         <div class="ap-search">
-          <Search :size="13" />
-          <input v-model="query" type="text" :placeholder="t('appPickerSearchPh')" />
+          <QdSearchBox v-model="query" :placeholder="t('appPickerSearchPh')" />
         </div>
         <div class="ap-list">
           <p v-if="loading" class="ap-hint">
@@ -166,27 +161,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   transition: background-color 0.12s, color 0.12s;
 }
 .ap-btn:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
-.ap-btn.active { color: var(--color-accent); border-color: var(--color-accent); }
+.ap-btn.active { color: var(--color-accent-ink); border-color: var(--color-accent); }
 
-.ap-mask { position: fixed; inset: 0; z-index: 20; }
+.ap-mask { position: fixed; inset: 0; z-index: var(--z-ctx-backdrop); }
 .ap-panel {
-  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 21;
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: calc(var(--z-ctx-backdrop) + 1);
   background: var(--color-popover-bg);
   border: 1px solid var(--popover-border-color); border-radius: var(--radius-sm);
   box-shadow: 0 8px 24px var(--color-bg-overlay);
   overflow: hidden;
 }
+/* 弹层顶部搜索：外圈只留底色留白与一条分隔线，盒子皮肤由 QdSearchBox 统一提供。 */
 .ap-search {
-  display: flex; align-items: center; gap: var(--space-3);
-  padding: var(--space-4) 10px;
+  padding: var(--space-3) 10px;
   border-bottom: 1px solid var(--color-border);
-  color: var(--color-text-muted);
-}
-.ap-search input {
-  flex: 1; min-width: 0;
-  border: none; outline: none;
-  background: transparent; color: var(--color-text-primary);
-  font-size: var(--text-sm); font-family: inherit;
 }
 .ap-list { max-height: 240px; overflow-y: auto; }
 .ap-hint {

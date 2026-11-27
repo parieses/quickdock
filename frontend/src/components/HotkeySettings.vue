@@ -14,6 +14,7 @@ import { isAppLocked } from '../utils/appLock'
 import CheatSheetModal from './CheatSheetModal.vue'
 import type { HotkeyConfig, ToastAPI } from '../types'
 
+import { reportError } from '../utils/reportError'
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 
@@ -249,8 +250,7 @@ async function saveAll() {
   } catch (e) {
     msgTone.value = 'err'
     message.value = t('saveFailed2') + ': ' + getErrorMessage(e)
-    toast.error(getErrorMessage(e))
-    logErr('HotkeySettings', e)
+    reportError(e, 'HotkeySettings')
   }
 }
 

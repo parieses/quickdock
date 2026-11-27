@@ -206,7 +206,7 @@ function showAllOfDay(ds: string) {
     </div>
 
     <!-- 整月没有任何安排：不留一张空网格，直接给插画 + 一个能立刻做完的动作 -->
-    <div v-if="!loading && monthEventCount === 0" class="cal-empty">
+    <div v-if="!loading && monthEventCount === 0" class="cal-empty qd-empty">
       <svg class="cal-empty-art" viewBox="0 0 120 96" aria-hidden="true">
         <rect x="14" y="22" width="92" height="64" rx="10" class="art-card" />
         <rect x="14" y="22" width="92" height="18" rx="10" class="art-head" />

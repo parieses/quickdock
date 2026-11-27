@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { downloadBlob } from '../utils/download'
 import PageHeader from './PageHeader.vue'
 import QdTabs from './QdTabs.vue'
 import QdSwitch from './QdSwitch.vue'
+import QdSearchBox from './QdSearchBox.vue'
 import QdModal from './QdModal.vue'
 defineOptions({ name: KEEP_ALIVE.monitor })
 // name 的唯一来源：pages/keepAlive.ts（与 KeepAlive 白名单共用同一常量）
@@ -55,7 +57,7 @@ interface MonitorStat {
 }
 import {
   Plus, Play, Pencil, Trash2, Globe, Activity, RefreshCw,
-  ChevronDown, ChevronUp, CheckCircle2, XCircle, Radio, Download, Search, Power, X, Wrench,
+  ChevronDown, ChevronUp, CheckCircle2, XCircle, Radio, Download, Power, Wrench,
   Bell as BellIcon, BellOff, Network, Cpu, TerminalSquare, Save,
   // 汇总卡的延迟趋势箭头：向上=变慢（告警色）、向下=变快、持平用一条短横线
   TrendingUp, TrendingDown, Minus, Ellipsis, AlertTriangle, History,
@@ -869,15 +871,8 @@ async function exportCsv(m: Monitor) {
       lines.push([l.checkedAt, l.status, l.statusCode, l.latencyMs, l.error].map(esc).join(','))
     }
     const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
     // 文件名去掉 Windows 非法字符，否则下载静默失败
-    a.download = 'monitor-' + m.name.replace(/[\\/:*?"<>|]/g, '_') + '-' + new Date().toISOString().slice(0, 10) + '.csv'
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(url)
+    downloadBlob('monitor-' + m.name.replace(/[\\/:*?"<>|]/g, '_') + '-' + new Date().toISOString().slice(0, 10) + '.csv', blob)
   } catch (e) {
     error.value = getErrorMessage(e)
   }
@@ -1223,11 +1218,7 @@ onUnmounted(() => {
       <label v-if="visibleMonitors.length > 1" class="mon-selall" :title="t('mon_sel_all')">
         <input type="checkbox" :checked="allVisibleSelected" @change="toggleSelectAll" />
       </label>
-      <div class="mon-search">
-        <Search :size="13" />
-        <input v-model="query" class="mon-search-input" :placeholder="t('mon_search_ph')" />
-        <button v-if="query" class="mon-search-clear" @click="query = ''"><X :size="12" /></button>
-      </div>
+      <QdSearchBox v-model="query" class="mon-search" :placeholder="t('mon_search_ph')" />
       <span v-if="query" class="mon-search-count">{{ t('mon_search_count', { n: visibleMonitors.length }) }}</span>
       <span class="mon-tools-fill" />
       <template v-if="selectedIds.size">
@@ -1775,20 +1766,9 @@ onUnmounted(() => {
   padding: 0 var(--space-7) var(--space-2);
 }
 .mon-selall { display: inline-flex; align-items: center; flex-shrink: 0; cursor: pointer; }
+/* 皮肤由 QdSearchBox 统一提供，这里只定宽。 */
 .mon-search {
-  display: flex; align-items: center; gap: var(--space-3);
-  width: 220px; padding: var(--space-2) var(--space-4); flex-shrink: 0;
-  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm); color: var(--color-text-muted);
-}
-.mon-search:focus-within { border-color: var(--color-border-focus-soft); }
-.mon-search-input {
-  flex: 1; min-width: 0; border: none; outline: none; background: none;
-  color: var(--color-text-primary); font-size: var(--text-sm); font-family: inherit;
-}
-.mon-search-clear {
-  display: inline-flex; align-items: center; border: none; background: none;
-  color: var(--color-text-muted); cursor: pointer; padding: 0;
+  width: 220px; flex-shrink: 0;
 }
 .mon-search-count { font-size: var(--text-xs); color: var(--color-text-muted); flex-shrink: 0; }
 .mon-tools-fill { flex: 1; }
@@ -1800,13 +1780,13 @@ onUnmounted(() => {
   display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap;
 }
 .mon-selbtn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
-.mon-selbtn:disabled { opacity: 0.5; cursor: not-allowed; }
+.mon-selbtn:disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
 .mon-selbtn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); }
 /* 勾选态把整条工具条换成强调底：批量动作只在选中后出现，
    如果还跟搜索框混在同一条灰底里，等于没有提示。 */
 .mon-tools-batch {
   background: var(--color-accent-bg);
-  border: 1px solid var(--color-accent-border, var(--color-border));
+  border: 1px solid var(--color-accent-border);
   border-radius: var(--radius-sm);
   margin: 0 var(--space-7) var(--space-2);
   padding: 4px var(--space-4);
@@ -1842,7 +1822,7 @@ onUnmounted(() => {
   border-radius: var(--radius-md); transition: background var(--transition-fast);
 }
 .mon-item:hover { background: var(--color-bg-hover); }
-.mon-item.disabled { opacity: 0.55; }
+.mon-item.disabled { opacity: var(--opacity-disabled); }
 /* 勾选行的高亮不能只靠 checkbox：停用行本身半透明，只多一个小勾很难看出来 */
 .mon-item.picked { border-color: var(--color-accent); }
 /* 拖拽中：半透明 + 虚线框，告诉用户「这条正在被拖」而不是页面卡了 */
@@ -1861,7 +1841,7 @@ onUnmounted(() => {
 /* 回收站里的条目：只读展示，没有展开/勾选那套交互 */
 
 /* 维护 / 静默已收进第一行的 .item-tag，原来的 .meta-maint / .meta-mute 随之删除 */
-.mon-item .act.active { color: var(--color-warning, var(--color-accent)); }
+.mon-item .act.active { color: var(--color-warning); }
 
 /* 视图切换 tab：活动列表 / 状态页，像标签页一样一眼分清当前在哪 */
 .mon-viewtabs { display: flex; gap: var(--space-2); padding: 0 var(--space-7) 10px; }
@@ -1872,7 +1852,7 @@ onUnmounted(() => {
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--color-bg-tertiary); color: var(--color-text-muted); font-size: var(--text-xs);
 }
-.vt-count.warn { background: var(--color-danger-bg, var(--color-bg-tertiary)); color: var(--color-danger, var(--color-text-muted)); }
+.vt-count.warn { background: var(--color-danger-bg); color: var(--color-danger); }
 .mon-state { display: flex; align-items: center; gap: var(--space-4); justify-content: center; padding: var(--space-8); color: var(--color-text-muted); }
 
 .item-head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-5) 14px; cursor: pointer; }
@@ -1955,7 +1935,7 @@ onUnmounted(() => {
   border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .act:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-active); }
-.act:disabled { opacity: 0.4; cursor: default; }
+.act:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .act.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 /* 行操作默认收起，只留启用开关（那是状态信号，必须常驻）。
    与知识库 .kb-doc-actions 同一套「常驻占位 + 透明度切换」，不用
@@ -2020,7 +2000,7 @@ onUnmounted(() => {
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-xs);
 }
 .eb-retry:hover:not(:disabled) { background: var(--color-danger-bg); }
-.eb-retry:disabled { opacity: 0.5; cursor: default; }
+.eb-retry:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 /* 最近故障时间线：margin-top:auto 让它在监控少时落到页面底部填白，
    监控多时自然跟在列表末尾一起滚。 */
@@ -2062,7 +2042,7 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 .logs-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
-.logs-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.logs-btn:disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
 .logs-btn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); }
 .logs-empty { font-size: var(--text-xs); color: var(--color-text-muted); padding: var(--space-3) 0; }
 .logs-load-error { display: inline-flex; align-items: center; gap: var(--space-3); font-size: var(--text-xs); color: var(--color-danger); padding: var(--space-3) 0; }

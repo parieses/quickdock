@@ -27,7 +27,8 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AtSign, ChevronRight, FileText, FileUp, FolderPlus, MessageSquare, Network, Search, Settings2 } from '@lucide/vue'
+import { AtSign, ChevronRight, FileText, FileUp, FolderPlus, MessageSquare, Network, Settings2 } from '@lucide/vue'
+import QdSearchBox from './QdSearchBox.vue'
 import type { AIConnector, AIMentionItem, AIPrompt, AISkill } from '../types/ai'
 
 // 四个列表都给默认值：模板里直接读 `props.prompts.length`，一旦某个父组件漏传
@@ -108,7 +109,9 @@ const navItems = computed(() => [
 
 // —— 子面板搜索 ——
 const query = ref('')
-const searchEl = ref<HTMLInputElement | null>(null)
+const searchBoxRef = ref<InstanceType<typeof QdSearchBox> | null>(null)
+/** 真实 input：全局 keydown 要靠它区分「在搜索框里按 Esc」和「在面板里按 Esc」。 */
+const searchInputEl = () => searchBoxRef.value?.inputEl ?? null
 
 const searchPlaceholder = computed(() => ({
   file: t('aiPlusSearchFiles'),
@@ -216,7 +219,7 @@ watch(section, () => {
 function onKeydown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
   if (e.isComposing || e.keyCode === 229) return
-  if (e.target === searchEl.value && query.value) {
+  if (e.target === searchInputEl() && query.value) {
     query.value = ''
     e.stopPropagation()
     return
@@ -266,16 +269,13 @@ onBeforeUnmount(() => {
     :style="panelH ? { height: panelH + 'px' } : undefined"
     @mouseenter="cancelHover"
   >
-    <div class="ai-plus-search">
-      <Search :size="13" class="ai-plus-search-icon" />
-      <input
-        ref="searchEl"
-        v-model="query"
-        class="ai-plus-search-input"
-        :placeholder="searchPlaceholder"
-        spellcheck="false"
-      />
-    </div>
+    <QdSearchBox
+      ref="searchBoxRef"
+      v-model="query"
+      class="ai-plus-search"
+      :clearable="false"
+      :placeholder="searchPlaceholder"
+    />
 
     <div ref="listEl" class="ai-plus-list">
       <!-- 引用：本对话碰过的文件在前，工作目录候选在后（与手打 @ 同源）。
@@ -420,7 +420,7 @@ onBeforeUnmount(() => {
 .ai-plus-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: var(--z-ctx-backdrop);
 }
 
 /* —— 左：分类浮层 ——
@@ -429,7 +429,7 @@ onBeforeUnmount(() => {
   position: absolute;
   left: 12px;
   bottom: calc(100% - 4px);
-  z-index: 41;
+  z-index: calc(var(--z-ctx-backdrop) + 1);
   width: 148px;
   max-width: calc(100% - 24px);
   padding: 5px;
@@ -494,7 +494,7 @@ onBeforeUnmount(() => {
   position: absolute;
   left: 166px; /* 12 + 148 + 6：左列右缘再留一道缝 */
   bottom: calc(100% - 4px);
-  z-index: 41;
+  z-index: calc(var(--z-ctx-backdrop) + 1);
   display: flex;
   flex-direction: column;
   width: 300px;
@@ -508,35 +508,11 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-/* 搜索框：固定在顶部，不跟着列表滚 */
+/* 搜索框固定在顶部不跟着列表滚；皮肤由 QdSearchBox 统一提供，这里只留外侧留白。 */
 .ai-plus-search {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
   flex: none;
   margin: 0 var(--space-4) 5px;
-  padding: 5px var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-secondary);
 }
-
-.ai-plus-search:focus-within { border-color: var(--color-border-focus-soft); }
-
-.ai-plus-search-icon { flex: none; color: var(--color-text-muted); }
-
-.ai-plus-search-input {
-  flex: 1;
-  min-width: 0;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--color-text-primary);
-  font-family: inherit;
-  font-size: var(--text-sm);
-}
-
-.ai-plus-search-input::placeholder { color: var(--color-text-disabled); }
 
 /* 列表：唯一可滚动的区域。min-height:0 不能省——flex 子项默认不肯矮于内容，
    少了它整列会顶穿面板，被外层 overflow:hidden 直接裁掉。 */

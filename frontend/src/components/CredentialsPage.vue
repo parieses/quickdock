@@ -17,7 +17,6 @@ import {
   LockKeyhole, MoreHorizontal, Plus, RefreshCw, Shield, Terminal, Trash2, Upload, Wand2,
 } from '@lucide/vue'
 import { unwrap } from '../utils/api'
-import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { useToast } from '../composables/useToast'
 import type { CredentialSummary } from '../composables/useCredential'
@@ -28,6 +27,7 @@ import {
 } from '../../bindings/quickdock/services/credentials/credentialsservice'
 import { LockStatus, SelectLocalFile, SelectSavePath } from '../../bindings/quickdock/services/appservice'
 
+import { reportError } from '../utils/reportError'
 const { t } = useI18n()
 const toast = useToast()
 
@@ -227,8 +227,7 @@ async function load(keepId = '') {
     }
   } catch (e) {
     loadFailed.value = true
-    toast.error(getErrorMessage(e) || t('credLoadFailed'))
-    logErr('CredentialsPage.load', e)
+    reportError(e, 'CredentialsPage.load', { fallback: t('credLoadFailed') })
   } finally {
     loading.value = false
   }
@@ -287,8 +286,7 @@ async function save() {
     await load(saved?.id ?? selectedId.value)
     await loadStatus()
   } catch (e) {
-    toast.error(getErrorMessage(e) || t('credSaveFailed'))
-    logErr('CredentialsPage.save', e)
+    reportError(e, 'CredentialsPage.save', { fallback: t('credSaveFailed') })
   } finally {
     saving.value = false
   }
@@ -306,8 +304,7 @@ async function remove() {
     await load()
     await loadStatus()
   } catch (e) {
-    toast.error(getErrorMessage(e) || t('credDeleteFailed'))
-    logErr('CredentialsPage.delete', e)
+    reportError(e, 'CredentialsPage.delete', { fallback: t('credDeleteFailed') })
   }
 }
 
@@ -328,8 +325,7 @@ async function toggleReveal() {
     form.secret = data?.secret ?? ''
     showSecret.value = true
   } catch (e) {
-    toast.error(getErrorMessage(e) || t('credRevealFailed'))
-    logErr('CredentialsPage.reveal', e)
+    reportError(e, 'CredentialsPage.reveal', { fallback: t('credRevealFailed') })
   }
 }
 
@@ -341,8 +337,7 @@ async function copySecret() {
     const data = unwrap<{ clearedInSec: number }>(res)
     toast.success(t('credCopied', { sec: data?.clearedInSec ?? 30 }))
   } catch (e) {
-    toast.error(getErrorMessage(e) || t('credCopyFailed'))
-    logErr('CredentialsPage.copy', e)
+    reportError(e, 'CredentialsPage.copy', { fallback: t('credCopyFailed') })
   }
 }
 
@@ -372,8 +367,7 @@ async function toggleExtension() {
       await loadStatus()
       toast.success(t('credExtDisabled'))
     } catch (e) {
-      toast.error(getErrorMessage(e) || t('credExtEnableFailed'))
-      logErr('CredentialsPage.extOff', e)
+      reportError(e, 'CredentialsPage.extOff', { fallback: t('credExtEnableFailed') })
     } finally {
       extBusy.value = false
     }
@@ -385,8 +379,7 @@ async function toggleExtension() {
     await loadStatus()
     toast.success(t('credExtEnabled'))
   } catch (e) {
-    toast.error(getErrorMessage(e) || t('credExtEnableFailed'))
-    logErr('CredentialsPage.extOn', e)
+    reportError(e, 'CredentialsPage.extOn', { fallback: t('credExtEnableFailed') })
   } finally {
     extBusy.value = false
   }
@@ -398,8 +391,7 @@ async function copyExtKey() {
     unwrap(await CopyExtensionKey())
     toast.success(t('credExtCopied'))
   } catch (e) {
-    toast.error(getErrorMessage(e) || t('credExtEnableFailed'))
-    logErr('CredentialsPage.extCopy', e)
+    reportError(e, 'CredentialsPage.extCopy', { fallback: t('credExtEnableFailed') })
   }
 }
 
@@ -465,8 +457,7 @@ async function runTransfer() {
     }
     transferPassword.value = ''
   } catch (e) {
-    toast.error(getErrorMessage(e) || t('credTransferFailed'))
-    logErr('CredentialsPage.transfer', e)
+    reportError(e, 'CredentialsPage.transfer', { fallback: t('credTransferFailed') })
   } finally {
     transferBusy.value = false
   }
@@ -873,9 +864,9 @@ onUnmounted(() => {
   min-width: 152px;
   padding: var(--space-2);
   background: var(--color-bg-secondary);
-  border: 1px solid var(--popover-border-color, var(--color-border));
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-popover, 0 8px 24px rgba(0, 0, 0, 0.35));
+  box-shadow: var(--shadow-pop);
 }
 
 .cred-more-item {
@@ -1080,7 +1071,7 @@ onUnmounted(() => {
 }
 
 .cred-item.is-active .cred-item-icon {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .cred-item-main {

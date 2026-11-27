@@ -52,7 +52,7 @@ const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
   background: var(--color-accent);
   border-color: var(--color-accent);
 }
-.qd-switch:disabled { opacity: 0.5; cursor: default; }
+.qd-switch:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .qd-switch-thumb {
   position: absolute;
   top: 2px;

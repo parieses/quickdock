@@ -4,8 +4,9 @@
 // 都走这里，避免各写一遍 a.click + revoke 的组合。踩过的两个坑记在下面：
 //
 // 1. a 元素必须进 DOM：部分 WebView 版本上，未挂载的 <a> 调 click() 不触发下载。
-// 2. revoke 要延到下一轮事件循环：同步 revoke 会让 WebView 拿到一个空文件，
-//    表现为「下载下来的文件是 0 字节」。
+// 2. revoke 必须延后：同步 revoke 会让 WebView 拿到空文件（0 字节）；
+//    WebView2 取流是异步的，留 1s 覆盖大文件场景（此前 SshPage/StatusPage
+//    各自写 1000ms 就是这个原因，统一到此处）。
 
 /** 触发一次「另存为」下载。blob 由调用方构造（CSV 要带 BOM 等差异自己处理）。 */
 export function downloadBlob(filename: string, blob: Blob): void {
@@ -16,7 +17,7 @@ export function downloadBlob(filename: string, blob: Blob): void {
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
-  setTimeout(() => URL.revokeObjectURL(url), 0)
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 /** 导出纯文本文件（Markdown / txt 等），按 UTF-8 写。 */

@@ -260,20 +260,20 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
   color: var(--color-text-secondary);
 }
 
-.ai-perm-badge.is-disabled { opacity: 0.5; cursor: default; }
+.ai-perm-badge.is-disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 /* 点外面收起菜单。z-index 比菜单低一层，菜单内部点击不受影响。 */
 .ai-perm-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: var(--z-ctx-backdrop);
 }
 
 .ai-perm-menu {
   position: absolute;
   right: 0;
   bottom: calc(100% + 8px);
-  z-index: 41;
+  z-index: calc(var(--z-ctx-backdrop) + 1);
   width: 260px;
   padding: var(--space-3);
   border: 1px solid var(--color-border);

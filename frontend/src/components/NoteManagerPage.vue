@@ -10,13 +10,14 @@ import { Events } from '@wailsio/runtime'
 import { useSaveAs } from '../composables/useSaveAs'
 import { pendingOpenNoteId, pendingOpenTodoId, pendingCreateNote, navigate, navigateTo } from '../composables/bridge'
 import { unwrap } from '../utils/api'
-import { getErrorMessage } from '../utils/error'
+import { writeStored } from '../utils/storage'
 import { pinyinMatch, matchesTextOrPinyin } from '../utils/pinyin'
 import { debounce } from '../utils/debounce'
 import ConfirmDialog from './ConfirmDialog.vue'
 import NoteTreeNode from './NoteTreeNode.vue'
 import NoteAiPanel from './NoteAiPanel.vue'
 import EntityLinkPicker from './EntityLinkPicker.vue'
+import QdSearchBox from './QdSearchBox.vue'
 import NoteGraphPanel from './NoteGraphPanel.vue'
 import NoteOutlinePanel from './NoteOutlinePanel.vue'
 import { marked } from 'marked'
@@ -59,6 +60,7 @@ import {
 } from '@lucide/vue'
 import type { ToastAPI, Note, WikiTarget, LinkTargetGroups, EntityType } from '../types'
 
+import { reportError } from '../utils/reportError'
 marked.setOptions({ breaks: true, gfm: true })
 
 const { t } = useI18n()
@@ -171,8 +173,8 @@ function loadTreePrefs() {
   } catch { /* ignore */ }
   treeCollapsed.value = localStorage.getItem(TREE_C_KEY) === '1'
 }
-function persistTreeWidth() { try { localStorage.setItem(TREE_W_KEY, String(treeWidth.value)) } catch { /* ignore */ } }
-function persistTreeCollapsed() { try { localStorage.setItem(TREE_C_KEY, treeCollapsed.value ? '1' : '0') } catch { /* ignore */ } }
+function persistTreeWidth() { writeStored(TREE_W_KEY, String(treeWidth.value)) }
+function persistTreeCollapsed() { writeStored(TREE_C_KEY, treeCollapsed.value ? '1' : '0') }
 function toggleTreeCollapsed() { treeCollapsed.value = !treeCollapsed.value; persistTreeCollapsed() }
 
 // 分割线拖拽：按下后跟随鼠标改宽度，按 .notes-body 左缘换算（树贴着 body 左边）。
@@ -214,7 +216,7 @@ async function confirmBatchDelete() {
     for (const id of ids) unwrap(await DeleteNoteNode(id))
     if (ids.includes(selectedDocId.value)) { selectedDocId.value = ''; docContent.value = ''; docTagsText.value = '' }
     toast.success(t('deleted'))
-  } catch (e) { toast.error(getErrorMessage(e)) } finally {
+  } catch (e) { reportError(e, 'NoteManagerPage.confirmBatchDelete') } finally {
     showBatchDel.value = false; clearSelection(); await load()
   }
 }
@@ -225,7 +227,7 @@ async function batchMove() {
   try {
     for (const id of ids) unwrap(await MoveNoteNode(id, target))
     toast.success(t('notesBatchMoved', { count: ids.length }))
-  } catch (e) { toast.error(getErrorMessage(e)) } finally {
+  } catch (e) { reportError(e, 'NoteManagerPage.batchMove') } finally {
     clearSelection(); moveTarget.value = ''; await load()
   }
 }
@@ -248,7 +250,7 @@ async function batchTag() {
       applyLocalTags(id, tagsJSON)
     }
     toast.success(t('notesBatchTagDone', { count: ids.length }))
-  } catch (e) { toast.error(getErrorMessage(e)) } finally {
+  } catch (e) { reportError(e, 'NoteManagerPage.batchTag') } finally {
     clearSelection(); batchTagText.value = ''; await load()
   }
 }
@@ -338,8 +340,7 @@ async function load() {
     }
   } catch (e) {
     loadFailed.value = true
-    toast.error(getErrorMessage(e))
-    logErr('NoteManager:load', e)
+    reportError(e, 'NoteManager:load')
   } finally { loading.value = false }
 }
 
@@ -360,7 +361,7 @@ async function doSearch() {
     for (const n of py) if (!byId.has(n.id)) byId.set(n.id, n)
     if (seq !== treeSearchSeq || searchQuery.value.trim() !== q) return
     nodes.value = [...byId.values()]
-  } catch (e) { if (seq === treeSearchSeq) { toast.error(getErrorMessage(e)); logErr('NoteManager:search', e) } }
+  } catch (e) { if (seq === treeSearchSeq) { reportError(e, 'NoteManager:search') } }
 }
 // 输入防抖：每敲一个字符都会打一次后端 LIKE + 一遍全量拼音扫描，
 // 中文输入法逐字上屏时这个代价非常明显。
@@ -378,8 +379,7 @@ async function loadTags() {
     const r = unwrap<string[]>(await ListNoteTags())
     backendTags.value = Array.isArray(r) ? r.filter((x): x is string => typeof x === 'string') : []
   } catch (e) {
-    logErr('NoteManager:listTags', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NoteManager:listTags')
   }
 }
 
@@ -435,7 +435,7 @@ async function newFolderAt(folderId: string) {
     await load()
     // 创建后进入重命名，方便直接命名（load 完成后再 startRename，确保节点已在树中，自动聚焦可用）
     if (r) startRename(r)
-  } catch (e) { toast.error(getErrorMessage(e)); logErr('NoteManager:newFolder', e) }
+  } catch (e) { reportError(e, 'NoteManager:newFolder') }
 }
 async function newDocAt(folderId: string) {
   try {
@@ -444,7 +444,7 @@ async function newDocAt(folderId: string) {
     invalidateLinkTargets() // 新笔记立刻可当互链目标，不等候选缓存 TTL
     await load()
     if (r) { const found = nodes.value.find(x => x.id === r.id); if (found) onDoc(found) }
-  } catch (e) { toast.error(getErrorMessage(e)); logErr('NoteManager:newDoc', e) }
+  } catch (e) { reportError(e, 'NoteManager:newDoc') }
 }
 
 // ---- 模板 / 日志笔记 ----
@@ -472,8 +472,7 @@ async function createFromTemplate(tpl: NoteTemplate) {
       if (found) await onDoc(found)
     }
   } catch (e) {
-    logErr('NoteManager:createTemplate', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NoteManager:createTemplate')
   }
 }
 
@@ -483,7 +482,7 @@ async function setFormat(fmt: string) {
   try {
     unwrap(await SetNoteDocFormat(selectedDocId.value, fmt))
     selectedDoc.value.format = fmt
-  } catch (e) { toast.error(getErrorMessage(e)); logErr('NoteManager:setFormat', e) }
+  } catch (e) { reportError(e, 'NoteManager:setFormat') }
 }
 
 // 重命名
@@ -497,7 +496,7 @@ async function commitRename(id: string) {
   editingId.value = ''
   editName.value = ''
   if (!name) return
-  try { unwrap(await RenameNoteNode(id, name)); await load() } catch (e) { toast.error(getErrorMessage(e)); logErr('NoteManager:rename', e) }
+  try { unwrap(await RenameNoteNode(id, name)); await load() } catch (e) { reportError(e, 'NoteManager:rename') }
 }
 
 // 删除
@@ -510,13 +509,13 @@ async function confirmDeleteNode() {
     unwrap(await DeleteNoteNode(deletingNode.value.id))
     if (selectedDocId.value === deletingNode.value.id) { selectedDocId.value = ''; docContent.value = ''; docTagsText.value = '' }
     toast.success(t('deleted')); showDel.value = false; await load()
-  } catch (e) { toast.error(getErrorMessage(e)); logErr('NoteManager:delete', e) }
+  } catch (e) { reportError(e, 'NoteManager:delete') }
 }
 
 // 移动（拖拽）
 async function handleDrop(dragId: string, targetId: string) {
   if (!dragId) return
-  try { unwrap(await MoveNoteNode(dragId, targetId || '')); await load() } catch (e) { toast.error(getErrorMessage(e)); logErr('NoteManager:move', e) }
+  try { unwrap(await MoveNoteNode(dragId, targetId || '')); await load() } catch (e) { reportError(e, 'NoteManager:move') }
 }
 
 /** 某个父目录下的同级节点，按**与树完全相同的规则**排序。
@@ -568,7 +567,7 @@ async function reorderNode(dragId: string, targetId: string, before: boolean) {
       next[i].sort = want
     }
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NoteManagerPage.reorderNode')
     // 本地状态可能已经部分更新，重拉一次回到库里的真实顺序。
     await load()
   }
@@ -607,7 +606,7 @@ function loadNoteView() {
 }
 function setNoteView(v: NoteView) {
   noteView.value = v
-  try { localStorage.setItem(NOTE_VIEW_KEY, v) } catch { /* 同上 */ }
+  writeStored(NOTE_VIEW_KEY, v)
 }
 
 const previewHtml = computed(() => (docContent.value ? DOMPurify.sanitize(marked.parse(docContent.value, { async: false }) as string) : ''))
@@ -637,8 +636,7 @@ async function onPreviewClick(e: MouseEvent) {
       unwrap(await CopyText(code))
       toast.success(t('copied'))
     } catch (err) {
-      logErr('NoteManagerPage.copyCode', err)
-      toast.error(getErrorMessage(err))
+      reportError(err, 'NoteManagerPage.copyCode')
     }
     return
   }
@@ -652,7 +650,7 @@ async function onPreviewClick(e: MouseEvent) {
       toast.error(t('wikiTargetNotFound'))
     }
   } catch (err) {
-    toast.error(getErrorMessage(err))
+    reportError(err, 'NoteManagerPage.onPreviewClick')
   }
 }
 
@@ -679,7 +677,7 @@ async function flushPendingSave() {
   } catch (e) {
     logErr('NoteManager:flushPendingSave', e)
     saveStatus.value = 'failed'
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NoteManagerPage.flushPendingSave')
   }
 }
 
@@ -796,8 +794,7 @@ async function exportAll() {
     downloadBlob(`quickdock-notes-${dateStamp()}.json`, blob)
     toast.success(t('notesExportDone', { count: list.length }))
   } catch (e) {
-    logErr('NoteManager:exportAll', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NoteManager:exportAll')
   }
 }
 const importInput = ref<HTMLInputElement | null>(null)
@@ -813,8 +810,7 @@ async function onImportFile(e: Event) {
     invalidateLinkTargets() // 批量导入的笔记也要立刻进互链候选
     await load()
   } catch (err) {
-    logErr('NoteManager:importNotes', err)
-    toast.error(getErrorMessage(err))
+    reportError(err, 'NoteManager:importNotes')
   } finally {
     input.value = '' // 允许连续选同一个文件
   }
@@ -938,8 +934,7 @@ async function loadRevisions() {
     revisions.value = list
   } catch (e) {
     if (seq !== revSeq) return
-    logErr('NoteManager:listRevisions', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NoteManager:listRevisions')
   } finally { if (seq === revSeq) historyLoading.value = false }
 }
 async function previewRevision(revId: string) {
@@ -947,8 +942,7 @@ async function previewRevision(revId: string) {
     const r = unwrap<NoteRevision>(await GetNoteRevision(revId))
     if (r) historyPreview.value = r
   } catch (e) {
-    logErr('NoteManager:getRevision', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NoteManager:getRevision')
   }
 }
 function askRestore(revId: string) {
@@ -969,8 +963,7 @@ async function reloadCurrentDoc() {
     docContent.value = d.content || ''
     docTagsText.value = parseTagsS(d.tags).join(', ')
   } catch (e) {
-    logErr('NoteManager:reloadDoc', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NoteManager:reloadDoc')
   }
 }
 async function confirmRestore() {
@@ -992,8 +985,7 @@ async function confirmRestore() {
     await loadRevisions()
     historyPreview.value = null
   } catch (e) {
-    logErr('NoteManager:restoreRevision', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NoteManager:restoreRevision')
   }
 }
 /**
@@ -1133,7 +1125,7 @@ async function saveDoc() {
   } catch (e) {
     logErr('NoteManager:saveDoc', e)
     if (selectedDocId.value === id) saveStatus.value = 'failed'
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NoteManagerPage.saveDoc')
   }
 }
 async function copyDoc() {
@@ -1142,8 +1134,7 @@ async function copyDoc() {
     unwrap(await CopyText(docContent.value))
     toast.success(t('copied'))
   } catch (e) {
-    logErr('NoteManagerPage.copyDoc', e)
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NoteManagerPage.copyDoc')
   }
 }
 
@@ -1249,8 +1240,7 @@ async function insertPastedImage(file: File) {
     const dataUrl = await imageToDataUrl(file)
     docEditor?.insertAtCursor(`![](${dataUrl})`)
   } catch (err) {
-    logErr('NoteManager:pasteImage', err)
-    toast.error(getErrorMessage(err) || t('notesImagePasteFailed'))
+    reportError(err, 'NoteManager:pasteImage', { fallback: t('notesImagePasteFailed') })
   }
 }
 // 宿主 DOM 上捕获阶段监听：只拦带 image 文件的 paste，其余交给 CodeMirror 自己处理。
@@ -1440,7 +1430,7 @@ async function openWikiPicker() {
     wikiRemoteHits.value = []
     if (wikiQuery.value.trim()) scheduleWikiRemoteSearch()
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NoteManagerPage.openWikiPicker')
   }
 }
 function insertWiki(c: { type: EntityType; label: string }) {
@@ -1578,7 +1568,7 @@ async function renameCurrent() {
     unwrap(await RenameNoteNode(selectedDoc.value.id, selectedDoc.value.name))
     await load()
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    reportError(e, 'NoteManagerPage.renameCurrent')
     // 行内改名是直接 v-model 到树节点的（乐观更新），失败必须重读一次把名字还原，
     // 否则树和标题一直显示一个没落库的新名字，用户以为已经改好了。
     await load()
@@ -1605,6 +1595,9 @@ onBeforeUnmount(() => {
   document.removeEventListener('mousedown', onMdHelpDocDown, true)
   document.removeEventListener('keydown', onMdHelpKeydown, true)
   cancelMdHelpClose()
+  // 搜索防抖的尾巴要一起掐掉：卸载后 250ms 内若还触发一次 doSearch，
+  // 会白打一趟后端 LIKE + 全量拼音扫描。
+  runSearch.cancel()
   if (savedResetTimer) clearTimeout(savedResetTimer)
   void flushPendingSave()
   offDocScroll?.()
@@ -1667,11 +1660,13 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
         <span class="qd-page-sub">{{ t('notesSubtitle') }}</span>
       </template>
       <div class="qd-page-fill">
-        <div class="qd-input-wrap notes-search">
-          <Search :size="14" />
-          <input v-model="searchQuery" class="qd-input ns-input" :placeholder="t('notesSearchPh')" />
-          <button v-if="searchQuery" class="ns-clear" @click="clearSearch"><X :size="13" /></button>
-        </div>
+        <QdSearchBox
+          v-model="searchQuery"
+          class="notes-search"
+          :icon-size="14"
+          :placeholder="t('notesSearchPh')"
+          @clear="clearSearch"
+        />
         <div class="notes-tags">
           <button class="nt-chip" :class="{ active: activeTag === '' }" @click="activeTag = ''">{{ t('notesAllTags') }}</button>
           <button v-for="tg in backendTags" :key="tg" class="nt-chip" :class="{ active: activeTag === tg }" @click="activeTag = activeTag === tg ? '' : tg">{{ tg }}</button>
@@ -2040,18 +2035,14 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 </template>
 
 <style scoped>
-.notes-page { height: 100%; display: flex; flex-direction: column; background: var(--color-bg-primary); }
+.notes-page { height: 100%; min-height: 0; display: flex; flex-direction: column; background: var(--color-bg-primary); }
 /* 页头已统一到 styles/app.css 的 .qd-page-header（标题 + 搜索 + 标签三段式） */
+/* 皮肤与图标留位都由 QdSearchBox 统一处理，这里只定宽。 */
 .notes-search { width: 240px; flex-shrink: 0; }
-/* 输入框左右留位给内置的两个图标（左放大镜、右清除按钮），28 / 26 与图标
-   实际尺寸绑定，不能就近取到 24 档（会压到图标上）。用 token 相加表示同一个值：
-   28 = space-8 + space-2，26 = space-8 + space-1。 */
-.ns-input { padding-left: calc(var(--space-8) + var(--space-2)); padding-right: calc(var(--space-8) + var(--space-1)); }
-.ns-clear { position: absolute; right: var(--space-3); border: none; background: none; color: var(--color-text-muted); cursor: pointer; display: flex; align-items: center; }
 .notes-tags { flex: 1; min-width: 0; display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center; margin-left: var(--space-4); }
 .nt-chip { padding: var(--space-1) var(--space-3); border: none; background: transparent; color: var(--color-text-muted); font-size: var(--text-sm); cursor: pointer; font-family: inherit; flex-shrink: 0; line-height: 1; transition: color var(--transition-fast), font-weight var(--transition-fast); }
 .nt-chip:hover { color: var(--color-text-primary); }
-.nt-chip.active { color: var(--color-accent); font-weight: 600; }
+.nt-chip.active { color: var(--color-accent-ink); font-weight: 600; }
 
 .notes-body { flex: 1; display: flex; min-height: 0; }
 .notes-tree { width: 250px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--color-bg-primary); }
@@ -2178,7 +2169,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
   font-family: inherit; font-size: var(--text-sm); cursor: pointer;
 }
 .ne-more-item:hover { background: var(--color-bg-hover); }
-.ne-more-item.active { color: var(--color-accent); }
+.ne-more-item.active { color: var(--color-accent-ink); }
 /* 插入 wiki 链接的候选浮层：挂在 .ne-head 上，absolute 不占布局高度 */
 .ne-wiki-pop { position: absolute; top: 100%; right: var(--space-5); z-index: var(--z-dropdown); width: 260px; margin-top: var(--space-2); padding: var(--space-3); border: 1px solid var(--popover-border-color); border-radius: var(--radius-sm); background: var(--color-popover-bg); box-shadow: var(--shadow-sm); }
 /* Markdown 语法速查浮层：锚在 ? 按钮所在 span（ne-head 内）。宽度按说明文字排布，
@@ -2357,7 +2348,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .tb-count { flex: 1; font-size: var(--text-xs); color: var(--color-text-muted); }
 .tb-clear { border: none; background: none; color: var(--color-text-muted); cursor: pointer; font-size: var(--text-xs); padding: var(--space-1) var(--space-3); border-radius: var(--radius-xs); }
 .tb-clear:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.tb-clear:disabled { opacity: 0.4; cursor: default; }
+.tb-clear:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .tb-input, .tb-select { flex: 1; min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: var(--text-sm); outline: none; font-family: inherit; }
 .tb-input:focus, .tb-select:focus { border-color: var(--color-border-focus-soft); }
 
