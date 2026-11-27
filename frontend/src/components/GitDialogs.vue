@@ -364,7 +364,7 @@ const { t } = useI18n()
 <style scoped>
 .bar-actions .qd-btn { height: 26px; }
 
-.qd-btn-primary .btn-badge { background: var(--color-accent-text); color: var(--color-accent); }
+.qd-btn-primary .btn-badge { background: var(--color-accent-text); color: var(--color-accent-ink); }
 
 .git-warn .qd-btn { height: 24px; flex-shrink: 0; }
 
@@ -381,7 +381,7 @@ const { t } = useI18n()
 
 .file-badge.mod { color: var(--color-warning-ink); }
 
-.file-badge.ren { color: var(--color-accent); }
+.file-badge.ren { color: var(--color-accent-ink); }
 
 .file-badge.new { color: var(--color-success-ink); }
 
@@ -416,7 +416,7 @@ const { t } = useI18n()
   border: 1px solid var(--color-border);
 }
 
-.pb-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
+.pb-btn:hover:not(:disabled) { color: var(--color-accent-ink); border-color: var(--color-accent); }
 
 .pb-btn.danger:hover:not(:disabled) { color: var(--color-danger-ink); border-color: var(--color-danger); }
 
@@ -449,7 +449,7 @@ const { t } = useI18n()
 
 .modal-hint { margin: 0; font-size: var(--text-xs); color: var(--color-text-muted); overflow-wrap: anywhere; }
 
-.modal-hint.cloning { display: flex; align-items: center; gap: 5px; color: var(--color-accent); }
+.modal-hint.cloning { display: flex; align-items: center; gap: 5px; color: var(--color-accent-ink); }
 
 .modal-hint .mono { font-family: var(--font-mono); }
 
@@ -511,7 +511,7 @@ const { t } = useI18n()
 
 .sub-state.init { color: var(--color-warning-ink); background: var(--color-warning-bg); }
 
-.sub-state.diff { color: var(--color-accent); background: var(--color-accent-bg); }
+.sub-state.diff { color: var(--color-accent-ink); background: var(--color-accent-bg); }
 
 .sub-state.conflict { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 
@@ -667,7 +667,7 @@ const { t } = useI18n()
 
 .blame-row:hover { background: var(--color-bg-hover); }
 
-.bl-c { color: var(--color-accent); }
+.bl-c { color: var(--color-accent-ink); }
 
 .bl-link { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
 

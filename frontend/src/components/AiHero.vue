@@ -677,11 +677,11 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 .ai-space-pick-item:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
-.ai-space-pick-item.is-sel { color: var(--color-accent); }
+.ai-space-pick-item.is-sel { color: var(--color-accent-ink); }
 .ai-space-pick-ico { display: inline-flex; flex-shrink: 0; width: 12px; opacity: 0.8; }
 .ai-space-pick-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 「已选目录」小标记：不写全路径（下拉窄），路径在 title 里 */
-.ai-space-pick-cwd { margin-left: auto; flex: none; font-size: var(--text-2xs); color: var(--color-accent); }
+.ai-space-pick-cwd { margin-left: auto; flex: none; font-size: var(--text-2xs); color: var(--color-accent-ink); }
 .ai-space-pick-sep { height: 1px; margin: var(--space-2) var(--space-3); background: var(--color-border); }
 
 .ai-hero-out {
@@ -806,7 +806,7 @@ onBeforeUnmount(() => {
 }
 
 .ai-hero-tip-ico { flex: none; color: var(--color-text-muted); }
-.ai-hero-tip:hover .ai-hero-tip-ico { color: var(--color-accent); }
+.ai-hero-tip:hover .ai-hero-tip-ico { color: var(--color-accent-ink); }
 /* 卡片宽度固定，长文案单行省略：两列等高才不会一条高一条矮 */
 .ai-hero-tip-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-hero-tip-icon { flex-shrink: 0; transform: rotate(45deg); opacity: 0.55; }

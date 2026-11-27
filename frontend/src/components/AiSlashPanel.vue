@@ -92,7 +92,7 @@ function isPicked(sk: AISkill): boolean {
   font-size: var(--text-sm);
 }
 
-.ai-slash-row.is-picked .ai-slash-name { color: var(--color-accent); }
+.ai-slash-row.is-picked .ai-slash-name { color: var(--color-accent-ink); }
 
 .ai-slash-desc {
   flex: 1;
@@ -109,7 +109,7 @@ function isPicked(sk: AISkill): boolean {
 .ai-slash-state {
   flex: none;
   font-size: var(--text-2xs);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .ai-slash-foot {

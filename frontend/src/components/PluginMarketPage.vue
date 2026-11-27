@@ -589,12 +589,12 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
   border: 1px solid var(--color-border); background: var(--color-bg-secondary);
   color: var(--color-text-secondary); font-size: var(--text-sm); cursor: pointer; white-space: nowrap;
 }
-.filter-chip:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
-.filter-chip.active { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent); }
+.filter-chip:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent-ink); }
+.filter-chip.active { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent-ink); }
 .filter-chip:disabled { color: var(--color-text-disabled); cursor: default; }
 .chip-count {
   font-size: var(--text-2xs); padding: 0 var(--space-3); border-radius: var(--radius-md); background: var(--color-accent-bg);
-  color: var(--color-accent); font-weight: 600;
+  color: var(--color-accent-ink); font-weight: 600;
 }
 .market-toolbar { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
 /* 搜索框皮肤由 QdSearchBox 统一提供（无边框 / 28px / bg-tertiary），这里只留占位宽度。
@@ -660,7 +660,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 /* 插件 ID 是无空格的长串（如 io.github.parieses.database），默认不可断行，
    会撑出很大的 min-content 宽度把列顶宽；anywhere 让它在窄列里也能断行。 */
 .card-id { font-size: var(--text-xs); color: var(--color-text-muted); font-family: var(--font-mono); width: 100%; overflow-wrap: anywhere; }
-.badge { font-size: var(--text-2xs); padding: 1px 7px; border-radius: var(--radius-md); background: var(--color-accent-bg); color: var(--color-accent); }
+.badge { font-size: var(--text-2xs); padding: 1px 7px; border-radius: var(--radius-md); background: var(--color-accent-bg); color: var(--color-accent-ink); }
 .badge-installed { background: var(--color-success-bg); color: var(--color-success-ink); }
 .badge-upgrade { background: var(--color-warning-bg); color: var(--color-warning-ink); }
 /* 描述：固定两行高度（12px × 1.5 × 2 = 36px），卡片等高、按行对齐；
@@ -700,7 +700,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
   background: var(--color-bg-tertiary); color: var(--color-text-primary);
   font-size: var(--text-sm); cursor: pointer; transition: all .15s;
 }
-.action-btn:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
+.action-btn:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent-ink); }
 .action-btn:disabled { color: var(--color-text-disabled); background: var(--color-bg-tertiary); border-color: var(--color-border); cursor: default; }
 .btn-install { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
 .btn-install:hover:not(:disabled) { opacity: .9; color: var(--color-accent-text); }

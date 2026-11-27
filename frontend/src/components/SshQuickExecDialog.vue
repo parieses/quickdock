@@ -576,7 +576,7 @@ onBeforeUnmount(() => {
   padding: var(--space-5) 14px;
   border-bottom: 1px solid var(--color-border);
 }
-.qex-head-icon { color: var(--color-accent); margin-top: 1px; }
+.qex-head-icon { color: var(--color-accent-ink); margin-top: 1px; }
 .qex-head-text { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 .qex-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
 .qex-sub { font-size: var(--text-xs); color: var(--color-text-muted); }

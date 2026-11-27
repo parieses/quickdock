@@ -2921,7 +2921,7 @@ onUnmounted(() => {
 .readout:hover { background: var(--color-bg-hover); }
 /* 悬停时数字提成强调色：这块是按钮，但六个读数并排时看不出可点。
    异常态不动（它已经是红的，再变蓝反而丢失警示）。 */
-.readout:not(.alert):hover .r-num { color: var(--color-accent); }
+.readout:not(.alert):hover .r-num { color: var(--color-accent-ink); }
 .readout.static { cursor: default; }
 .readout.static:hover { background: none; }
 .r-label {
@@ -3049,7 +3049,7 @@ onUnmounted(() => {
 }
 .card:hover .card-link,
 .card-link:focus-visible { opacity: 1; }
-.card-link:hover { color: var(--color-accent); }
+.card-link:hover { color: var(--color-accent-ink); }
 
 /* 卡片内的空态：不居中反而是对的（列表为空时上方还有热力条/分布条），
    但留白要够，否则一行灰字像被漏掉的说明。整卡只有空态时（脚本任务那种）
@@ -3130,7 +3130,7 @@ onUnmounted(() => {
 }
 .qc-link {
   background: none; border: 0; padding: 0; cursor: pointer;
-  font: inherit; color: var(--color-accent);
+  font: inherit; color: var(--color-accent-ink);
 }
 .qc-link:hover { text-decoration: underline; }
 .qc-more { padding: var(--space-2) 0 var(--space-1); font-size: var(--text-2xs); }
@@ -3159,7 +3159,7 @@ onUnmounted(() => {
 }
 .qc-code {
   flex-shrink: 0; min-width: 78px; font-size: var(--text-lg); font-weight: 600;
-  letter-spacing: .06em; color: var(--color-accent);
+  letter-spacing: .06em; color: var(--color-accent-ink);
 }
 /* 安全提醒没有码：同一列只留「图标 + 文字」，不套橙色背景块。
    之前带底色的胶囊 + 橙色标题，两行安全提醒会把中间的验证码行夹成一块
@@ -3205,7 +3205,7 @@ onUnmounted(() => {
 .qc-acct-add {
   display: inline-flex; align-items: center; gap: var(--space-2); flex-shrink: 0;
   padding: 3px var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  background: none; font: inherit; font-size: var(--text-xs); color: var(--color-accent); cursor: pointer;
+  background: none; font: inherit; font-size: var(--text-xs); color: var(--color-accent-ink); cursor: pointer;
 }
 .qc-acct-add:hover { background: var(--color-accent-bg); border-color: var(--color-accent); }
 .qc-acct-list {
@@ -3323,10 +3323,10 @@ onUnmounted(() => {
 }
 .inline-prefix {
   display: flex; align-items: center; gap: var(--space-3);
-  color: var(--color-accent); font-size: var(--text-md);
+  color: var(--color-accent-ink); font-size: var(--text-md);
   font-weight: 500; flex-shrink: 0;
 }
-.inline-name { color: var(--color-accent); }
+.inline-name { color: var(--color-accent-ink); }
 .inline-sep { color: var(--color-text-muted); }
 .dash-inline-input {
   flex: 1; min-width: 0; font: inherit;
@@ -3367,7 +3367,7 @@ onUnmounted(() => {
 .tile-ic {
   display: grid; place-items: center; flex-shrink: 0;
   width: 26px; height: 26px; border-radius: var(--radius-xs);
-  background: var(--color-accent-bg); color: var(--color-accent);
+  background: var(--color-accent-bg); color: var(--color-accent-ink);
 }
 /* 真图标多半自己带底色（应用图标是圆角方块、favicon 是站点色），
    再垫一层浅色底会看起来像贴了两层皮，所以只留透明底。 */
@@ -3450,7 +3450,7 @@ onUnmounted(() => {
 
 /* Git 行的 ↑↓ 与干净标记 */
 .git-ab { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-warning-ink); flex-shrink: 0; }
-.git-ab.down { color: var(--color-accent); }
+.git-ab.down { color: var(--color-accent-ink); }
 .git-ok { display: flex; color: var(--color-success-ink); flex-shrink: 0; }
 
 .spin { animation: dash-spin 900ms linear infinite; }
@@ -3539,7 +3539,7 @@ onUnmounted(() => {
   border-radius: var(--radius-full);
   color: var(--color-text-muted); background: var(--color-bg-tertiary);
 }
-.db-festival { color: var(--color-accent); background: var(--color-accent-bg); }
+.db-festival { color: var(--color-accent-ink); background: var(--color-accent-bg); }
 
 /* 宜忌摘要：一行到底、过长省略，只有点开的全量详情才允许长高（且自带高度上限）。
    宜绿忌红走语义 token，深浅两套主题都随变量走；不写死任何色值。 */
@@ -3603,7 +3603,7 @@ onUnmounted(() => {
 .mail-guide { margin-top: var(--space-3); }
 .mail-guide-toggle, .mail-guide-link, .mail-guide-inline {
   padding: 0; border: 0; background: none; cursor: pointer;
-  color: var(--color-accent); font-family: inherit; font-size: var(--text-xs);
+  color: var(--color-accent-ink); font-family: inherit; font-size: var(--text-xs);
 }
 .mail-guide-toggle { display: flex; align-items: center; gap: var(--space-2); }
 .mail-guide-toggle svg { transition: transform 120ms ease; }
@@ -3618,7 +3618,7 @@ onUnmounted(() => {
   margin-left: auto; padding-left: var(--space-6);
   border-left: 1px solid var(--color-border);
 }
-.db-w-ic { color: var(--color-accent); flex-shrink: 0; }
+.db-w-ic { color: var(--color-accent-ink); flex-shrink: 0; }
 .db-w-main { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 .db-w-line { display: flex; align-items: baseline; gap: var(--space-3); }
 .db-w-temp {
@@ -3655,12 +3655,12 @@ onUnmounted(() => {
   cursor: pointer;
   transition: color var(--transition-fast), background var(--transition-fast);
 }
-.db-icon-btn:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-accent); }
+.db-icon-btn:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-accent-ink); }
 .db-icon-btn:focus-visible { outline: 1px solid var(--color-accent-border-strong); outline-offset: 2px; }
 .db-icon-btn:disabled { cursor: default; color: var(--color-text-disabled); }
 .db-text-btn {
   background: none; border: 0; padding: 0; cursor: pointer;
-  font: inherit; font-size: var(--text-xs); color: var(--color-accent);
+  font: inherit; font-size: var(--text-xs); color: var(--color-accent-ink);
   transition: color var(--transition-fast);
 }
 .db-text-btn:hover { color: var(--color-accent-hover); }

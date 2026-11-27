@@ -341,7 +341,7 @@ const { t } = useI18n()
   transition: color var(--transition-fast);
 }
 
-.svc-port-link:hover { color: var(--color-accent); text-decoration: underline; }
+.svc-port-link:hover { color: var(--color-accent-ink); text-decoration: underline; }
 
 .svc-port-link.disabled { cursor: default; color: var(--color-text-disabled); }
 
@@ -546,7 +546,7 @@ const { t } = useI18n()
 
 .pd-kind { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); white-space: nowrap; }
 
-.pd-manager { font-size: var(--text-xs); color: var(--color-accent); white-space: nowrap; }
+.pd-manager { font-size: var(--text-xs); color: var(--color-accent-ink); white-space: nowrap; }
 
 .pd-manager-ver { color: var(--color-text-muted); }
 

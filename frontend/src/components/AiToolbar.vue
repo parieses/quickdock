@@ -237,7 +237,7 @@ const startedClock = computed(() => {
 }
 
 .ai-trace-tag:hover { color: var(--color-text-primary); border-color: var(--color-border); }
-.ai-trace-tag.is-running { color: var(--color-accent); }
+.ai-trace-tag.is-running { color: var(--color-accent-ink); }
 
 .ai-trace-name {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -276,10 +276,10 @@ const startedClock = computed(() => {
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.ai-icon-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
+.ai-icon-btn:hover { color: var(--color-accent-ink); border-color: var(--color-accent); }
 /* 激活态：星标已收藏 / 大纲已展开 / 右侧面板已打开。
    模板一直在切 is-active，但这条规则此前从未写过——三个按钮的「已开启」看不出来。 */
-.ai-icon-btn.is-active { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
+.ai-icon-btn.is-active { color: var(--color-accent-ink); border-color: var(--color-accent); background: var(--color-accent-bg); }
 /* 清理按钮的「已上膛」态：与普通激活态区分开——它表示「再点一次就真删」，
    用 warning 而不是 accent，避免和「面板已打开」那种无害的激活混淆。 */
 .ai-icon-btn.is-armed { color: var(--color-warning-ink); border-color: var(--color-warning); background: transparent; }
@@ -294,7 +294,7 @@ const startedClock = computed(() => {
 .ai-jobs-started {
   font-size: var(--text-2xs);
   font-variant-numeric: tabular-nums;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .ai-jobs-badge {

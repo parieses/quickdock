@@ -1409,7 +1409,7 @@ defineExpose({
 }
 
 .term-keyword.is-current {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: var(--color-accent-bg);
   border-color: var(--color-accent-border);
 }
@@ -1506,7 +1506,7 @@ defineExpose({
    用显式 class 而不是 :has(.mi-lead) —— 后者要 Chrome 105+，
    WebView2 若停在旧版会整条样式失效。 */
 .term-menu-item.ask-ai {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .term-menu-item.ask-ai:disabled {

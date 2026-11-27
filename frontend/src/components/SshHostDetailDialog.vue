@@ -232,7 +232,7 @@ async function copyTarget() {
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
-.hdd-head-icon { color: var(--color-accent); }
+.hdd-head-icon { color: var(--color-accent-ink); }
 .hdd-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
 .hdd-x {
   margin-left: auto;
@@ -303,7 +303,7 @@ async function copyTarget() {
 .hdd-btn--primary {
   border-color: var(--color-accent);
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .hdd-enter-active, .hdd-leave-active { transition: opacity 0.14s ease; }

@@ -167,7 +167,7 @@
   align-items: center;
   gap: var(--space-3);
   font-size: var(--text-sm);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   text-decoration: none;
   transition: opacity 150ms;
 }
@@ -259,7 +259,7 @@
   font-family: inherit; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
 .locale-btn:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
-.locale-btn.active { border-color: var(--color-accent); background: var(--color-accent-bg); color: var(--color-accent); }
+.locale-btn.active { border-color: var(--color-accent); background: var(--color-accent-bg); color: var(--color-accent-ink); }
 
 /* 普通设置页：一列内容，水平居中。
  * 原来是「贴左侧 + 600px 上限」——最大化时整块挤在左半边、右边一片空白，
@@ -322,7 +322,7 @@
    统一定义一次）。这里不再重复声明盒模型 —— 历史调用点太多，类名保留，
    但「同一种按钮有两套值」这件事到此为止。 */
 .action-row { margin-top: var(--space-5); }
-.result-hint { font-size: var(--text-sm); color: var(--color-accent); margin: var(--space-4) 0 0; }
+.result-hint { font-size: var(--text-sm); color: var(--color-accent-ink); margin: var(--space-4) 0 0; }
 
 /* 弹窗内部元素 / 表单输入（统一，供各组件复用，避免每处重复定义） */
 .modal h3 { margin: 0 0 var(--space-3); font-size: var(--text-lg); color: var(--color-text-primary); }
@@ -393,7 +393,7 @@
   display: flex; align-items: center; justify-content: center; width: 22px; height: 22px;
   border-radius: var(--radius-sm); flex-shrink: 0;
 }
-.ai-profile-edit:hover { color: var(--color-accent); background: var(--color-accent-bg); }
+.ai-profile-edit:hover { color: var(--color-accent-ink); background: var(--color-accent-bg); }
 .ai-profile-name { flex: 1; font-size: var(--text-md); color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-profile-model { font-size: var(--text-xs); color: var(--color-text-muted); }
 .ai-profile-del {
@@ -408,7 +408,7 @@
   color: var(--color-text-secondary); border-radius: var(--radius-md); cursor: pointer;
   font-family: inherit; font-size: var(--text-sm); transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
-.ai-profile-add:hover { color: var(--color-accent); border-color: var(--color-accent); }
+.ai-profile-add:hover { color: var(--color-accent-ink); border-color: var(--color-accent); }
 
 /* 一次性问答的模型选择（SSH / 剪贴板 / 笔记 / 插件 host.ai.ask）。
    跟档案列表同属「模型」页，但只有一个下拉，用一行紧凑表单而不是再占
@@ -499,7 +499,7 @@
   font-family: inherit; cursor: pointer; transition: background 0.15s, color 0.15s;
 }
 .usage-range:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.usage-range.on { background: var(--color-accent-bg); color: var(--color-accent); }
+.usage-range.on { background: var(--color-accent-bg); color: var(--color-accent-ink); }
 
 .usage-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-3); }
 .usage-tile {
@@ -534,7 +534,7 @@
 .usage-note { margin: var(--space-4) 0 0; font-size: var(--text-xs); line-height: 1.5; color: var(--color-text-secondary); }
 
 /* 缓存命中率高是好事，语气与告警相反：用强调色，不用黄 */
-.usage-cache { margin: 10px 0 0; font-size: var(--text-xs); line-height: 1.5; color: var(--color-accent); }
+.usage-cache { margin: 10px 0 0; font-size: var(--text-xs); line-height: 1.5; color: var(--color-accent-ink); }
 
 /* 来源 chip：一眼看出「钱花在对话还是面板/插件」 */
 .usage-sources { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: 10px; }
@@ -586,12 +586,12 @@
   font-size: var(--text-2xs); line-height: 16px; display: inline-block;
 }
 /* 「仅内置 AI」不是风险提示，用强调色：它是「外部客户端看不到」这种中性事实。 */
-.approval-risk-tag.is-plat { background: var(--color-accent-bg); color: var(--color-accent); }
+.approval-risk-tag.is-plat { background: var(--color-accent-bg); color: var(--color-accent-ink); }
 .approval-reset {
   display: block; margin: var(--space-1) 0 0 auto; padding: 0; border: none;
   background: none; cursor: pointer; font-size: var(--text-2xs); color: var(--color-text-muted);
 }
-.approval-reset:hover { color: var(--color-accent); }
+.approval-reset:hover { color: var(--color-accent-ink); }
 
 /* 只读工具那一段：恒放行，只是展示。 */
 /* 折叠头做成一行文字而不是按钮块：它解释的是「下面还有一段」，
@@ -601,7 +601,7 @@
   margin: 10px 0 0; padding: 0; border: none; background: none;
   cursor: pointer; font-size: var(--text-xs); color: var(--color-text-muted);
 }
-.approval-ro-toggle:hover { color: var(--color-accent); }
+.approval-ro-toggle:hover { color: var(--color-accent-ink); }
 .approval-ro-arrow { font-size: var(--text-2xs); }
 /* 外部 MCP 服务器（阶段 D）：状态点 + JSON 编辑框。
    .ai-hook-ok / .ai-hook-no 与 AIPage 的钩子批准条同名——两处都是
@@ -630,7 +630,7 @@
 /* ── 外部 MCP：表单式添加（原来是一整份 JSON 文本框） ── */
 .ai-ext-add {
   padding: 0; border: none; background: none; cursor: pointer;
-  color: var(--color-accent); font-family: inherit; font-size: var(--text-sm);
+  color: var(--color-accent-ink); font-family: inherit; font-size: var(--text-sm);
 }
 .ai-ext-add:hover { text-decoration: underline; }
 /* 标题行两个入口（编辑 JSON / 添加服务器）并排，别被 space-between 拆散 */
@@ -702,7 +702,7 @@
 .ai-ext-import { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-4); }
 
 .ext-status { margin-left: var(--space-4); font-size: var(--text-xs); }
-.ext-status.ok { color: var(--color-accent); }
+.ext-status.ok { color: var(--color-accent-ink); }
 .ext-status.disabled { color: var(--color-text-disabled); }
 .ext-status.error { color: var(--color-danger-ink); }
 
@@ -792,9 +792,9 @@
   cursor: pointer; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
 .snapshot-item-actions .action-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.snapshot-item-actions .restore-btn:hover { color: var(--color-accent); }
+.snapshot-item-actions .restore-btn:hover { color: var(--color-accent-ink); }
 .snapshot-item-actions .action-btn.danger:hover { color: var(--color-danger-ink); background: var(--color-danger-bg); }
-.snapshot-item-actions .action-btn.enabled-btn { color: var(--color-accent); }
+.snapshot-item-actions .action-btn.enabled-btn { color: var(--color-accent-ink); }
 
 /* 占位 */
 .placeholder-title { font-size: var(--text-lg); color: var(--color-text-primary); margin: 0 0 var(--space-4); }

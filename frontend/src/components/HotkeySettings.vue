@@ -479,7 +479,7 @@ defineExpose({ capturing })
 .hk-row.capturing { background: var(--color-accent-bg); }
 
 .hk-icon { display: inline-flex; align-items: center; justify-content: center; color: var(--color-text-muted); }
-.hk-row.capturing .hk-icon { color: var(--color-accent); }
+.hk-row.capturing .hk-icon { color: var(--color-accent-ink); }
 .hk-name { font-size: var(--text-md); font-weight: 500; color: var(--color-text-primary); white-space: nowrap; }
 .hk-desc {
   font-size: var(--text-sm);
@@ -515,7 +515,7 @@ defineExpose({ capturing })
   border-bottom-color: var(--color-accent);
   /* 捕获态是「按下待录入」，用低透明强调底；废弃的 --color-surface 比卡片还暗，会像挖了个洞。 */
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   box-shadow: 0 0 0 2px var(--color-accent-border);
   animation: hk-pulse 1.1s ease-in-out infinite;
 }

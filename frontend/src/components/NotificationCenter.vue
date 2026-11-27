@@ -500,7 +500,7 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
 .nc-chip:hover { color: var(--color-text-primary); border-color: var(--color-accent-border); }
 .nc-chip.on {
   background: var(--color-accent-bg); border-color: var(--color-accent-border);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 .nc-chip-count {
   margin-left: var(--space-2); font-size: var(--text-2xs); opacity: 0.72;

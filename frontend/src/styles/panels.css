@@ -153,7 +153,7 @@
   flex-shrink: 0;
   padding: var(--space-2) 14px;
   font-size: var(--text-xs);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: var(--color-accent-bg);
 }
 
@@ -314,7 +314,7 @@
   border: 1px solid var(--color-accent-border);
   border-radius: var(--radius-sm);
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-size: var(--text-sm);
   font-weight: 600;
   font-family: inherit;
@@ -348,7 +348,7 @@
 .qd-run-caret { transition: transform var(--transition-fast); transform: rotate(-90deg); flex-shrink: 0; }
 .qd-run[open] > .qd-run-sum .qd-run-caret { transform: rotate(0deg); }
 .qd-run-state { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-muted); }
-.qd-run-state.is-running { color: var(--color-accent); }
+.qd-run-state.is-running { color: var(--color-accent-ink); }
 .qd-run-state.is-done { color: var(--color-success-ink); }
 .qd-run-state.is-failed { color: var(--color-danger-ink); }
 .qd-run-state.is-canceled { color: var(--color-warning-ink); }
@@ -403,7 +403,7 @@
   padding: 1px 5px; border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-muted);
 }
-.qd-team-role .qd-run-role { color: var(--color-accent); }
+.qd-team-role .qd-run-role { color: var(--color-accent-ink); }
 /* 成员行上的中文职能小标签：名字只有 writer/code 这种英文标识，不展开也能
    看出这位负责哪方面。团队卡（AgentTeamCard）与编排树（AgentRunTree）共用。 */
 .qd-team-role-chip {
@@ -468,13 +468,13 @@
   width: 18px; height: 18px; flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: var(--radius-full);
-  font-size: 10px; font-weight: 600; font-family: var(--font-mono);
-  background: var(--color-accent-bg); color: var(--color-accent);
+  font-size: var(--text-2xs); font-weight: 600; font-family: var(--font-mono);
+  background: var(--color-accent-bg); color: var(--color-accent-ink);
   border: 1px solid var(--color-card-bg);
 }
 .qd-run-avatar--stack { margin-left: -4px; }
 .qd-run-avatar--more { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
-.qd-run-avatar.tone-a { background: var(--color-accent-bg); color: var(--color-accent); }
+.qd-run-avatar.tone-a { background: var(--color-accent-bg); color: var(--color-accent-ink); }
 .qd-run-avatar.tone-b { background: var(--color-success-bg); color: var(--color-success-ink); }
 .qd-run-avatar.tone-c { background: var(--color-warning-bg); color: var(--color-warning-ink); }
 .qd-run-avatar.tone-d { background: var(--color-danger-bg); color: var(--color-danger-ink); }
@@ -498,7 +498,7 @@
   margin-left: auto; display: inline-flex; align-items: center; gap: var(--space-2);
   font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap;
 }
-.qd-run-member-status.is-running { color: var(--color-accent); }
+.qd-run-member-status.is-running { color: var(--color-accent-ink); }
 .qd-run-member-status.is-done { color: var(--color-success-ink); }
 .qd-run-member-status.is-failed { color: var(--color-danger-ink); }
 .qd-run-member-status.is-canceled { color: var(--color-warning-ink); }
@@ -553,4 +553,4 @@
   background: var(--color-bg-active); color: var(--color-text-secondary);
   font-size: var(--text-xs);
 }
-.qd-diff-more:hover { color: var(--color-accent); }
+.qd-diff-more:hover { color: var(--color-accent-ink); }

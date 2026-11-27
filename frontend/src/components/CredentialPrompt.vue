@@ -340,7 +340,7 @@ function onKeydown(e: KeyboardEvent) {
   flex-shrink: 0;
   width: 32px;
   height: 32px;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: var(--color-accent-bg);
   border-radius: var(--radius-sm);
 }
@@ -393,7 +393,7 @@ function onKeydown(e: KeyboardEvent) {
 
 .cred-pick.is-active {
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .cred-pick-name {

@@ -351,7 +351,7 @@ onUnmounted(() => {
   height: 46px;
   margin: 0 auto var(--space-5);
   border-radius: var(--radius-lg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: var(--color-accent-bg);
   border: 1px solid var(--color-accent-border);
 }
@@ -510,7 +510,7 @@ onUnmounted(() => {
 }
 
 .lock-link:hover {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: var(--color-accent-bg);
 }
 

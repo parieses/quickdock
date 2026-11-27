@@ -310,7 +310,7 @@ function writeBack(mode: 'insert' | 'replace' | 'append') {
 }
 
 .note-ai-action:hover:not(:disabled) {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: var(--color-bg-hover);
 }
 
@@ -348,7 +348,7 @@ function writeBack(mode: 'insert' | 'replace' | 'append') {
   align-items: center;
   gap: var(--space-2);
   font-size: var(--text-xs);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .note-ai-quote-line {

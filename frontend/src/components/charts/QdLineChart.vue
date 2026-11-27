@@ -269,5 +269,5 @@ onBeforeUnmount(() => {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-xs);
 }
-.qd-chart__zoom button:hover { color: var(--color-accent); border-color: var(--color-accent); }
+.qd-chart__zoom button:hover { color: var(--color-accent-ink); border-color: var(--color-accent); }
 </style>

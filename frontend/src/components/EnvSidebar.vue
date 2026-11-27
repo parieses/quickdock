@@ -194,7 +194,7 @@ watch(() => props.selectedId, () => { void nextTick(revealActive) }, { immediate
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
 }
 
-.cat-btn.active .cat-count { background: var(--color-accent-bg); color: var(--color-accent); }
+.cat-btn.active .cat-count { background: var(--color-accent-bg); color: var(--color-accent-ink); }
 
 .cats-sep { height: 1px; background: var(--color-border); margin: var(--space-4) var(--space-3); flex-shrink: 0; }
 

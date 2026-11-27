@@ -123,7 +123,7 @@ function onTabKey(e: KeyboardEvent, i: number) {
 .qd-tab:hover:not(:disabled) { color: var(--color-text-primary); }
 .qd-tab[aria-selected='true'] {
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 .qd-tab:disabled { color: var(--color-text-disabled); cursor: default; }
 .qd-tab-badge {
@@ -148,7 +148,7 @@ function onTabKey(e: KeyboardEvent, i: number) {
 }
 .qd-tabs.is-chip .qd-tab[aria-selected='true'] {
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   border-color: var(--color-accent-border-strong);
 }
 </style>

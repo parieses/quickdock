@@ -160,7 +160,7 @@ function onKeydown(e: KeyboardEvent) {
   width: 24px;
   height: 24px;
   border-radius: var(--radius-sm);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: var(--color-accent-bg);
 }
 

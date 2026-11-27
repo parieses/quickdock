@@ -3541,7 +3541,7 @@ const dialogCtx = reactive({
   color: var(--color-text-muted); background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
 }
-.env-info:hover { color: var(--color-accent); border-color: var(--color-border-focus); }
+.env-info:hover { color: var(--color-accent-ink); border-color: var(--color-border-focus); }
 
 .env-body { flex: 1; min-height: 0; display: flex; }
 
@@ -3592,7 +3592,7 @@ const dialogCtx = reactive({
   inset: -4px;
   border-radius: 50%;
 }
-.doc-btn:hover, .doc-btn.on { color: var(--color-accent); border-color: var(--color-accent); }
+.doc-btn:hover, .doc-btn.on { color: var(--color-accent-ink); border-color: var(--color-accent); }
 /* 浮层走 popover 面层：卡片是 card-bg，浮层要再上一层才不会看起来"挖"进卡片。
    位置由 script 算好（fixed + 按钮 rect），这里只管外观。
    资料卡内容变长：限高 + 内部滚动，避免长要点把卡片顶出屏幕；
@@ -3614,7 +3614,7 @@ const dialogCtx = reactive({
 }
 .doc-pop-kind {
   margin-left: auto; padding: 1px 7px; border-radius: var(--radius-full);
-  background: var(--color-accent-bg); color: var(--color-accent); font-size: var(--text-2xs);
+  background: var(--color-accent-bg); color: var(--color-accent-ink); font-size: var(--text-2xs);
 }
 .doc-pop-text {
   margin: 10px 0 0; font-size: var(--text-xs); line-height: 1.65;
@@ -3662,10 +3662,10 @@ const dialogCtx = reactive({
   color: var(--color-text-secondary); font-size: var(--text-2xs);
   transition: color .15s ease, border-color .15s ease;
 }
-.doc-link:hover { color: var(--color-accent); border-color: var(--color-accent); }
+.doc-link:hover { color: var(--color-accent-ink); border-color: var(--color-accent); }
 .detail-badges { display: flex; align-items: center; gap: var(--space-3); }
 .badge { font-size: var(--text-xs); padding: 1px 7px; border-radius: var(--radius-md); background: var(--color-bg-tertiary); color: var(--color-text-muted); }
-.badge.svc { background: var(--color-accent-bg); color: var(--color-accent); }
+.badge.svc { background: var(--color-accent-bg); color: var(--color-accent-ink); }
 /* 常驻开关（服务类运行时）：开=随应用自启/崩溃自愈，关=停止 */
 .svc-switch { display: inline-flex; align-items: center; gap: var(--space-3); margin-left: var(--space-2); cursor: pointer; user-select: none; -webkit-user-select: none; }
 /* 开关本体已换成 QdSwitch（34×18 几何完全一致），这里只留行内布局与文案。 */
@@ -3770,7 +3770,7 @@ const dialogCtx = reactive({
   background: var(--color-accent-bg);
   border: 1px solid var(--color-accent-border);
 }
-.ub-icon { font-size: var(--text-lg); color: var(--color-accent); flex: 0 0 auto; }
+.ub-icon { font-size: var(--text-lg); color: var(--color-accent-ink); flex: 0 0 auto; }
 .ub-text { display: flex; flex-direction: column; gap: var(--space-1); flex: 1; min-width: 0; }
 .ub-title { font-size: var(--text-md); color: var(--color-text-primary); font-weight: 500; }
 .ub-desc { font-size: var(--text-xs); color: var(--color-text-muted); }
@@ -3838,17 +3838,17 @@ const dialogCtx = reactive({
   cursor: pointer; color: var(--color-text-secondary);
 }
 .col-path.clickable:hover, .g-path.clickable:hover {
-  color: var(--color-accent); text-decoration: underline;
+  color: var(--color-accent-ink); text-decoration: underline;
 }
 
 .col-ver { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 /* 版本行首：默认版本圆点 + 别名 + 版本号。圆点是 14px 控件，
    用 center 对齐比 baseline 更稳（中文别名与等宽版本号基线并不一致）。 */
 .ver-name { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
-.ver-alias { font-size: var(--text-md); font-weight: 600; color: var(--color-accent); white-space: nowrap; }
+.ver-alias { font-size: var(--text-md); font-weight: 600; color: var(--color-accent-ink); white-space: nowrap; }
 .ver-ver { font-size: var(--text-sm); color: var(--color-text-secondary); font-family: var(--font-mono); }
 .ver-scope { font-size: var(--text-2xs); padding: 1px 7px; border-radius: var(--radius-md); width: fit-content; }
-.ver-scope.portable { background: var(--color-accent-bg); color: var(--color-accent); }
+.ver-scope.portable { background: var(--color-accent-bg); color: var(--color-accent-ink); }
 .ver-scope.system { background: var(--color-border); color: var(--color-text-secondary); }
 /* 路径/备注是这一列的内容而不是禁用态：disabled 档在浅色下（#9aa2ae on #f6f7f9）
    只有 ~2.4:1，长路径读起来像「不可用」。内容一律至少 muted。 */
@@ -3883,7 +3883,7 @@ const dialogCtx = reactive({
 /* 状态/操作色用 -bg 低透明底 + 同色文字：四个实色块同屏会盖过标题层级。 */
 .svc-btn.start { background: var(--color-success-bg); color: var(--color-success-ink); }
 .svc-btn.stop { background: var(--color-danger-bg); color: var(--color-danger-ink); }
-.svc-btn.restart { background: var(--color-accent-bg); color: var(--color-accent); }
+.svc-btn.restart { background: var(--color-accent-bg); color: var(--color-accent-ink); }
 .svc-btn.console { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .svc-btn:hover { opacity: 0.9; }
 .svc-btn:disabled { color: var(--color-text-disabled); cursor: default; }
@@ -3913,7 +3913,7 @@ const dialogCtx = reactive({
   cursor: pointer;
   transition: color var(--transition-fast);
 }
-.svc-port-link:hover { color: var(--color-accent); text-decoration: underline; }
+.svc-port-link:hover { color: var(--color-accent-ink); text-decoration: underline; }
 .svc-port-link.disabled { cursor: default; color: var(--color-text-disabled); }
 .svc-port-link.disabled:hover { color: var(--color-text-disabled); text-decoration: none; }
 
@@ -4062,7 +4062,7 @@ const dialogCtx = reactive({
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   cursor: pointer;
 }
-.path-text:hover { color: var(--color-accent); text-decoration: underline; }
+.path-text:hover { color: var(--color-accent-ink); text-decoration: underline; }
 .path-copy {
   flex: none; width: 20px; height: 20px; padding: 0;
   display: inline-flex; align-items: center; justify-content: center;
@@ -4074,7 +4074,7 @@ const dialogCtx = reactive({
 /* 复制图标默认隐藏：30 行 × 每行一个图标会形成一条竖线干扰读表格。
    鼠标进入该行（或键盘聚焦到行内）才出现，功能不减、默认状态更安静。 */
 .ver-row:hover .path-copy, .path-cell:focus-within .path-copy { opacity: 1; }
-.path-copy:hover { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
+.path-copy:hover { color: var(--color-accent-ink); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
 
 /* 全局默认版本圆点：radio 语义，选中=该版本的 bin 在 PATH 里 */
 .def-radio {
@@ -4134,7 +4134,7 @@ const dialogCtx = reactive({
 .adv-label { flex: none; min-width: 76px; font-size: var(--text-xs); color: var(--color-text-muted); }
 .adv-row--stack .env-input { flex: 1; min-width: 220px; }
 .install-adv .link-btn.on {
-  background: var(--color-accent-bg); color: var(--color-accent);
+  background: var(--color-accent-bg); color: var(--color-accent-ink);
   border-color: var(--color-border-focus-soft);
 }
 
@@ -4179,7 +4179,7 @@ const dialogCtx = reactive({
 .env-select:focus, .env-input:focus, .env-textarea:focus { border-color: var(--color-border-focus-soft); }
 .link-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
   flex-shrink: 0; font-size: var(--text-xs); height: 24px; padding: 0 var(--space-4); border-radius: var(--radius-sm); cursor: pointer;
-  border: 1px solid var(--color-border); background: transparent; color: var(--color-accent);
+  border: 1px solid var(--color-border); background: transparent; color: var(--color-accent-ink);
   font-family: inherit; transition: background var(--transition-fast);
 }
 .link-btn:hover { background: var(--color-accent-bg); }
@@ -4217,7 +4217,7 @@ const dialogCtx = reactive({
 
 /* E-8 更新总览：页头角标 + 全局清单 */
 .qd-icon-btn { position: relative; }
-.qd-icon-btn.on { color: var(--color-accent); background: var(--color-accent-bg); }
+.qd-icon-btn.on { color: var(--color-accent-ink); background: var(--color-accent-bg); }
 .qd-upd-badge {
   position: absolute; top: -4px; right: -4px;
   min-width: 14px; height: 14px; padding: 0 3px;

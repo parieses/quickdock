@@ -1048,7 +1048,7 @@ defineExpose({
 
 .sess-ai-fab:hover {
   background: var(--color-bg-hover);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .sess-overlay {

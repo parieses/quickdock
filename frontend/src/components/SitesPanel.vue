@@ -773,7 +773,7 @@ onMounted(() => { load(); loadCert() })
 .status-item { display: flex; align-items: center; gap: 10px; font-size: var(--text-sm); }
 .status-label { width: 96px; flex: 0 0 auto; color: var(--color-text-muted); }
 .status-value { display: flex; align-items: center; gap: var(--space-3); color: var(--color-text-primary); }
-.status-value.ok { color: var(--color-accent); }
+.status-value.ok { color: var(--color-accent-ink); }
 .status-value.off { color: var(--color-text-muted); }
 .port-input { width: 90px; padding: 3px var(--space-4); font-size: var(--text-sm); }
 .env-input {
@@ -789,7 +789,7 @@ onMounted(() => { load(); loadCert() })
   padding: var(--space-4) 0; border-top: 1px solid var(--color-border);
 }
 .site-main { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex: 1; }
-.site-domain { font-size: var(--text-md); font-weight: 600; color: var(--color-accent); text-decoration: none; }
+.site-domain { font-size: var(--text-md); font-weight: 600; color: var(--color-accent-ink); text-decoration: none; }
 .site-domain:hover { text-decoration: underline; }
 .site-name { font-size: var(--text-sm); color: var(--color-text-muted); }
 /* 文档根徽标：一眼看出这个站点不是从项目根对外服务的（Laravel→public 之类） */
@@ -815,7 +815,7 @@ onMounted(() => { load(); loadCert() })
 .op-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 .link-btn {
   background: none; border: none; padding: 0; font-size: var(--text-sm); font-family: inherit;
-  color: var(--color-accent); cursor: pointer;
+  color: var(--color-accent-ink); cursor: pointer;
 }
 .link-btn:hover:not(:disabled) { text-decoration: underline; }
 .link-btn:disabled { color: var(--color-text-disabled); cursor: default; }
@@ -851,7 +851,7 @@ onMounted(() => { load(); loadCert() })
 }
 .gen-head { display: flex; align-items: center; justify-content: space-between; flex: 0 0 auto; }
 .gen-tabs { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; flex: 0 0 auto; }
-.gen-tag { font-size: var(--text-xs); color: var(--color-accent); }
+.gen-tag { font-size: var(--text-xs); color: var(--color-accent-ink); }
 .gen-tag.muted { color: var(--color-text-muted); }
 .gen-tag-off { margin-left: 5px; font-size: var(--text-2xs); opacity: 0.75; }
 /* 中段独立滚动：头部/底部固定，窗口再矮也点得到「保存」 */
@@ -872,7 +872,7 @@ onMounted(() => { load(); loadCert() })
 }
 .gen-code:focus { border-color: var(--color-border-focus-soft); }
 .gen-meta { display: flex; flex-direction: column; gap: var(--space-1); flex: 0 0 auto; }
-.block-hint.ok { color: var(--color-accent); }
+.block-hint.ok { color: var(--color-accent-ink); }
 .gen-foot { display: flex; justify-content: flex-end; gap: var(--space-4); flex: 0 0 auto; }
 .gen-modules { display: flex; flex-direction: column; gap: var(--space-4); }
 .gen-modules-title { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); }

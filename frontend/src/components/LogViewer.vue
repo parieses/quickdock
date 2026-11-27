@@ -939,7 +939,7 @@ onUnmounted(() => {
 .log-file.active {
   background: var(--color-accent-bg);
   border-color: var(--color-accent-border);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 /* 不能用 flex：徽章是行内元素，一旦容器变 flex，后面的文件名会变成匿名 flex item，
    容器的 text-overflow: ellipsis 就不再作用于它，长文件名会直接溢出。 */
@@ -981,7 +981,7 @@ onUnmounted(() => {
   background: transparent; color: var(--color-text-muted); cursor: pointer;
   transition: color var(--transition-fast), border-color var(--transition-fast);
 }
-.tail-add:hover { color: var(--color-accent); border-color: var(--color-accent); }
+.tail-add:hover { color: var(--color-accent-ink); border-color: var(--color-accent); }
 
 .tail-tab { position: relative; }
 /* 名称行让出右侧 20px：关闭按钮是绝对定位的，不占栅格宽度，
@@ -1072,7 +1072,7 @@ onUnmounted(() => {
   background: var(--color-bg-secondary);
 }
 .log-context-main { display: flex; align-items: center; gap: var(--space-4); flex: 1 1 auto; min-width: 0; }
-.log-context-icon { flex-shrink: 0; color: var(--color-accent); }
+.log-context-icon { flex-shrink: 0; color: var(--color-accent-ink); }
 .log-context-icon.is-crash { color: var(--color-danger-ink); }
 .log-context-name {
   min-width: 0;
@@ -1220,7 +1220,7 @@ onUnmounted(() => {
   transition: opacity var(--transition-fast), color var(--transition-fast);
 }
 .log-line-row:hover .line-copy { opacity: 1; }
-.line-copy:hover { color: var(--color-accent); border-color: var(--color-accent-border); }
+.line-copy:hover { color: var(--color-accent-ink); border-color: var(--color-accent-border); }
 
 .log-empty-body { padding: var(--space-11) 0; text-align: center; font-size: var(--text-md); }
 

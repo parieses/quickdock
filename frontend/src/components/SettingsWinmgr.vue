@@ -370,7 +370,7 @@ async function saveAll() {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.wm-item.capturing .wm-item-label { color: var(--color-accent); }
+.wm-item.capturing .wm-item-label { color: var(--color-accent-ink); }
 
 /* 真实键帽样式 */
 .wm-kbd {
@@ -398,7 +398,7 @@ async function saveAll() {
   border-color: var(--color-accent);
   border-bottom-color: var(--color-accent);
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   box-shadow: 0 0 0 2px var(--color-accent-border);
   animation: wm-pulse 1.1s ease-in-out infinite;
 }
@@ -429,7 +429,7 @@ async function saveAll() {
 
 .wm-ratio { display: flex; align-items: center; gap: var(--space-5); }
 .wm-slider { flex: 1; accent-color: var(--color-accent); }
-.wm-ratio-val { font-size: var(--text-md); font-weight: 600; color: var(--color-accent); min-width: 44px; text-align: right; }
+.wm-ratio-val { font-size: var(--text-md); font-weight: 600; color: var(--color-accent-ink); min-width: 44px; text-align: right; }
 .wm-hint { font-size: var(--text-xs); color: var(--color-text-muted); margin: var(--space-4) 0 0; line-height: 1.5; }
 
 .wm-actions { display: flex; gap: var(--space-4); margin-top: var(--space-1); }

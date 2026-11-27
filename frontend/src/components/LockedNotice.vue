@@ -75,7 +75,7 @@ async function openMain() {
   justify-content: center;
   width: 42px;
   height: 42px;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);

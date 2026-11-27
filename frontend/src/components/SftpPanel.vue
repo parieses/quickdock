@@ -1329,7 +1329,7 @@ async function copyPath(e: SftpEntry) {
 }
 
 .sftp-head-icon {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   flex: 0 0 auto;
 }
 
@@ -1428,7 +1428,7 @@ async function copyPath(e: SftpEntry) {
   color: var(--color-text-muted);
   padding: var(--space-1) 5px;
 }
-.sftp-crumb-edit:hover:not(:disabled) { color: var(--color-accent); }
+.sftp-crumb-edit:hover:not(:disabled) { color: var(--color-accent-ink); }
 /* 路径输入框：占满面包屑剩余宽度，与面包屑同字号同高 */
 .sftp-path-input {
   flex: 1 1 auto;
@@ -1577,7 +1577,7 @@ async function copyPath(e: SftpEntry) {
 .sftp-selcount {
   flex: 0 0 auto;
   font-weight: 500;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .sftp-selbtn {
@@ -1709,7 +1709,7 @@ async function copyPath(e: SftpEntry) {
 }
 
 .ic--dir {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .nm {
@@ -2002,7 +2002,7 @@ async function copyPath(e: SftpEntry) {
 .props-sub { color: var(--color-text-muted); font-size: var(--text-xs); margin-left: var(--space-2); }
 .props-oct {
   font-family: var(--font-mono);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 .props-note {
   margin-top: var(--space-3);

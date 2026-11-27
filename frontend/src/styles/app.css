@@ -247,12 +247,12 @@
 
 /* 开关型按钮的"已选中"态（如插件页的「市场 / 本地」切换、分组筛选 chip） */
 .qd-btn.is-on, .btn.is-on {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   border-color: var(--color-accent-border-strong);
   background: var(--color-accent-bg);
 }
 .qd-btn.is-on:hover, .btn.is-on:hover {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   border-color: var(--color-accent);
   background: var(--color-accent-bg);
 }
@@ -523,7 +523,7 @@
   text-align: left; font-family: inherit;
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
-.ai-artifact:hover { background: var(--color-bg-hover); color: var(--color-accent); }
+.ai-artifact:hover { background: var(--color-bg-hover); color: var(--color-accent-ink); }
 .ai-artifact-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-artifact-op { color: var(--color-text-secondary); flex-shrink: 0; }
 /* 右侧面板首页的产物合集：面板窄，仍是竖列、op 贴行右，chip 去掉描边融进列表 */
@@ -555,7 +555,7 @@
   font-size: var(--text-xs); text-decoration: none;
   transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
 }
-.ai-source:hover { background: var(--color-bg-hover); border-color: var(--color-accent); color: var(--color-accent); }
+.ai-source:hover { background: var(--color-bg-hover); border-color: var(--color-accent); color: var(--color-accent-ink); }
 .ai-source > svg:first-child { flex: none; color: var(--color-text-muted); }
 .ai-source-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-source-ext { flex: none; opacity: 0.6; }
@@ -578,7 +578,7 @@
   white-space: nowrap;
 }
 
-.ai-rich-chip-icon { flex-shrink: 0; color: var(--color-accent); font-size: var(--text-2xs); }
+.ai-rich-chip-icon { flex-shrink: 0; color: var(--color-accent-ink); font-size: var(--text-2xs); }
 
 .ai-rich-chip-name { overflow: hidden; text-overflow: ellipsis; }
 
@@ -614,7 +614,7 @@
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 
-.ai-tool-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
+.ai-tool-btn:hover { color: var(--color-accent-ink); border-color: var(--color-accent); }
 
 /* 运行中不让加图：图片要过一次闸门 + 落盘，插不进已经开始跑的那一轮。
    灰掉而不是藏起来——藏起来会让人以为功能坏了。 */
@@ -742,7 +742,7 @@
   white-space: nowrap;
 }
 .op-btn:hover { background: var(--color-bg-primary); color: var(--color-text-primary); }
-.op-btn.on { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-border-focus); }
+.op-btn.on { background: var(--color-accent-bg); color: var(--color-accent-ink); border-color: var(--color-border-focus); }
 .op-btn.danger:hover { background: var(--color-danger-bg); color: var(--color-danger-ink); border-color: var(--color-danger); }
 
 .log-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
@@ -750,7 +750,7 @@
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm); white-space: nowrap;
 }
-.log-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.log-btn:hover { border-color: var(--color-accent); color: var(--color-accent-ink); }
 .log-btn.active { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
 
 /* 空态基干：EnvCoreDialogs / EnvironmentPage 两份逐字重复 */

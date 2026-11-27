@@ -2039,7 +2039,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
    这是描边重叠技巧而非间距，取 --space 档位（最小 2px）会把缝露出来，故保留裸值。 */
 .ne-format button:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
 .ne-format button:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-left: -1px; }
-.ne-format button.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
+.ne-format button.active { color: var(--color-accent-ink); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
 .ne-format button:hover:not(.active) { color: var(--color-text-primary); }
 /* 编辑区工具条：格式 + 视图，紧贴编辑区上沿。与标题行分开后，
    窄窗口下「文档名 + 一排图标」不再和分段按钮抢同一行宽度。 */
@@ -2055,7 +2055,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .ne-view button { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-muted); cursor: pointer; font-family: inherit; border-radius: var(--radius-sm); }
 .ne-view button:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
 .ne-view button:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-left: -1px; }
-.ne-view button.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
+.ne-view button.active { color: var(--color-accent-ink); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
 .ne-view button:hover:not(.active) { color: var(--color-text-primary); }
 /* 视图模式：隐藏某一栏，另一栏撑满。预览用 v-show（内联 display:none），
    故这里必须 !important 才能压过内联样式；编辑器无 v-show，正常隐藏即可。 */
@@ -2065,10 +2065,10 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
    它们常驻高对比度会把「文档名」这个主信息挤走。 */
 .ne-copy { border: none; background: none; color: var(--color-text-muted); cursor: pointer; padding: var(--space-3); border-radius: var(--radius-sm); opacity: 0.55; transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast); }
 .ne-head:hover .ne-copy, .ne-copy:hover, .ne-copy:focus-visible, .ne-copy.active { opacity: 1; }
-.ne-copy:hover { background: var(--color-bg-hover); color: var(--color-accent); }
+.ne-copy:hover { background: var(--color-bg-hover); color: var(--color-accent-ink); }
 /* 大纲按钮的开启态。此前只有 :class="{ active: tocOpen }" 而没有任何 .active 规则，
    点了完全没反馈（11-12 补）。 */
-.ne-copy.active { background: var(--color-accent-bg); color: var(--color-accent); }
+.ne-copy.active { background: var(--color-accent-bg); color: var(--color-accent-ink); }
 /* 低频操作溢出菜单：hover / focus-within 展开，沿用浮层 token */
 .ne-more-wrap { position: relative; display: inline-flex; }
 .ne-more-pop {
@@ -2112,7 +2112,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .md-help-row { display: flex; align-items: baseline; gap: var(--space-3); width: 100%; padding: var(--space-1) var(--space-2); margin: 0; border: none; border-radius: var(--radius-sm); background: none; text-align: left; cursor: pointer; font-family: inherit; }
 .md-help-row:hover { background: var(--color-bg-hover); }
 .md-help-row:hover .md-help-sample { color: var(--color-text-primary); }
-.md-help-sample { flex-shrink: 0; min-width: 108px; padding: var(--space-1) var(--space-2); border-radius: var(--radius-xs); background: var(--color-bg-tertiary); color: var(--color-accent); font-family: var(--font-mono); font-size: var(--text-sm); white-space: nowrap; }
+.md-help-sample { flex-shrink: 0; min-width: 108px; padding: var(--space-1) var(--space-2); border-radius: var(--radius-xs); background: var(--color-bg-tertiary); color: var(--color-accent-ink); font-family: var(--font-mono); font-size: var(--text-sm); white-space: nowrap; }
 .md-help-desc { font-size: var(--text-sm); color: var(--color-text-secondary); }
 .md-help-foot { padding: var(--space-2) var(--space-4); border-top: 1px solid var(--color-border); font-size: var(--text-xs); color: var(--color-text-muted); }
 .md-help-wiki { padding: 0 var(--space-4) var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); }
@@ -2124,7 +2124,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .ne-wiki-tabs { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-2); }
 .ne-wiki-tab { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-4); border: none; border-radius: var(--radius-xs); background: transparent; color: var(--color-text-muted); font-family: inherit; font-size: var(--text-xs); cursor: pointer; }
 .ne-wiki-tab:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.ne-wiki-tab.on { background: var(--color-accent-bg); color: var(--color-accent); }
+.ne-wiki-tab.on { background: var(--color-accent-bg); color: var(--color-accent-ink); }
 .ne-wiki-tab-n { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .ne-wiki-tab.on .ne-wiki-tab-n { color: inherit; opacity: 0.7; }
 .ne-wiki-empty { padding: var(--space-3); color: var(--color-text-muted); font-size: var(--text-sm); }
@@ -2153,12 +2153,12 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 }
 .ne-toc-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 /* 搜索命中高亮：只覆盖文字底色，不用 <mark> 的默认黄底（深色主题下会刺眼） */
-.tn-hl { background: var(--color-accent-bg); color: var(--color-accent); border-radius: var(--radius-2xs); padding: 0 var(--space-1); }
+.tn-hl { background: var(--color-accent-bg); color: var(--color-accent-ink); border-radius: var(--radius-2xs); padding: 0 var(--space-1); }
 /* 视图 tab：文档 / 图谱。图谱是覆盖层，tab 必须压在它上面（z-index 更高）。 */
 .ne-viewtabs { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-4); flex-shrink: 0; border-bottom: 1px solid var(--color-border); background: var(--color-bg-secondary); position: relative; z-index: calc(var(--z-dropdown) + 1); }
 .ne-viewtabs button { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted); font-size: var(--text-sm); cursor: pointer; font-family: inherit; }
 .ne-viewtabs button:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.ne-viewtabs button.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
+.ne-viewtabs button.active { color: var(--color-accent-ink); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
 .ne-viewtabs-spacer { flex: 1; }
 .ne-graph-overlay { position: absolute; inset: 0; z-index: var(--z-dropdown); background: var(--color-bg-primary); }
 /* 大纲侧栏：作为 ne-split 的第三个 flex 栏，与源码/预览并排，不遮挡内容。 */
@@ -2185,7 +2185,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 }
 
 /* 工具栏按钮高亮态（多选/激活） */
-.tt-btn.on { background: var(--color-accent-bg); color: var(--color-accent); }
+.tt-btn.on { background: var(--color-accent-bg); color: var(--color-accent-ink); }
 
 /* 勾选框统一走全局 input[type='checkbox']，这里只留布局属性（另见 .recent-row .tn-check） */
 /* 选中态全页唯一画法：select-bg 实底 + 3px accent 竖条，文字不变蓝。
@@ -2305,7 +2305,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 /* 链接：深色底下浏览器默认的「蓝字 + 实下划线」最刺眼，压成 accent 文字 + 极淡下划线，
    悬停才加亮。正文里的链接读起来应该像文字，不像被框住的东西。 */
 .markdown-body :deep(a) {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   text-decoration: none;
   border-bottom: 1px solid var(--color-accent-border);
   transition: color var(--transition-fast), border-color var(--transition-fast);
@@ -2406,7 +2406,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
   padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
 }
-.nh-head-icon { color: var(--color-accent); flex-shrink: 0; }
+.nh-head-icon { color: var(--color-accent-ink); flex-shrink: 0; }
 .nh-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
 .nh-count { font-size: var(--text-xs); color: var(--color-text-muted); }
 .nh-spacer { flex: 1; }
@@ -2416,7 +2416,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-muted); cursor: pointer;
 }
-.nh-icon-btn:hover { color: var(--color-accent); border-color: var(--color-accent-border); }
+.nh-icon-btn:hover { color: var(--color-accent-ink); border-color: var(--color-accent-border); }
 .nh-body { flex: 1; min-height: 0; display: flex; }
 .nh-list {
   width: 300px; flex-shrink: 0; overflow-y: auto; padding: var(--space-2);
@@ -2452,7 +2452,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .nh-item-top { display: flex; align-items: baseline; gap: var(--space-2); }
 .nh-time { font-size: var(--text-xs); color: var(--color-text-secondary); flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .nh-reason {
-  font-size: var(--text-2xs); color: var(--color-accent); flex-shrink: 0;
+  font-size: var(--text-2xs); color: var(--color-accent-ink); flex-shrink: 0;
   padding: 0 var(--space-2); border-radius: var(--radius-full); background: var(--color-accent-bg);
 }
 .nh-excerpt {

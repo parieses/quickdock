@@ -98,7 +98,7 @@ function onCancel() {
 <style scoped>
 /* 外壳（遮罩 / 卡片 / 头部 / 底部按钮排布）由 QdModal 提供，这里只留内容样式。 */
 .challenge-icon {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   flex: 0 0 auto;
 }
 

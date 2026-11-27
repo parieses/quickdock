@@ -216,7 +216,7 @@ onUnmounted(() => {
 .wm-target {
   display: inline-flex; align-items: center; gap: var(--space-3); min-width: 0;
   max-width: 460px; padding: var(--space-1) 9px; border-radius: var(--radius-full);
-  background: var(--color-accent-bg); color: var(--color-accent); font-size: var(--text-xs);
+  background: var(--color-accent-bg); color: var(--color-accent-ink); font-size: var(--text-xs);
 }
 .wm-target-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
 .wm-target-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

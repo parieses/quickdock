@@ -832,7 +832,7 @@ onUnmounted(() => {
 }
 
 .cred-switch.is-on {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   border-color: var(--color-accent-border-strong);
   background: var(--color-accent-bg);
 }
@@ -967,7 +967,7 @@ onUnmounted(() => {
 }
 
 .cred-transfer-result {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   word-break: break-all;
 }
 
@@ -1308,7 +1308,7 @@ onUnmounted(() => {
 }
 
 .cred-gen:hover {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   border-color: var(--color-accent-border-strong);
   background: var(--color-accent-bg);
 }

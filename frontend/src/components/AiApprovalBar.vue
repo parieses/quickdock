@@ -261,7 +261,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   white-space: nowrap;
 }
 
-.ai-approve-rules:hover { color: var(--color-accent); text-decoration: underline; }
+.ai-approve-rules:hover { color: var(--color-accent-ink); text-decoration: underline; }
 
 .ai-approve-meta {
   margin-top: 7px;

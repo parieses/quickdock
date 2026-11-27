@@ -3300,7 +3300,7 @@ const dialogCtx = reactive({
   background: none; color: var(--color-text-muted); cursor: pointer;
 }
 .bar-toggle:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
-.bar-icon { color: var(--color-accent); flex-shrink: 0; }
+.bar-icon { color: var(--color-accent-ink); flex-shrink: 0; }
 .bar-repo { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); flex-shrink: 0; }
 .bar-path {
   font-size: var(--text-xs); color: var(--color-text-muted); font-family: var(--font-mono);
@@ -3333,7 +3333,7 @@ const dialogCtx = reactive({
   font-family: var(--font-mono); font-size: var(--text-2xs); line-height: 1;
 }
 /* 徽章挂在实心的主按钮上时，蓝底压蓝底会糊成一团：反成白底蓝字 */
-.qd-btn-primary .btn-badge { background: var(--color-accent-text); color: var(--color-accent); }
+.qd-btn-primary .btn-badge { background: var(--color-accent-text); color: var(--color-accent-ink); }
 
 .git-error {
   margin: 0; padding: var(--space-3) var(--space-5); font-size: var(--text-sm); flex-shrink: 0;
@@ -3409,7 +3409,7 @@ const dialogCtx = reactive({
 /* 当前检出的分支：淡 accent 底 + 图标转 accent + 字重 700。
    只加粗时在 12px 字号下几乎看不出差别，必须有底色才能一眼定位。 */
 .item.current { background: var(--color-accent-bg); color: var(--color-text-primary); font-weight: 700; }
-.item.current .item-ic { color: var(--color-accent); }
+.item.current .item-ic { color: var(--color-accent-ink); }
 .item.dim .item-name { color: var(--color-text-secondary); }
 /* 选中项与全站统一：淡底 + 左缘竖条 + 常规文字色。
    原来整行文字转强调色，一列仓库名里只有它发蓝，看着像链接列表。 */
@@ -3423,7 +3423,7 @@ const dialogCtx = reactive({
 }
 .item-ic { flex-shrink: 0; color: var(--color-text-muted); }
 .item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.item-cur { flex-shrink: 0; color: var(--color-accent); }
+.item-cur { flex-shrink: 0; color: var(--color-accent-ink); }
 .item-remote {
   flex-shrink: 0; font-size: var(--text-2xs); color: var(--color-text-muted);
 }
@@ -3436,7 +3436,7 @@ const dialogCtx = reactive({
 .item-x:hover { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 .ab { display: inline-flex; align-items: center; gap: 1px; font-family: var(--font-mono); font-size: var(--text-2xs); flex-shrink: 0; }
 .ab.up { color: var(--color-warning-ink); }
-.ab.down { color: var(--color-accent); }
+.ab.down { color: var(--color-accent-ink); }
 
 /* ---- 右栏 ---- */
 .git-main {
@@ -3495,7 +3495,7 @@ const dialogCtx = reactive({
 /* 「全历史」徽标：告诉用户当前列表已经不是本地 200 条的筛选结果 */
 .hb-mode {
   flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
-  font-size: var(--text-2xs); color: var(--color-accent);
+  font-size: var(--text-2xs); color: var(--color-accent-ink);
 }
 
 /* 表头与数据行共用同一套列宽：图形列 + 内容列，时间在内容行内右对齐。
@@ -3562,8 +3562,8 @@ const dialogCtx = reactive({
 }
 /* 分支标记用浅底胶囊（GitLens 那套）：一眼能认出「这个提交带着哪个分支」。
    底色只用 8.5% 的 accent-bg，比实底克制，整列连起来也不抢摘要。 */
-.ref-branch { background: var(--color-accent-bg); color: var(--color-accent); font-weight: 600; }
-.ref-remote { background: var(--color-bg-tertiary); color: var(--color-accent); }
+.ref-branch { background: var(--color-accent-bg); color: var(--color-accent-ink); font-weight: 600; }
+.ref-remote { background: var(--color-bg-tertiary); color: var(--color-accent-ink); }
 .ref-tag { background: var(--color-warning-bg); color: var(--color-warning-ink); }
 .ref-more { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 
@@ -3610,7 +3610,7 @@ const dialogCtx = reactive({
   color: var(--color-text-muted);
 }
 .wt-all:hover { color: var(--color-text-secondary); background: var(--color-bg-hover); }
-.wt-all.on { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent); }
+.wt-all.on { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent-ink); }
 
 /* ---- 详情 + 提交面板 ---- */
 .detail-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -3649,7 +3649,7 @@ const dialogCtx = reactive({
   margin-left: auto; padding: 0 var(--space-1); border: 0; background: none;
   font: inherit; font-size: var(--text-2xs); color: var(--color-text-muted); cursor: pointer;
 }
-.pane-act:hover:not(:disabled) { color: var(--color-accent); }
+.pane-act:hover:not(:disabled) { color: var(--color-accent-ink); }
 .pane-act:disabled { color: var(--color-text-disabled); cursor: default; }
 /* 「全部暂存」后面紧跟的丢弃按钮不该再抢一次 auto 边距，否则两个动作被推到两端 */
 .pane-act + .pane-ic { margin-left: 0; }
@@ -3672,10 +3672,10 @@ const dialogCtx = reactive({
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 .cb-mini:first-of-type { margin-left: auto; }
-.cb-mini:hover:not(:disabled) { color: var(--color-accent); background: var(--color-accent-bg); }
+.cb-mini:hover:not(:disabled) { color: var(--color-accent-ink); background: var(--color-accent-bg); }
 .cb-mini:disabled { color: var(--color-text-disabled); cursor: default; }
 /* amend 是开关，选中态要与悬停态一眼区分 */
-.cb-mini.is-on { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent); }
+.cb-mini.is-on { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent-ink); }
 .cb-input {
   width: 100%; flex: none; height: 74px; min-height: 74px; resize: vertical;
   max-height: 180px;
@@ -3746,7 +3746,7 @@ const dialogCtx = reactive({
 }
 /* 拖到组头上方：整条变 accent 底 + 内描边，明确「松手就搬到这一组」 */
 .pane-head.drop-on {
-  background: var(--color-accent-bg); color: var(--color-accent);
+  background: var(--color-accent-bg); color: var(--color-accent-ink);
   box-shadow: inset 0 0 0 1px var(--color-accent-border);
 }
 .file-state { padding: var(--space-5); color: var(--color-text-muted); font-size: var(--text-sm); }
@@ -3771,7 +3771,7 @@ const dialogCtx = reactive({
 /* 目录行同理：一键把整个目录暂存 / 取消 */
 .tree-dir .file-quick { margin-left: auto; }
 .tree-dir:hover .file-quick, .tree-dir:focus-within .file-quick { display: grid; }
-.file-quick:hover { color: var(--color-accent); background: var(--color-accent-bg); }
+.file-quick:hover { color: var(--color-accent-ink); background: var(--color-accent-bg); }
 .file-quick:disabled { color: var(--color-text-disabled); cursor: default; }
 /* 目录行：只承担分组与折叠，不参与选中（点它折叠/展开） */
 .tree-dir {
@@ -3798,7 +3798,7 @@ const dialogCtx = reactive({
 .file-badge.add { color: var(--color-success-ink); }
 .file-badge.del { color: var(--color-danger-ink); }
 .file-badge.mod { color: var(--color-warning-ink); }
-.file-badge.ren { color: var(--color-accent); }
+.file-badge.ren { color: var(--color-accent-ink); }
 .file-badge.new { color: var(--color-success-ink); }
 .file-badge.conflict { color: var(--color-danger-ink); }
 .file-path {
@@ -3818,7 +3818,7 @@ const dialogCtx = reactive({
 .diff-hash { margin-left: auto; font-family: var(--font-mono); color: var(--color-text-muted); }
 .diff-reset {
   margin-left: auto; background: none; border: 0; padding: 0; cursor: pointer;
-  font: inherit; font-size: var(--text-xs); color: var(--color-accent);
+  font: inherit; font-size: var(--text-xs); color: var(--color-accent-ink);
 }
 .diff-reset:hover { color: var(--color-accent-hover); }
 
@@ -3830,7 +3830,7 @@ const dialogCtx = reactive({
 .diff span { display: block; padding: 0 var(--space-4); }
 .diff span.add { color: var(--color-success-ink); background: var(--color-success-bg); }
 .diff span.del { color: var(--color-danger-ink); background: var(--color-danger-bg); }
-.diff span.hunk { color: var(--color-accent); background: var(--color-bg-tertiary); }
+.diff span.hunk { color: var(--color-accent-ink); background: var(--color-bg-tertiary); }
 .diff span.meta { color: var(--color-text-muted); }
 .diff span.trunc { color: var(--color-text-muted); }
 
@@ -3840,7 +3840,7 @@ const dialogCtx = reactive({
   margin-left: auto; padding: 0 var(--space-2); border: 0; background: none; cursor: pointer;
   font: inherit; font-size: var(--text-2xs); color: var(--color-text-muted);
 }
-.diff-toggle:hover { color: var(--color-accent); }
+.diff-toggle:hover { color: var(--color-accent-ink); }
 .diff-toggle + .diff-reset { margin-left: var(--space-4); }
 .diff-side { flex: 1; min-height: 0; overflow: auto; font-family: var(--font-mono); font-size: var(--text-xs); }
 .side-block + .side-block { border-top: 1px solid var(--color-border); }
@@ -3865,7 +3865,7 @@ const dialogCtx = reactive({
 /* 左右两栏的分界线：没有它，上下文行两边的同文会看起来像连成一片 */
 .side-table td:nth-of-type(2) { border-right: 1px solid var(--color-border); }
 .sd-full { padding: 0 var(--space-4); white-space: pre-wrap; }
-.sd-full.hunk { color: var(--color-accent); background: var(--color-bg-tertiary); }
+.sd-full.hunk { color: var(--color-accent-ink); background: var(--color-bg-tertiary); }
 .sd-full.meta { color: var(--color-text-muted); }
 
 /* ---- 多选 ---- */
@@ -3875,10 +3875,10 @@ const dialogCtx = reactive({
   margin-left: auto; padding: 0 var(--space-1); border: 0; background: none; cursor: pointer;
   color: var(--color-text-muted); display: inline-flex; align-items: center;
 }
-.pane-ic:hover { color: var(--color-accent); }
+.pane-ic:hover { color: var(--color-accent-ink); }
 /* diff 头最左的「收起文件列」按钮：不属于右侧动作组，要抵消 margin-left:auto */
 .pane-ic.lead { margin-left: 0; margin-right: 2px; }
-.pane-ic.lead.on { color: var(--color-accent); background: var(--color-accent-bg); }
+.pane-ic.lead.on { color: var(--color-accent-ink); background: var(--color-accent-bg); }
 .pane-ic.danger:hover:not(:disabled) { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 .pane-ic:disabled { color: var(--color-text-disabled); cursor: default; }
 .pane-ic + .pane-act { margin-left: var(--space-3); }
@@ -3896,7 +3896,7 @@ const dialogCtx = reactive({
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
   border: 1px solid var(--color-border);
 }
-.pb-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
+.pb-btn:hover:not(:disabled) { color: var(--color-accent-ink); border-color: var(--color-accent); }
 .pb-btn.danger:hover:not(:disabled) { color: var(--color-danger-ink); border-color: var(--color-danger); }
 .pb-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 .pb-x {
@@ -3976,7 +3976,7 @@ const dialogCtx = reactive({
 .fh-bar {
   display: flex; align-items: center; gap: var(--space-3); height: 28px; flex-shrink: 0;
   padding: 0 var(--space-5); background: var(--color-accent-bg);
-  border-bottom: 1px solid var(--color-border); font-size: var(--text-xs); color: var(--color-accent);
+  border-bottom: 1px solid var(--color-border); font-size: var(--text-xs); color: var(--color-accent-ink);
 }
 .fh-ic { flex-shrink: 0; }
 .fh-name { font-weight: 500; flex-shrink: 0; }
@@ -3994,7 +3994,7 @@ const dialogCtx = reactive({
 /* ---- 大弹窗（SSH / blame / 历史版本）---- */
 
 /* ---- 子模块 ---- */
-.sub-state.diff { color: var(--color-accent); background: var(--color-accent-bg); }
+.sub-state.diff { color: var(--color-accent-ink); background: var(--color-accent-bg); }
 
 /* ---- 分支对比 ---- */
 .cmp-pill.add { color: var(--color-success-ink); background: var(--color-success-bg); }

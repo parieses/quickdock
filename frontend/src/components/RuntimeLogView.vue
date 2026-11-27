@@ -214,7 +214,7 @@ onMounted(() => nextTick(scrollBottom))
   border: none; border-radius: var(--radius-xs); background: var(--color-bg-tertiary);
   color: var(--color-text-secondary); font-size: var(--text-2xs);
 }
-.rv-nav:hover { background: var(--color-accent-bg); color: var(--color-accent); }
+.rv-nav:hover { background: var(--color-accent-bg); color: var(--color-accent-ink); }
 
 .rv-btn {
   height: 28px; padding: 0 11px; font-size: var(--text-sm); cursor: pointer; white-space: nowrap;
@@ -222,7 +222,7 @@ onMounted(() => nextTick(scrollBottom))
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
 }
-.rv-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.rv-btn:hover { border-color: var(--color-accent); color: var(--color-accent-ink); }
 .rv-btn.active { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
 .rv-badge {
   min-width: 14px; padding: 0 3px; border-radius: var(--radius-sm); font-size: var(--text-2xs); line-height: 14px;

@@ -391,7 +391,7 @@ function clearDrag() {
 }
 
 .tabs-act.is-on {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: var(--color-accent-bg);
 }
 

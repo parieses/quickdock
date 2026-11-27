@@ -2171,7 +2171,7 @@ onUnmounted(() => {
 .dl-stat { display: flex; flex-direction: column; gap: var(--space-1); min-width: 62px; }
 .dl-stat-label { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap; }
 .dl-stat-value { font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
-.dl-stat.is-speed .dl-stat-value { color: var(--color-accent); }
+.dl-stat.is-speed .dl-stat-value { color: var(--color-accent-ink); }
 .dl-stat.is-up .dl-stat-value { color: var(--color-success-ink); }
 .dl-stat-spark { flex: 1 1 140px; min-width: 120px; }
 .dl-spark-svg { display: block; width: 100%; height: 30px; }
@@ -2225,7 +2225,7 @@ onUnmounted(() => {
   display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
   padding: var(--space-3) var(--space-4); border-radius: var(--radius-md);
   background: var(--color-accent-bg); border: 1px solid var(--color-accent-border-strong);
-  font-size: var(--text-xs); color: var(--color-accent);
+  font-size: var(--text-xs); color: var(--color-accent-ink);
 }
 
 /* 空态卡：一条任务都没有时它是整页唯一主体。虚线框 + 悬停淡光晕表示
@@ -2271,7 +2271,7 @@ onUnmounted(() => {
   transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 .dl-pill:hover { background: var(--color-bg-hover); color: var(--color-text-primary); border-color: var(--color-border-light); }
-.dl-pill.is-primary { color: var(--color-accent); border-color: var(--color-accent-border-strong); background: var(--color-accent-bg); }
+.dl-pill.is-primary { color: var(--color-accent-ink); border-color: var(--color-accent-border-strong); background: var(--color-accent-bg); }
 .dl-pill.is-primary:hover { background: var(--color-accent-bg); color: var(--color-accent-hover); }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2287,14 +2287,14 @@ onUnmounted(() => {
 .dl-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-md); color: var(--color-text-primary); }
 .dl-badge {
   flex: none; display: inline-flex; align-items: center; gap: var(--space-1); padding: 1px var(--space-2);
-  border-radius: var(--radius-sm); background: var(--color-accent-bg); color: var(--color-accent);
+  border-radius: var(--radius-sm); background: var(--color-accent-bg); color: var(--color-accent-ink);
   font-size: var(--text-2xs);
 }
 /* 历史记录标记：刻意做得比 BT 徽章更淡——它只是「这条不是当前任务」的提示，
    不该在列表里抢走进行中任务的注意力。 */
 .dl-badge.is-history { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .dl-tag { flex: none; padding: var(--space-1) var(--space-4); border-radius: var(--radius-full); font-size: var(--text-xs); color: var(--color-text-secondary); background: var(--color-bg-tertiary); }
-.dl-tag.is-active { color: var(--color-accent); background: var(--color-accent-border-strong); }
+.dl-tag.is-active { color: var(--color-accent-ink); background: var(--color-accent-border-strong); }
 .dl-tag.is-complete { color: var(--color-success-ink); background: var(--color-success-bg); }
 .dl-tag.is-error { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 .dl-tag.is-paused { color: var(--color-warning-ink); background: var(--color-warning-bg); }
@@ -2333,7 +2333,7 @@ onUnmounted(() => {
 .dl-import-result { padding: var(--space-3); border-radius: var(--radius-sm); background: var(--color-bg-secondary); }
 .dl-import-result .dl-hint { margin-top: 0; }
 .dl-import-result .dl-hint + .dl-hint { margin-top: var(--space-1); }
-.dl-modal-head-icon { flex: none; color: var(--color-accent); }
+.dl-modal-head-icon { flex: none; color: var(--color-accent-ink); }
 .dl-modal-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
 .dl-modal-sub { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--color-text-muted); }
 .dl-modal-tabs { display: flex; gap: var(--space-2); flex-wrap: wrap; }

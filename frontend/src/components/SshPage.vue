@@ -1306,7 +1306,7 @@ defineExpose({
 }
 
 .ssh-tool.is-on {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: var(--color-accent-bg);
 }
 
@@ -1346,7 +1346,7 @@ defineExpose({
 /* 快速连接行整体复用 .ssh-side-search（含 :focus-within），
    只把「连接」按钮染成强调色，与上方搜索框的「清空」按钮区分开。 */
 .ssh-quick .ssh-side-search-clear {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .ssh-quick .ssh-side-search-clear:hover {

@@ -313,7 +313,7 @@ function showAllOfDay(ds: string) {
 .cal-cell.selected { background: var(--color-accent-bg); box-shadow: inset 0 0 0 1px var(--color-accent-border); }
 .cal-day { font-size: var(--text-xs); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
 .cal-cell.other .cal-day { color: var(--color-text-muted); }
-.cal-cell.today .cal-day { color: var(--color-accent); font-weight: 700; }
+.cal-cell.today .cal-day { color: var(--color-accent-ink); font-weight: 700; }
 
 /* 事件条：色点 + 时间 + 标题。色点取类型身份色，和列表图标同一套 */
 .cal-ev {
@@ -339,7 +339,7 @@ function showAllOfDay(ds: string) {
 .cal-more {
   align-self: flex-start; margin-top: 1px; padding: 0 6px;
   font-size: var(--text-2xs); line-height: 1.6;
-  color: var(--color-accent); background: var(--color-accent-bg);
+  color: var(--color-accent-ink); background: var(--color-accent-bg);
   border: 1px solid var(--color-accent-border); border-radius: var(--radius-full);
   cursor: pointer;
 }
@@ -383,7 +383,7 @@ function showAllOfDay(ds: string) {
 .cal-row-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--color-text-primary); }
 .cal-row-kind { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; font-size: var(--text-2xs); color: var(--color-text-muted); }
 .cal-row-go { flex-shrink: 0; color: var(--color-text-muted); }
-.cal-row:hover .cal-row-go { color: var(--color-accent); }
+.cal-row:hover .cal-row-go { color: var(--color-accent-ink); }
 
 /* 空月份：柔和的插画 + 一个真正可点的下一步 */
 .cal-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); flex: 1; min-height: 240px; text-align: center; padding: var(--space-6) var(--space-4); }

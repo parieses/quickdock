@@ -167,7 +167,7 @@ watch([range, () => props.refreshToken], () => { void load() }, { immediate: tru
 }
 .fsp-tab:hover { color: var(--color-text-primary); }
 .fsp-tab.active {
-  background: var(--color-accent-bg); color: var(--color-accent);
+  background: var(--color-accent-bg); color: var(--color-accent-ink);
   border-color: var(--color-accent-border); font-weight: 600;
 }
 .fsp-state { padding: var(--space-5) 0; text-align: center; color: var(--color-text-muted); }
@@ -194,7 +194,7 @@ watch([range, () => props.refreshToken], () => { void load() }, { immediate: tru
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; color: var(--color-text-primary);
 }
-.fsp-row-num { flex-shrink: 0; color: var(--color-accent); font-variant-numeric: tabular-nums; }
+.fsp-row-num { flex-shrink: 0; color: var(--color-accent-ink); font-variant-numeric: tabular-nums; }
 .fsp-row-sub { flex-shrink: 0; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .fsp-hint {
   margin-top: var(--space-3); padding-top: var(--space-2);

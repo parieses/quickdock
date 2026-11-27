@@ -633,7 +633,7 @@ async function confirmDeleteVar(name: string) {
 
 .path-modal-head { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-5); }
 
-.path-modal-icon { width: 34px; height: 34px; border-radius: var(--radius-md); flex: none; display: inline-flex; align-items: center; justify-content: center; background: var(--color-accent-bg); color: var(--color-accent); }
+.path-modal-icon { width: 34px; height: 34px; border-radius: var(--radius-md); flex: none; display: inline-flex; align-items: center; justify-content: center; background: var(--color-accent-bg); color: var(--color-accent-ink); }
 
 .path-modal-icon svg { width: 18px; height: 18px; }
 
@@ -713,7 +713,7 @@ async function confirmDeleteVar(name: string) {
 
 .cfg-version {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--text-sm);
-  color: var(--color-accent); background: var(--color-accent-bg); padding: var(--space-1) var(--space-4); border-radius: var(--radius-full);
+  color: var(--color-accent-ink); background: var(--color-accent-bg); padding: var(--space-1) var(--space-4); border-radius: var(--radius-full);
   white-space: nowrap;
 }
 
@@ -774,7 +774,7 @@ async function confirmDeleteVar(name: string) {
 
 .go-env-key {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--text-sm); font-weight: 600;
-  color: var(--color-accent); background: var(--color-accent-bg); padding: 1px 7px; border-radius: var(--radius-full);
+  color: var(--color-accent-ink); background: var(--color-accent-bg); padding: 1px 7px; border-radius: var(--radius-full);
 }
 
 .go-env-name { font-size: var(--text-sm); color: var(--color-text-secondary); }
@@ -795,7 +795,7 @@ async function confirmDeleteVar(name: string) {
 
 .go-env-preset:hover { border-color: var(--color-border-focus); color: var(--color-text-primary); }
 
-.go-env-preset.active { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-border-focus); }
+.go-env-preset.active { background: var(--color-accent-bg); color: var(--color-accent-ink); border-color: var(--color-border-focus); }
 
 .php-tabs { display: flex; gap: var(--space-2); margin: var(--space-2) 0 10px; flex-wrap: wrap; }
 
@@ -951,7 +951,7 @@ async function confirmDeleteVar(name: string) {
   font-size: var(--text-2xs);
   padding: 1px var(--space-2);
   border-radius: var(--radius-full);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: var(--color-bg-tertiary);
 }
 

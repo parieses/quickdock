@@ -592,7 +592,7 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 .ai-panel-stream.on:hover,
 .ai-panel-thinking.on,
 .ai-panel-thinking.on:hover {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .ai-panel-list {
@@ -633,7 +633,7 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 }
 
 .ai-panel-sample:hover {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .ai-panel-empty-tip {
@@ -727,11 +727,11 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
   padding: 1px var(--space-2);
   border-radius: var(--radius-sm);
   background: var(--color-bg-secondary);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .ai-panel-answer :deep(a) {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   text-decoration: none;
 }
 

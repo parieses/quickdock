@@ -275,7 +275,7 @@ defineExpose({ markSaved, focus })
   flex: 1 1 auto; min-width: 0; width: 100%;
   resize: none; border: none; outline: none; padding: 8px 10px;
   background: transparent; color: var(--color-text-primary);
-  font-family: var(--font-mono); font-size: 13px; line-height: 1.6;
+  font-family: var(--font-mono); font-size: var(--text-md); line-height: 1.6;
   tab-size: 2; white-space: pre; overflow: auto;
 }
 .ce-loading {

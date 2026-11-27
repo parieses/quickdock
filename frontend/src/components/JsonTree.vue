@@ -153,5 +153,5 @@ function copyNodeJson() {
   opacity: 0; transition: color var(--transition-fast), opacity var(--transition-fast), background var(--transition-fast);
 }
 .jt-row:hover .jt-copy { opacity: 1; }
-.jt-copy:hover { color: var(--color-accent); background: var(--color-bg-active); }
+.jt-copy:hover { color: var(--color-accent-ink); background: var(--color-bg-active); }
 </style>

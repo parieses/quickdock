@@ -501,7 +501,7 @@ const navItems = computed<NavItemView[]>(() =>
   height: 20px;
   border: none;
   background: transparent;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   cursor: pointer;
   border-radius: var(--radius-sm);
   flex-shrink: 0;

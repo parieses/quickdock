@@ -293,7 +293,7 @@ onMounted(load)
 }
 .rc-chip:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .rc-chip.active {
-  background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent);
+  background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent-ink);
 }
 
 .recycle-error {
@@ -315,7 +315,7 @@ onMounted(load)
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
   color: var(--color-text-secondary);
 }
-.rc-icon[data-type='workspaces'] { color: var(--color-accent); border-color: var(--color-accent-border); }
+.rc-icon[data-type='workspaces'] { color: var(--color-accent-ink); border-color: var(--color-accent-border); }
 .rc-icon[data-type='scenes'] { color: var(--color-log-info); }
 .rc-icon[data-type='collections'] { color: var(--color-success-ink); border-color: var(--color-success-border); }
 .rc-icon[data-type='notes'] { color: var(--color-warning-ink); }
@@ -341,7 +341,7 @@ onMounted(load)
 }
 .rc-btn:hover:not(:disabled) { background: var(--color-bg-active); }
 .rc-btn:disabled { color: var(--color-text-disabled); cursor: default; }
-.rc-btn.restore:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
+.rc-btn.restore:hover:not(:disabled) { color: var(--color-accent-ink); border-color: var(--color-accent); }
 .rc-btn.danger { border-radius: var(--radius-sm); padding: 3px var(--space-3); color: var(--color-text-muted); }
 .rc-btn.danger:hover:not(:disabled) { color: var(--color-danger-ink); border-color: var(--color-danger-border); }
 

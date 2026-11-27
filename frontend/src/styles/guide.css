@@ -125,7 +125,7 @@
   border: 1px solid var(--color-accent-border);
   border-radius: 50%;
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-size: var(--text-xs);
   font-weight: 600;
   line-height: 1;
@@ -172,7 +172,7 @@
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 .qd-guide-link:hover {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   border-color: var(--color-accent-border);
   background: var(--color-accent-bg);
 }

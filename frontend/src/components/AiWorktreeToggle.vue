@@ -142,7 +142,7 @@ function onToggle() {
 }
 
 .ai-wt-chip:hover:not(:disabled) {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   border-color: var(--color-accent);
 }
 
@@ -151,7 +151,7 @@ function onToggle() {
 .ai-wt-chip.is-active {
   border-style: solid;
   border-color: var(--color-accent);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: var(--color-bg-tertiary);
 }
 
@@ -175,7 +175,7 @@ function onToggle() {
   white-space: nowrap;
 }
 
-.ai-wt-branch:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
+.ai-wt-branch:hover:not(:disabled) { color: var(--color-accent-ink); border-color: var(--color-accent); }
 .ai-wt-branch:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
 
 .ai-wt-del {
@@ -231,7 +231,7 @@ function onToggle() {
 }
 
 .ai-wt-item:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
-.ai-wt-item.is-sel { color: var(--color-accent); }
+.ai-wt-item.is-sel { color: var(--color-accent-ink); }
 
 .ai-wt-empty {
   padding: var(--space-3) var(--space-4);

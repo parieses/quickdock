@@ -691,7 +691,7 @@ function onKeydown(e: KeyboardEvent) {
 .fs-inline-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .fs-clear { right: 31px; }
 .fs-help { right: 7px; }
-.fs-help.active { color: var(--color-accent); background: var(--color-accent-bg); }
+.fs-help.active { color: var(--color-accent-ink); background: var(--color-accent-bg); }
 
 /* 语法速查卡：挂在搜索框下方，不再在工具条右侧挂一行没人读的提示 */
 .fs-syn-pop {
@@ -720,9 +720,9 @@ function onKeydown(e: KeyboardEvent) {
   padding: 1px 5px;
   border-radius: var(--radius-xs);
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 .fs-syn-list dd {
   margin: 0;
@@ -740,7 +740,7 @@ function onKeydown(e: KeyboardEvent) {
 /* ---- 高级筛选 ---- */
 .fs-adv-btn { position: relative; }
 .fs-adv-btn.active {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   border-color: var(--color-accent-border);
   background: var(--color-accent-bg);
 }
@@ -787,7 +787,7 @@ function onKeydown(e: KeyboardEvent) {
 .fs-seg-btn:hover { color: var(--color-text-primary); }
 .fs-seg-btn.active {
   background: var(--color-bg-primary);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   box-shadow: var(--shadow-sm);
 }
 
@@ -803,7 +803,7 @@ function onKeydown(e: KeyboardEvent) {
   border-bottom: 1px solid var(--color-border);
   background: var(--color-accent-bg);
 }
-.fs-bulk-count { font-size: var(--text-sm); font-weight: 600; color: var(--color-accent); }
+.fs-bulk-count { font-size: var(--text-sm); font-weight: 600; color: var(--color-accent-ink); }
 .fs-error {
   margin: 0;
   padding: var(--space-3) var(--space-6);
@@ -880,7 +880,7 @@ function onKeydown(e: KeyboardEvent) {
 .fs-chip:hover {
   border-color: var(--color-accent-border);
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 .fs-presets {
   display: grid;
@@ -903,12 +903,12 @@ function onKeydown(e: KeyboardEvent) {
 }
 .fs-preset:hover { background: var(--color-bg-hover); border-color: var(--color-accent-border); }
 .fs-preset-icon { flex-shrink: 0; color: var(--color-text-muted); }
-.fs-preset:hover .fs-preset-icon { color: var(--color-accent); }
+.fs-preset:hover .fs-preset-icon { color: var(--color-accent-ink); }
 .fs-preset-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .fs-preset-name { font-size: var(--text-sm); color: var(--color-text-primary); }
 .fs-preset-q {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -923,7 +923,7 @@ function onKeydown(e: KeyboardEvent) {
   padding: 0;
   border: 0;
   background: none;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-family: inherit;
   font-size: inherit;
   text-decoration: underline;
@@ -962,7 +962,7 @@ function onKeydown(e: KeyboardEvent) {
 .fs-mock-file {
   margin-left: 6px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 .fs-mock-body { display: flex; flex-direction: column; gap: 6px; padding: 12px; }
@@ -991,7 +991,7 @@ function onKeydown(e: KeyboardEvent) {
   padding: 2px 8px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 

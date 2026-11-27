@@ -99,7 +99,7 @@ function restoreAll() {
 
 <style scoped>
 .snv { display: flex; flex-direction: column; gap: var(--space-5); }
-.snv-head { display: flex; align-items: flex-start; gap: var(--space-4); color: var(--color-accent); }
+.snv-head { display: flex; align-items: flex-start; gap: var(--space-4); color: var(--color-accent-ink); }
 .snv-title { margin: 0; font-size: var(--text-md); font-weight: 500; color: var(--color-text-primary); }
 .snv-sub { margin: var(--space-1) 0 0; font-size: var(--text-sm); color: var(--color-text-secondary); }
 
@@ -138,7 +138,7 @@ function restoreAll() {
   border-radius: var(--radius-sm);
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
-.snv-eye:hover { color: var(--color-accent); background: var(--color-bg-active); }
+.snv-eye:hover { color: var(--color-accent-ink); background: var(--color-bg-active); }
 .snv-row.hidden .snv-eye { color: var(--color-text-disabled); }
 
 .snv-hint { margin: 0; font-size: var(--text-sm); color: var(--color-text-muted); }
@@ -147,7 +147,7 @@ function restoreAll() {
 .snv-link {
   border: none;
   background: transparent;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-size: var(--text-sm);
   font-family: inherit;
   cursor: pointer;

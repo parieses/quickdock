@@ -119,7 +119,7 @@ const stepText = computed(() => {
   flex-shrink: 0;
 }
 .ai-sched-bar.is-busy { color: var(--color-text-primary); }
-.ai-sched-ico { flex-shrink: 0; color: var(--color-accent); opacity: 0.9; }
+.ai-sched-ico { flex-shrink: 0; color: var(--color-accent-ink); opacity: 0.9; }
 
 /* 任务名可以截断：它和侧栏是同一串，截断后靠 title 看全名 */
 .ai-sched-name {
@@ -175,7 +175,7 @@ const stepText = computed(() => {
     background-color var(--transition-fast);
 }
 .ai-sched-btn:hover:not(:disabled) {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   border-color: var(--color-border);
   background: var(--color-bg-tertiary);
 }

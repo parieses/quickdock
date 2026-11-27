@@ -196,7 +196,7 @@ function openSettings() {
   height: 32px;
   border-radius: 50%;
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-size: var(--text-base);
   font-weight: 600;
   display: flex;
@@ -243,7 +243,7 @@ function openSettings() {
   transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
 .ob-link-btn:hover {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   border-color: var(--color-accent-border);
   background: var(--color-accent-bg);
 }

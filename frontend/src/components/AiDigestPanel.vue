@@ -100,7 +100,7 @@ const { t } = useI18n()
 
 .ai-digest-gen {
   font-size: var(--text-sm); font-family: inherit; padding: var(--space-2) 10px; cursor: pointer;
-  color: var(--color-accent); background: var(--color-accent-bg);
+  color: var(--color-accent-ink); background: var(--color-accent-bg);
   border: 1px solid var(--color-accent-border); border-radius: var(--radius-sm);
 }
 

@@ -898,7 +898,7 @@ watch(() => props.visible, async (v) => {
 /* 服务地址：可点开 + 可复制 */
 .dsh-url { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .dsh-url-link {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   text-decoration: none;
   cursor: pointer;
 }
@@ -916,7 +916,7 @@ watch(() => props.visible, async (v) => {
   color: var(--color-text-secondary);
 }
 .dsh-status-path.clickable:hover {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   text-decoration: underline;
 }
 .dsh-status-home {
@@ -929,7 +929,7 @@ watch(() => props.visible, async (v) => {
   line-height: 1.5;
 }
 .dsh-goto-link {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   text-decoration: none;
   margin-left: var(--space-2);
   cursor: pointer;
@@ -945,7 +945,7 @@ watch(() => props.visible, async (v) => {
   color: var(--color-text-muted);
 }
 .dsh-badge.ok {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 .dsh-update-badge {
   display: inline-block;
@@ -1090,7 +1090,7 @@ watch(() => props.visible, async (v) => {
   padding: 0 var(--space-2);
   border-radius: var(--radius-xs);
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-size: var(--text-2xs);
   
 }
@@ -1151,7 +1151,7 @@ watch(() => props.visible, async (v) => {
   white-space: nowrap;
 }
 .pu-ver b {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 .dsh-progress {
   margin-top: var(--space-5);

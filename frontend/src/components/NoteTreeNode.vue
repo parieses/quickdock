@@ -208,7 +208,7 @@ function onDragStart(e: DragEvent) {
   background: var(--color-accent);
 }
 .tn-row.sel-on:hover, .tn-row.active:hover { background: var(--color-select-bg); }
-.tn-icon { flex-shrink: 0; color: var(--color-accent); }
+.tn-icon { flex-shrink: 0; color: var(--color-accent-ink); }
 .tn-doc .tn-icon { color: var(--color-warning-ink); }
 .tn-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tn-count { font-size: var(--text-2xs); color: var(--color-text-muted); background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 var(--space-3); flex-shrink: 0; }

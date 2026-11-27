@@ -727,7 +727,7 @@ function onTestTrusted() {
   padding: var(--space-3) var(--space-5);
   font-size: var(--text-sm);
   font-family: inherit;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: var(--color-accent-bg);
   border: 1px solid var(--color-accent-border);
   border-radius: var(--radius-sm);
@@ -920,7 +920,7 @@ function onTestTrusted() {
   height: 14px;
   font-size: var(--text-2xs);
   font-weight: 600;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: var(--color-accent-bg);
   border: 1px solid var(--color-accent-border);
   border-radius: var(--radius-xs);

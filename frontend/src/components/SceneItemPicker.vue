@@ -188,7 +188,7 @@ function close() { emit('cancel') }
   font-size: var(--text-sm); color: var(--color-text-secondary); cursor: pointer; font-family: inherit;
 }
 .crumb-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.crumb-item.on { color: var(--color-accent); background: var(--color-accent-bg); }
+.crumb-item.on { color: var(--color-accent-ink); background: var(--color-accent-bg); }
 .crumb-sep { color: var(--color-text-muted); flex-shrink: 0; }
 
 .picker-body {

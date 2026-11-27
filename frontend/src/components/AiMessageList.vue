@@ -1334,7 +1334,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-tool.is-err .ai-tool-icon { color: var(--color-danger-ink); opacity: 1; }
 
-.ai-tool.is-run .ai-tool-icon { color: var(--color-accent); opacity: 1; }
+.ai-tool.is-run .ai-tool-icon { color: var(--color-accent-ink); opacity: 1; }
 
 .ai-tool.is-ask .ai-tool-icon { color: var(--color-warning-ink); opacity: 1; }
 
@@ -1349,7 +1349,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   max-width: 320px;
   font-size: var(--text-sm);
   font-weight: 500;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1431,7 +1431,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   cursor: pointer;
 }
 
-.ai-tool-undo:hover { color: var(--color-accent); background: var(--color-bg-hover); }
+.ai-tool-undo:hover { color: var(--color-accent-ink); background: var(--color-bg-hover); }
 
 .ai-rules {
   display: flex; align-items: center; gap: var(--space-2);
@@ -1477,7 +1477,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 /* 压缩进行中给一点强调色：那是唯一一个「正在花你的钱等几秒」的状态 */
 .ai-compact.is-running { color: var(--color-text-secondary); }
-.ai-compact.is-running .ai-compact-ico { color: var(--color-accent); }
+.ai-compact.is-running .ai-compact-ico { color: var(--color-accent-ink); }
 
 
 .ai-tool-err {
@@ -1502,7 +1502,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   margin: 0 var(--space-3) var(--space-3) 18px;
   padding: var(--space-1) var(--space-3);
   font-size: var(--text-2xs);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: none;
   border: none;
   cursor: pointer;
@@ -1558,7 +1558,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 /* 悬停才给下划线：平时它是「附注里的一句」，别做得像按钮抢走注意力。 */
 .ai-job-note-open:hover {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -1704,7 +1704,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   border: 1px solid var(--color-accent-border);
   border-radius: var(--radius-full);
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-size: var(--text-2xs);
   line-height: 1;
 }
@@ -1743,13 +1743,13 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
    它是这条回复上唯一的动作型按钮，跟「复制 / 存笔记」这类附属操作不是一类。 */
 /* 用双类名提特异性：本条写在 .ai-copy 之前，同特异性下会被它的
    color: text-disabled 覆盖，靠书写顺序取胜太脆弱。 */
-.ai-copy.ai-run-plan { color: var(--color-accent); font-weight: 500; }
+.ai-copy.ai-run-plan { color: var(--color-accent-ink); font-weight: 500; }
 
-.ai-copy.ai-run-plan:hover { color: var(--color-accent); background: var(--color-accent-bg); }
+.ai-copy.ai-run-plan:hover { color: var(--color-accent-ink); background: var(--color-accent-bg); }
 
 /* 继续生成：跟「开始执行」同款强调色，让被中断的回复旁这个操作看得见 */
-.ai-copy.ai-continue { color: var(--color-accent); }
-.ai-copy.ai-continue:hover { color: var(--color-accent); background: var(--color-accent-bg); }
+.ai-copy.ai-continue { color: var(--color-accent-ink); }
+.ai-copy.ai-continue:hover { color: var(--color-accent-ink); background: var(--color-accent-bg); }
 
 .ai-copy {
   display: flex; align-items: center; gap: 3px;
@@ -1762,7 +1762,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-msg.user .ai-copy { color: var(--color-text-muted); }
 
-.ai-msg.user .ai-copy:hover { color: var(--color-accent); background: var(--color-accent-bg); }
+.ai-msg.user .ai-copy:hover { color: var(--color-accent-ink); background: var(--color-accent-bg); }
 
 .ai-msg-stopped {
   font-size: var(--text-2xs); padding: 1px var(--space-3); border-radius: var(--radius-xs);
@@ -1783,7 +1783,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   cursor: default;
 }
 
-.ai-cursor { animation: ai-blink 1s steps(1) infinite; color: var(--color-accent); }
+.ai-cursor { animation: ai-blink 1s steps(1) infinite; color: var(--color-accent-ink); }
 
 .ai-error {
   align-self: flex-start;
@@ -1845,7 +1845,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
     border-color var(--transition-fast), opacity var(--transition-fast);
 }
 
-.ai-jump-bottom:hover { color: var(--color-accent); border-color: var(--color-accent); }
+.ai-jump-bottom:hover { color: var(--color-accent-ink); border-color: var(--color-accent); }
 
 .ai-md-block { display: contents; }
 
@@ -1857,7 +1857,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-md :deep(br) { display: inline; }
 
-.ai-md :deep(a) { color: var(--color-accent); text-decoration: none; }
+.ai-md :deep(a) { color: var(--color-accent-ink); text-decoration: none; }
 
 .ai-md :deep(a:hover) { text-decoration: underline; }
 
@@ -1913,11 +1913,11 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
-.ai-md :deep(.md-code-run:hover) { background: var(--color-bg-hover); color: var(--color-accent); }
+.ai-md :deep(.md-code-run:hover) { background: var(--color-bg-hover); color: var(--color-accent-ink); }
 
 .ai-md :deep(.md-code-run svg) { width: 13px; height: 13px; }
 
-.ai-md :deep(.md-code-copy:hover) { background: var(--color-bg-hover); color: var(--color-accent); }
+.ai-md :deep(.md-code-copy:hover) { background: var(--color-bg-hover); color: var(--color-accent-ink); }
 
 .ai-md :deep(.md-code-copy.copied) { color: var(--color-success-ink); }
 
@@ -1965,14 +1965,14 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 }
 
 .ai-md :deep(.md-table-export:hover) {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   border-color: var(--color-border);
   background: var(--color-bg-secondary);
 }
 
 .ai-md :deep(.md-th-sortable) { cursor: pointer; user-select: none; white-space: nowrap; }
 
-.ai-md :deep(.md-th-sortable:hover) { color: var(--color-accent); }
+.ai-md :deep(.md-th-sortable:hover) { color: var(--color-accent-ink); }
 
 .ai-md :deep(.md-th-sortable[data-sort-dir="asc"]::after) { content: " ▲"; font-size: var(--text-2xs); }
 
@@ -2050,7 +2050,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
-.ai-md :deep(.md-mermaid-act:hover) { background: var(--color-bg-hover); color: var(--color-accent); }
+.ai-md :deep(.md-mermaid-act:hover) { background: var(--color-bg-hover); color: var(--color-accent-ink); }
 
 .ai-md :deep(.md-mermaid-act svg) { width: 13px; height: 13px; display: block; }
 

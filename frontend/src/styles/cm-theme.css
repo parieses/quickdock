@@ -79,6 +79,6 @@
 .qd-cmfind-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .qd-cmfind-btn.on {
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   border-color: var(--color-accent);
 }

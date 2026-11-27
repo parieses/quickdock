@@ -1383,8 +1383,8 @@ onUnmounted(() => {
 .action-top-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .action-top-btn.btn-stop-top:hover { color: var(--color-warning-ink); }
 .action-top-btn.btn-kill-top:hover { color: var(--color-danger-ink); }
-.action-top-btn.btn-open-top:hover { color: var(--color-accent); }
-.action-top-btn.btn-reinstall-top:hover { color: var(--color-accent); }
+.action-top-btn.btn-open-top:hover { color: var(--color-accent-ink); }
+.action-top-btn.btn-reinstall-top:hover { color: var(--color-accent-ink); }
 .action-top-btn.btn-uninstall-top:hover { color: var(--color-danger-ink); }
 
 /* ---- 第一层：头 ---- */
@@ -1440,7 +1440,7 @@ onUnmounted(() => {
 /* disabled 是中性「被关掉」，不该和 crashed 同为红色；红色只留给真正的崩溃 */
 .badge-disabled { background: var(--color-bg-tertiary); color: var(--color-text-disabled); }
 .badge-crashed { background: var(--color-danger-bg); color: var(--color-danger-ink); }
-.badge-registered { background: var(--color-accent-bg); color: var(--color-accent); }
+.badge-registered { background: var(--color-accent-bg); color: var(--color-accent-ink); }
 .badge-starting { background: var(--color-warning-bg); color: var(--color-warning-ink); }
 .badge-unresponsive { background: var(--color-warning-bg); color: var(--color-warning-ink); }
 
@@ -1555,7 +1555,7 @@ onUnmounted(() => {
 .card-cta.is-primary {
   background: var(--color-accent-bg);
   border-color: var(--color-accent-border-strong);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 .card-cta.is-primary:hover { background: var(--color-accent); border-color: transparent; color: var(--color-accent-text); }
 .card-cta:disabled { color: var(--color-text-disabled); cursor: default; }
@@ -1604,7 +1604,7 @@ onUnmounted(() => {
 .cat-tab.active {
   background: var(--color-accent-bg);
   border-color: var(--color-accent-border-strong);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-weight: 600;
 }
 .cat-count {
@@ -1642,7 +1642,7 @@ onUnmounted(() => {
 .history-retry {
   padding: 1px var(--space-3);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  background: var(--color-bg-tertiary); color: var(--color-accent);
+  background: var(--color-bg-tertiary); color: var(--color-accent-ink);
   font-size: var(--text-xs); font-family: inherit; cursor: pointer;
 }
 .history-retry:hover { border-color: var(--color-accent); }
@@ -1725,17 +1725,17 @@ onUnmounted(() => {
   background: var(--color-card-bg);
   border: 1px dashed var(--color-accent);
   border-radius: var(--radius-md);
-  color: var(--color-accent); font-size: var(--text-md);
+  color: var(--color-accent-ink); font-size: var(--text-md);
   box-shadow: 0 8px 24px var(--color-bg-overlay);
 }
 
 /* 空状态可点：文案原本就写着「拖入此区域或点击安装」，之前点击是没反应的 */
 .plugin-empty { cursor: pointer; }
-.plugin-empty:hover .empty-title { color: var(--color-accent); }
+.plugin-empty:hover .empty-title { color: var(--color-accent-ink); }
 
-.install-overlay-spin { color: var(--color-accent); animation: qd-spin 0.9s linear infinite; }
+.install-overlay-spin { color: var(--color-accent-ink); animation: qd-spin 0.9s linear infinite; }
 .install-overlay-text { font-size: var(--text-md); color: var(--color-text-secondary); }
-.spin { color: var(--color-accent); animation: qd-spin 0.9s linear infinite; }
+.spin { color: var(--color-accent-ink); animation: qd-spin 0.9s linear infinite; }
 @keyframes qd-spin { to { transform: rotate(360deg); } }
 
 /* ---- 离线缓存横幅：网络失败降级时必须显式标注，不能静默用旧数据 ---- */
@@ -1773,7 +1773,7 @@ onUnmounted(() => {
 .cmd-trigger {
   font-size: var(--text-2xs); line-height: 15px; padding: 0 5px;
   border-radius: var(--radius-md);
-  background: var(--color-accent-bg); color: var(--color-accent);
+  background: var(--color-accent-bg); color: var(--color-accent-ink);
   white-space: nowrap;
 }
 .cmd-row-hint, .cmd-row-desc { font-size: var(--text-xs); color: var(--color-text-muted); overflow-wrap: anywhere; }

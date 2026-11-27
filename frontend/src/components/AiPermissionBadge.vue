@@ -317,7 +317,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
 
 .ai-perm-opt-head { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-sm); font-weight: 500; }
 
-.ai-perm-opt-now { font-size: var(--text-2xs); font-weight: 400; color: var(--color-accent); }
+.ai-perm-opt-now { font-size: var(--text-2xs); font-weight: 400; color: var(--color-accent-ink); }
 
 .ai-perm-opt-desc { font-size: var(--text-xs); line-height: 1.45; color: var(--color-text-muted); }
 

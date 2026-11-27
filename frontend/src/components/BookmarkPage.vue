@@ -1368,7 +1368,7 @@ onMounted(() => {
   border: 1px solid var(--color-accent-border);
   border-radius: var(--radius-sm);
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-size: var(--text-xs);
 }
 .bm-banner-text { flex-shrink: 0; white-space: nowrap; }
@@ -1400,7 +1400,7 @@ onMounted(() => {
   border-radius: var(--radius-sm);
   background: var(--color-select-bg);
 }
-.bm-batch-n { font-size: var(--text-sm); font-weight: 600; color: var(--color-accent); }
+.bm-batch-n { font-size: var(--text-sm); font-weight: 600; color: var(--color-accent-ink); }
 .bm-batch-sub { font-size: var(--text-xs); color: var(--color-text-muted); }
 
 /* ---- 网格 ---- */
@@ -1502,7 +1502,7 @@ onMounted(() => {
 .bm-flag.is-broken { color: var(--color-danger-ink); border-color: var(--color-danger-border); background: var(--color-danger-bg); }
 .bm-flag.is-blocked { color: var(--color-warning-ink); border-color: var(--color-warning-border); background: var(--color-warning-bg); }
 .bm-flag.is-moved,
-.bm-flag.is-changed { color: var(--color-accent); border-color: var(--color-accent-border); background: var(--color-accent-bg); }
+.bm-flag.is-changed { color: var(--color-accent-ink); border-color: var(--color-accent-border); background: var(--color-accent-bg); }
 
 .bm-card-actions {
   position: absolute; top: var(--space-3); right: var(--space-3);
@@ -1556,7 +1556,7 @@ onMounted(() => {
 .bm-badge.is-broken { border-color: var(--color-danger-border); color: var(--color-danger-ink); }
 .bm-badge.is-blocked { border-color: var(--color-warning-border); color: var(--color-warning-ink); }
 .bm-badge.is-moved,
-.bm-badge.is-changed { border-color: var(--color-accent-border); color: var(--color-accent); }
+.bm-badge.is-changed { border-color: var(--color-accent-border); color: var(--color-accent-ink); }
 .bm-badge.is-ok { border-color: var(--color-success-border); color: var(--color-success-ink); }
 
 .bm-none { padding: var(--space-6); text-align: center; font-size: var(--text-sm); color: var(--color-text-muted); }
@@ -1620,7 +1620,7 @@ onMounted(() => {
 .bm-dup { display: flex; flex-direction: column; gap: var(--space-3); max-height: 52vh; overflow: auto; }
 .bm-dup-group { padding: var(--space-3); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); }
 .bm-dup-head { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-1); }
-.bm-dup-kind { flex-shrink: 0; font-size: var(--text-xs); color: var(--color-accent); }
+.bm-dup-kind { flex-shrink: 0; font-size: var(--text-xs); color: var(--color-accent-ink); }
 .bm-dup-key { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); color: var(--color-text-muted); }
 .bm-dup-item { display: flex; align-items: center; gap: var(--space-3); padding: 3px 0; font-size: var(--text-sm); cursor: pointer; }
 .bm-dup-name { color: var(--color-text-primary); }

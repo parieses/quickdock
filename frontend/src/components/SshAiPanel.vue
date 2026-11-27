@@ -591,7 +591,7 @@ function saveAsResult(e: MouseEvent) {
   align-items: center;
   gap: var(--space-2);
   font-size: var(--text-xs);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .ssh-ai-quote-x {
@@ -674,7 +674,7 @@ function saveAsResult(e: MouseEvent) {
 /* 「执行」是少数会真正改动的动作，用 accent 文字色标出层级即可，
    不必上实心块——它并不比「填入」高一档，只是更省一步。 */
 .ssh-ai-btn.run:hover {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 /*

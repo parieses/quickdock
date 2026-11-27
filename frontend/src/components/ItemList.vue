@@ -671,7 +671,7 @@ defineExpose({ flashItemById })
 /* 未选中集合的空状态：箭头轻微左右摆动，把注意力引向左侧集合栏。
    只在 ≥901px 有意义（窄屏集合栏是抽屉，方向感不存在），因此窄屏停掉动画。 */
 .qd-empty-icon-dir {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   border-color: var(--color-accent-border);
   background: var(--color-accent-bg);
 }
@@ -725,7 +725,7 @@ defineExpose({ flashItemById })
   padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-xs);
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-size: var(--text-2xs);
 }
 

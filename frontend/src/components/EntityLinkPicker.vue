@@ -480,7 +480,7 @@ function openBacklink(b: BacklinkRow) {
 .elp-add-input { flex: 1; min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: var(--text-sm); outline: none; font-family: inherit; }
 .elp-add-input:focus { border-color: var(--color-border-focus-soft); }
 .elp-add-btn { flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-secondary); cursor: pointer; }
-.elp-add-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent-border); }
+.elp-add-btn:hover:not(:disabled) { color: var(--color-accent-ink); border-color: var(--color-accent-border); }
 .elp-add-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 
 .elp-cands { max-height: 132px; overflow-y: auto; margin-top: var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-primary); }
@@ -488,12 +488,12 @@ function openBacklink(b: BacklinkRow) {
 .elp-tabs { position: sticky; top: 0; display: flex; gap: 2px; padding: 4px; background: var(--color-bg-primary); border-bottom: 1px solid var(--color-border); }
 .elp-tab { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: none; border-radius: var(--radius-xs); background: transparent; color: var(--color-text-muted); font-family: inherit; font-size: var(--text-xs); cursor: pointer; }
 .elp-tab:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.elp-tab.on { background: var(--color-accent-bg); color: var(--color-accent); }
+.elp-tab.on { background: var(--color-accent-bg); color: var(--color-accent-ink); }
 .elp-tab-n { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .elp-tab.on .elp-tab-n { color: inherit; opacity: 0.7; }
 .elp-cand { display: flex; align-items: center; gap: var(--space-2); width: 100%; padding: var(--space-2) var(--space-3); border: none; background: transparent; color: var(--color-text-secondary); text-align: left; cursor: pointer; font-family: inherit; font-size: var(--text-sm); }
 .elp-cand:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.elp-cand.is-picked { background: var(--color-accent-bg); color: var(--color-accent); }
+.elp-cand.is-picked { background: var(--color-accent-bg); color: var(--color-accent-ink); }
 .elp-cand-type { flex-shrink: 0; color: var(--color-text-muted); }
 .elp-cand-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 次要信息（父文件夹 / 到期日 / 所属集合）：只用来区分重名，不该抢标题的宽度 */

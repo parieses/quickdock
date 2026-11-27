@@ -466,7 +466,7 @@ onBeforeUnmount(() => {
 .ai-plus-nav-icon { flex: none; color: var(--color-text-muted); }
 
 .ai-plus-nav:hover .ai-plus-nav-icon,
-.ai-plus-nav.is-active .ai-plus-nav-icon { color: var(--color-accent); }
+.ai-plus-nav.is-active .ai-plus-nav-icon { color: var(--color-accent-ink); }
 
 .ai-plus-nav-name {
   flex: 1;
@@ -563,13 +563,13 @@ onBeforeUnmount(() => {
 .ai-plus-badge.is-dir {
   border-radius: var(--radius-xs);
   background: var(--color-bg-hover);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 /* 置顶「从本地选文件」：图标方块用强调色，和普通引用的字母块区分开 */
 .ai-plus-badge.is-local {
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 /* 置顶入口与下面的引用列表之间留一道分隔，避免连成一串看不出它是动作 */
@@ -616,14 +616,14 @@ onBeforeUnmount(() => {
 
 .ai-plus-item.is-bad .ai-plus-item-desc { color: var(--color-danger-ink); }
 
-.ai-plus-item.is-picked .ai-plus-item-name { color: var(--color-accent); }
+.ai-plus-item.is-picked .ai-plus-item-name { color: var(--color-accent-ink); }
 
 /* 已选只是文字标记：选择本身是输入框上方那排胶囊（点一下挂上/摘下），
    这里再放一个勾选框，就会出现两套「选了什么」要对账。 */
 .ai-plus-state {
   flex: none;
   font-size: var(--text-2xs);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .ai-plus-empty {

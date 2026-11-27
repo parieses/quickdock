@@ -358,7 +358,7 @@ onUnmounted(() => {
   border: none; border-radius: var(--radius-sm);
   background: transparent; color: var(--color-text-muted); cursor: pointer;
 }
-.pane-head-btn:hover { color: var(--color-accent); background: var(--color-bg-active); }
+.pane-head-btn:hover { color: var(--color-accent-ink); background: var(--color-bg-active); }
 /* ---- 时间线筛选（来源 + 时间）---- */
 .tl-filters {
   display: flex; flex-direction: column; gap: var(--space-2);
@@ -375,7 +375,7 @@ onUnmounted(() => {
 }
 .tl-chip:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .tl-chip.active {
-  background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent);
+  background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent-ink);
 }
 .pane-body { flex: 1; overflow-y: auto; padding: var(--space-3); }
 .pane-empty { margin: 0; padding: var(--space-8) var(--space-5); font-size: var(--text-sm); line-height: 1.6; color: var(--color-text-muted); }
@@ -390,7 +390,7 @@ onUnmounted(() => {
   width: 18px; flex-shrink: 0; text-align: center; font-size: var(--text-xs);
   color: var(--color-text-muted); font-variant-numeric: tabular-nums;
 }
-.used-rank.top { color: var(--color-accent); font-weight: 600; }
+.used-rank.top { color: var(--color-accent-ink); font-weight: 600; }
 .used-label {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -408,7 +408,7 @@ onUnmounted(() => {
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
   color: var(--color-text-secondary);
 }
-.tl-dot[data-kind='item'] { color: var(--color-accent); border-color: var(--color-accent-border); }
+.tl-dot[data-kind='item'] { color: var(--color-accent-ink); border-color: var(--color-accent-border); }
 .tl-dot[data-kind='ssh'] { color: var(--color-success-ink); border-color: var(--color-success-border); }
 .tl-dot[data-kind='plugin'] { color: var(--color-warning-ink); }
 .tl-dot[data-kind='schedule'] { color: var(--color-log-info); }
@@ -429,6 +429,6 @@ onUnmounted(() => {
   background: var(--color-bg-tertiary);
 }
 /* AI 触发的动作用强调色：一眼能扫出「哪些不是我干的」 */
-.tl-src.is-mcp { color: var(--color-accent); background: var(--color-accent-bg); }
+.tl-src.is-mcp { color: var(--color-accent-ink); background: var(--color-accent-bg); }
 .tl-time { font-size: var(--text-xs); color: var(--color-text-muted); }
 </style>

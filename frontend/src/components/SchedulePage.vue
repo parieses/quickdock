@@ -1345,7 +1345,7 @@ async function openTaskFromCalendar(id: string) {
 .sched-viewtabs { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-7); flex-shrink: 0; border-bottom: 1px solid var(--color-border); }
 .sched-viewtabs button { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted); font-size: var(--text-sm); cursor: pointer; font-family: inherit; }
 .sched-viewtabs button:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.sched-viewtabs button.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
+.sched-viewtabs button.active { color: var(--color-accent-ink); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
 .sched-pick-btn { margin-top: var(--space-2); }
 .interval-row { display: flex; align-items: center; gap: var(--space-2); }
 .interval-num { flex: 1 1 auto; min-width: 0; }
@@ -1359,7 +1359,7 @@ async function openTaskFromCalendar(id: string) {
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
   font-family: var(--font-mono); font-size: var(--text-xs); cursor: pointer;
 }
-.cron-preset:hover { color: var(--color-accent); border-color: var(--color-accent-border); }
+.cron-preset:hover { color: var(--color-accent-ink); border-color: var(--color-accent-border); }
 
 /* 搜索 / 状态筛选条：跟着页头一起通栏，内边距与列表对齐 */
 .sched-toolbar {
@@ -1420,7 +1420,7 @@ async function openTaskFromCalendar(id: string) {
   border: 1px solid var(--color-accent-border); border-radius: var(--radius-md); flex-shrink: 0;
 }
 .sched-run-text { flex: 1; min-width: 0; }
-.sched-run-step { color: var(--color-accent); }
+.sched-run-step { color: var(--color-accent-ink); }
 .sched-run-cancel {
   flex-shrink: 0; padding: var(--space-1) var(--space-3); font-size: var(--text-xs);
   color: var(--color-text-secondary); background: var(--color-surface);
@@ -1504,7 +1504,7 @@ async function openTaskFromCalendar(id: string) {
 .console-line.fail .cl-text { color: var(--color-danger-ink); }
 .console-line.skipped { color: var(--color-text-muted); }
 .cl-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.console-line.live .cl-text { color: var(--color-accent); }
+.console-line.live .cl-text { color: var(--color-accent-ink); }
 .console-empty { color: var(--color-text-muted); }
 @media (prefers-reduced-motion: reduce) {
   .live-dot { animation: none; }
@@ -1556,7 +1556,7 @@ async function openTaskFromCalendar(id: string) {
   color: var(--color-text-muted);
 }
 .item-kind.a-app,
-.item-kind.a-url { color: var(--color-accent); }
+.item-kind.a-url { color: var(--color-accent-ink); }
 .item-kind.a-dir { color: var(--color-warning-ink); }
 .item-kind.a-command,
 .item-kind.a-script { color: var(--color-cat-command); }
@@ -1578,7 +1578,7 @@ async function openTaskFromCalendar(id: string) {
 /* 中间那段空白把「规则」和「上次结果」推到两端：左对齐一列、右对齐一列，
    扫视时不用在一长串文字里找结果。 */
 .meta-fill { flex: 1 1 auto; min-width: 0; }
-.meta-next { color: var(--color-accent); }
+.meta-next { color: var(--color-accent-ink); }
 .meta-left { color: var(--color-text-muted); }
 .meta-last {
   display: inline-flex; align-items: center; gap: 4px; flex-shrink: 1; min-width: 0;
@@ -1647,7 +1647,7 @@ async function openTaskFromCalendar(id: string) {
   cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .wd-btn:hover { color: var(--color-text-primary); }
-.wd-btn.active { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-accent-border); }
+.wd-btn.active { background: var(--color-accent-bg); color: var(--color-accent-ink); border-color: var(--color-accent-border); }
 
 .toggle-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-5); margin-top: var(--space-4); }
 /* 渠道从属于总开关：左移一点 + 略小，视觉上挂在它下面 */
@@ -1656,7 +1656,7 @@ async function openTaskFromCalendar(id: string) {
 .toggle-label input { cursor: pointer; }
 /* 「机器人地址去设置配」的跳转链接：做成手型+下划线虚线，别用按钮——
    它不是本次操作的动作，只是一条注记。 */
-.nf-link { font-size: var(--text-xs); color: var(--color-accent); cursor: pointer; text-decoration: underline dotted; }
+.nf-link { font-size: var(--text-xs); color: var(--color-accent-ink); cursor: pointer; text-decoration: underline dotted; }
 .nf-link:hover { color: var(--color-accent-hover); }
 
 </style>

@@ -328,7 +328,7 @@ onUnmounted(stopPoll)
   padding: 0 var(--space-2);
   border-radius: var(--radius-full);
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-size: var(--text-2xs);
   font-variant-numeric: tabular-nums;
 }
@@ -471,7 +471,7 @@ onUnmounted(stopPoll)
 }
 
 .ai-job-act:hover {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: var(--color-bg-active);
 }
 

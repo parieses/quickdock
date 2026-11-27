@@ -578,7 +578,7 @@ onBeforeUnmount(() => {
   font-size: var(--text-md);
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
-.ai-new-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
+.ai-new-btn:hover { color: var(--color-accent-ink); border-color: var(--color-accent); }
 .ai-conv-list { flex: 1; overflow-y: auto; padding: 0 var(--space-4) var(--space-5); }
 
 /* 分组标题：任务 / 空间。两组用同一套样式，视觉上是对等的两个区域，
@@ -647,8 +647,8 @@ onBeforeUnmount(() => {
   color: var(--color-text-muted);
   cursor: pointer;
 }
-.ai-space-run:hover { color: var(--color-accent); background: var(--color-bg-tertiary); }
-.ai-space-run.is-busy { display: flex; color: var(--color-accent); cursor: default; }
+.ai-space-run:hover { color: var(--color-accent-ink); background: var(--color-bg-tertiary); }
+.ai-space-run.is-busy { display: flex; color: var(--color-accent-ink); cursor: default; }
 .ai-space-run.is-busy:hover { background: none; }
 .ai-space-run .spin { animation: ai-space-run-spin 0.9s linear infinite; }
 @keyframes ai-space-run-spin { to { transform: rotate(360deg); } }
@@ -656,7 +656,7 @@ onBeforeUnmount(() => {
    别再把 .ai-conv-del 抄回来——那个类已经没有对应节点了。
    「新建任务」的显隐规则统一收在下面 .ai-conv-add 那一组，这里不再重复。 */
 .ai-space-caret { flex-shrink: 0; opacity: 0.6; }
-.ai-space-icon { flex-shrink: 0; color: var(--color-accent); opacity: 0.85; }
+.ai-space-icon { flex-shrink: 0; color: var(--color-accent-ink); opacity: 0.85; }
 /* 定时任务空间是全自动产出物，和「我建的项目目录」不是一类东西：
    闹钟不透明，在侧栏里更容易一眼扫到。 */
 .ai-space-icon.is-sched { opacity: 1; }
@@ -691,7 +691,7 @@ onBeforeUnmount(() => {
   transition: background var(--transition-fast);
 }
 .ai-conv-item:hover { background: var(--color-bg-hover); }
-.ai-conv-item.active { background: var(--color-bg-tertiary); color: var(--color-accent); }
+.ai-conv-item.active { background: var(--color-bg-tertiary); color: var(--color-accent-ink); }
 .ai-conv-title {
   flex: 1;
   overflow: hidden;
@@ -742,7 +742,7 @@ onBeforeUnmount(() => {
 .ai-space-row:hover .ai-conv-add,
 .ai-space-row:focus-within .ai-conv-add,
 .ai-conv-add:focus-visible { opacity: 1; }
-.ai-conv-add:hover { color: var(--color-accent); background: var(--color-bg-tertiary); opacity: 1; }
+.ai-conv-add:hover { color: var(--color-accent-ink); background: var(--color-bg-tertiary); opacity: 1; }
 /* 命中区补到 24px：伪元素外扩 1px，不撑大布局、不改行高 */
 .ai-conv-add::before {
   content: '';

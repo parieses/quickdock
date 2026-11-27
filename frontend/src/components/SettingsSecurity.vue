@@ -287,7 +287,7 @@ function dismissRecovery() {
   margin: 0 0 var(--space-4);
   font-size: var(--text-md);
   font-weight: 600;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 .sec-recovery-code {
   display: block;
@@ -346,7 +346,7 @@ function dismissRecovery() {
   color: var(--color-danger-ink);
 }
 .sec-msg.is-ok {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .sec-note {

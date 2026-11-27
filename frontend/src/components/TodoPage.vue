@@ -1989,11 +1989,11 @@ onUnmounted(() => {
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 .focus-dur-trigger:hover { color: var(--color-text-primary); border-color: var(--color-border-focus); }
-.focus-dur-trigger.open { border-color: var(--color-accent-border); background: var(--color-accent-bg); color: var(--color-accent); }
+.focus-dur-trigger.open { border-color: var(--color-accent-border); background: var(--color-accent-bg); color: var(--color-accent-ink); }
 .fd-label { color: var(--color-text-muted); }
-.focus-dur-trigger.open .fd-label { color: var(--color-accent); }
+.focus-dur-trigger.open .fd-label { color: var(--color-accent-ink); }
 .fd-value { color: var(--color-text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
-.focus-dur-trigger.open .fd-value { color: var(--color-accent); }
+.focus-dur-trigger.open .fd-value { color: var(--color-accent-ink); }
 .fd-caret { opacity: 0.7; }
 .focus-dur-pop {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: var(--z-dropdown);
@@ -2008,7 +2008,7 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
 }
 .fd-opt:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.fd-opt.active { color: var(--color-accent); background: var(--color-accent-bg); font-weight: 600; }
+.fd-opt.active { color: var(--color-accent-ink); background: var(--color-accent-bg); font-weight: 600; }
 .fd-custom {
   display: flex; align-items: center; gap: var(--space-2);
   margin-top: var(--space-1); padding-top: var(--space-2);
@@ -2108,11 +2108,11 @@ onUnmounted(() => {
   transition: color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
 }
 .cal-cell.out-month .cal-day { color: var(--color-text-muted); }
-.cal-cell.is-today .cal-day { color: var(--color-accent); border: 1px solid var(--color-accent); }
+.cal-cell.is-today .cal-day { color: var(--color-accent-ink); border: 1px solid var(--color-accent); }
 /* 选中态用半透明主题色 + 一圈细描边：深色下实心亮蓝对比过强，压得整块日历发刺 */
 .cal-cell.is-selected .cal-day {
   background: var(--color-select-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-weight: 600;
   box-shadow: inset 0 0 0 1px var(--color-accent-border);
 }
@@ -2123,7 +2123,7 @@ onUnmounted(() => {
 .dot { width: 5px; height: 5px; border-radius: 50%; display: inline-block; }
 .dot.p-high { width: 6px; height: 6px; }
 .dot.done { opacity: 0.3; }
-.cal-bell { color: var(--color-accent); }
+.cal-bell { color: var(--color-accent-ink); }
 .cal-more { font-size: var(--text-2xs); color: var(--color-text-muted); font-style: normal; }
 
 .unscheduled-chip {
@@ -2133,7 +2133,7 @@ onUnmounted(() => {
   cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .unscheduled-chip:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
-.unscheduled-chip.active { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-accent-border); }
+.unscheduled-chip.active { background: var(--color-accent-bg); color: var(--color-accent-ink); border-color: var(--color-accent-border); }
 .chip-count { margin-left: auto; font-style: normal; background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 var(--space-3); font-size: var(--text-xs); }
 
 /* 右侧面板 */
@@ -2149,7 +2149,7 @@ onUnmounted(() => {
 .panel-today-tag {
   flex-shrink: 0; padding: 1px 7px; border-radius: var(--radius-full);
   background: var(--color-accent-bg); border: 1px solid var(--color-accent-border);
-  color: var(--color-accent); font-size: var(--text-2xs); font-weight: 600; line-height: 15px;
+  color: var(--color-accent-ink); font-size: var(--text-2xs); font-weight: 600; line-height: 15px;
 }
 .panel-remaining { font-size: var(--text-sm); color: var(--color-text-muted); }
 
@@ -2191,7 +2191,7 @@ onUnmounted(() => {
    刷成实心蓝会和页面里真正的主操作（新建待办）抢同一个视觉权重。 */
 .vt-btn.active {
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-weight: 600;
 }
 
@@ -2202,7 +2202,7 @@ onUnmounted(() => {
 }
 .status-pill.st-todo { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .status-pill.st-doing { background: var(--color-warning-bg); color: var(--color-warning-ink); border-color: var(--color-warning-border); }
-.status-pill.st-done { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-accent-border); }
+.status-pill.st-done { background: var(--color-accent-bg); color: var(--color-accent-ink); border-color: var(--color-accent-border); }
 
 /* 子任务（4.1）*/
 .todo-item { flex-wrap: wrap; }
@@ -2305,7 +2305,7 @@ onUnmounted(() => {
   color: var(--color-text-muted); font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .tag-fbtn:hover { color: var(--color-text-primary); border-color: var(--color-border-focus); }
-.tag-fbtn.active { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-accent-border); }
+.tag-fbtn.active { background: var(--color-accent-bg); color: var(--color-accent-ink); border-color: var(--color-accent-border); }
 .add-fab {
   width: 30px; height: 30px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
   background: var(--color-accent); color: var(--color-accent-text); border: none; border-radius: var(--radius-md);
@@ -2449,11 +2449,11 @@ onUnmounted(() => {
 .overdue-text { color: var(--color-danger-ink); }
 .meta-pill { display: inline-flex; align-items: center; gap: 3px; color: var(--color-text-muted); }
 .meta-pill.sent { color: var(--color-text-muted); }
-.done-pill { color: var(--color-accent); }
+.done-pill { color: var(--color-accent-ink); }
 .todo-note { color: var(--color-text-muted); }
 .tag-chip {
   font-size: var(--text-2xs); padding: 0 7px; line-height: 16px; border-radius: var(--radius-md);
-  background: var(--color-accent-bg); color: var(--color-accent);
+  background: var(--color-accent-bg); color: var(--color-accent-ink);
   cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .tag-chip:hover { filter: brightness(1.15); }
@@ -2467,8 +2467,8 @@ onUnmounted(() => {
 }
 .act:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
 .act.danger:hover { color: var(--color-danger-ink); background: var(--color-danger-bg); }
-.focus-act { font-size: var(--text-xs); font-weight: 600; color: var(--color-accent); min-width: 34px; }
-.focus-act.running { background: var(--color-accent-bg); color: var(--color-accent); }
+.focus-act { font-size: var(--text-xs); font-weight: 600; color: var(--color-accent-ink); min-width: 34px; }
+.focus-act.running { background: var(--color-accent-bg); color: var(--color-accent-ink); }
 
 /* 优先级配色 */
 .p-none { background: var(--color-text-muted); }

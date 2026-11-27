@@ -606,7 +606,7 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
-.qd-graph-title-icon { color: var(--color-accent); flex-shrink: 0; }
+.qd-graph-title-icon { color: var(--color-accent-ink); flex-shrink: 0; }
 .qd-graph-title { font-weight: 600; color: var(--color-text-primary); font-size: var(--text-md); }
 .qd-graph-count { color: var(--color-text-muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
 .qd-graph-spacer { flex: 1; min-width: var(--space-2); }
@@ -638,7 +638,7 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 .qd-graph-icon-btn:hover:not(:disabled) {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   border-color: var(--color-accent-border);
 }
 .qd-graph-icon-btn:disabled { color: var(--color-text-disabled); cursor: default; }
@@ -761,7 +761,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--color-accent-border);
   border-radius: var(--radius-sm);
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   cursor: pointer;
   font-family: inherit;
   font-size: var(--text-xs);
@@ -812,7 +812,7 @@ onBeforeUnmount(() => {
 }
 .qd-graph-side-row:hover { background: var(--color-bg-hover); }
 .qd-graph-side-arrow { color: var(--color-text-muted); flex-shrink: 0; }
-.qd-graph-side-arrow.is-in { transform: rotate(180deg); color: var(--color-accent); }
+.qd-graph-side-arrow.is-in { transform: rotate(180deg); color: var(--color-accent-ink); }
 .qd-graph-side-row-label {
   flex: 1;
   min-width: 0;
@@ -829,7 +829,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--color-accent-border);
   border-radius: var(--radius-xs);
   background: transparent;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   cursor: pointer;
   font-family: inherit;
   font-size: var(--text-2xs);

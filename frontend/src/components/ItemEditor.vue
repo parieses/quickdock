@@ -553,7 +553,7 @@ function onKeydown(e: KeyboardEvent) {
 .env-select { padding: 3px var(--space-3); font-size: var(--text-xs); border: 1px solid var(--color-border); border-radius: var(--radius-xs); background: var(--color-bg-tertiary); color: var(--color-text-primary); }
 .link-btn {
   background: none; border: none; padding: 0; font-size: var(--text-sm); font-family: inherit;
-  color: var(--color-accent); cursor: pointer;
+  color: var(--color-accent-ink); cursor: pointer;
 }
 .link-btn:hover:not(:disabled) { text-decoration: underline; }
 .link-btn:disabled { color: var(--color-text-disabled); cursor: default; }

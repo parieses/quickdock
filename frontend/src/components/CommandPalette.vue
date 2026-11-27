@@ -1242,12 +1242,12 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-size: var(--text-md);
   font-weight: 500;
   flex-shrink: 0;
 }
-.inline-name { color: var(--color-accent); }
+.inline-name { color: var(--color-accent-ink); }
 .inline-sep { color: var(--color-text-muted); }
 .inline-input { font-size: var(--text-base); }
 .inline-cancel {
@@ -1346,7 +1346,7 @@ onUnmounted(() => {
   transition: color var(--transition-fast), background var(--transition-fast);
 }
 .result-item:hover .result-icon { color: var(--color-text-primary); }
-.result-item.active .result-icon { color: var(--color-accent); background: var(--color-select-bg); }
+.result-item.active .result-icon { color: var(--color-accent-ink); background: var(--color-select-bg); }
 
 .result-app-icon { width: 20px; height: 20px; object-fit: contain; border-radius: var(--radius-xs); }
 
@@ -1606,7 +1606,7 @@ onUnmounted(() => {
   --wails-draggable: no-drag;
   transition: background 0.12s, color 0.12s;
 }
-.plugin-detach-btn:hover { background: var(--color-bg-hover); color: var(--color-accent); }
+.plugin-detach-btn:hover { background: var(--color-bg-hover); color: var(--color-accent-ink); }
 .plugin-detach-btn:active { background: var(--color-bg-active); }
 
 .palette-plugin-body { flex: 1; display: flex; overflow: hidden; }

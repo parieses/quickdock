@@ -201,7 +201,7 @@ function goHotkeySettings() {
   padding: 14px var(--space-6) var(--space-5);
   border-bottom: 1px solid var(--color-border);
 }
-.cs-head-icon { color: var(--color-accent); flex-shrink: 0; margin-top: var(--space-1); }
+.cs-head-icon { color: var(--color-accent-ink); flex-shrink: 0; margin-top: var(--space-1); }
 .cs-head-text { flex: 1; min-width: 0; }
 .cs-title { margin: 0; font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
 .cs-desc { margin: 3px 0 0; font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.5; }
@@ -281,7 +281,7 @@ function goHotkeySettings() {
   padding: 0;
   border: none;
   background: transparent;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-size: var(--text-sm);
   font-family: inherit;
   cursor: pointer;

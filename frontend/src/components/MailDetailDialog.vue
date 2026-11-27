@@ -235,7 +235,7 @@ onUnmounted(() => { if (copyTimer) clearTimeout(copyTimer) })
 .md-tabs button:hover { color: var(--color-text-primary); }
 .md-tabs button.on {
   background: var(--color-accent-bg); border-color: var(--color-accent-border);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 .md-remote {
   display: inline-flex; align-items: center; gap: var(--space-2); margin-left: var(--space-3);
@@ -277,7 +277,7 @@ onUnmounted(() => { if (copyTimer) clearTimeout(copyTimer) })
 }
 .md-btn:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .md-btn:disabled { color: var(--color-text-disabled); cursor: default; }
-.md-btn.primary { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent); }
+.md-btn.primary { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent-ink); }
 
 .dialog-enter-active { transition: opacity .2s ease-out, transform .2s ease-out; }
 .dialog-leave-active { transition: opacity .15s ease-in; }

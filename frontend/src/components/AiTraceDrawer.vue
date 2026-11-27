@@ -781,7 +781,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-.trace-head-ico { color: var(--color-accent); flex-shrink: 0; }
+.trace-head-ico { color: var(--color-accent-ink); flex-shrink: 0; }
 
 /* 标题吃掉全部剩余宽度，把右边的范围切换和关闭按钮顶到边上。
    别用 .trace-modes 的 margin-left:auto 干这事：子任务视图不渲染范围切换，
@@ -973,7 +973,7 @@ onBeforeUnmount(() => {
 
 /* 与气泡内 run 树（panels.css .qd-run-state）同一套口径：
    pending 中性、running 蓝、canceled 橙，别让运行中/已停止都落灰。 */
-.trace-node-status.is-running { color: var(--color-accent); }
+.trace-node-status.is-running { color: var(--color-accent-ink); }
 .trace-node-status.is-done { color: var(--color-success-ink); }
 .trace-node-status.is-failed { color: var(--color-danger-ink); }
 .trace-node-status.is-canceled { color: var(--color-warning-ink); }
@@ -1019,7 +1019,7 @@ onBeforeUnmount(() => {
 .trace-summary-stats .is-done { color: var(--color-success-ink); }
 .trace-summary-stats .is-failed { color: var(--color-danger-ink); }
 .trace-summary-stats .is-canceled { color: var(--color-warning-ink); }
-.trace-summary-stats .is-running { color: var(--color-accent); }
+.trace-summary-stats .is-running { color: var(--color-accent-ink); }
 .trace-summary-bar {
   display: flex;
   height: 4px;

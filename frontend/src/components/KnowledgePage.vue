@@ -1576,7 +1576,7 @@ onScopeDispose(() => {
 
 .kb-side-vec {
   margin-left: auto;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .kb-lib-acts {
@@ -1730,7 +1730,7 @@ onScopeDispose(() => {
 }
 
 .kb-doc-reindex:hover {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: var(--color-bg-hover);
 }
 
@@ -1811,7 +1811,7 @@ onScopeDispose(() => {
 
 .kb-tab-icon { flex-shrink: 0; }
 /* 问答是 AI 能力：图标常驻主题色，选中时更亮一点，作为「这里能对话」的提示 */
-.kb-tab-ai { color: var(--color-accent); opacity: 0.75; }
+.kb-tab-ai { color: var(--color-accent-ink); opacity: 0.75; }
 .kb-tabbar :deep(.qd-tab[aria-selected='true']) .kb-tab-ai { opacity: 1; }
 
 .kb-tabs-right {
@@ -1832,7 +1832,7 @@ onScopeDispose(() => {
 
 /* 抽屉开关的"已打开"态。优先级要压过 .qd-icon-btn:hover。 */
 .kb-preview-toggle.is-on {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: var(--color-accent-bg);
 }
 
@@ -1944,7 +1944,7 @@ onScopeDispose(() => {
 }
 
 .kb-tag.vec {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: var(--color-accent-bg);
 }
 
@@ -2049,7 +2049,7 @@ onScopeDispose(() => {
 
 .kb-cite:hover {
   border-color: var(--color-accent);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .kb-ask-box {
@@ -2094,7 +2094,7 @@ onScopeDispose(() => {
 .kb-scope-chip.active {
   border-color: var(--color-accent-border);
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .kb-scope-chip:disabled { color: var(--color-text-disabled); cursor: default; }
@@ -2244,7 +2244,7 @@ onScopeDispose(() => {
 }
 
 .kb-chunk-idx {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2267,7 +2267,7 @@ onScopeDispose(() => {
   color: var(--color-text-muted);
 }
 
-.kb-chunk-vec:hover { color: var(--color-accent); }
+.kb-chunk-vec:hover { color: var(--color-accent-ink); }
 
 .kb-chunk-size {
   margin-left: auto;
@@ -2320,7 +2320,7 @@ onScopeDispose(() => {
 .kb-chunk-more:hover {
   border-color: var(--color-accent-border);
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   text-decoration: none;
 }
 
@@ -2341,7 +2341,7 @@ onScopeDispose(() => {
 .kb-ov-icon {
   flex-shrink: 0;
   margin-top: 2px;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .kb-ov-title {
@@ -2391,7 +2391,7 @@ onScopeDispose(() => {
 
 .kb-ov-ask-icon {
   flex-shrink: 0;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .kb-ov-ask-input {
@@ -2418,7 +2418,7 @@ onScopeDispose(() => {
   border: 1px solid var(--color-accent-border);
   border-radius: var(--radius-sm);
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   cursor: pointer;
 }
 
@@ -2467,7 +2467,7 @@ onScopeDispose(() => {
 .kb-ov-prompt:hover {
   border-color: var(--color-accent-border);
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 /* 章节列表：像目录一样一列，点一条跳到右栏对应片段 */
@@ -2493,7 +2493,7 @@ onScopeDispose(() => {
   white-space: nowrap;
 }
 
-.kb-ov-heading:hover { color: var(--color-accent); }
+.kb-ov-heading:hover { color: var(--color-accent-ink); }
 
 .kb-ov-excerpt {
   margin: 0;
@@ -2575,7 +2575,7 @@ onScopeDispose(() => {
   background: none;
   font-size: inherit;
   font-family: inherit;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   text-decoration: underline;
   cursor: pointer;
 }
@@ -2678,7 +2678,7 @@ onScopeDispose(() => {
 .kb-lib-chip.active {
   background: var(--color-accent-bg);
   border-color: var(--color-accent-border);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .kb-lib-icon {
@@ -2790,7 +2790,7 @@ onScopeDispose(() => {
 .kb-icon-pick.active {
   border-color: var(--color-accent);
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 /* ---- 窄窗口 ---- */

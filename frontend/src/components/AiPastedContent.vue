@@ -93,14 +93,14 @@ function lineCount(full: string, lines: string): string {
   font-size: var(--text-xs); font-family: var(--font-mono);
   line-height: 1.4; cursor: pointer;
 }
-.ai-pasted-chip:hover { color: var(--color-accent); border-color: var(--color-accent-border); }
+.ai-pasted-chip:hover { color: var(--color-accent-ink); border-color: var(--color-accent-border); }
 
 /* 弹框头部：图标 + 标题 + 一行元信息，别把「N 行 / N 字」堆在正文上方。 */
 .ai-paste-head-icon {
   flex: none; width: 28px; height: 28px;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: var(--radius-sm);
-  background: var(--color-accent-bg); color: var(--color-accent);
+  background: var(--color-accent-bg); color: var(--color-accent-ink);
 }
 .ai-paste-head-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .ai-paste-head-title {

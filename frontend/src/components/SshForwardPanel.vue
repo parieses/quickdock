@@ -520,13 +520,13 @@ onBeforeUnmount(() => {
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border);
 }
-.sfp-head-icon { flex: 0 0 auto; color: var(--color-accent); }
+.sfp-head-icon { flex: 0 0 auto; color: var(--color-accent-ink); }
 .sfp-title { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-secondary); }
 .sfp-count {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 15px; height: 15px; padding: 0 var(--space-1);
   border-radius: var(--radius-full);
-  background: var(--color-accent-bg); color: var(--color-accent);
+  background: var(--color-accent-bg); color: var(--color-accent-ink);
   font-size: var(--text-2xs); font-variant-numeric: tabular-nums;
 }
 .sfp-head-spacer { flex: 1 1 auto; }
@@ -588,7 +588,7 @@ onBeforeUnmount(() => {
   background: transparent; color: var(--color-text-muted);
   font: inherit; font-size: var(--text-xs); cursor: pointer; white-space: nowrap;
 }
-.sfp-act:hover { color: var(--color-accent); background: var(--color-bg-active); }
+.sfp-act:hover { color: var(--color-accent-ink); background: var(--color-bg-active); }
 .sfp-act.is-danger:hover { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 
 .sfp-empty { padding: var(--space-6) var(--space-3); text-align: center; font-size: var(--text-xs); color: var(--color-text-muted); }

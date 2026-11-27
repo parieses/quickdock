@@ -1350,7 +1350,7 @@ function shortTime(s: string): string {
   background: none;
   font-family: inherit;
   font-size: var(--text-sm);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   cursor: pointer;
 }
 .nd-text-link:hover { text-decoration: underline; }
@@ -1407,7 +1407,7 @@ function shortTime(s: string): string {
   cursor: pointer;
 }
 .nd-crumb:hover {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 .nd-crumb.is-current {
   color: var(--color-text-primary);
@@ -1435,7 +1435,7 @@ function shortTime(s: string): string {
   background: none;
   padding-left: var(--space-2);
   border-left: 1px solid var(--color-border);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-size: var(--text-sm);
   cursor: pointer;
 }
@@ -1550,10 +1550,10 @@ function shortTime(s: string): string {
   cursor: pointer;
 }
 .nd-name-btn:hover {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 .nd-icon-dir {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   flex: none;
 }
 .nd-icon-file {
@@ -1594,11 +1594,11 @@ function shortTime(s: string): string {
 }
 .nd-sort-mark.is-asc {
   opacity: 1;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 .nd-sort-mark.is-desc {
   opacity: 1;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   transform: rotate(180deg);
 }
 /* 行内操作走图标按钮：四个动作塞文字会挤成两行，标题气泡足够解释 */
@@ -1657,7 +1657,7 @@ function shortTime(s: string): string {
   align-items: center;
 }
 .nd-job-dir.is-up {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 .nd-job-dir.is-down {
   color: var(--color-success-ink);

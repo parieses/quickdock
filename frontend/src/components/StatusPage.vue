@@ -598,7 +598,7 @@ function exportSnapshot() {
 }
 .st-kind {
   display: inline-block; padding: 0 var(--space-2); border-radius: var(--radius-xs);
-  background: var(--color-accent-bg); color: var(--color-accent); font-size: var(--text-2xs);
+  background: var(--color-accent-bg); color: var(--color-accent-ink); font-size: var(--text-2xs);
 }
 .st-metrics {
   display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-2) var(--space-4);

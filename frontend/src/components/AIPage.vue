@@ -4220,7 +4220,7 @@ onUnmounted(() => {
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-size: var(--text-xs);
   cursor: pointer;
 }
@@ -4252,7 +4252,7 @@ onUnmounted(() => {
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
-.ai-sel-copy:hover { color: var(--color-accent); border-color: var(--color-accent); }
+.ai-sel-copy:hover { color: var(--color-accent-ink); border-color: var(--color-accent); }
 
 /* 图 / 公式的右键菜单（position 由 floating-ui 注入） */
 .ai-ctx {
@@ -4274,7 +4274,7 @@ onUnmounted(() => {
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
-.ai-ctx-item:hover { background: var(--color-bg-hover); color: var(--color-accent); }
+.ai-ctx-item:hover { background: var(--color-bg-hover); color: var(--color-accent-ink); }
 
 .ai-ctx-item svg { flex: 0 0 auto; }
 

@@ -226,7 +226,7 @@ function onClickAway() {
    页头后下方没有内容可连，实色块压在 bg-secondary 上反而像挖了个洞。 */
 .tab.active {
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-weight: 500;
   border-color: var(--color-accent-border-strong);
   z-index: 1;

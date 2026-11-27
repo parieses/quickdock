@@ -1741,7 +1741,7 @@ onUnmounted(() => {
 }
 .group-chip:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .group-chip.active {
-  background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent);
+  background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent-ink);
 }
 .group-head {
   display: flex; align-items: center; gap: var(--space-4);
@@ -1759,7 +1759,7 @@ onUnmounted(() => {
   color: var(--color-text-muted); background: none; border: 1px solid var(--color-border);
   border-radius: var(--radius-xs); cursor: pointer;
 }
-.group-sel:hover { color: var(--color-accent); border-color: var(--color-accent); }
+.group-sel:hover { color: var(--color-accent-ink); border-color: var(--color-accent); }
 
 /* ---- 搜索 + 批量条 ---- */
 .mon-tools {
@@ -1773,14 +1773,14 @@ onUnmounted(() => {
 }
 .mon-search-count { font-size: var(--text-xs); color: var(--color-text-muted); flex-shrink: 0; }
 .mon-tools-fill { flex: 1; }
-.mon-sel-count { font-size: var(--text-xs); font-weight: 500; color: var(--color-accent); }
+.mon-sel-count { font-size: var(--text-xs); font-weight: 500; color: var(--color-accent-ink); }
 .mon-selbtn {
   height: 24px; padding: 0 var(--space-4); font-size: var(--text-xs); font-family: inherit; cursor: pointer;
   color: var(--color-text-secondary); background: var(--color-bg-secondary);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap;
 }
-.mon-selbtn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
+.mon-selbtn:hover:not(:disabled) { color: var(--color-accent-ink); border-color: var(--color-accent); }
 .mon-selbtn:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
 .mon-selbtn.danger:hover:not(:disabled) { color: var(--color-danger-ink); border-color: var(--color-danger); }
 /* 勾选态把整条工具条换成强调底：批量动作只在选中后出现，
@@ -1913,7 +1913,7 @@ onUnmounted(() => {
 .meta-cell + .meta-cell::before {
   content: '|'; margin: 0 var(--space-3); color: var(--color-border); font-weight: 400;
 }
-.meta-up { color: var(--color-accent); }
+.meta-up { color: var(--color-accent-ink); }
 .meta-lat { color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
 .meta-lat-num { font-weight: 500; }
 .meta-sub { color: var(--color-text-muted); }
@@ -2042,7 +2042,7 @@ onUnmounted(() => {
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   white-space: nowrap;
 }
-.logs-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
+.logs-btn:hover:not(:disabled) { color: var(--color-accent-ink); border-color: var(--color-accent); }
 .logs-btn:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
 .logs-btn.danger:hover:not(:disabled) { color: var(--color-danger-ink); border-color: var(--color-danger); }
 .logs-empty { font-size: var(--text-xs); color: var(--color-text-muted); padding: var(--space-3) 0; }

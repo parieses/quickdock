@@ -1727,7 +1727,7 @@ onUnmounted(() => {
 }
 .time-btn:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .time-btn.active {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   background: var(--color-accent-bg);
   border-color: var(--color-accent-border);
 }
@@ -1760,7 +1760,7 @@ onUnmounted(() => {
 }
 
 .tag-btn.active {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   border-color: var(--color-accent-border);
   background: var(--color-accent-bg);
 }
@@ -1775,11 +1775,11 @@ onUnmounted(() => {
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 .cb-src-btn:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
-.cb-src-btn.active { color: var(--color-accent); border-color: var(--color-accent-border); background: var(--color-accent-bg); }
+.cb-src-btn.active { color: var(--color-accent-ink); border-color: var(--color-accent-border); background: var(--color-accent-bg); }
 .cb-src-name { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cb-src-menu { max-width: 320px; }
 .cb-src-menu-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cb-menu-check { color: var(--color-accent); margin-left: var(--space-3); flex-shrink: 0; }
+.cb-menu-check { color: var(--color-accent-ink); margin-left: var(--space-3); flex-shrink: 0; }
 .save-menu-item.is-active { color: var(--color-accent-ink); }
 
 /* 页头「更多」：导出 / 清空 */
@@ -1788,7 +1788,7 @@ onUnmounted(() => {
 
 /* 页头「选择」按钮：带文字，省得用户猜图标是干啥的 */
 .cb-select-toggle { gap: var(--space-2); }
-.cb-select-toggle.is-on { color: var(--color-accent); border-color: var(--color-accent-border); background: var(--color-accent-bg); }
+.cb-select-toggle.is-on { color: var(--color-accent-ink); border-color: var(--color-accent-border); background: var(--color-accent-bg); }
 
 /* ---- 批量操作条 ---- */
 .cb-batch {
@@ -1798,7 +1798,7 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--color-accent-border);
   flex-wrap: wrap; row-gap: var(--space-2);
 }
-.cb-batch-count { font-size: var(--text-xs); font-weight: 600; color: var(--color-accent); white-space: nowrap; }
+.cb-batch-count { font-size: var(--text-xs); font-weight: 600; color: var(--color-accent-ink); white-space: nowrap; }
 .cb-batch-fill { flex: 1; }
 .cb-batch-btn {
   display: inline-flex; align-items: center; gap: var(--space-2);
@@ -1808,7 +1808,7 @@ onUnmounted(() => {
   font-size: var(--text-xs); font-family: inherit; cursor: pointer; white-space: nowrap;
   transition: color var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast);
 }
-.cb-batch-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
+.cb-batch-btn:hover:not(:disabled) { color: var(--color-accent-ink); border-color: var(--color-accent); }
 .cb-batch-btn.danger:hover:not(:disabled) { color: var(--color-danger-ink); border-color: var(--color-danger); background: var(--color-danger-bg); }
 .cb-batch-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 
@@ -1816,7 +1816,7 @@ onUnmounted(() => {
    一眼能看清命中词，又不刺眼 */
 .hl-hit {
   background: var(--color-accent-bg);
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   font-weight: 600;
   border-radius: var(--radius-xs);
   padding: 0;
@@ -1929,7 +1929,7 @@ onUnmounted(() => {
   align-self: flex-start; padding: 0;
   border: 0; background: none; cursor: pointer;
   font-size: var(--text-xs); font-family: inherit;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 .cb-expand:hover { text-decoration: underline; }
 .cb-expand-caret { transition: transform var(--transition-fast); }
@@ -1937,7 +1937,7 @@ onUnmounted(() => {
 
 /* 文件条目 */
 .cb-file { display: flex; align-items: flex-start; gap: var(--space-3); }
-.cb-file-icon { flex-shrink: 0; margin-top: 2px; color: var(--color-accent); }
+.cb-file-icon { flex-shrink: 0; margin-top: 2px; color: var(--color-accent-ink); }
 .cb-file-paths {
   flex: 1; min-width: 0;
   font-size: var(--text-md); color: var(--color-text-secondary); line-height: 1.5;
@@ -1951,7 +1951,7 @@ onUnmounted(() => {
   transition: opacity var(--transition-fast), background-color var(--transition-fast), color var(--transition-fast);
 }
 .cb-card:hover .cb-file-reveal { opacity: 1; }
-.cb-file-reveal:hover { color: var(--color-accent); background: var(--color-accent-bg); }
+.cb-file-reveal:hover { color: var(--color-accent-ink); background: var(--color-accent-bg); }
 .cb-file-reveal:disabled { color: var(--color-text-disabled); cursor: default; }
 
 /* ---- 元数据：图标 + 提亮一档的次要色 ---- */
@@ -1967,7 +1967,7 @@ onUnmounted(() => {
 .cb-meta-lang {
   font-family: var(--font-mono); font-size: var(--text-2xs);
   letter-spacing: 0.04em; text-transform: uppercase;
-  color: var(--color-accent); opacity: 0.85;
+  color: var(--color-accent-ink); opacity: 0.85;
 }
 /* 屏蔽来源：hover 才出现的极轻量按钮 */
 .cb-source-block {
@@ -2152,7 +2152,7 @@ onUnmounted(() => {
 }
 .item-note-icon {
   flex-shrink: 0; opacity: 0.6;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 .item-note span {
   overflow: hidden; text-overflow: ellipsis;
@@ -2161,7 +2161,7 @@ onUnmounted(() => {
 /* 多选开关高亮 / 按钮禁用态：.qd-icon-btn 来自全局 app.css，
    scoped 下用同一类名加状态即可命中本页渲染出来的按钮。 */
 .qd-icon-btn.active {
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
   border-color: var(--color-accent-border);
   background: var(--color-accent-bg);
 }
@@ -2174,8 +2174,8 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--color-border);
   background: var(--color-accent-bg);
 }
-.cb-queue-icon { flex-shrink: 0; color: var(--color-accent); }
-.cb-queue-title { flex-shrink: 0; font-size: var(--text-xs); font-weight: 600; color: var(--color-accent); }
+.cb-queue-icon { flex-shrink: 0; color: var(--color-accent-ink); }
+.cb-queue-title { flex-shrink: 0; font-size: var(--text-xs); font-weight: 600; color: var(--color-accent-ink); }
 .cb-queue-status { flex-shrink: 0; font-size: var(--text-xs); color: var(--color-text-secondary); }
 .cb-queue-chips { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-2); overflow: hidden; }
 .cb-queue-chip {
