@@ -39,13 +39,13 @@ import { getErrorMessage } from '../utils/error'
 import { removeStored, writeStored } from '../utils/storage'
 import { logErr } from '../utils/logger'
 import { useToast } from '../composables/useToast'
+import { useGitClone } from '../composables/useGitClone'
 import { navigateTo, pendingTarget } from '../composables/bridge'
 import ConfirmDialog from './ConfirmDialog.vue'
 import {
   GitListRepos, GitAddRepo, GitRemoveRepo, GitPickRepo,
   GitRepoStatus, GitBranches, GitLog, GitCommitDetail,
   GitCheckout, GitFetch, GitPull, GitPush,
-  GitPickCloneParent, GitClone,
   GitWorkingTree, GitWorkingDiff, GitStage, GitUnstage, GitCommit, GitCommitAmend, GitCommitMessageAI,
   GitDiscardChanges, GitAddIgnore, GitUntrack,
   GitCreateBranch, GitDeleteBranch, GitRenameBranch, GitMerge,
@@ -668,70 +668,22 @@ async function addRepo() {
 }
 
 // ---- 克隆远端仓库 ----
-const cloneOpen = ref(false)
-const cloneUrl = ref('')
-const cloneParent = ref('')
-const cloneErr = ref('')
-const cloning = ref(false)
-
-/** 与后端 repoNameFromURL 同一规则：取路径末段、剥 .git，用于克隆前预览目标路径。 */
-const cloneName = computed(() => {
-  let u = cloneUrl.value.trim().replace(/\/+$/, '')
-  const i = Math.max(u.lastIndexOf('/'), u.lastIndexOf(':'))
-  if (i >= 0) u = u.slice(i + 1)
-  return u.replace(/\.git$/, '')
-})
-const cloneTarget = computed(() =>
-  (cloneParent.value && cloneName.value)
-    ? `${cloneParent.value.replace(/[\\/]+$/, '')}\\${cloneName.value}`
-    : '')
-
-function openClone() {
-  cloneUrl.value = ''
-  cloneParent.value = ''
-  cloneErr.value = ''
-  cloneOpen.value = true
-}
-
-function closeClone() {
-  if (cloning.value) return // 克隆进行中不允许误关：关了也不知道后台跑完没有
-  cloneOpen.value = false
-}
-
-async function pickParent() {
-  try {
-    const picked = unwrap<string>(await GitPickCloneParent())
-    if (picked) cloneParent.value = picked
-  } catch (e) {
-    logErr('git.pickCloneParent', e)
-  }
-}
-
-async function doClone() {
-  const url = cloneUrl.value.trim()
-  if (!url) { cloneErr.value = t('git_clone_need_url'); return }
-  if (!cloneParent.value) { cloneErr.value = t('git_clone_need_parent'); return }
-  cloning.value = true
-  cloneErr.value = ''
-  try {
-    // data 是后端归一化好的目标路径（Windows 分隔符由后端 filepath.Join 处理）
-    const target = unwrap<string>(await GitClone(url, cloneParent.value)) || ''
-    toast.success(t('git_cloned'))
-    cloneOpen.value = false
+// 对话框自己的状态与请求在 useGitClone；克隆成功后的收尾要动 activePath 与视图状态，
+// 所以由本页注入回调。
+const {
+  cloneOpen, cloneUrl, cloneParent, cloneErr, cloning,
+  cloneName, cloneTarget,
+  openClone, closeClone, pickParent, doClone,
+} = useGitClone({
+  onCloned: async (target) => {
     await loadRepos()
     if (target) {
       resetRepoView()
       activePath.value = target
       await loadRepo()
     }
-  } catch (e) {
-    // clone 的失败原因（地址不对 / 没权限 / 目录已存在）在 stderr 里，后端已透出
-    cloneErr.value = getErrorMessage(e)
-    logErr('git.clone', e)
-  } finally {
-    cloning.value = false
-  }
-}
+  },
+})
 
 function removeRepo(r: RepoRef) {
   // 「移出列表」不改磁盘，但小叉极易误点，必须先问一次再动手。
