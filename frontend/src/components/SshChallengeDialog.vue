@@ -6,9 +6,10 @@
  * OTP / 密码这类必须走 password，否则明文答案会留在屏幕上。
  * 组件只负责收集并原样交回，不判断答案对错——那是服务端的事。
  */
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ShieldAlert } from '@lucide/vue'
+import QdModal from './QdModal.vue'
 
 const { t } = useI18n()
 
@@ -32,7 +33,6 @@ const emit = defineEmits<{
 }>()
 
 const answers = ref<string[]>([])
-const boxRef = ref<HTMLElement | null>(null)
 
 // 每个问题一格答案；换一批问题就整体重置，避免上一轮的 OTP 残留到这一轮。
 watch(
@@ -42,11 +42,6 @@ watch(
   },
   { immediate: true },
 )
-
-onMounted(() => {
-  // 弹窗一出现焦点就落在第一个输入框：用户手已经在键盘上，省掉一次点击。
-  void nextTick(() => boxRef.value?.querySelector<HTMLInputElement>('input')?.focus())
-})
 
 function onSubmit() {
   emit('submit', answers.value.slice(), false)
@@ -58,88 +53,60 @@ function onCancel() {
 </script>
 
 <template>
-  <div
-    class="challenge-mask"
-    @click.self="onCancel"
-    @keydown.esc="onCancel"
+  <!-- inline：只盖住终端区域。终端页是 keep-alive 的，做成全局模态会在切走后飘到别的页面。
+       初始焦点由 QdModal 的 v-dialog 落在第一个输入框，与原来手写的 focus 等价。 -->
+  <QdModal
+    :model-value="true"
+    inline
+    width="420px"
+    @update:model-value="onCancel"
   >
-    <div ref="boxRef" class="challenge-box" role="dialog" aria-modal="true">
-      <header class="challenge-head">
-        <ShieldAlert :size="16" class="challenge-icon" />
-        <h3 class="challenge-title">{{ t('sshChallengeTitle') }}</h3>
-      </header>
+    <template #header>
+      <ShieldAlert :size="16" class="challenge-icon" />
+      <h3 class="challenge-title">{{ t('sshChallengeTitle') }}</h3>
+    </template>
 
-      <p v-if="event.name" class="challenge-name">{{ event.name }}</p>
-      <p v-if="event.instruction" class="challenge-instruction">{{ event.instruction }}</p>
+    <p v-if="event.name" class="challenge-name">{{ event.name }}</p>
+    <p v-if="event.instruction" class="challenge-instruction">{{ event.instruction }}</p>
 
-      <p class="challenge-desc">{{ t('sshChallengeInstruction') }}</p>
+    <p class="challenge-desc">{{ t('sshChallengeInstruction') }}</p>
 
-      <div class="challenge-questions">
-        <label v-for="(q, i) in event.questions" :key="i" class="challenge-field">
-          <span class="challenge-label">{{ q }}</span>
-          <input
-            v-model="answers[i]"
-            class="challenge-input"
-            :type="event.echos[i] === false ? 'password' : 'text'"
-            autocomplete="off"
-            @keydown.enter="onSubmit"
-          />
-        </label>
-      </div>
-
-      <p class="challenge-hint">{{ t('sshChallengeHint') }}</p>
-
-      <footer class="challenge-actions">
-        <button class="challenge-btn" @click="onCancel">{{ t('sshChallengeCancel') }}</button>
-        <button class="challenge-btn challenge-btn--primary" @click="onSubmit">
-          {{ t('sshChallengeSubmit') }}
-        </button>
-      </footer>
+    <div class="challenge-questions">
+      <label v-for="(q, i) in event.questions" :key="i" class="challenge-field">
+        <span class="challenge-label">{{ q }}</span>
+        <input
+          v-model="answers[i]"
+          class="challenge-input"
+          :type="event.echos[i] === false ? 'password' : 'text'"
+          autocomplete="off"
+          @keydown.enter="onSubmit"
+        />
+      </label>
     </div>
-  </div>
+
+    <p class="challenge-hint">{{ t('sshChallengeHint') }}</p>
+
+    <template #footer>
+      <button class="qd-btn" @click="onCancel">{{ t('sshChallengeCancel') }}</button>
+      <button class="qd-btn qd-btn-primary" @click="onSubmit">
+        {{ t('sshChallengeSubmit') }}
+      </button>
+    </template>
+  </QdModal>
 </template>
 
 <style scoped>
-.challenge-mask {
-  position: absolute;
-  inset: 0;
-  z-index: 40;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-6);
-  background: var(--color-bg-overlay);
-}
-
-.challenge-box {
-  width: 420px;
-  max-width: 100%;
-  max-height: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  padding: var(--space-6);
-  background: var(--color-popover-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-toast);
-}
-
-.challenge-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin-bottom: var(--space-4);
-}
-
+/* 外壳（遮罩 / 卡片 / 头部 / 底部按钮排布）由 QdModal 提供，这里只留内容样式。 */
 .challenge-icon {
   color: var(--color-accent);
   flex: 0 0 auto;
 }
 
 .challenge-title {
+  flex: 1;
+  min-width: 0;
   margin: 0;
-  font-size: var(--text-md);
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -207,43 +174,5 @@ function onCancel() {
   font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--color-text-muted);
-}
-
-.challenge-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-3);
-  margin-top: var(--space-6);
-}
-
-.challenge-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 28px;
-  padding: 0 11px;
-  font-size: var(--text-sm);
-  font-family: inherit;
-  color: var(--color-text-secondary);
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-
-.challenge-btn:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-hover);
-}
-
-.challenge-btn--primary {
-  color: var(--color-accent-text);
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-}
-
-.challenge-btn--primary:hover {
-  color: var(--color-accent-text);
-  background: var(--color-accent-hover);
 }
 </style>

@@ -106,6 +106,13 @@
   --text-4xl: 34px;
   --text-5xl: 48px;
 
+  /* 禁用态透明度：只有两档，避免同一个「不可点」在 60 个组件里有六种长相
+     （存量散布 0.25/0.35/0.38/0.4/0.45/0.5/0.55/0.6）。
+       disabled      按钮、图标、标签等「控件本身」，弱化即可
+       disabled-soft 输入框、整块区域：里面的文字仍要能读，别压太狠 */
+  --opacity-disabled: 0.45;
+  --opacity-disabled-soft: 0.6;
+
   /* 运行时官方品牌标识色（Node 绿 / PHP 紫 …）：与明暗主题无关，故只定义一次。
      以前这些 hex 直接写在 utils/palette.ts 里经 :style 注入，绕开了设计 token；
      现在色值只在这里有一份，脚本里拿到的全是 var(--brand-*)。 */
@@ -190,6 +197,8 @@
   --color-accent: #5b8cff;
   --color-accent-hover: #4a7af0;
   --color-accent-text: #fff;
+  /* accent 作文字/图标色时的专用档：深色底上 --color-accent 本身够亮，直接复用。 */
+  --color-accent-ink: #5b8cff;
   --color-danger: #ef4444;
   --color-danger-bg: rgba(239, 68, 68, 0.12);
   --color-danger-text: #ffffff;
@@ -327,21 +336,23 @@
   --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
   /* ==== 浮层层级（唯一出处）====
-     层级散着写是这类 bug 的温床：设置面板是 z-index 10000/10001 的全屏外壳，
-     而 QdModal 原来写 3000，于是「设置里点编辑」弹的东西全被设置页盖住——
+     层级散着写是这类 bug 的温床：设置面板是 10000/10001 的全屏外壳，
+     而早期弹窗写 1000/9000，于是「设置里点编辑」弹的东西全被设置页盖住——
      看起来就是点了没反应。这里按「谁必须压住谁」排成一条梯子，新浮层取对应
-     档，不要再写裸数字：
-       dropdown 页面内局部浮层（版本列表、行内下拉）
-       modal    常规弹窗（QdModal 的全部实例，含设置面板里的）
-       context  右键菜单（要能盖住弹窗，弹窗里也能右键）
-       settings 设置全屏外壳（10000/10001 见 styles/settings.css）
-       confirm  全局确认框 / 更新提示（阻塞型，必须压过一切普通弹窗）
-       toast    轻提示（不能因为开着弹窗就看不见）
-       lock     启动锁屏（唯一不该被任何东西盖住的） */
+     档，不要再写裸数字（组件内部相对定位的 1/2/5/20 之类不算浮层）：
+       ctx-backdrop 页面内右键菜单的透明遮罩，只负责「点外面关闭」
+       dropdown     页面内局部浮层（版本列表、行内下拉、固定菜单）
+       settings     设置全屏外壳（10000/10001 见 styles/settings.css）
+       modal        常规弹窗（含设置面板里的；必须盖住设置）
+       context      右键菜单（要能盖住弹窗，弹窗里也能右键）
+       confirm      全局确认框 / 更新提示（阻塞型，必须压过一切普通弹窗）
+       toast        轻提示（不能因为开着弹窗就看不见）
+       lock         启动锁屏（唯一不该被任何东西盖住的） */
+  --z-ctx-backdrop: 900;
   --z-dropdown: 1000;
+  --z-settings: 10000;
   --z-modal: 12000;
   --z-context: 13000;
-  --z-settings: 10000;
   --z-confirm: 20000;
   --z-toast: 25000;
   --z-lock: 30000;
@@ -358,6 +369,12 @@
   --color-cat-command: #9b6dff;
   --color-cat-http: #e0556b;
   --color-cat-ai: #22d3ee;
+  --color-cat-ai-text: #06232b;
+  /* 提交图 lane 的第 3/5/6 条（1/2/4 借 accent/warning/success，不另立）。
+     浅色档压深，否则亮色在白底上看不见。 */
+  --color-git-lane-3: #a78bfa;
+  --color-git-lane-5: #f472b6;
+  --color-git-lane-6: #22d3ee;
   --shadow-toast: 0 4px 24px rgba(0, 0, 0, 0.45);
   --shadow-toast-hover: 0 6px 28px rgba(0, 0, 0, 0.55);
   /* 「运行中」绿点的呼吸光晕；原来在 SettingsDSH 里写死 rgba(76,175,80,.8)。 */
@@ -382,7 +399,7 @@
   --color-settings-bg: var(--color-bg-primary);
   --color-text-primary: #1a1f27;
   --color-text-secondary: #525b68;
-  --color-text-muted: #6e7683;
+  --color-text-muted: #6a727e;
   --color-text-disabled: #9aa2ae;
   --color-border: #dde1e8;
   --color-border-light: #c9cfd9;
@@ -393,6 +410,9 @@
   --color-accent: #5b8cff;
   --color-accent-hover: #4a7af0;
   --color-accent-text: #fff;
+  /* 浅色底上 --color-accent 当文字只有 2.95:1，选中态看不清；压深到 5.18:1。
+     实心按钮/焦点环仍用 --color-accent，品牌色不变。 */
+  --color-accent-ink: #3563c9;
   --color-danger: #ef4444;
   --color-danger-bg: rgba(239, 68, 68, 0.1);
   --color-danger-text: #ffffff;
@@ -502,6 +522,10 @@
   --color-cat-command: #9b6dff;
   --color-cat-http: #e0556b;
   --color-cat-ai: #0891b2;
+  --color-cat-ai-text: #06232b;
+  --color-git-lane-3: #7c3aed;
+  --color-git-lane-5: #db2777;
+  --color-git-lane-6: #0891b2;
   --shadow-toast: 0 4px 24px rgba(0, 0, 0, 0.15);
   --shadow-toast-hover: 0 6px 28px rgba(0, 0, 0, 0.2);
   /* 与深色档一一对应：浅底上光晕要收淡，否则绿点会糊成一团 */
@@ -513,6 +537,21 @@
 *::before,
 *::after {
   box-sizing: border-box;
+}
+
+/* 系统「减少动态效果」全局兜底。项目有 100+ 动画、300+ transition，逐个文件写降级
+   不现实；这里统一压到近乎瞬时，组件里已有的局部 @media 仍然生效。
+   !important 必须保留：scoped 规则带属性选择器，特异性高于 `html *`，不加就压不住。
+   个别确实需要保留的过渡，请在组件自己的 @media 里用同等 !important 覆盖。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* 全站文本选中色。不给浏览器默认（浅色下是深蓝底白字、深色下是亮蓝，
@@ -637,12 +676,12 @@ html.qd-backdrop .plugin-standalone {
    .palette-standalone 本来就是 transparent；命令面板与插件窗口改走更实的
    --color-acrylic-bg：它们内容区没有铺满的实色卡片，窗口底太透会让搜索框 /
    iframe 内容直接压在壁纸上。
-   ⚠️ 不能把 .note-standalone 外壳也透明化：App.vue 里它是外壳，但 NotePanel.vue
-   里同名类是组件自己的根节点，两层同名嵌套，只有内层该铺底。 */
+   .note-standalone 是 NotePanel.vue 自己的根节点，组件自己撑满窗口，
+   App.vue 不再套同名外壳，故用与剪贴板同款的单层「外壳 > 组件根」写法。 */
 html.qd-backdrop .clipboard-standalone > .clipboard-panel,
 html.qd-backdrop .winmgr-standalone > .wm-root,
 html.qd-backdrop .ssh-standalone > .ssh-page,
-html.qd-backdrop .note-standalone > .note-standalone {
+html.qd-backdrop .note-standalone {
   background: var(--color-window-bg);
 }
 
@@ -847,7 +886,7 @@ input[type='checkbox']:checked {
 input[type='checkbox']:indeterminate {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8h8' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E");
 }
-input[type='checkbox']:disabled { cursor: not-allowed; opacity: 0.45; }
+input[type='checkbox']:disabled { cursor: not-allowed; opacity: var(--opacity-disabled); }
 
 /* 单选框：应用本体目前没有用到，但插件窗口共用这份样式表，插件里的
    <input type="radio"> 同样会被画成系统白块，所以一并给出圆形版本。 */
@@ -872,7 +911,7 @@ input[type='radio']:checked {
   /* 实心圆环：外圈 1px 选中色 + 中心 6px 圆点，中间留一圈底色当白边。 */
   background-image: radial-gradient(circle, var(--qd-check-color) 0 3px, transparent 3px);
 }
-input[type='radio']:disabled { cursor: not-allowed; opacity: 0.45; }
+input[type='radio']:disabled { cursor: not-allowed; opacity: var(--opacity-disabled); }
 
 /* ==================== 通用工具类 ==================== */
 .text-muted { color: var(--color-text-muted); }
@@ -933,13 +972,13 @@ svg[stroke='currentColor'] { stroke-width: 1.75; }
   z-index: 1;
 }
 .version-toggle-btn:hover:not(:disabled) { opacity: 0.85; }
-.version-toggle-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.version-toggle-btn:disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
 .version-list-panel {
   position: absolute;
   top: 100%;
   left: 0;
   right: 0;
-  z-index: 1000;
+  z-index: var(--z-dropdown);
   margin-top: var(--space-2);
   max-height: 280px;
   overflow-y: auto;

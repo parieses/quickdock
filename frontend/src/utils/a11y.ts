@@ -11,8 +11,9 @@ import type { App, Directive } from 'vue'
  * / `.ai-modal-overlay` / `.tool-modal-overlay` 这一批已经全部迁到 QdModal（自己带 v-dialog），
  * 白名单里对应条目随之删除 —— 留着只会让新写的同名遮罩悄悄绕过 v-dialog 又拿到一份陷阱。
  *
- * 与 `useFocusTrap` 的关系：那 14 个组件自己接了焦点陷阱、自己处理 Esc，
- * 本文件的白名单**刻意不含**它们的遮罩类名（.confirm-overlay 等），避免双重陷阱。
+ * 与 `useFocusTrap` 的关系：另有一批组件（SshHostDialog / ItemEditor / SettingsModal 等）
+ * 自己接了焦点陷阱、自己处理 Esc，本文件的白名单**刻意不含**它们的遮罩类名
+ * （.confirm-overlay 等），避免双重陷阱。走 QdModal 的组件不要再接 useFocusTrap。
  *
  * Esc 用「延后一帧兜底」而不是抢注册：项目已有 20+ 处组件级 / 页面级 Esc 链
  * （CommandPalette / GitPage / DownloadPage / AIPage …），再加一层同步 Esc 会导致

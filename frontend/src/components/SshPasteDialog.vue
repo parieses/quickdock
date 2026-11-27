@@ -9,11 +9,11 @@
  *
  * 只拦多行：单行粘贴是终端的日常操作，加确认等于每天骚扰用户几十次。
  */
-import { computed, ref, toRef, watch } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ShieldAlert } from '@lucide/vue'
 import { splitPasteLines } from '../utils/ssh'
-import { useFocusTrap } from '../utils/focusTrap'
+import QdModal from './QdModal.vue'
 
 const { t } = useI18n()
 
@@ -30,96 +30,57 @@ const emit = defineEmits<{
 
 const parsed = computed(() => splitPasteLines(props.data, 6))
 
-const boxRef = ref<HTMLElement | null>(null)
-const { onKeydown } = useFocusTrap(toRef(props, 'visible'), boxRef)
-
-// 每次重新打开都把初始焦点落在「取消」上。
-//
-// 这个弹窗的默认动作必须是「不发」——用户一进来手指就在键盘上，
-// 若焦点落在「仍然发送」上，一个误触的回车就把内容投到远端 shell 了。
-watch(
-  () => props.visible,
-  v => {
-    if (v) boxRef.value?.querySelector<HTMLButtonElement>('.paste-btn')?.focus()
-  },
-)
+// 初始焦点交给 QdModal 的 v-dialog：本弹窗没有表单控件，会落到头部关闭按钮（≡ 取消），
+// 仍然满足「默认动作必须是不发」——误触回车不会把内容投到远端。
 </script>
 
 <template>
-  <div
+  <!-- inline：只盖住终端区域（终端页 keep-alive，全局模态会在切走后飘到别的页面）。 -->
+  <QdModal
     v-if="visible"
-    class="paste-mask"
-    @click.self="emit('cancel')"
-    @keydown="onKeydown"
+    :model-value="true"
+    inline
+    width="460px"
+    @update:model-value="emit('cancel')"
   >
-    <div ref="boxRef" class="paste-box" role="dialog" aria-modal="true">
-      <header class="paste-head">
-        <ShieldAlert :size="16" class="paste-warn-icon" />
-        <h3 class="paste-title">{{ t('sshPasteTitle') }}</h3>
-      </header>
+    <template #header>
+      <ShieldAlert :size="16" class="paste-warn-icon" />
+      <h3 class="paste-title">{{ t('sshPasteTitle') }}</h3>
+    </template>
 
-      <p class="paste-desc">{{ t('sshPasteDesc', { lines: parsed.total }) }}</p>
+    <p class="paste-desc">{{ t('sshPasteDesc', { lines: parsed.total }) }}</p>
 
-      <div class="paste-preview">
-        <div class="paste-preview-label">{{ t('sshPastePreview') }}</div>
-        <pre class="paste-code">{{ parsed.lines.join('\n') }}</pre>
-        <p v-if="parsed.truncated" class="paste-more">
-          {{ t('sshPasteMore', { n: parsed.total - parsed.lines.length }) }}
-        </p>
-      </div>
-
-      <p class="paste-hint">{{ t('sshPasteDangerHint') }}</p>
-
-      <footer class="paste-actions">
-        <button class="paste-btn" @click="emit('cancel')">{{ t('cancel') }}</button>
-        <button class="paste-btn paste-btn--danger" @click="emit('confirm')">
-          {{ t('sshPasteConfirm') }}
-        </button>
-      </footer>
+    <div class="paste-preview">
+      <div class="paste-preview-label">{{ t('sshPastePreview') }}</div>
+      <pre class="paste-code">{{ parsed.lines.join('\n') }}</pre>
+      <p v-if="parsed.truncated" class="paste-more">
+        {{ t('sshPasteMore', { n: parsed.total - parsed.lines.length }) }}
+      </p>
     </div>
-  </div>
+
+    <p class="paste-hint">{{ t('sshPasteDangerHint') }}</p>
+
+    <template #footer>
+      <button class="qd-btn" @click="emit('cancel')">{{ t('cancel') }}</button>
+      <button class="qd-btn qd-btn-danger" @click="emit('confirm')">
+        {{ t('sshPasteConfirm') }}
+      </button>
+    </template>
+  </QdModal>
 </template>
 
 <style scoped>
-.paste-mask {
-  position: absolute;
-  inset: 0;
-  z-index: 40;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-6);
-  background: var(--color-bg-overlay);
-}
-
-.paste-box {
-  width: 460px;
-  max-width: 100%;
-  max-height: 100%;
-  display: flex;
-  flex-direction: column;
-  padding: var(--space-6);
-  background: var(--color-popover-bg);
-  border: 1px solid var(--popover-border-color);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-toast);
-}
-
-.paste-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin-bottom: var(--space-4);
-}
-
+/* 外壳（遮罩 / 卡片 / 头部 / 底部）由 QdModal 提供，这里只留内容样式。 */
 .paste-warn-icon {
   color: var(--color-warning);
   flex: 0 0 auto;
 }
 
 .paste-title {
+  flex: 1;
+  min-width: 0;
   margin: 0;
-  font-size: var(--text-md);
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -168,42 +129,5 @@ watch(
   font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--color-warning);
-}
-
-.paste-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-3);
-  margin-top: var(--space-6);
-}
-
-.paste-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
-  height: 28px; padding: 0 11px;
-  font-size: var(--text-sm);
-  font-family: inherit;
-  color: var(--color-text-secondary);
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: color var(--transition-fast), background var(--transition-fast),
-    border-color var(--transition-fast);
-}
-
-.paste-btn:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-hover);
-}
-
-.paste-btn--danger {
-  color: var(--color-danger);
-  border-color: var(--color-danger-bg);
-  background: var(--color-danger-bg);
-}
-
-.paste-btn--danger:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-active);
-  border-color: var(--color-danger);
 }
 </style>

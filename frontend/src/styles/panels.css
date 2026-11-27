@@ -89,16 +89,14 @@
 /* 头部方按钮与行内按钮共用 app.css 的 .qd-icon-btn 定义，
    这里不再重复一套（重复就必然和页头分叉）。 */
 
-/* ---- 过滤行：三栏都在头部下方、同样高度 ---- */
-.qd-panel-search {
+/* ---- 搜索框皮肤（QdSearchBox 根节点）----
+   皮肤与布局分离：这里只管「看起来是一个搜索框」，放在页面哪个位置、多宽，
+   由调用方自己的 class 决定（三栏过滤行见下方 .qd-panel-search）。 */
+.qd-search-box {
   display: flex;
   align-items: center;
   gap: var(--space-3);
   flex-shrink: 0;
-  /* 项目栏是 flex:1 的宽面板，不限宽的话搜索框会拉满上千像素，
-     和左边两栏的窄框完全不像同一套控件 */
-  max-width: 380px;
-  margin: var(--space-4) var(--space-4) var(--space-3);
   padding: 0 var(--space-4);
   height: 28px;
   background: var(--color-bg-tertiary);
@@ -106,10 +104,18 @@
   border-radius: var(--radius-sm);
   transition: border-color var(--transition-fast);
 }
-.qd-panel-search:focus-within {
+.qd-search-box:focus-within {
   border-color: var(--color-border-focus-soft);
 }
-.qd-panel-search.is-disabled { opacity: 0.6; }
+.qd-search-box.is-disabled { opacity: var(--opacity-disabled-soft); }
+
+/* ---- 三栏过滤行布局：与 QdSearchBox 叠加使用 ----
+   项目栏是 flex:1 的宽面板，不限宽的话搜索框会拉满上千像素，
+   和左边两栏的窄框完全不像同一套控件。 */
+.qd-panel-search {
+  max-width: 380px;
+  margin: var(--space-4) var(--space-4) var(--space-3);
+}
 .qd-search-icon { flex-shrink: 0; color: var(--color-text-muted); }
 .qd-search-input {
   flex: 1;
@@ -138,6 +144,9 @@
   cursor: pointer;
 }
 .qd-search-clear:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
+/* 检索中：用 spinner 占住清除位，避免输入框右侧跳动 */
+.qd-search-spin { flex-shrink: 0; color: var(--color-text-muted); animation: qd-spin 0.9s linear infinite; }
+@keyframes qd-spin { to { transform: rotate(360deg); } }
 
 /* 搜索结果计数条 */
 .qd-search-hint {

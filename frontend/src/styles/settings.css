@@ -42,29 +42,14 @@
 }
 .close-btn:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
 
-/* 设置项搜索框：侧栏常驻，根菜单/设置页内都可见 */
+/* 设置项搜索框：侧栏常驻，根菜单/设置页内都可见。
+   盒子皮肤由 QdSearchBox 的 .qd-search-box 统一提供（无边框、28px、bg-tertiary），
+   这里只留外框留白，全项目搜索框保持同一副长相。 */
 .settings-search {
   padding: 10px var(--space-5);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
-.settings-search-box {
-  display: flex; align-items: center; gap: var(--space-4);
-  padding: var(--space-3) 10px;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-md);
-  transition: border-color 0.12s;
-}
-/* 聚焦给强调蓝：搜索框与侧栏底色只差一档，不加这一下很难看出「现在能打字」 */
-.settings-search-box:focus-within { border-color: var(--color-accent); }
-.settings-search-icon { color: var(--color-text-muted); flex-shrink: 0; }
-.settings-search-box input {
-  flex: 1; min-width: 0;
-  background: transparent; border: none; outline: none;
-  color: var(--color-text-primary); font-size: var(--text-sm); font-family: inherit;
-}
-.settings-search-box input::placeholder { color: var(--color-text-disabled); }
 .settings-search-empty {
   margin: 0; padding: 18px var(--space-7);
   font-size: var(--text-sm); color: var(--color-text-muted);
@@ -357,7 +342,7 @@
 .modal-input:focus { border-color: var(--color-border-focus-soft); }
 /* 唯一补遗：qd-btn 只对 primary 单独定义了 disabled，其余语气沿用通用
    .qd-btn:disabled。历史设置页这几个变体原本带 0.5 透明度，保留观感。 */
-.btn-secondary:disabled, .btn-ghost:disabled, .btn-danger:disabled { opacity: 0.5; cursor: default; }
+.btn-secondary:disabled, .btn-ghost:disabled, .btn-danger:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
 /* 开关本体已全部收编到 QdSwitch（34×18）。这里只留它旁边的
    「开/关」文字标签，与 .toggle-field 的行内布局骨架。 */
@@ -470,7 +455,7 @@
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
 }
 .action-btn:hover { color: var(--color-text-primary); background: var(--color-bg-hover); border-color: var(--color-border-light); }
-.action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.action-btn:disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
 
 /* 存储位置（与其他设置页复用 section/setting-row/btn 体系） */
 .storage-current-path {
@@ -587,7 +572,7 @@
   padding: var(--space-1) 0; cursor: pointer;
 }
 .ai-memory-check { margin: 0; cursor: pointer; }
-.ai-memory-check:disabled { cursor: progress; opacity: 0.6; }
+.ai-memory-check:disabled { cursor: progress; opacity: var(--opacity-disabled-soft); }
 .ai-memory-label { font-size: var(--text-sm); color: var(--color-text-primary); }
 
 /* ── 工具审批策略表（设置 → AI） ─────────────────────────────────── */
@@ -632,7 +617,7 @@
   padding: 3px var(--space-5); font-size: var(--text-xs); border-radius: var(--radius-xs); cursor: pointer;
   border: 1px solid var(--color-accent); background: var(--color-accent); color: var(--color-accent-text);
 }
-.ai-hook-ok:disabled { opacity: .6; cursor: default; }
+.ai-hook-ok:disabled { opacity: var(--opacity-disabled-soft); cursor: default; }
 .ai-hook-no {
   padding: 3px var(--space-5); font-size: var(--text-xs); border-radius: var(--radius-xs); cursor: pointer;
   border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
@@ -768,7 +753,7 @@
   color: var(--color-text-secondary); cursor: pointer; white-space: nowrap;
 }
 .model-option:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
-.model-option.on { color: var(--color-accent); }
+.model-option.on { color: var(--color-accent-ink); }
 .model-option-empty { padding: var(--space-4) 9px; font-size: var(--text-xs); color: var(--color-text-muted); }
 .ollama-model-picks { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: -2px; }
 .picks-label { font-size: var(--text-xs); color: var(--color-text-muted); }
@@ -790,7 +775,7 @@
   cursor: pointer; transition: all 0.12s;
 }
 .model-fetch-btn:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-text-primary); }
-.model-fetch-btn:disabled { opacity: 0.6; cursor: default; }
+.model-fetch-btn:disabled { opacity: var(--opacity-disabled-soft); cursor: default; }
 .model-fetch-msg { font-size: var(--text-xs); color: var(--color-text-muted); }
 .model-fetch-msg.error { color: var(--color-danger); }
 .field-textarea textarea { resize: vertical; min-height: 60px; font-family: inherit; }

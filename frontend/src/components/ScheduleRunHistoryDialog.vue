@@ -7,6 +7,7 @@ import { getErrorMessage } from '../utils/error'
 import { GetScheduleRuns } from '../../bindings/quickdock/services/appservice'
 import { downloadCsv } from '../utils/csv'
 import { History, CheckCircle2, XCircle, Download, Ban } from '@lucide/vue'
+import QdModal from './QdModal.vue'
 
 const props = defineProps<{
   visible: boolean
@@ -122,86 +123,75 @@ function close() {
 </script>
 
 <template>
-  <div v-if="visible" class="mask" @click.self="close">
-    <div class="dialog">
-      <div class="dlg-head">
-        <div class="dlg-title">
-          <History :size="16" />
-          <span>{{ t('sched_history_title') }}</span>
-        </div>
-        <div v-if="task" class="dlg-sub">{{ task.name }}</div>
-        <button class="dlg-close" @click="close" title="×">×</button>
+  <QdModal v-if="visible" :model-value="true" @update:model-value="close">
+    <template #header>
+      <div class="dlg-title">
+        <History :size="16" />
+        <span>{{ t('sched_history_title') }}</span>
       </div>
+      <div v-if="task" class="dlg-sub">{{ task.name }}</div>
+    </template>
 
-      <!-- 筛选 / 导出：历史原本只有一坨按时间的流水，既挑不出失败也带不走 -->
-      <div class="dlg-tools">
-        <button :class="['qd-btn', 'qd-btn-sm', { 'is-on': !onlyFail }]" @click="onlyFail = false">
-          {{ t('sched_filter_all') }} ({{ runs.length }})
-        </button>
-        <button :class="['qd-btn', 'qd-btn-sm', { 'is-on': onlyFail }]" @click="onlyFail = true">
-          {{ t('sched_filter_fail') }} ({{ failed.length }})
-        </button>
-        <button class="qd-btn qd-btn-sm dlg-export" :disabled="!shown.length" @click="exportCsv">
-          <Download :size="12" /> {{ t('sched_history_export') }}
-        </button>
-      </div>
+    <!-- 筛选 / 导出：历史原本只有一坨按时间的流水，既挑不出失败也带不走 -->
+    <div class="dlg-tools">
+      <button :class="['qd-btn', 'qd-btn-sm', { 'is-on': !onlyFail }]" @click="onlyFail = false">
+        {{ t('sched_filter_all') }} ({{ runs.length }})
+      </button>
+      <button :class="['qd-btn', 'qd-btn-sm', { 'is-on': onlyFail }]" @click="onlyFail = true">
+        {{ t('sched_filter_fail') }} ({{ failed.length }})
+      </button>
+      <button class="qd-btn qd-btn-sm dlg-export" :disabled="!shown.length" @click="exportCsv">
+        <Download :size="12" /> {{ t('sched_history_export') }}
+      </button>
+    </div>
 
-      <div v-if="error" class="dlg-error">{{ error }}</div>
+    <div v-if="error" class="dlg-error">{{ error }}</div>
 
-      <div class="dlg-body">
-        <div v-if="loading" class="dlg-empty">{{ t('sched_history_loading') }}</div>
-        <div v-else-if="runs.length === 0" class="dlg-empty">{{ t('sched_history_empty') }}</div>
-        <div v-else-if="shown.length === 0" class="dlg-empty">{{ t('sched_history_no_fail') }}</div>
+    <div class="dlg-body">
+      <div v-if="loading" class="dlg-empty qd-empty">{{ t('sched_history_loading') }}</div>
+      <div v-else-if="runs.length === 0" class="dlg-empty qd-empty">{{ t('sched_history_empty') }}</div>
+      <div v-else-if="shown.length === 0" class="dlg-empty qd-empty">{{ t('sched_history_no_fail') }}</div>
 
-        <div v-else class="run-list">
-          <div v-for="r in shown" :key="r.id" class="run-row" :class="r.status">
-            <div class="run-status">
-              <CheckCircle2 v-if="r.status === 'ok'" :size="14" />
-              <Ban v-else-if="r.status === 'skipped'" :size="14" />
-              <XCircle v-else :size="14" />
-            </div>
-            <div class="run-time">{{ r.runAt }}</div>
-            <div class="run-dur">{{ fmtDuration(r.durationMs) }}</div>
-            <div class="run-result">
-              <span class="run-result-text" :title="r.result">{{ resultText(r) }}</span>
-              <button v-if="convIdOf(r.result)" class="qd-btn qd-btn-sm run-open-conv"
-                      @click="openConv(convIdOf(r.result))">
-                {{ t('sched_ai_open_conv') }}
-              </button>
-            </div>
+      <div v-else class="run-list">
+        <div v-for="r in shown" :key="r.id" class="run-row" :class="r.status">
+          <div class="run-status">
+            <CheckCircle2 v-if="r.status === 'ok'" :size="14" />
+            <Ban v-else-if="r.status === 'skipped'" :size="14" />
+            <XCircle v-else :size="14" />
+          </div>
+          <div class="run-time">{{ r.runAt }}</div>
+          <div class="run-dur">{{ fmtDuration(r.durationMs) }}</div>
+          <div class="run-result">
+            <span class="run-result-text" :title="r.result">{{ resultText(r) }}</span>
+            <button v-if="convIdOf(r.result)" class="qd-btn qd-btn-sm run-open-conv"
+                    @click="openConv(convIdOf(r.result))">
+              {{ t('sched_ai_open_conv') }}
+            </button>
           </div>
         </div>
       </div>
+    </div>
 
+    <template #footer>
       <div class="dlg-foot">
         <span class="dlg-retention">{{ t('sched_history_retention') }}</span>
         <button class="qd-btn" @click="close">{{ t('cancel') }}</button>
       </div>
-    </div>
-  </div>
+    </template>
+  </QdModal>
 </template>
 
 <style scoped>
-.mask {
-  position: fixed; inset: 0; background: var(--color-bg-overlay);
-  display: flex; align-items: center; justify-content: center; z-index: 200;
+/* 外壳（遮罩 / 卡片 / 关闭按钮 / 头部内边距）由 QdModal 提供，这里只留内容自身的样式。 */
+.dlg-title {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 7px;
+  font-size: var(--text-base); font-weight: 600; color: var(--color-text-primary);
 }
-.dialog {
-  width: 460px; max-width: 92vw; max-height: 80vh; display: flex; flex-direction: column;
-  background: var(--color-popover-bg); border-radius: var(--radius-lg);
-  padding: var(--space-5); box-shadow: var(--shadow-lg);
+.dlg-sub {
+  flex: none; max-width: 240px; font-size: var(--text-sm); color: var(--color-text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.dlg-head {
-  display: flex; align-items: center; gap: 10px; position: relative; margin-bottom: var(--space-4);
-}
-.dlg-title { display: flex; align-items: center; gap: 7px; font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
-.dlg-sub { font-size: var(--text-sm); color: var(--color-text-muted); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dlg-close {
-  position: absolute; right: -6px; top: -4px; width: 28px; height: 28px;
-  border: none; background: transparent; color: var(--color-text-muted);
-  font-size: var(--text-xl); line-height: 1; cursor: pointer; border-radius: var(--radius-sm);
-}
-.dlg-close:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
 
 .dlg-error {
   margin-bottom: var(--space-3); padding: var(--space-4) var(--space-5); font-size: var(--text-sm);
@@ -209,7 +199,7 @@ function close() {
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-md);
 }
 
-.dlg-body { flex: 1; overflow-y: auto; min-height: 120px; }
+.dlg-body { min-height: 120px; }
 .dlg-empty { text-align: center; padding: var(--space-8) var(--space-4); color: var(--color-text-muted); font-size: var(--text-md); }
 
 .run-list { display: flex; flex-direction: column; gap: var(--space-3); }
@@ -234,9 +224,10 @@ function close() {
 }
 .run-open-conv { flex-shrink: 0; }
 
+/* footer 槽内布局：保留期限提示靠左、取消按钮靠右（QdModal 的 footer 是右对齐）。 */
 .dlg-foot {
   display: flex; align-items: center; justify-content: space-between;
-  margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--color-border);
+  width: 100%;
 }
 .dlg-retention { font-size: var(--text-xs); color: var(--color-text-muted); }
 /* 工具条与头部之间留白；导出按钮靠右 */

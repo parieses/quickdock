@@ -17,6 +17,9 @@ import { X } from '@lucide/vue'
  * - 底部按钮进 `#footer`，头部要图标 / 副标题 / 额外按钮时进 `#header`：
  *   插槽内容由父组件渲染，父组件的 scoped 样式仍然生效。
  * - 内容自带的 padding 与滚动要去掉：body 的 padding 与 overflow 由本组件提供。
+ * - `inline` 用于「只盖住自己那块区域」的二次确认（SSH 终端里的粘贴确认 / 密码问答）：
+ *   不 Teleport、absolute 铺满最近的定位父容器。这类遮罩**不该**改成全局模态——
+ *   终端页是 keep-alive 的，切走之后全局遮罩会飘到别的页面上。
  *
  * 无障碍：v-dialog 指令（utils/a11y.ts）负责 role/aria-modal、打开聚焦首个
  * 输入控件、Tab 循环与关闭恢复焦点；这里只补 Esc 与点遮罩关闭。
@@ -26,9 +29,12 @@ const props = withDefaults(defineProps<{
   title?: string
   closeOnMask?: boolean
   width?: string
+  /** 局部遮罩（不 Teleport、absolute 定位），详见文件头。 */
+  inline?: boolean
 }>(), {
   closeOnMask: true,
   width: 'var(--qd-modal-width, 460px)',
+  inline: false,
 })
 
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
@@ -43,11 +49,12 @@ function onMask() {
 </script>
 
 <template>
-  <Teleport to="body">
+  <Teleport to="body" :disabled="inline">
     <div
       v-if="modelValue"
       v-dialog
       class="qd-modal-mask"
+      :class="{ 'is-inline': inline }"
       @click.self="onMask"
       @keydown.esc="close"
     >
@@ -85,6 +92,17 @@ function onMask() {
   justify-content: center;
   padding: var(--space-6);
   background: var(--color-bg-overlay);
+}
+.qd-modal-mask.is-inline {
+  /* 终端内的局部遮罩：absolute 铺满最近定位父容器，层级只需压住终端本体。
+     不进 --z-* 梯子——它永远不该盖过设置面板或 toast。 */
+  position: absolute;
+  z-index: 40;
+}
+/* 局部遮罩的可用空间是父容器而不是视口，百分比尺寸要相对遮罩自身算。 */
+.qd-modal-mask.is-inline .qd-modal-card {
+  max-width: 100%;
+  max-height: 100%;
 }
 .qd-modal-card {
   max-width: 94vw;
