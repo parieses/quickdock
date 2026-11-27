@@ -1,7 +1,10 @@
-// 环境页的格式化与比较工具：进度百分比、速度、剩余时间、字节、版本号。
+// 环境页的格式化与比较工具：进度百分比、速度、剩余时间、版本号。
+// 字节数统一走 utils/bytes.ts（formatBytes），这里不再保留第二套口径。
 //
 // 全是无状态的纯函数（不读页面 ui 表、不引 i18n），抽出来才能单测，
 // 也让页面只留状态机与编排。
+
+import { formatBytes } from './bytes'
 
 // percent 下载进度百分比；total <= 0（未知大小）返回 -1，调用方据此显示不确定进度条。
 export function percent(s: { written: number; total: number }): number {
@@ -11,9 +14,7 @@ export function percent(s: { written: number; total: number }): number {
 
 export function formatSpeed(b: number): string {
   if (!isFinite(b) || b <= 0) return ''
-  if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB/s'
-  if (b >= 1024) return (b / 1024).toFixed(0) + ' KB/s'
-  return b.toFixed(0) + ' B/s'
+  return formatBytes(b) + '/s'
 }
 
 export function formatEta(sec: number): string {
@@ -21,14 +22,6 @@ export function formatEta(sec: number): string {
   if (sec >= 3600) return (sec / 3600).toFixed(1) + ' h'
   if (sec >= 60) return Math.ceil(sec / 60) + ' min'
   return Math.ceil(sec) + ' s'
-}
-
-// formatBytes 进程占用的可读格式：>1GB 用 GB，>100MB 取整，更小保留一位小数。
-export function formatBytes(b: number): string {
-  if (!b || b <= 0) return '—'
-  if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GB'
-  if (b >= 104857600) return Math.round(b / 1048576) + ' MB'
-  return (b / 1048576).toFixed(1) + ' MB'
 }
 
 // cmpVer 比较版本号。版本号形如 "v22.22.2" / "1.25.0" / "8.3.20"，

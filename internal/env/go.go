@@ -13,6 +13,7 @@ import (
 
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
+	"quickdock/internal/sysutil"
 )
 
 const goBaseRel = "runtime/go"
@@ -227,7 +228,7 @@ func (g *GoRuntime) goBin(version string) (string, error) {
 // go env -w，写的都是那一个文件），且 OS 级 GOPATH 还会再盖一层；用 GOENV 指向版本专属文件后，
 // go env 的读与写都只作用于该版本。推导不出版本（如系统 PATH 上的 go）时不注入，回退默认行为。
 func (g *GoRuntime) runGo(bin string, args ...string) (string, error) {
-	cmd := exec.Command(bin, args...)
+	cmd := sysutil.Command(bin, args...)
 	cmd.Env = g.goVersionEnv(g.versionFromBin(bin))
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -336,7 +337,7 @@ func (g *GoRuntime) envBin(version string) (string, error) {
 // 同时剔除 GOPATH / GOPROXY：进程里存在同名环境变量时 `go env -w` 会被拒绝
 // （"does not override conflicting OS environment variable"）。
 func (g *GoRuntime) runGoGlobal(bin string, args ...string) (string, error) {
-	cmd := exec.Command(bin, args...)
+	cmd := sysutil.Command(bin, args...)
 	env := make([]string, 0, len(os.Environ()))
 	for _, kv := range os.Environ() {
 		if strings.HasPrefix(kv, "GOENV=") || strings.HasPrefix(kv, "GOPATH=") || strings.HasPrefix(kv, "GOPROXY=") {

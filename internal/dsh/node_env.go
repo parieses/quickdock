@@ -496,7 +496,7 @@ func (m *NodeEnvManager) runNpmInstall(ctx context.Context, target string, onMsg
 	// npm 全局。node 仅当运行底座：执行 npm 的 node 仍取 NodePath()（PATH 优先/缺失自装）。
 	// 产物落在 <installDir>/node_modules/@deepseek-ai/dsh + <installDir> 根 shim。
 	args := []string{npmCli, "install", "-g", "--prefix", m.installDir(), pkgArg}
-	cmd := exec.CommandContext(ctx, node, args...)
+	cmd := sysutil.CommandContext(ctx, node, args...)
 	cmd.Dir = m.DshHome()
 	env := cleanNodeEnv(os.Environ())
 	env = append(env,
@@ -555,7 +555,7 @@ func (m *NodeEnvManager) installPnpm(ctx context.Context, node, npmCli string, e
 		onMsg("正在安装 pnpm（dsh 插件管理依赖）…")
 	}
 	args := []string{npmCli, "install", "-g", "pnpm"}
-	cmd := exec.CommandContext(ctx, node, args...)
+	cmd := sysutil.CommandContext(ctx, node, args...)
 	cmd.Dir = m.DshHome()
 	cmd.Env = env
 	sysutil.Hide(cmd)

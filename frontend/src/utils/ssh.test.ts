@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  formatBytes,
   formatDuration,
   isFingerprintError,
   isSessionAlive,
@@ -102,20 +101,6 @@ describe('formatDuration', () => {
     expect(formatDuration(-1)).toBe('0s')
     expect(formatDuration(NaN)).toBe('0s')
     expect(formatDuration(Infinity)).toBe('0s')
-  })
-})
-
-describe('formatBytes', () => {
-  it('按 1024 进位', () => {
-    expect(formatBytes(0)).toBe('0 B')
-    expect(formatBytes(512)).toBe('512 B')
-    expect(formatBytes(2048)).toBe('2.0 KB')
-    expect(formatBytes(5 * 1024 * 1024)).toBe('5.0 MB')
-  })
-
-  it('非法输入不产生 NaN', () => {
-    expect(formatBytes(-5)).toBe('0 B')
-    expect(formatBytes(NaN)).toBe('0 B')
   })
 })
 

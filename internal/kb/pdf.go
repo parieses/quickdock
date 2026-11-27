@@ -14,6 +14,8 @@ import (
 	"unicode"
 
 	"github.com/ledongthuc/pdf"
+
+	"quickdock/internal/sysutil"
 )
 
 // pdf 解析。
@@ -346,8 +348,7 @@ func pdfTextViaExec(path string) ([]string, bool) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), pdfExecTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "-layout", "-enc", "UTF-8", path, "-")
-	hideCmdWindow(cmd)
+	cmd := sysutil.CommandContext(ctx, bin, "-layout", "-enc", "UTF-8", path, "-")
 	// 进程被杀后，若还有子进程握着 stdout，Wait 会一直等下去。
 	// WaitDelay 兜住这最后 5 秒（Go 1.20+）。
 	cmd.WaitDelay = 5 * time.Second

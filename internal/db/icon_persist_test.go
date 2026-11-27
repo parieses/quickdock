@@ -6,7 +6,7 @@ import "testing"
 //
 // 背景：persistExtractedIcons 曾按「Icon != ""」收集参数，而 DB 里本来就存着图标的
 // 条目扫出来 Icon 同样非空，于是每次只读查询（ListAllItems / GetMostUsedItems /
-// SearchAllItems）都要白拿一次全局写锁、白构造一条 CASE UPDATE，靠 WHERE icon=''
+// SearchAllItems）都要白拿一次全局写锁、白构造一条 CASE UPDATE，靠 WHERE icon=”
 // 才没有写坏数据。实测 4/4 参数全部未命中，并发下把 p99 从 2.7ms 拖到 11.6ms。
 //
 // 这个用例防止有人把 iconFresh 优化掉又退回旧写法。

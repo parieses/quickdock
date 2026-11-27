@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"quickdock/internal/platform"
+	"quickdock/internal/sysutil"
 )
 
 const rabbitmqBaseRel = "runtime/rabbitmq"
@@ -253,7 +254,7 @@ func (r *RabbitMQRuntime) EnableManagementPlugin(version string, onLog func(stri
 				"ERLANG_HOME=" + erlRoot,
 				"PATH=" + filepath.Join(erlRoot, "bin") + ";" + os.Getenv("PATH"),
 			})
-			cmd := exec.Command("cmd.exe", "/c", "call", pluginsBat, "enable", rabbitmqMgmtPlugin)
+			cmd := sysutil.Command("cmd.exe", "/c", "call", pluginsBat, "enable", rabbitmqMgmtPlugin)
 			cmd.Dir = r.versionDir(version)
 			cmd.Env = env
 			out, err := cmd.CombinedOutput()
@@ -310,7 +311,7 @@ func (r *RabbitMQRuntime) DisableManagementPlugin(version string, onLog func(str
 				"ERLANG_HOME=" + erlRoot,
 				"PATH=" + filepath.Join(erlRoot, "bin") + ";" + os.Getenv("PATH"),
 			})
-			cmd := exec.Command("cmd.exe", "/c", "call", pluginsBat, "disable", rabbitmqMgmtPlugin)
+			cmd := sysutil.Command("cmd.exe", "/c", "call", pluginsBat, "disable", rabbitmqMgmtPlugin)
 			cmd.Dir = r.versionDir(version)
 			cmd.Env = env
 			out, err := cmd.CombinedOutput()

@@ -5,7 +5,7 @@
  * （根目录多一层斜杠、本地 Windows 路径混进来），写在组件里就只能靠手点
  * 验证，抽出来可以单测。
  */
-import { formatBytes } from './ssh'
+import { formatBytes } from './bytes'
 
 /** 一条远端文件/目录记录。与 internal/sshx.FileEntry 一一对应。 */
 export interface SftpEntry {

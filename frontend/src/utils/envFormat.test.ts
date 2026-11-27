@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cmpVer, formatBytes, formatEta, formatSpeed, percent } from './envFormat'
+import { cmpVer, formatEta, formatSpeed, percent } from './envFormat'
 
 describe('percent', () => {
   it('按比例向下取整，并封顶 100', () => {
@@ -17,7 +17,7 @@ describe('percent', () => {
 
 describe('formatSpeed', () => {
   it('按量级选单位', () => {
-    expect(formatSpeed(2 * 1048576)).toBe('2.0 MB/s')
+    expect(formatSpeed(2 * 1048576)).toBe('2 MB/s')
     expect(formatSpeed(2048)).toBe('2 KB/s')
     expect(formatSpeed(512)).toBe('512 B/s')
   })
@@ -39,18 +39,6 @@ describe('formatEta', () => {
   it('非正数返回空串', () => {
     expect(formatEta(0)).toBe('')
     expect(formatEta(Number.POSITIVE_INFINITY)).toBe('')
-  })
-})
-
-describe('formatBytes', () => {
-  it('>1GB 两位小数、>100MB 取整、更小一位小数', () => {
-    expect(formatBytes(2 * 1073741824)).toBe('2.00 GB')
-    expect(formatBytes(200 * 1048576)).toBe('200 MB')
-    expect(formatBytes(12.34 * 1048576)).toBe('12.3 MB')
-  })
-
-  it('0 与空值给破折号而不是 0.0 MB', () => {
-    expect(formatBytes(0)).toBe('—')
   })
 })
 

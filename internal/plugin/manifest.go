@@ -1,14 +1,13 @@
 package plugin
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
 
+	"quickdock/internal/fsutil"
 	"quickdock/internal/logger"
 )
 
@@ -24,14 +23,9 @@ var pluginIDRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9._-]*$`)
 
 // LoadManifest 读取并校验 plugin.json
 func LoadManifest(path string) (*PluginManifest, error) {
-	data, err := os.ReadFile(path)
+	m, err := fsutil.ReadJSON[PluginManifest](path)
 	if err != nil {
-		return nil, fmt.Errorf("读取 %s 失败: %w", path, err)
-	}
-
-	var m PluginManifest
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("解析 %s 失败: %w", path, err)
+		return nil, err
 	}
 
 	if err := validateManifest(&m); err != nil {

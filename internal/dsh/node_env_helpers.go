@@ -2,7 +2,6 @@ package dsh
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -16,7 +15,7 @@ func npmGlobalRoot() string {
 	if npmGlobalRootCached {
 		return npmGlobalRootVal
 	}
-	cmd := exec.Command("npm", "root", "-g")
+	cmd := sysutil.Command("npm", "root", "-g")
 	sysutil.Hide(cmd)
 	out, err := cmd.Output()
 	if err == nil {

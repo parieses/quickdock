@@ -467,7 +467,7 @@ func findListenPID(port int) int {
 		return findListenPIDWin(port)
 	}
 	// 非 Windows：使用 lsof/fuser 尽力探测
-	if out, err := exec.Command("lsof", "-ti", "tcp:"+strconv.Itoa(port), "-sTCP:LISTEN").Output(); err == nil {
+	if out, err := sysutil.Command("lsof", "-ti", "tcp:"+strconv.Itoa(port), "-sTCP:LISTEN").Output(); err == nil {
 		if pid, err := strconv.Atoi(strings.TrimSpace(string(out))); err == nil {
 			return pid
 		}
@@ -486,7 +486,7 @@ func processImageMatches(pid int, expect string) bool {
 		}
 		return strings.Contains(strings.ToLower(string(out)), strings.ToLower(expect))
 	}
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
+	out, err := sysutil.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
 	if err != nil {
 		return false
 	}
@@ -532,7 +532,7 @@ func killTree(pid int) {
 		_ = killCmd.Run()
 		return
 	}
-	_ = exec.Command("kill", "-9", strconv.Itoa(pid)).Run()
+	_ = sysutil.Command("kill", "-9", strconv.Itoa(pid)).Run()
 }
 
 // waitPortClosed 轮询等待端口释放（进程退出后端口才真正空出来）。

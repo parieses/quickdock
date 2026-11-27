@@ -24,6 +24,8 @@ import (
 	"syscall"
 
 	"golang.org/x/sys/windows/registry"
+
+	"quickdock/internal/sysutil"
 )
 
 // isTerminalTool 判断某个可执行文件是否为终端类工具
@@ -102,6 +104,7 @@ func tryTerminalTool(tool OpenTool, value, workingDir string, pathDirs []string)
 	toolPath := resolveExecutable(tool.Path)
 	c := exec.Command(toolPath)
 	c.SysProcAttr = &syscall.SysProcAttr{CmdLine: toolPath + " " + inner}
+	sysutil.Hide(c) // |= 合并 CreationFlags，保留手写的 CmdLine（见 platform/opener_windows.go 同款范式）
 	if workingDir != "" {
 		c.Dir = workingDir
 	}

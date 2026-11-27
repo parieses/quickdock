@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"quickdock/internal/fsutil"
 )
 
 // dataDirEnv 允许通过环境变量在启动前覆盖数据目录（便携版 / 高级用法）。
@@ -63,11 +65,7 @@ func cleanAbs(p string) string {
 }
 
 func readDataDirConfig() dataDirConfig {
-	var cfg dataDirConfig
-	b, err := os.ReadFile(dataDirConfigFile())
-	if err == nil {
-		_ = json.Unmarshal(b, &cfg)
-	}
+	cfg, _ := fsutil.TryReadJSON[dataDirConfig](dataDirConfigFile())
 	return cfg
 }
 

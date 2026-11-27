@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	"quickdock/internal/sysutil"
 )
 
 // proxyCommandStderrLimit 只保留外部命令最近 4KB 的 stderr。
@@ -181,7 +183,7 @@ func startProxyCommand(ctx context.Context, argv []string, addr proxyCommandAddr
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("sshx: 拨号已取消，未启动 ProxyCommand %q: %w", argv[0], err)
 	}
-	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd := sysutil.Command(argv[0], argv[1:]...)
 
 	stderr := &cappedBuffer{max: proxyCommandStderrLimit}
 	cmd.Stderr = stderr

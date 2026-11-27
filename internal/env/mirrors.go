@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"quickdock/internal/sysutil"
 )
 
 // 国内镜像加速（2026-10 引入）。
@@ -126,7 +128,7 @@ func runGoEnv(bin string, args ...string) (string, error) {
 //   - 继承的 GOENV 会让「写用户级」悄悄变成「写某个版本的文件」，
 //     必须剔除后按目标显式指定，写入位置才可控。
 func runGoEnvAt(bin, envFile string, args ...string) (string, error) {
-	cmd := exec.Command(bin, append([]string{"env"}, args...)...)
+	cmd := sysutil.Command(bin, append([]string{"env"}, args...)...)
 	env := make([]string, 0, len(os.Environ())+1)
 	for _, kv := range os.Environ() {
 		if strings.HasPrefix(kv, "GOPROXY=") || strings.HasPrefix(kv, "GOENV=") {

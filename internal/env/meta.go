@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"quickdock/internal/fsutil"
 	"quickdock/internal/platform"
 )
 
@@ -25,12 +26,7 @@ func metaPath(rt Runtime) string {
 }
 
 func loadMeta(rt Runtime) runtimeMeta {
-	var m runtimeMeta
-	data, err := os.ReadFile(metaPath(rt))
-	if err != nil {
-		return m
-	}
-	_ = json.Unmarshal(data, &m)
+	m, _ := fsutil.TryReadJSON[runtimeMeta](metaPath(rt))
 	if m.Versions == nil {
 		m.Versions = map[string]versionMeta{}
 	}

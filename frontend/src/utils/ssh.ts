@@ -281,19 +281,6 @@ export function formatDuration(ms: number): string {
   return `${d}d${h % 24}h`
 }
 
-/** 字节数 → 人类可读（终端累计流量用）。 */
-export function formatBytes(n: number): string {
-  if (!Number.isFinite(n) || n <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let v = n
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i++
-  }
-  return i === 0 ? `${v} ${units[i]}` : `${v.toFixed(1)} ${units[i]}`
-}
-
 /**
  * 拆分多行粘贴内容，供二次确认弹窗使用。
  *

@@ -262,7 +262,7 @@ func (m *DSHProcessManager) Start() (string, error) {
 	// （"opening the default browser"），而 QuickDock 已有原生 WebviewWindow 承载 dsh 界面，
 	// 不让它额外弹浏览器。
 	args := []string{mainJS, "web", "--no-open", "--host", "127.0.0.1", "--port", strconv.Itoa(port)}
-	cmd := exec.Command(node, args...)
+	cmd := sysutil.Command(node, args...)
 	cmd.Dir = dshHome
 	// 由 os.Environ 过滤掉 WorkBuddy 的 genie-safe-delete NODE_OPTIONS 注入，
 	// 否则 dsh 启动时 heal profile 的文件删除操作会被劫持成 trash 而崩溃。
@@ -911,7 +911,7 @@ func (m *DSHProcessManager) stopLocked() {
 		// （dsh 的 node 子进程一并清理，不残留占端口）；reaper 的 cmd.Wait() 随之返回并清状态。
 		// taskkill.exe 是控制台程序：GUI 主进程（正式版 -H windowsgui）直接拉起会弹 cmd 窗，
 		// 必须带 CREATE_NO_WINDOW，与 Start()/node_env.go 的其他隐藏控制台调用保持一致。
-		kill := exec.Command("taskkill", "/PID", strconv.Itoa(cmd.Process.Pid), "/T", "/F")
+		kill := sysutil.Command("taskkill", "/PID", strconv.Itoa(cmd.Process.Pid), "/T", "/F")
 		sysutil.Hide(kill)
 		if err := kill.Run(); err != nil {
 			m.logf("warn", fmt.Sprintf("DSHStop: taskkill 进程树 PID %d 返回错误: %v（继续按端口验证）", cmd.Process.Pid, err))
@@ -984,7 +984,7 @@ func (m *DSHProcessManager) InstallPlugin(plugin string) error {
 	// 超时兜底：避免 npm/网络卡死时前端 installingPlugin 状态永久占用导致按钮不可点
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, node, args...)
+	cmd := sysutil.CommandContext(ctx, node, args...)
 	cmd.Dir = dshHome
 	env := cleanNodeEnv(os.Environ())
 	env = append(env, "DSH_HOME="+dshHome)
@@ -1110,7 +1110,7 @@ func (m *DSHProcessManager) UpdateAllPlugins() error {
 		logf("info", "供应链白名单 merge 失败（不影响安装；若遇 allowBuilds 拦截请反馈）: "+err.Error())
 	}
 	args := []string{mainJS, "plugin", "--profile", "web", "update"}
-	cmd := exec.CommandContext(ctx, node, args...)
+	cmd := sysutil.CommandContext(ctx, node, args...)
 	cmd.Dir = dshHome
 	env := cleanNodeEnv(os.Environ())
 	env = append(env, "DSH_HOME="+dshHome)
@@ -1197,7 +1197,7 @@ func (m *DSHProcessManager) repairProfileNodeModules(profileDir string, logf fun
 			return err
 		}
 	}
-	cmd := exec.CommandContext(ctx, pnpm, "install")
+	cmd := sysutil.CommandContext(ctx, pnpm, "install")
 	cmd.Dir = profileDir
 	env := cleanNodeEnv(os.Environ())
 	if nodeDir := m.nodeEnv.runtimeDir(); nodeDir != "" {
@@ -1284,7 +1284,7 @@ func (m *DSHProcessManager) RollbackPlugins() (err error) {
 		logf("info", "供应链白名单 merge 失败（不影响安装；若遇 allowBuilds 拦截请反馈）: "+err.Error())
 	}
 
-	cmd := exec.CommandContext(ctx, pnpm, "install")
+	cmd := sysutil.CommandContext(ctx, pnpm, "install")
 	cmd.Dir = profileDir
 	env := cleanNodeEnv(os.Environ())
 	if nodeDir := m.nodeEnv.runtimeDir(); nodeDir != "" {
@@ -1338,7 +1338,7 @@ func (m *DSHProcessManager) CheckPluginUpdates() ([]PluginUpdateInfo, error) {
 			return nil, err
 		}
 	}
-	cmd := exec.CommandContext(ctx, pnpm, "outdated", "--json")
+	cmd := sysutil.CommandContext(ctx, pnpm, "outdated", "--json")
 	cmd.Dir = profileDir
 	env := cleanNodeEnv(os.Environ())
 	if nodeDir := m.nodeEnv.runtimeDir(); nodeDir != "" {
@@ -1450,7 +1450,7 @@ func (m *DSHProcessManager) RemovePlugin(name string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, node, mainJS, "plugin", "--profile", "web", "remove", name)
+	cmd := sysutil.CommandContext(ctx, node, mainJS, "plugin", "--profile", "web", "remove", name)
 	cmd.Dir = dshHome
 	env := cleanNodeEnv(os.Environ())
 	env = append(env, "DSH_HOME="+dshHome)
@@ -1626,7 +1626,7 @@ func (m *DSHProcessManager) ensurePnpm(ctx context.Context, logf func(string, st
 	logf("info", "pnpm 未检测到，正在自动安装…")
 	installCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(installCtx, node, npmCli, "install", "-g", "pnpm")
+	cmd := sysutil.CommandContext(installCtx, node, npmCli, "install", "-g", "pnpm")
 	cmd.Dir = m.nodeEnv.DshHome()
 	env := cleanNodeEnv(os.Environ())
 	env = append(env, "DSH_HOME="+m.nodeEnv.DshHome(),

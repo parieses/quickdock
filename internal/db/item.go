@@ -737,7 +737,7 @@ func execOpen(item *CollectionItem, tool OpenTool) error {
 	// Windows 桌面程序安装后不写 PATH，直接 exec 裸名必然报 not found in %PATH%。
 	// 解析失败返回原名，保持旧报错行为不变。
 	toolPath := resolveExecutable(tool.Path)
-	cmd := exec.Command(toolPath, argList...)
+	cmd := sysutil.Command(toolPath, argList...)
 	if item.WorkingDirectory != "" {
 		cmd.Dir = item.WorkingDirectory
 	}
@@ -792,9 +792,9 @@ func openWithOSDefault(value string) error {
 		// 经 explorer 中转打开，让目标进程脱离 QuickDock 作业、主程序退出后继续存活。
 		return sysutil.OpenDetached(value, "")
 	case "darwin":
-		return exec.Command("open", value).Start()
+		return sysutil.Command("open", value).Start()
 	default:
-		return exec.Command("xdg-open", value).Start()
+		return sysutil.Command("xdg-open", value).Start()
 	}
 }
 
@@ -803,7 +803,7 @@ func openCommand(value, workingDir string) error {
 	if len(argList) == 0 {
 		return fmt.Errorf("命令内容为空")
 	}
-	cmd := exec.Command(argList[0], argList[1:]...)
+	cmd := sysutil.Command(argList[0], argList[1:]...)
 	if workingDir != "" {
 		cmd.Dir = workingDir
 	}
@@ -822,7 +822,7 @@ func openWithSystemDefault(value, itemType string, workingDir string) error {
 			// 应用类型：经 explorer 中转打开，脱离 QuickDock 作业、主程序退出后继续存活。
 			return sysutil.OpenDetached(value, workingDir)
 		}
-		cmd := exec.Command(value)
+		cmd := sysutil.Command(value)
 		return startDetached(cmd)
 	}
 }

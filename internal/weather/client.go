@@ -13,9 +13,7 @@ package weather
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -26,6 +24,7 @@ import (
 	"unicode/utf8"
 
 	"quickdock/internal/env"
+	"quickdock/internal/httpget"
 )
 
 const (
@@ -128,54 +127,21 @@ func getJSONWithHeaders(rawURL string, out any, headers map[string]string) error
 		clients = append(clients, proxyHTTP)
 	}
 
-	var lastErr error
-	for _, c := range clients {
-		if err := ctx.Err(); err != nil {
-			if lastErr == nil {
-				lastErr = err
-			}
-			break
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Accept", "application/json")
-		req.Header.Set("User-Agent", "QuickDock/weather")
-		for k, v := range headers {
-			req.Header.Set(k, v)
-		}
-
-		resp, err := c.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
-		_ = resp.Body.Close()
-		if readErr != nil {
-			lastErr = readErr
-			continue
-		}
-		if resp.StatusCode != http.StatusOK {
-			lastErr = &HTTPStatusError{Status: resp.StatusCode, Body: strings.TrimSpace(string(body))}
-			continue
-		}
-		if err := json.Unmarshal(body, out); err != nil {
-			lastErr = fmt.Errorf("响应不是有效 JSON: %w", err)
-			continue
-		}
-		return nil
-	}
-	if lastErr == nil {
-		// clients 非空时循环理论上必会赋值，但 ctx 恰好在第一次进循环前就超时、
-		// 或以后把 clients 改成动态列表时都可能漏掉；%w 接到 nil 会打印出
-		// %!w(<nil>)，错误链也就断了（下游的 errors.As 再也认不出 HTTPStatusError）。
-		lastErr = fmt.Errorf("没有可用的请求通道")
-	}
 	// %w 保留错误链：调用方要用 errors.As 认 HTTPStatusError，把它翻成
 	// 「token 无效」这种可操作的提示（见 caiyun.go / qweather.go）。
-	return fmt.Errorf("天气服务不可达（直连与代理均未成功）: %w", lastErr)
+	err := httpget.GetJSON(ctx, rawURL, out, httpget.Options{
+		Clients:   clients,
+		UserAgent: "QuickDock/weather",
+		Headers:   headers,
+		MaxBytes:  maxBodyBytes,
+		StatusErr: func(code int, body []byte) error {
+			return &HTTPStatusError{Status: code, Body: strings.TrimSpace(string(body))}
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("天气服务不可达（直连与代理均未成功）: %w", err)
+	}
+	return nil
 }
 
 type forecastResponse struct {

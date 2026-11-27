@@ -218,7 +218,7 @@ describe('formatEntrySize', () => {
   })
 
   it('文件走通用字节格式化', () => {
-    expect(formatEntrySize(entry({ size: 1024 }))).toBe('1.0 KB')
+    expect(formatEntrySize(entry({ size: 1024 }))).toBe('1 KB')
   })
 })
 

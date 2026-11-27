@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	neturl "net/url"
-	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -34,7 +33,7 @@ func FindFreePort() (int, error) {
 // findPortPID 返回 127.0.0.1:<port> 上 LISTENING 进程的 PID；无占用返回 0。
 // netstat 是控制台程序，GUI 主进程（-H windowsgui）直接拉起会弹 cmd，必须隐藏窗口。
 func findPortPID(port int) int {
-	cmd := exec.Command("netstat", "-ano")
+	cmd := sysutil.Command("netstat", "-ano")
 	sysutil.Hide(cmd)
 	out, err := cmd.Output()
 	if err != nil {
@@ -60,7 +59,7 @@ func findPortPID(port int) int {
 // isNodeProcess 判断 PID 对应进程是否为 node.exe（dsh 由 node 拉起，残留实例也是 node）。
 // tasklist 是控制台程序，同样必须隐藏窗口。
 func isNodeProcess(pid int) bool {
-	cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/FO", "CSV", "/NH")
+	cmd := sysutil.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/FO", "CSV", "/NH")
 	sysutil.Hide(cmd)
 	out, err := cmd.Output()
 	if err != nil {
@@ -85,7 +84,7 @@ func isNodeProcess(pid int) bool {
 
 // killProcessTree 用 taskkill /T /F 强杀进程树（隐藏窗口），返回是否成功发出。
 func killProcessTree(pid int) bool {
-	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/T", "/F")
+	cmd := sysutil.Command("taskkill", "/PID", strconv.Itoa(pid), "/T", "/F")
 	sysutil.Hide(cmd)
 	return cmd.Run() == nil
 }

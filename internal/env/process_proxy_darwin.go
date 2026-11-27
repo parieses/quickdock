@@ -3,9 +3,10 @@
 package env
 
 import (
-	"os/exec"
 	"strconv"
 	"strings"
+
+	"quickdock/internal/sysutil"
 )
 
 // processExePath 返回占用 pid 的进程完整可执行文件路径。
@@ -16,7 +17,7 @@ func processExePath(pid int) string {
 	if pid <= 0 {
 		return ""
 	}
-	out, err := exec.Command("lsof", "-p", strconv.Itoa(pid), "-d", "txt", "-Fn").Output()
+	out, err := sysutil.Command("lsof", "-p", strconv.Itoa(pid), "-d", "txt", "-Fn").Output()
 	if err != nil {
 		return ""
 	}

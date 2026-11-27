@@ -6,12 +6,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+
 	"mime"
 	"net"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
+	"quickdock/internal/fsutil"
 	"strconv"
 	"strings"
 	"time"
@@ -58,14 +60,7 @@ func proxyStatePath() string {
 }
 
 func loadProxyState() proxyState {
-	var st proxyState
-	data, err := os.ReadFile(proxyStatePath())
-	if err != nil {
-		return st
-	}
-	if err := json.Unmarshal(data, &st); err != nil {
-		return proxyState{}
-	}
+	st, _ := fsutil.TryReadJSON[proxyState](proxyStatePath())
 	return st
 }
 
