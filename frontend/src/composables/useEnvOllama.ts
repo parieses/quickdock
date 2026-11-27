@@ -14,6 +14,7 @@ import { useI18n } from 'vue-i18n'
 import { useToast } from './useToast'
 import { unwrap } from '../utils/api'
 import { formatBytes } from '../utils/bytes'
+import { debounce } from '../utils/debounce'
 import { getErrorMessage } from '../utils/error'
 import { logWarn } from '../utils/logger'
 import { copyToClipboard } from '../utils/clipboard'
@@ -83,7 +84,6 @@ export function useEnvOllama(deps: EnvOllamaDeps) {
   const ollamaLibModels = ref<{ name: string; size: number }[]>([])
   const ollamaLibOpen = ref(false)
   const ollamaLibLoading = ref(false)
-  let ollamaLibTimer: ReturnType<typeof setTimeout> | null = null
   // 请求序号：慢的旧响应回来时若已发起新请求，直接丢弃，避免候选列表被旧结果覆盖。
   let ollamaLibSeq = 0
 
@@ -103,10 +103,9 @@ export function useEnvOllama(deps: EnvOllamaDeps) {
   }
 
   /** 输入防抖 300ms 后查询，避免逐字符打满官方接口。 */
-  function onOllamaPullInput() {
-    if (ollamaLibTimer) clearTimeout(ollamaLibTimer)
-    ollamaLibTimer = setTimeout(() => searchOllamaLibrary(ollamaPullName.value.trim()), 300)
-  }
+  const onOllamaPullInput = debounce(() => {
+    void searchOllamaLibrary(ollamaPullName.value.trim())
+  }, 300)
 
   /** 聚焦即展开；首次展开时拉一次热门，让空输入也有候选可点。 */
   function openOllamaLib() {

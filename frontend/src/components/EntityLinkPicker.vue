@@ -10,6 +10,7 @@
 import { ref, computed, watch, inject, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
+import { debounce } from '../utils/debounce'
 import { matchesTextOrPinyin } from '../utils/pinyin'
 import { LINK_TARGETS_INVALIDATED } from '../constants/linkEvents'
 import { pendingOpenNoteId, pendingOpenTodoId, navigate, navigateTo } from '../composables/bridge'
@@ -149,7 +150,6 @@ async function ensureTargets() {
 // （表现为「明明有这篇笔记，就是搜不出来」）。输入变化时防抖补一次服务端
 // 标题 LIKE，结果并到本地命中之后。拼音匹配仍只作用于本地集合。
 const remoteHits = ref<Candidate[]>([])
-let searchTimer: ReturnType<typeof setTimeout> | null = null
 let searchSeq = 0
 
 /** 让候选缓存立即过期：宿主新建实体后调用，或收到失效事件时自动触发。 */
@@ -177,10 +177,18 @@ async function runRemoteSearch() {
   }
 }
 
+// 250ms 输入防抖：每敲一个字都会打一次服务端 LIKE。
+const scheduledRemoteSearch = debounce(() => { void runRemoteSearch() }, 250)
+
 function scheduleRemoteSearch() {
-  if (searchTimer) clearTimeout(searchTimer)
-  if (!query.value.trim()) { remoteHits.value = []; return }
-  searchTimer = setTimeout(() => { void runRemoteSearch() }, 250)
+  // 清空输入要立刻撤掉旧结果，不能等 250ms 后自己发现——那段时间里
+  // 列表还挂着上一次的关键词命中，看起来像没响应。
+  if (!query.value.trim()) {
+    scheduledRemoteSearch.cancel()
+    remoteHits.value = []
+    return
+  }
+  scheduledRemoteSearch()
 }
 
 function openCands() {
@@ -277,6 +285,7 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('mousedown', onDocMouseDown, true)
   window.removeEventListener(LINK_TARGETS_INVALIDATED, invalidateTargets)
+  scheduledRemoteSearch.cancel()
 })
 
 // 供宿主在保存新实体后直接调 ref.value.invalidateTargets()，无需派发 DOM 事件。
