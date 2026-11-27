@@ -8,6 +8,7 @@ import { ref, computed, onMounted, onBeforeUnmount, onActivated, inject, watch, 
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
 import { useSaveAs } from '../composables/useSaveAs'
+import { useNoteHistory } from '../composables/useNoteHistory'
 import { pendingOpenNoteId, pendingOpenTodoId, pendingCreateNote, navigate, navigateTo } from '../composables/bridge'
 import { unwrap } from '../utils/api'
 import { writeStored } from '../utils/storage'
@@ -41,10 +42,6 @@ import {
   DeleteNoteNode,
   SetNoteDocFormat,
   SetNoteSort,
-  GetNoteDoc,
-  ListNoteRevisions,
-  GetNoteRevision,
-  RestoreNoteRevision,
   ListNoteTags,
   ExportNotes,
   ImportNotes,
@@ -890,22 +887,26 @@ function gotoHeading(text: string) {
 // ---- 修订历史（覆盖层 tab，不卸载 CodeMirror）----
 // 与「图谱」同级：作为覆盖层叠在编辑区上，编辑器宿主始终在 DOM 里，
 // 切回文档时光标与撤销历史都还在（同 NoteGraphPanel 的挂法）。
-interface NoteRevision {
-  id: string
-  noteId: string
-  name: string
-  content: string
-  tags: string
-  reason: string
-  createdAt: string
-}
-const historyOpen = ref(false)
-const historyLoading = ref(false)
-let revSeq = 0
-const revisions = ref<NoteRevision[]>([])
-const historyPreview = ref<NoteRevision | null>(null)
-const restoringRevId = ref('')
-const showRestoreConfirm = ref(false)
+//
+// 列表 / 预览 / 恢复的状态与请求都在 useNoteHistory 里；这里只保留与「图谱」
+// 互斥的那三个开关（它们要同时动 graphOpen），以及「恢复后怎么把新正文写回界面」
+// ——节点树、编辑器内容、标签草稿都在本文件手里。
+const {
+  historyOpen, historyLoading, revisions, historyPreview,
+  showRestoreConfirm, loadRevisions, previewRevision,
+  askRestore, confirmRestore, revisionReasonLabel, revisionExcerpt,
+} = useNoteHistory({
+  selectedDocId,
+  applyRestoredDoc: (d) => {
+    const id = selectedDocId.value
+    for (const list of [nodes.value, allNodes.value]) {
+      const i = list.findIndex(n => n.id === id)
+      if (i >= 0) list[i] = { ...list[i], ...d }
+    }
+    docContent.value = d.content || ''
+    docTagsText.value = parseTagsS(d.tags).join(', ')
+  },
+})
 function closeOverlays() {
   graphOpen.value = false
   historyOpen.value = false
@@ -921,95 +922,6 @@ function openHistory() {
   historyOpen.value = true
   historyPreview.value = null
   void loadRevisions()
-}
-async function loadRevisions() {
-  const id = selectedDocId.value
-  if (!id) { revisions.value = []; return }
-  const seq = ++revSeq
-  historyLoading.value = true
-  try {
-    const list = unwrap<NoteRevision[]>(await ListNoteRevisions(id, 50)) || []
-    // 期间切了文档：这次结果属于上一篇，丢弃
-    if (seq !== revSeq || id !== selectedDocId.value) return
-    revisions.value = list
-  } catch (e) {
-    if (seq !== revSeq) return
-    reportError(e, 'NoteManager:listRevisions')
-  } finally { if (seq === revSeq) historyLoading.value = false }
-}
-async function previewRevision(revId: string) {
-  try {
-    const r = unwrap<NoteRevision>(await GetNoteRevision(revId))
-    if (r) historyPreview.value = r
-  } catch (e) {
-    reportError(e, 'NoteManager:getRevision')
-  }
-}
-function askRestore(revId: string) {
-  restoringRevId.value = revId
-  showRestoreConfirm.value = true
-}
-/** 恢复后重新载入当前文档（GetNoteDoc 带正文与 updatedAt），并刷新版本列表。 */
-async function reloadCurrentDoc() {
-  const id = selectedDocId.value
-  if (!id) return
-  try {
-    const d = unwrap<Note | null>(await GetNoteDoc(id))
-    if (!d) return
-    for (const list of [nodes.value, allNodes.value]) {
-      const i = list.findIndex(n => n.id === id)
-      if (i >= 0) list[i] = { ...list[i], ...d }
-    }
-    docContent.value = d.content || ''
-    docTagsText.value = parseTagsS(d.tags).join(', ')
-  } catch (e) {
-    reportError(e, 'NoteManager:reloadDoc')
-  }
-}
-async function confirmRestore() {
-  const revId = restoringRevId.value
-  showRestoreConfirm.value = false
-  restoringRevId.value = ''
-  if (!revId) return
-  // 兜底：万一列表仍是别的文档的（重载还没回来），别把那一篇的正文恢复到这里
-  const rev = revisions.value.find(r => r.id === revId)
-  if (rev && rev.noteId && rev.noteId !== selectedDocId.value) {
-    toast.error(t('notesHistoryStale'))
-    void loadRevisions()
-    return
-  }
-  try {
-    unwrap(await RestoreNoteRevision(revId))
-    toast.success(t('notesHistoryRestored'))
-    await reloadCurrentDoc()
-    await loadRevisions()
-    historyPreview.value = null
-  } catch (e) {
-    reportError(e, 'NoteManager:restoreRevision')
-  }
-}
-/**
- * 修订原因本地化。
- *
- * db 层存的是稳定枚举（save / import / rollback / clip），不能改成中文：
- * 节流判断与历史数据都按这些字面值比对。以前模板直接渲染 r.reason，
- * 中文界面里就冒出「save」「rollback」两个英文词。空值或未知值仍走
- * 「自动保存」兜底，未知枚举显示原文便于排查，不把界面弄成空白。
- */
-function revisionReasonLabel(reason: string): string {
-  switch (reason) {
-    case 'save': return t('notesHistoryAuto')
-    case 'import': return t('notesHistoryReasonImport')
-    case 'rollback': return t('notesHistoryReasonRollback')
-    case 'clip': return t('notesHistoryReasonClip')
-    default: return reason || t('notesHistoryAuto')
-  }
-}
-/** 版本列表里的「内容前 60 字」，rune 安全截断、压掉换行。 */
-function revisionExcerpt(s: string): string {
-  const chars = Array.from(String(s || '').replace(/\s+/g, ' ').trim())
-  const cut = chars.slice(0, 60).join('')
-  return chars.length > 60 ? cut + '…' : cut
 }
 
 /** 搜索高亮切片：返回「命中段 / 普通段」交替的数组，模板里用 span 渲染。 */
@@ -1351,7 +1263,6 @@ type WikiCand = { type: EntityType; id: string; label: string; hint?: string }
 // 服务端候选搜索：本地候选被 LIMIT 截断后，靠它兜住「有这篇却搜不到」。
 // 与 EntityLinkPicker 同一套策略：防抖 250ms，只补不替，失败静默。
 const wikiRemoteHits = ref<WikiCand[]>([])
-let wikiSearchTimer: ReturnType<typeof setTimeout> | null = null
 let wikiSearchSeq = 0
 
 async function runWikiRemoteSearch() {
@@ -1372,10 +1283,17 @@ async function runWikiRemoteSearch() {
   }
 }
 
+// 250ms 输入防抖：每敲一个字都会打一次服务端 LIKE。
+const scheduledWikiSearch = debounce(() => { void runWikiRemoteSearch() }, 250)
+
 function scheduleWikiRemoteSearch() {
-  if (wikiSearchTimer) clearTimeout(wikiSearchTimer)
-  if (!wikiQuery.value.trim()) { wikiRemoteHits.value = []; return }
-  wikiSearchTimer = setTimeout(() => { void runWikiRemoteSearch() }, 250)
+  // 清空输入立刻撤掉旧结果，不等防抖到点——否则列表还挂着上一次的关键词命中。
+  if (!wikiQuery.value.trim()) {
+    scheduledWikiSearch.cancel()
+    wikiRemoteHits.value = []
+    return
+  }
+  scheduledWikiSearch()
 }
 
 watch(wikiQuery, scheduleWikiRemoteSearch)
@@ -1598,6 +1516,7 @@ onBeforeUnmount(() => {
   // 搜索防抖的尾巴要一起掐掉：卸载后 250ms 内若还触发一次 doSearch，
   // 会白打一趟后端 LIKE + 全量拼音扫描。
   runSearch.cancel()
+  scheduledWikiSearch.cancel()
   if (savedResetTimer) clearTimeout(savedResetTimer)
   void flushPendingSave()
   offDocScroll?.()
