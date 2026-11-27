@@ -35,6 +35,7 @@ import PageLoadError from './components/PageLoadError.vue';
 // 页面注册表：主窗口内容页与侧边栏导航项的单一数据源（替代 currentPage 手动 switch）
 import { findContentPage, findNavEntry, KEEP_ALIVE_PAGES, retryChunkLoad, type PageContext } from './pages/registry'
 
+import { writeStored } from './utils/storage'
 // 异步加载的页面级组件（仅在主窗口中用，减少独立窗口的加载体积）
 const SettingsModal = defineAsyncComponent(() => import('./components/SettingsModal.vue'))
 // NotePanel（含 CodeMirror 编辑器内核）只在 #/note 独立窗口分支渲染，主窗口从不显示。
@@ -508,7 +509,7 @@ async function skipUpdate() {
   if (v) {
     updatePromptHandled.add(v)
     try {
-      localStorage.setItem('qd_update_skip_' + v, '1')
+      writeStored('qd_update_skip_' + v, '1')
       // 与设置页「跳过此版本」共用一份清单，设置页才能列出并清除。
       // 不调 SkipUpdate：Wails v3 的 SkipVersion 会让 Check() 直接判为最新，
       // 连带用户在设置里手动「检查更新」也看不到这个版本。

@@ -481,7 +481,7 @@ function openBacklink(b: BacklinkRow) {
 .elp-add-input:focus { border-color: var(--color-border-focus-soft); }
 .elp-add-btn { flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-secondary); cursor: pointer; }
 .elp-add-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent-border); }
-.elp-add-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.elp-add-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 
 .elp-cands { max-height: 132px; overflow-y: auto; margin-top: var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-primary); }
 /* 一级类型栏吸顶：候选一多要滚，类型档位不能跟着滚出去 */
@@ -513,5 +513,5 @@ function openBacklink(b: BacklinkRow) {
 .elp-type { flex-shrink: 0; color: var(--color-text-muted); }
 .elp-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-primary); }
 .elp-del { flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border: none; border-radius: var(--radius-xs); background: transparent; color: var(--color-text-muted); cursor: pointer; }
-.elp-del:hover { background: var(--color-danger-bg); color: var(--color-danger); }
+.elp-del:hover { background: var(--color-danger-bg); color: var(--color-danger-ink); }
 </style>

@@ -105,13 +105,13 @@ async function save() {
 <style scoped>
 .hooks-meta { padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); font-size: var(--text-xs); line-height: 1.7; color: var(--color-text-secondary); word-break: break-all; }
 .hooks-badge { padding: 0 var(--space-2); border-radius: var(--radius-xs); }
-.hooks-badge.ok { color: var(--color-success); background: var(--color-success-bg); }
-.hooks-badge.warn { color: var(--color-warning); background: var(--color-warning-bg); }
+.hooks-badge.ok { color: var(--color-success-ink); background: var(--color-success-bg); }
+.hooks-badge.warn { color: var(--color-warning-ink); background: var(--color-warning-bg); }
 .hooks-warning { margin: var(--space-4) 0; padding: var(--space-3) var(--space-4); border: 1px solid var(--color-danger-border); border-radius: var(--radius-sm); background: var(--color-danger-bg); color: var(--color-text-primary); font-size: var(--text-sm); line-height: 1.6; }
 .hooks-list { margin-top: var(--space-5); }
 .hooks-list-head { margin-bottom: var(--space-3); font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); }
 .hooks-row { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
 .hooks-input { flex: 1; min-width: 0; font-family: var(--font-mono); }
 .hooks-add { margin-top: var(--space-1); }
-.hooks-err { margin: var(--space-4) 0 0; padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); background: var(--color-danger-bg); color: var(--color-danger); font-size: var(--text-sm); word-break: break-all; }
+.hooks-err { margin: var(--space-4) 0 0; padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); background: var(--color-danger-bg); color: var(--color-danger-ink); font-size: var(--text-sm); word-break: break-all; }
 </style>

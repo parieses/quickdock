@@ -141,7 +141,7 @@ const stepText = computed(() => {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.ai-sched-state.is-fail { color: var(--color-danger); }
+.ai-sched-state.is-fail { color: var(--color-danger-ink); }
 
 .ai-sched-dot {
   width: 7px;
@@ -179,7 +179,7 @@ const stepText = computed(() => {
   border-color: var(--color-border);
   background: var(--color-bg-tertiary);
 }
-.ai-sched-btn:disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
+.ai-sched-btn:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
 
 .spin { animation: ai-sched-spin 1s linear infinite; }
 @keyframes ai-sched-spin { to { transform: rotate(360deg); } }

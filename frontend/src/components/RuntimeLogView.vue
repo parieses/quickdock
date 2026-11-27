@@ -228,7 +228,7 @@ onMounted(() => nextTick(scrollBottom))
   min-width: 14px; padding: 0 3px; border-radius: var(--radius-sm); font-size: var(--text-2xs); line-height: 14px;
   text-align: center; background: var(--color-danger); color: var(--color-danger-text);
 }
-.rv-btn.active .rv-badge { background: var(--color-bg-primary); color: var(--color-danger); }
+.rv-btn.active .rv-badge { background: var(--color-bg-primary); color: var(--color-danger-ink); }
 .rv-count { font-size: var(--text-2xs); color: var(--color-text-muted); margin-left: auto; font-variant-numeric: tabular-nums; }
 
 /* position: relative 是「上/下」按 offsetTop 定位的前提 */
@@ -244,8 +244,8 @@ onMounted(() => nextTick(scrollBottom))
 .rv-line { display: flex; gap: var(--space-4); padding: 0 10px; white-space: pre-wrap; word-break: break-all; color: var(--color-text-muted); }
 .rv-line:hover { background: var(--color-bg-hover); }
 /* 错误行整体染色 + 左侧色条：扫一眼就能定位，不依赖读文案 */
-.rv-line.error { color: var(--color-danger); box-shadow: inset 2px 0 0 var(--color-danger); background: var(--color-danger-bg); }
-.rv-line.warn { color: var(--color-warning); box-shadow: inset 2px 0 0 var(--color-warning); }
+.rv-line.error { color: var(--color-danger-ink); box-shadow: inset 2px 0 0 var(--color-danger); background: var(--color-danger-bg); }
+.rv-line.warn { color: var(--color-warning-ink); box-shadow: inset 2px 0 0 var(--color-warning); }
 .rv-no {
   flex-shrink: 0; width: 3.2em; text-align: right; color: var(--color-text-muted);
   user-select: none; font-variant-numeric: tabular-nums;

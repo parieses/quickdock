@@ -1386,14 +1386,14 @@ async function openTaskFromCalendar(id: string) {
 .stat-num { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); font-variant-numeric: tabular-nums; }
 .stat-unit { color: var(--color-text-muted); }
 .stat-sep { color: var(--color-text-muted); }
-.stat-fail { color: var(--color-danger); }
+.stat-fail { color: var(--color-danger-ink); }
 .stat-fail.zero { color: var(--color-text-muted); }
 .stat-rate {
   font-size: var(--text-2xs); padding: 0 5px; border-radius: var(--radius-md);
   background: var(--color-bg-tertiary); color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
 }
-.stat-rate.bad { background: var(--color-danger-bg); color: var(--color-danger); }
+.stat-rate.bad { background: var(--color-danger-bg); color: var(--color-danger-ink); }
 .stat-bars { margin-left: auto; display: flex; flex-direction: column; align-items: stretch; gap: 2px; width: 184px; flex-shrink: 0; }
 /* 图表两色必须有图例：蓝=当天没有失败，红=当天出现过失败 */
 .stat-legend { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-3); font-size: var(--text-2xs); color: var(--color-text-muted); }
@@ -1409,7 +1409,7 @@ async function openTaskFromCalendar(id: string) {
 
 .sched-error {
   margin: var(--space-5) var(--space-7) 0; padding: var(--space-4) var(--space-5); font-size: var(--text-sm);
-  color: var(--color-danger); background: var(--color-danger-bg);
+  color: var(--color-danger-ink); background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); flex-shrink: 0;
 }
 /* 立即运行同步等待提示：把「最长 30 秒」提到眼前，别让用户对着转圈干等 */
@@ -1426,13 +1426,13 @@ async function openTaskFromCalendar(id: string) {
   color: var(--color-text-secondary); background: var(--color-surface);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm); cursor: pointer;
 }
-.sched-run-cancel:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); }
-.sched-run-cancel:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.sched-run-cancel:hover:not(:disabled) { color: var(--color-danger-ink); border-color: var(--color-danger); }
+.sched-run-cancel:disabled { color: var(--color-text-disabled); cursor: default; }
 
 /* 弹窗内校验提示：与页面级 .sched-error 同色系，但去掉外边距（弹窗有自己的内边距） */
 .form-err {
   margin: var(--space-3) 0 0; padding: 7px 10px; font-size: var(--text-sm);
-  color: var(--color-danger); background: var(--color-danger-bg);
+  color: var(--color-danger-ink); background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-md);
 }
 
@@ -1481,7 +1481,7 @@ async function openTaskFromCalendar(id: string) {
 }
 .console-ico { color: var(--color-cat-command); flex-shrink: 0; }
 .console-title { font-weight: 500; }
-.console-live { display: inline-flex; align-items: center; gap: 4px; color: var(--color-success); }
+.console-live { display: inline-flex; align-items: center; gap: 4px; color: var(--color-success-ink); }
 .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-success); animation: live-pulse 1.4s ease-in-out infinite; }
 @keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .console-count { margin-left: auto; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
@@ -1499,9 +1499,9 @@ async function openTaskFromCalendar(id: string) {
 .console-line { display: flex; gap: var(--space-3); white-space: nowrap; color: var(--color-text-secondary); }
 .cl-time { flex-shrink: 0; color: var(--color-text-muted); }
 .cl-mark { flex-shrink: 0; width: 12px; text-align: center; }
-.console-line.ok .cl-mark { color: var(--color-success); }
+.console-line.ok .cl-mark { color: var(--color-success-ink); }
 .console-line.fail .cl-mark,
-.console-line.fail .cl-text { color: var(--color-danger); }
+.console-line.fail .cl-text { color: var(--color-danger-ink); }
 .console-line.skipped { color: var(--color-text-muted); }
 .cl-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .console-line.live .cl-text { color: var(--color-accent); }
@@ -1516,7 +1516,7 @@ async function openTaskFromCalendar(id: string) {
   border-radius: var(--radius-md); transition: background var(--transition-fast);
 }
 .sched-item:hover { background: var(--color-bg-hover); }
-.sched-item.disabled { opacity: var(--opacity-disabled); }
+.sched-item.disabled { color: var(--color-text-disabled); }
 /* 拖拽：抓起来的半透明、落点给一条左侧高亮 */
 .sched-item.dragging { opacity: 0.45; }
 .sched-item.drag-over { border-color: var(--color-accent); box-shadow: inset 0 2px 0 var(--color-accent); }
@@ -1557,7 +1557,7 @@ async function openTaskFromCalendar(id: string) {
 }
 .item-kind.a-app,
 .item-kind.a-url { color: var(--color-accent); }
-.item-kind.a-dir { color: var(--color-warning); }
+.item-kind.a-dir { color: var(--color-warning-ink); }
 .item-kind.a-command,
 .item-kind.a-script { color: var(--color-cat-command); }
 .item-kind.a-http { color: var(--color-cat-http); }
@@ -1586,8 +1586,8 @@ async function openTaskFromCalendar(id: string) {
 }
 .meta-last .ml-text { overflow: hidden; text-overflow: ellipsis; }
 .meta-last .ml-ago { flex-shrink: 0; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
-.meta-last.ok { color: var(--color-success); }
-.meta-last.fail { color: var(--color-danger); }
+.meta-last.ok { color: var(--color-success-ink); }
+.meta-last.fail { color: var(--color-danger-ink); }
 .meta-last.ok .ml-ago,
 .meta-last.fail .ml-ago { color: var(--color-text-muted); }
 .meta-ai-mode { color: var(--color-cat-ai); font-weight: 500; }
@@ -1600,8 +1600,8 @@ async function openTaskFromCalendar(id: string) {
   border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .act:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-active); }
-.act:disabled { opacity: var(--opacity-disabled); cursor: default; }
-.act.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.act:disabled { color: var(--color-text-disabled); cursor: default; }
+.act.danger:hover { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 /* 行操作默认收起，只留启用开关（状态信号）。
    disabled 的「立即执行」常驻可见，同步阻塞期间的转圈才有落点。 */
 .item-actions .act { opacity: 0; transition: opacity var(--transition-fast); }

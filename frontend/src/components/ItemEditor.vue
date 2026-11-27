@@ -515,7 +515,7 @@ function onKeydown(e: KeyboardEvent) {
   font-size: var(--text-md); font-family: inherit; outline: none;
 }
 .field-textarea:focus { border-color: var(--color-border-focus-soft); }
-.field-error { font-size: var(--text-xs); color: var(--color-danger); margin-top: var(--space-1); }
+.field-error { font-size: var(--text-xs); color: var(--color-danger-ink); margin-top: var(--space-1); }
 .field-hint { font-size: var(--text-xs); color: var(--color-text-muted); margin-top: var(--space-1); }
 
 /* 外观行：颜色 + 自定义图标（都是可选，默认不占视觉重量） */

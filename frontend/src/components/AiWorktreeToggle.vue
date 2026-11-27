@@ -155,7 +155,7 @@ function onToggle() {
   background: var(--color-bg-tertiary);
 }
 
-.ai-wt-chip:disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
+.ai-wt-chip:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
 
 .ai-wt-name { white-space: nowrap; }
 
@@ -176,7 +176,7 @@ function onToggle() {
 }
 
 .ai-wt-branch:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
-.ai-wt-branch:disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
+.ai-wt-branch:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
 
 .ai-wt-del {
   display: inline-flex;
@@ -191,8 +191,8 @@ function onToggle() {
   cursor: pointer;
 }
 
-.ai-wt-del:hover:not(:disabled) { color: var(--color-danger); background: var(--color-bg-tertiary); }
-.ai-wt-del:disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
+.ai-wt-del:hover:not(:disabled) { color: var(--color-danger-ink); background: var(--color-bg-tertiary); }
+.ai-wt-del:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
 
 /* 下拉向上弹：输入区贴着窗口底部，往下弹会被切掉 */
 .ai-wt-menu {

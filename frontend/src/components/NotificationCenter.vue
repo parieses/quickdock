@@ -487,7 +487,7 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
   transition: background var(--transition-fast), color var(--transition-fast);
 }
 .nc-icon-btn:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.nc-icon-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.nc-icon-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 
 .nc-filters { display: flex; gap: var(--space-2); padding: var(--space-4) var(--space-5); flex-wrap: wrap; }
 .nc-chip {

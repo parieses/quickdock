@@ -433,6 +433,6 @@ async function saveAll() {
 .wm-hint { font-size: var(--text-xs); color: var(--color-text-muted); margin: var(--space-4) 0 0; line-height: 1.5; }
 
 .wm-actions { display: flex; gap: var(--space-4); margin-top: var(--space-1); }
-.wm-msg { font-size: var(--text-sm); color: var(--color-success); margin: var(--space-4) 0 0; }
+.wm-msg { font-size: var(--text-sm); color: var(--color-success-ink); margin: var(--space-4) 0 0; }
 .wm-tip { font-size: var(--text-sm); color: var(--color-text-muted); line-height: 1.6; margin: var(--space-4) 0 0; }
 </style>

@@ -293,11 +293,11 @@ async function openSite() {
 .wiz-grow { flex: 1; min-width: 0; }
 .wiz-root-line { padding: var(--space-3) 0; }
 .wiz-badge { padding: 0 var(--space-2); border-radius: var(--radius-xs); font-size: var(--text-xs); }
-.wiz-badge.ok { color: var(--color-success); background: var(--color-success-bg); }
-.wiz-badge.warn { color: var(--color-warning); background: var(--color-warning-bg); }
+.wiz-badge.ok { color: var(--color-success-ink); background: var(--color-success-bg); }
+.wiz-badge.warn { color: var(--color-warning-ink); background: var(--color-warning-bg); }
 .wiz-result { margin-top: var(--space-3); font-family: var(--font-mono); font-size: var(--text-xs); resize: vertical; }
 .wiz-msg { margin: var(--space-3) 0; padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); font-size: var(--text-sm); line-height: 1.5; }
-.wiz-msg.error { color: var(--color-danger); background: var(--color-danger-bg); border: 1px solid var(--color-danger-border); }
+.wiz-msg.error { color: var(--color-danger-ink); background: var(--color-danger-bg); border: 1px solid var(--color-danger-border); }
 .wiz-done-title { font-size: var(--text-base); font-weight: 600; color: var(--color-text-primary); }
 .wiz-address { margin-bottom: var(--space-4); }
 .wiz-url { padding: var(--space-2) var(--space-3); border-radius: var(--radius-xs); background: var(--color-bg-active); color: var(--color-text-primary); font-family: var(--font-mono); font-size: var(--text-sm); word-break: break-all; }

@@ -54,5 +54,5 @@ const { t } = useI18n()
   cursor: pointer; font-size: var(--text-md); line-height: 1; padding: 0 var(--space-1);
 }
 
-.ai-attached-chip-del:hover { color: var(--color-danger); }
+.ai-attached-chip-del:hover { color: var(--color-danger-ink); }
 </style>

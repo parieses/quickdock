@@ -888,7 +888,7 @@ onBeforeUnmount(() => {
   line-height: 1.6;
 }
 
-.trace-hint.is-bad { color: var(--color-danger); }
+.trace-hint.is-bad { color: var(--color-danger-ink); }
 
 .trace-run {
   padding: var(--space-3);
@@ -974,9 +974,9 @@ onBeforeUnmount(() => {
 /* 与气泡内 run 树（panels.css .qd-run-state）同一套口径：
    pending 中性、running 蓝、canceled 橙，别让运行中/已停止都落灰。 */
 .trace-node-status.is-running { color: var(--color-accent); }
-.trace-node-status.is-done { color: var(--color-success); }
-.trace-node-status.is-failed { color: var(--color-danger); }
-.trace-node-status.is-canceled { color: var(--color-warning); }
+.trace-node-status.is-done { color: var(--color-success-ink); }
+.trace-node-status.is-failed { color: var(--color-danger-ink); }
+.trace-node-status.is-canceled { color: var(--color-warning-ink); }
 
 /* 抽屉顶部的子任务区：固定在头部下方，不随下面的 run 列表滚动。
    这里要限高！一轮派十几个子 agent 时，整列铺开会把下面的「运行轨迹」挤出
@@ -1016,9 +1016,9 @@ onBeforeUnmount(() => {
   font-variant-numeric: tabular-nums;
   color: var(--color-text-muted);
 }
-.trace-summary-stats .is-done { color: var(--color-success); }
-.trace-summary-stats .is-failed { color: var(--color-danger); }
-.trace-summary-stats .is-canceled { color: var(--color-warning); }
+.trace-summary-stats .is-done { color: var(--color-success-ink); }
+.trace-summary-stats .is-failed { color: var(--color-danger-ink); }
+.trace-summary-stats .is-canceled { color: var(--color-warning-ink); }
 .trace-summary-stats .is-running { color: var(--color-accent); }
 .trace-summary-bar {
   display: flex;
@@ -1094,9 +1094,9 @@ onBeforeUnmount(() => {
   background: var(--color-bg-hover);
   color: var(--color-text-muted);
 }
-.trace-child-badge.is-done { background: var(--color-success-bg); color: var(--color-success); }
-.trace-child-badge.is-failed { background: var(--color-danger-bg); color: var(--color-danger); }
-.trace-child-badge.is-canceled { background: var(--color-warning-bg); color: var(--color-warning); }
+.trace-child-badge.is-done { background: var(--color-success-bg); color: var(--color-success-ink); }
+.trace-child-badge.is-failed { background: var(--color-danger-bg); color: var(--color-danger-ink); }
+.trace-child-badge.is-canceled { background: var(--color-warning-bg); color: var(--color-warning-ink); }
 .trace-child-badge.is-running { background: var(--color-accent-bg); color: var(--color-accent-text); }
 /* 副行：role 胶囊 + token/耗时，等宽数值对齐，不挤主行。 */
 .trace-child-task-sub {
@@ -1145,10 +1145,10 @@ onBeforeUnmount(() => {
 }
 .trace-child-task-head:hover .trace-child-stop,
 .trace-child-stop:focus-visible { opacity: 1; }
-.trace-child-stop:hover { color: var(--color-danger); background: var(--color-bg-hover); }
+.trace-child-stop:hover { color: var(--color-danger-ink); background: var(--color-bg-hover); }
 /* 键盘用户不触发 hover：聚焦时也显形，且给个明确的焦点环。 */
 .trace-child-stop:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
-.trace-child-stop:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.trace-child-stop:disabled { color: var(--color-text-disabled); cursor: default; }
 
 .trace-child-task-detail {
   padding: var(--space-2);
@@ -1214,7 +1214,7 @@ onBeforeUnmount(() => {
   font-variant-numeric: tabular-nums;
 }
 
-.trace-event-title.is-bad { color: var(--color-danger); }
+.trace-event-title.is-bad { color: var(--color-danger-ink); }
 
 .trace-event-detail {
   color: var(--color-text-muted);
@@ -1268,7 +1268,7 @@ onBeforeUnmount(() => {
   z-index: 1;
 }
 
-.trace-step.is-done .trace-step-idx { background: var(--color-success-bg); color: var(--color-success); }
+.trace-step.is-done .trace-step-idx { background: var(--color-success-bg); color: var(--color-success-ink); }
 .trace-step.is-think .trace-step-idx { background: var(--color-accent-bg); color: var(--color-accent-text); }
 
 .trace-step-main {
@@ -1301,9 +1301,9 @@ onBeforeUnmount(() => {
    is-err 由 !step.ok 显式加，不用 :has()（旧 WebView2 整条规则会静默失效）。 */
 .trace-step.is-err .trace-step-idx {
   background: var(--color-danger-bg);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
-.trace-step.is-err .trace-step-title { color: var(--color-danger); }
+.trace-step.is-err .trace-step-title { color: var(--color-danger-ink); }
 
 .trace-step-target {
   flex: 1;
@@ -1327,7 +1327,7 @@ onBeforeUnmount(() => {
 .trace-step-err {
   margin-top: 2px;
   font-size: var(--text-2xs);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 
 .trace-step-hidden {

@@ -56,6 +56,7 @@ import { parseReleaseNotes } from '../utils/releaseNotes'
 import { SITE_GUIDE_URL, SITE_GUIDE_TEXT } from '../utils/siteLinks'
 
 import { reportError } from '../utils/reportError'
+import { writeStored } from '../utils/storage'
 const props = defineProps<{
   visible: boolean
   initialPage?: string
@@ -477,7 +478,7 @@ async function restartApp() {
 }
 
 function onUpdateAdminConfirm() {
-  localStorage.setItem(UPDATE_ADMIN_ACK, '1')
+  writeStored(UPDATE_ADMIN_ACK, '1')
   showUpdateAdminConfirm.value = false
   doRestart()
 }
@@ -903,13 +904,11 @@ async function restartAppForStorage() {
 const uiZoomValue = ref(1)
 const uiZoomMsg = ref('')
 const uiZoomBusy = ref(false)
-// 只暴露三档：缩放会同时改窗口尺寸与内容，任意数值很容易得到内容被裁的畸形窗口。
-// 用 computed 包一层，切语言时标签跟着变（t 是响应式的）。
-const uiZoomLevels = computed(() => [
-  { value: 1, label: t('uiZoomStandard') },
-  { value: 1.1, label: t('uiZoomLarge') },
-  { value: 1.2, label: t('uiZoomXLarge') },
-])
+// 档位必须与 internal/platform/uizoom.go 的 uiZoomLevels 一一对应，后端只认这些值。
+// 百分比标签不需要 i18n：100% / 150% 各语言写法一致。
+const uiZoomLevels = computed(() =>
+  [1, 1.1, 1.15, 1.2, 1.25, 1.5].map((v) => ({ value: v, label: Math.round(v * 100) + '%' })),
+)
 
 async function loadUiZoom() {
   try {
@@ -959,6 +958,23 @@ async function restartForUiZoom() {
     uiZoomBusy.value = false
   }
 }
+
+// ---- 文字大小 ----
+// 只缩放字号（--font-scale），不动间距/图标/窗口，也不需要重启；与上面的界面缩放正交。
+// 档位与界面缩放保持一致，用户在一排刻度里看到的两组数字含义相同。
+const FONT_SCALE_KEY = 'qd.fontScale'
+const fontScaleLevels = [1, 1.1, 1.15, 1.2, 1.25, 1.5]
+const fontScale = ref(1)
+function selectFontScale(v: number) {
+  if (v === fontScale.value) return
+  fontScale.value = v
+  document.documentElement.style.setProperty('--font-scale', String(v))
+  writeStored(FONT_SCALE_KEY, String(v))
+}
+try {
+  const saved = Number(localStorage.getItem(FONT_SCALE_KEY))
+  if (fontScaleLevels.includes(saved)) fontScale.value = saved
+} catch { /* 存储被禁：保持 100% */ }
 
 // ---- 窗口材质（Mica / Acrylic）----
 // 与界面缩放同源：材质在窗口创建时固定，配置写在 platform（quickdock.json），
@@ -1029,6 +1045,10 @@ const themeOptions = computed(() => [
   { value: 'light',  label: t('light'), icon: Sun },
   { value: 'system', label: t('system'), icon: MonitorIcon },
 ])
+const themeTabs = computed(() => themeOptions.value.map((o) => ({ id: o.value, label: o.label })))
+function themeIcon(value: string) {
+  return themeOptions.value.find((o) => o.value === value)?.icon ?? Moon
+}
 
 const currentLocale = ref('zh-CN')
 
@@ -1385,7 +1405,7 @@ async function toggleAutoStart() {
           </div>
 
           <!-- 通用设置（开机自启 + 外观主题/语言） -->
-          <div v-else-if="activePage === 'preferences'" class="content-page content-left">
+          <div v-else-if="activePage === 'preferences'" class="content-page content-left preferences-page">
             <div class="section">
               <h3 class="section-title">{{ t('general') }}</h3>
               <div class="setting-row">
@@ -1397,8 +1417,89 @@ async function toggleAutoStart() {
                 <p v-if="autoStartResult" class="result-hint error">{{ autoStartResult }}</p>
               </div>
             </div>
+            <div class="section">
+              <h3 class="section-title">{{ t('theme') }}</h3>
+              <p class="section-desc">{{ t('themeDesc') }}</p>
+              <QdTabs
+                :model-value="currentTheme"
+                :tabs="themeTabs"
+                variant="segmented"
+                :aria-label="t('theme')"
+                @update:model-value="setTheme"
+              >
+                <template #tab="{ tab }">
+                  <component :is="themeIcon(tab.id)" :size="14" />
+                  <span>{{ tab.label }}</span>
+                </template>
+              </QdTabs>
+            </div>
+            <div class="section">
+              <h3 class="section-title">{{ t('language') }}</h3>
+              <p class="section-desc">{{ t('languageDesc') }}</p>
+              <QdTabs
+                :model-value="currentLocale"
+                :tabs="localeTabs"
+                variant="segmented"
+                :aria-label="t('language')"
+                @update:model-value="setLocale"
+              />
+            </div>
+            <!-- 两种缩放放同一段里上下对照：两排刻度长得一样，拆成两个 section
+                 各带一段长说明时很难看出作用范围不同。说明压到每行下方的小字。 -->
+            <div class="section">
+              <h3 class="section-title">{{ t('displayScale') }}</h3>
+              <div class="scale-row">
+                <label class="setting-label">{{ t('uiZoom') }}</label>
+                <QdTabs
+                  :model-value="String(uiZoomValue)"
+                  :tabs="uiZoomTabs"
+                  variant="segmented"
+                  class="scale-tabs"
+                  :aria-label="t('uiZoom')"
+                  @update:model-value="onUiZoomTab"
+                />
+              </div>
+              <p class="scale-hint">{{ t('uiZoomDesc') }}</p>
+              <div class="scale-row">
+                <label class="setting-label">{{ t('textSize') }}</label>
+                <QdTabs
+                  :model-value="String(fontScale)"
+                  :tabs="fontScaleLevels.map((v) => ({ id: String(v), label: Math.round(v * 100) + '%' }))"
+                  variant="segmented"
+                  class="scale-tabs"
+                  :aria-label="t('textSize')"
+                  @update:model-value="selectFontScale(Number($event))"
+                />
+              </div>
+              <p class="scale-hint">{{ t('textSizeDesc') }}</p>
+              <!-- 「立即重启」只在改完出现：缩放是窗口创建时固定的，不重启等于没改 -->
+              <div v-if="uiZoomMsg" class="action-row">
+                <p class="result-hint">{{ uiZoomMsg }}</p>
+                <button class="btn btn-secondary" :disabled="uiZoomBusy" @click="restartForUiZoom">{{ t('uiZoomRestart') }}</button>
+              </div>
+            </div>
+            <!-- 窗口材质：能力探测通过（Win11 22621+）才渲染这一整块。
+                 Win10 / 非 Windows 下 v-if 为 false，设置页与旧版逐项一致。 -->
+            <div v-if="backdropSupported" class="section">
+              <h3 class="section-title">{{ t('windowBackdrop') }}</h3>
+              <p class="section-desc">{{ t('windowBackdropDesc') }}</p>
+              <QdTabs
+                :model-value="backdropValue"
+                :tabs="backdropTabs"
+                variant="segmented"
+                :aria-label="t('windowBackdrop')"
+                @update:model-value="selectWindowBackdrop"
+              />
+              <p class="field-hint">{{ t('windowBackdropHint') }}</p>
+              <!-- 材质在窗口创建时固定，改完必须重启（复用与缩放相同的真重启路径） -->
+              <div v-if="backdropMsg" class="action-row">
+                <p class="result-hint">{{ backdropMsg }}</p>
+                <button class="btn btn-secondary" :disabled="backdropBusy" @click="restartForWindowBackdrop">{{ t('windowBackdropRestart') }}</button>
+              </div>
+            </div>
             <!-- Ctrl+K 搜索排除：三类实体各一个总开关，关掉后整类不再出现在
-                 命令面板结果里。单条排除在各自的编辑表单中（场景/集合/项目）。 -->
+                 命令面板结果里。单条排除在各自的编辑表单中（场景/集合/项目）。
+                 放在页尾：它是低频的高级设置，不挡在主题/缩放这些常用项前面。 -->
             <div class="section">
               <h3 class="section-title">{{ t('searchScopeTitle') }}</h3>
               <p class="section-desc">{{ t('searchScopeDesc') }}</p>
@@ -1434,67 +1535,6 @@ async function toggleAutoStart() {
                             @update:model-value="toggleShowHidden" />
                   <span class="toggle-label">{{ showHidden ? t('showHiddenOn') : t('showHiddenOff') }}</span>
                 </div>
-              </div>
-            </div>
-            <div class="section">
-              <h3 class="section-title">{{ t('theme') }}</h3>
-              <p class="section-desc">{{ t('themeDesc') }}</p>
-              <div class="theme-selector">
-                <button
-                  v-for="opt in themeOptions"
-                  :key="opt.value"
-                  :class="['theme-card', { active: currentTheme === opt.value }]"
-                  @click="setTheme(opt.value)"
-                >
-                  <component :is="opt.icon" :size="24" />
-                  <span>{{ opt.label }}</span>
-                </button>
-              </div>
-            </div>
-            <div class="section">
-              <h3 class="section-title">{{ t('language') }}</h3>
-              <p class="section-desc">{{ t('languageDesc') }}</p>
-              <QdTabs
-                :model-value="currentLocale"
-                :tabs="localeTabs"
-                variant="segmented"
-                :aria-label="t('language')"
-                @update:model-value="setLocale"
-              />
-            </div>
-            <div class="section">
-              <h3 class="section-title">{{ t('uiZoom') }}</h3>
-              <p class="section-desc">{{ t('uiZoomDesc') }}</p>
-              <QdTabs
-                :model-value="String(uiZoomValue)"
-                :tabs="uiZoomTabs"
-                variant="segmented"
-                :aria-label="t('uiZoom')"
-                @update:model-value="onUiZoomTab"
-              />
-              <!-- 「立即重启」只在改完出现：缩放是窗口创建时固定的，不重启等于没改 -->
-              <div v-if="uiZoomMsg" class="action-row">
-                <p class="result-hint">{{ uiZoomMsg }}</p>
-                <button class="btn btn-secondary" :disabled="uiZoomBusy" @click="restartForUiZoom">{{ t('uiZoomRestart') }}</button>
-              </div>
-            </div>
-            <!-- 窗口材质：能力探测通过（Win11 22621+）才渲染这一整块。
-                 Win10 / 非 Windows 下 v-if 为 false，设置页与旧版逐项一致。 -->
-            <div v-if="backdropSupported" class="section">
-              <h3 class="section-title">{{ t('windowBackdrop') }}</h3>
-              <p class="section-desc">{{ t('windowBackdropDesc') }}</p>
-              <QdTabs
-                :model-value="backdropValue"
-                :tabs="backdropTabs"
-                variant="segmented"
-                :aria-label="t('windowBackdrop')"
-                @update:model-value="selectWindowBackdrop"
-              />
-              <p class="field-hint">{{ t('windowBackdropHint') }}</p>
-              <!-- 材质在窗口创建时固定，改完必须重启（复用与缩放相同的真重启路径） -->
-              <div v-if="backdropMsg" class="action-row">
-                <p class="result-hint">{{ backdropMsg }}</p>
-                <button class="btn btn-secondary" :disabled="backdropBusy" @click="restartForWindowBackdrop">{{ t('windowBackdropRestart') }}</button>
               </div>
             </div>
           </div>
@@ -1784,7 +1824,7 @@ async function toggleAutoStart() {
   padding: 1px var(--space-3);
   border-radius: var(--radius-full);
   background: var(--color-danger-bg);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   font-size: var(--text-2xs);
   line-height: 1.5;
   white-space: nowrap;
@@ -1836,5 +1876,21 @@ async function toggleAutoStart() {
 }
 .export-scope-row:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .export-scope-row input { accent-color: var(--color-accent); }
+/* 通用页专属微调：section 间距/说明层级已提升为全局收口（见 settings.css）；
+   这里只留本页的 field-hint / action-row 贴合。 */
+.preferences-page :deep(.field-hint) { margin-top: var(--space-3); }
+.preferences-page :deep(.action-row) { margin-top: var(--space-4); }
+
+/* 显示缩放：两种刻度上下对照，标签列与其他设置行对齐（104px）。
+   说明压在每行下方的小字，避免两个 section 各占一整段长说明。 */
+.scale-row { display: flex; align-items: center; gap: var(--space-5); }
+/* 104px 标签列 + 12px(--space-5) 间距 = 116px，说明文字对齐到刻度列 */
+.scale-row + .scale-hint { margin: 4px 0 0 116px; }
+.scale-row + .scale-hint + .scale-row { margin-top: var(--space-5); }
+.scale-hint {
+  font-size: var(--text-xs); line-height: 1.5; color: var(--color-text-muted);
+}
+/* 六档百分比收紧到截图那种一排紧凑刻度的密度 */
+.scale-tabs :deep(.qd-tab) { padding: 0 var(--space-3); }
 </style>
 

@@ -774,6 +774,8 @@ func (s *MailboxService) pushNew(m internalmailbox.Message) {
 			title, level = "安全提醒：账号密码已变更", "warn"
 		case "login":
 			title, level = "安全提醒：账号在新设备或新地点登录", "warn"
+		case "reset":
+			title, level = "密码重置：点开邮件查看重置链接", "warn"
 		}
 		body := m.Subject
 		if m.From != "" {

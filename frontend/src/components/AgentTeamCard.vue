@@ -203,7 +203,7 @@ const group = computed(() => {
   align-self: flex-start;
   font-size: var(--text-xs); padding: 1px var(--space-2);
   border-radius: var(--radius-sm);
-  color: var(--color-warning); background: var(--color-warning-bg);
+  color: var(--color-warning-ink); background: var(--color-warning-bg);
 }
 .ai-spawn-group {
   display: flex; align-items: center; gap: var(--space-2);

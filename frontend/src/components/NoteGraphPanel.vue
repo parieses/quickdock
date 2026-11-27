@@ -641,7 +641,7 @@ onBeforeUnmount(() => {
   color: var(--color-accent);
   border-color: var(--color-accent-border);
 }
-.qd-graph-icon-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.qd-graph-icon-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 .qd-graph-spin { animation: qd-graph-rotate 0.9s linear infinite; }
 @keyframes qd-graph-rotate { to { transform: rotate(360deg); } }
 
@@ -689,7 +689,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--color-warning-border);
   border-radius: var(--radius-sm);
   background: var(--color-warning-bg);
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   font-size: var(--text-xs);
   white-space: nowrap;
 }

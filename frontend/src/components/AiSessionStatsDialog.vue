@@ -274,7 +274,7 @@ onBeforeUnmount(() => window.document.removeEventListener('keydown', onKeydown, 
 .sstat-close:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .sstat-body { flex: 1; overflow-y: auto; padding: var(--space-4); }
 .sstat-hint { margin: 0; padding: var(--space-4) 0; font-size: var(--text-sm); color: var(--color-text-muted); }
-.sstat-hint.is-bad { color: var(--color-danger); }
+.sstat-hint.is-bad { color: var(--color-danger-ink); }
 .sstat-hero {
   display: flex;
   align-items: baseline;

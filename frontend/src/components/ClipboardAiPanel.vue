@@ -25,6 +25,7 @@ import { useAIAvailability } from '../composables/useAIAvailability'
 import { useAiStreamPreference } from '../composables/useAiStreamPreference'
 import AiPanel, { type AiPanelResult } from './AiPanel.vue'
 
+import { writeStored } from '../utils/storage'
 const props = defineProps<{
   /** 待处理的剪贴板文本。 */
   text: string
@@ -71,12 +72,7 @@ function readThinking(): boolean {
 }
 const thinking = ref(readThinking())
 watch(thinking, (v) => {
-  if (typeof localStorage === 'undefined') return
-  try {
-    localStorage.setItem(THINKING_KEY, v ? '1' : '0')
-  } catch {
-    // 隐私模式 / 存储被禁：退化为「仅本次运行有效」，不影响功能
-  }
+  writeStored(THINKING_KEY, v ? '1' : '0')
 })
 
 /**
@@ -323,7 +319,7 @@ function clearAll() {
 }
 
 .clip-ai-action:disabled {
-  opacity: var(--opacity-disabled);
+  color: var(--color-text-disabled);
   cursor: default;
 }
 

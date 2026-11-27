@@ -357,7 +357,7 @@ void n // 保留 i18n 的数字格式化入口，后续要按语言显示千分�
   color: var(--color-text-muted);
 }
 
-.ctx-hint.is-bad { color: var(--color-danger); }
+.ctx-hint.is-bad { color: var(--color-danger-ink); }
 
 .ctx-meter-top {
   display: flex;
@@ -378,8 +378,8 @@ void n // 保留 i18n 的数字格式化入口，后续要按语言显示千分�
   font-variant-numeric: tabular-nums;
 }
 
-.ctx-meter-used.is-warn, .ctx-meter-pct.is-warn { color: var(--color-warning); }
-.ctx-meter-used.is-danger, .ctx-meter-pct.is-danger { color: var(--color-danger); }
+.ctx-meter-used.is-warn, .ctx-meter-pct.is-warn { color: var(--color-warning-ink); }
+.ctx-meter-used.is-danger, .ctx-meter-pct.is-danger { color: var(--color-danger-ink); }
 .ctx-meter-pct.is-ok { color: var(--color-text-primary); }
 
 .ctx-bar {
@@ -445,7 +445,7 @@ void n // 保留 i18n 的数字格式化入口，后续要按语言显示千分�
 .ctx-warn {
   margin: var(--space-2) 0 0;
   font-size: var(--text-xs);
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
 }
 
 .ctx-compact {

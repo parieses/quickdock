@@ -1172,7 +1172,7 @@ defineExpose({
 
 .ssh-tool:disabled {
   cursor: default;
-  opacity: var(--opacity-disabled);
+  color: var(--color-text-disabled);
 }
 
 .spinning {
@@ -1189,7 +1189,7 @@ defineExpose({
   margin: 0 var(--space-5) var(--space-4);
   padding: var(--space-3) var(--space-4);
   font-size: var(--text-sm);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   background: var(--color-danger-bg);
   border-radius: var(--radius-xs);
 }

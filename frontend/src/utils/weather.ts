@@ -24,6 +24,7 @@ import {
   GetWeather, RefreshWeather, SetWeatherConfig, SearchCities,
 } from '../../bindings/quickdock/services/weather/weatherservice'
 
+import { writeStored } from './storage'
 const CACHE_KEY = 'qd_weather_cache_v1'
 
 export interface WeatherConfig {
@@ -166,7 +167,6 @@ export async function searchCities(name: string, lang: 'zh' | 'en'): Promise<Cit
 }
 
 /** WMO code 归成 8 类，对应 i18n 的 `weatherKinds` 与一组图标。 */
-export const WEATHER_GROUP_COUNT = 8
 export function weatherGroup(code: number): number {
   if (code === 0) return 0
   if (code === 1 || code === 2) return 1
@@ -192,9 +192,5 @@ export function readWeatherCache(latitude: number, longitude: number): WeatherDa
 }
 
 export function writeWeatherCache(latitude: number, longitude: number, data: WeatherData): void {
-  try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ latitude, longitude, data } satisfies CachePayload))
-  } catch {
-    // 隐私模式 / 配额满：缓存不是必需，下一次仍会正常拉取
-  }
+  writeStored(CACHE_KEY, JSON.stringify({ latitude, longitude, data } satisfies CachePayload))
 }

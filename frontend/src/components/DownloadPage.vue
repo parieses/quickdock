@@ -2129,7 +2129,7 @@ onUnmounted(() => {
 .dl-dot { width: 8px; height: 8px; border-radius: var(--radius-full); background: var(--color-text-disabled); flex: none; }
 .dl-engine.is-on .dl-dot { background: var(--color-success); box-shadow: 0 0 6px var(--color-success-border); }
 /* 装了没启动：红灯 + 呼吸，这是「需要你动手」的状态，不该和「未安装」同色 */
-.dl-engine.is-stopped { color: var(--color-danger); background: var(--color-danger-bg); }
+.dl-engine.is-stopped { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 .dl-engine.is-stopped .dl-dot {
   background: var(--color-danger); box-shadow: 0 0 6px var(--color-danger-border);
   animation: dl-dot-pulse 2.4s ease-in-out infinite;
@@ -2138,7 +2138,7 @@ onUnmounted(() => {
 .dl-error {
   padding: var(--space-4) var(--space-5); border-radius: var(--radius-md);
   border: 1px solid var(--color-danger-border); background: var(--color-danger-bg);
-  color: var(--color-danger); font-size: var(--text-xs);
+  color: var(--color-danger-ink); font-size: var(--text-xs);
 }
 
 .dl-setup {
@@ -2162,7 +2162,7 @@ onUnmounted(() => {
   border-color: var(--color-warning-border);
   background: var(--color-warning-bg);
 }
-.dl-notice-icon { color: var(--color-warning); flex: none; }
+.dl-notice-icon { color: var(--color-warning-ink); flex: none; }
 .dl-notice-text { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 /* 副文案原本是 text-muted，深色底上几乎看不清「列表为上次快照」这个关键信息 */
 .dl-notice p { margin: 0; font-size: var(--text-xs); color: var(--color-text-secondary); }
@@ -2172,7 +2172,7 @@ onUnmounted(() => {
 .dl-stat-label { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap; }
 .dl-stat-value { font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
 .dl-stat.is-speed .dl-stat-value { color: var(--color-accent); }
-.dl-stat.is-up .dl-stat-value { color: var(--color-success); }
+.dl-stat.is-up .dl-stat-value { color: var(--color-success-ink); }
 .dl-stat-spark { flex: 1 1 140px; min-width: 120px; }
 .dl-spark-svg { display: block; width: 100%; height: 30px; }
 .dl-spark-area { fill: var(--color-accent-bg); stroke: none; }
@@ -2191,7 +2191,7 @@ onUnmounted(() => {
 .dl-field-block .qd-input { min-height: 88px; resize: vertical; }
 .dl-card-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-5); }
 .dl-hint { margin: var(--space-3) 0 0; font-size: var(--text-xs); line-height: 1.6; color: var(--color-text-muted); }
-.dl-hint.is-warn { color: var(--color-danger); }
+.dl-hint.is-warn { color: var(--color-danger-ink); }
 
 /* 新建弹框内的输入区：不占列表宽度，source / target / 高级选项分段 */
 .dl-add-input-row { display: flex; align-items: center; gap: var(--space-2); }
@@ -2246,7 +2246,7 @@ onUnmounted(() => {
   box-shadow: inset 0 0 0 1px var(--color-accent-border-strong), 0 0 26px -12px var(--color-accent);
 }
 .dl-empty-icon { color: var(--color-text-muted); }
-.dl-empty-icon.is-off { color: var(--color-danger); }
+.dl-empty-icon.is-off { color: var(--color-danger-ink); }
 .dl-empty p { margin: 0; font-size: var(--text-md); color: var(--color-text-secondary); }
 .dl-empty span { max-width: 40em; font-size: var(--text-xs); line-height: 1.7; color: var(--color-text-muted); }
 .dl-empty .dl-drop-title { font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
@@ -2295,15 +2295,15 @@ onUnmounted(() => {
 .dl-badge.is-history { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .dl-tag { flex: none; padding: var(--space-1) var(--space-4); border-radius: var(--radius-full); font-size: var(--text-xs); color: var(--color-text-secondary); background: var(--color-bg-tertiary); }
 .dl-tag.is-active { color: var(--color-accent); background: var(--color-accent-border-strong); }
-.dl-tag.is-complete { color: var(--color-success); background: var(--color-success-bg); }
-.dl-tag.is-error { color: var(--color-danger); background: var(--color-danger-bg); }
-.dl-tag.is-paused { color: var(--color-warning); background: var(--color-warning-bg); }
+.dl-tag.is-complete { color: var(--color-success-ink); background: var(--color-success-bg); }
+.dl-tag.is-error { color: var(--color-danger-ink); background: var(--color-danger-bg); }
+.dl-tag.is-paused { color: var(--color-warning-ink); background: var(--color-warning-bg); }
 
 .dl-bar { height: 6px; border-radius: var(--radius-full); background: var(--color-bg-tertiary); overflow: hidden; }
 .dl-bar-fill { height: 100%; border-radius: var(--radius-full); background: var(--color-accent); transition: width var(--transition-fast); }
 .dl-item-meta { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; font-size: var(--text-xs); color: var(--color-text-muted); }
 .dl-item-meta > span { display: inline-flex; align-items: center; gap: var(--space-1); }
-.dl-err-text { color: var(--color-danger); }
+.dl-err-text { color: var(--color-danger-ink); }
 
 /* 弹框：面层用 popover-bg（比卡片亮一级），遮罩压住整页 */
 /* 弹窗外壳统一走 QdModal：遮罩 / 卡片 / 头部 / 底栏 / 宽度都不再本地重写。 */
@@ -2325,8 +2325,8 @@ onUnmounted(() => {
   font-size: var(--text-2xs); white-space: nowrap;
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
 }
-.dl-import-state.is-resume { background: var(--color-success-bg); color: var(--color-success); }
-.dl-import-state.is-partial { background: var(--color-warning-bg); color: var(--color-warning); }
+.dl-import-state.is-resume { background: var(--color-success-bg); color: var(--color-success-ink); }
+.dl-import-state.is-partial { background: var(--color-warning-bg); color: var(--color-warning-ink); }
 .dl-import-state.is-fresh { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .dl-import-options { display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap; }
 .dl-import-options .dl-check-field { align-self: auto; font-size: var(--text-xs); }
@@ -2380,9 +2380,9 @@ onUnmounted(() => {
 .dl-ctx-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 /* 引擎未运行时暂停/继续这类项留在菜单里但压灰：直接隐藏会让菜单项忽有忽无，
    用户以为是 bug；压灰 + title 说明原因才读得懂。 */
-.dl-ctx-item:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.dl-ctx-item:disabled { color: var(--color-text-disabled); cursor: default; }
 .dl-ctx-item:disabled:hover { background: none; color: var(--color-text-secondary); }
-.dl-ctx-item.is-danger { color: var(--color-danger); }
+.dl-ctx-item.is-danger { color: var(--color-danger-ink); }
 .dl-ctx-sep { height: 1px; margin: var(--space-1) 0; background: var(--color-border); }
 
 @media (max-width: 720px) {

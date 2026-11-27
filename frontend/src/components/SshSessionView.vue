@@ -1006,7 +1006,7 @@ defineExpose({
 }
 
 .sess-auto.is-warn {
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   background: var(--color-warning-bg);
   border-bottom-color: var(--color-warning-border);
 }
@@ -1079,7 +1079,7 @@ defineExpose({
   margin: 0 0 var(--space-3);
   font-size: var(--text-md);
   font-weight: 600;
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 
 .sess-card-msg {

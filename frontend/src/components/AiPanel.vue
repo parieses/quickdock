@@ -646,7 +646,7 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 .ai-panel-err {
   margin: 0;
   font-size: var(--text-sm);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border);
   border-radius: var(--radius-sm);
@@ -754,7 +754,7 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
   margin: 0;
   font-size: var(--text-xs);
   line-height: 1.5;
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border);
   border-radius: var(--radius-sm);
@@ -927,7 +927,7 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 }
 
 .ai-panel-send:disabled {
-  opacity: var(--opacity-disabled);
+  background: var(--color-bg-tertiary); color: var(--color-text-disabled); 
   cursor: default;
 }
 

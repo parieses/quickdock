@@ -288,7 +288,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   margin-top: 7px;
   font-size: var(--text-sm);
   line-height: 1.55;
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   word-break: break-word;
 }
 
@@ -324,7 +324,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   color: var(--color-text-primary);
 }
 
-.ai-approve-opt.is-danger.is-active { color: var(--color-danger); }
+.ai-approve-opt.is-danger.is-active { color: var(--color-danger-ink); }
 
 .ai-approve-num {
   flex: none;

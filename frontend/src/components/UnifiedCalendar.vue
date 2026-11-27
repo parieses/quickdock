@@ -291,7 +291,7 @@ function showAllOfDay(ds: string) {
 
 <style scoped>
 .cal-wrap { display: flex; flex-direction: column; gap: var(--space-4); flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-4) var(--space-5); }
-.cal-error { padding: var(--space-2) var(--space-3); color: var(--color-danger); background: var(--color-danger-bg); border: 1px solid var(--color-danger-border); border-radius: var(--radius-sm); font-size: var(--text-xs); }
+.cal-error { padding: var(--space-2) var(--space-3); color: var(--color-danger-ink); background: var(--color-danger-bg); border: 1px solid var(--color-danger-border); border-radius: var(--radius-sm); font-size: var(--text-xs); }
 
 /* 导航：左键 / 月份 / 右键 / 今天 连成一组，右端只放一个计数 */
 .cal-bar { display: flex; align-items: center; gap: var(--space-4); }

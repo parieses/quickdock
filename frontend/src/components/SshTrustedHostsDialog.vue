@@ -302,7 +302,7 @@ function onKeydown(e: KeyboardEvent) {
 .th-error {
   padding: var(--space-3) var(--space-4);
   font-size: var(--text-sm);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   background: var(--color-danger-bg);
   border-radius: var(--radius-xs);
 }
@@ -403,7 +403,7 @@ function onKeydown(e: KeyboardEvent) {
   padding: var(--space-2) var(--space-4);
   font-size: var(--text-sm);
   font-family: inherit;
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   background: transparent;
   border: 1px solid var(--color-danger-bg);
   border-radius: var(--radius-xs);
@@ -416,7 +416,7 @@ function onKeydown(e: KeyboardEvent) {
 
 .th-forget:disabled {
   cursor: default;
-  opacity: var(--opacity-disabled);
+  color: var(--color-text-disabled); border-color: var(--color-border);
 }
 
 .th-key {

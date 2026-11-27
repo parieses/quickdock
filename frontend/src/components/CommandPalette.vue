@@ -1552,9 +1552,9 @@ onUnmounted(() => {
 }
 .action-menu-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .action-menu-item.active { background: var(--color-select-bg); color: var(--color-text-primary); }
-.action-menu-item.danger { color: var(--color-danger); }
+.action-menu-item.danger { color: var(--color-danger-ink); }
 .action-menu-item.danger.active,
-.action-menu-item.danger:hover { background: var(--color-danger-bg); color: var(--color-danger); }
+.action-menu-item.danger:hover { background: var(--color-danger-bg); color: var(--color-danger-ink); }
 
 .action-menu-icon { flex-shrink: 0; opacity: 0.85; }
 .action-menu-index {
@@ -1615,7 +1615,7 @@ onUnmounted(() => {
   flex: 1; display: flex; align-items: center; justify-content: center;
   font-size: var(--text-md); color: var(--color-text-muted); user-select: none;
 }
-.palette-plugin-error { color: var(--color-danger); padding: 0 var(--space-8); text-align: center; line-height: 1.6; }
+.palette-plugin-error { color: var(--color-danger-ink); padding: 0 var(--space-8); text-align: center; line-height: 1.6; }
 
 .palette-plugin-iframe { flex: 1; width: 100%; height: 100%; border: none; background: var(--color-bg-primary); }
 </style>

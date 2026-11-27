@@ -204,7 +204,7 @@ function close() { emit('cancel') }
   padding: var(--space-7) var(--space-2); text-align: center;
   font-size: var(--text-sm); color: var(--color-text-muted);
 }
-.picker-err { color: var(--color-danger); }
+.picker-err { color: var(--color-danger-ink); }
 .picker-loading .spin {
   animation: picker-spin 1s linear infinite; vertical-align: -3px; margin-right: var(--space-3);
 }

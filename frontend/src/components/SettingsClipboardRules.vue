@@ -499,8 +499,8 @@ function matchLabel(r: ClipboardRule): string {
 .cr-test-input:focus { outline: none; border-color: var(--color-border-focus-soft); }
 .cr-test-actions { display: flex; align-items: center; gap: var(--space-4); margin-top: var(--space-4); }
 .cr-test-state { font-size: var(--text-sm); color: var(--color-text-muted); }
-.cr-test-state.matched { color: var(--color-success); }
-.cr-test-state.nomatch { color: var(--color-warning); }
+.cr-test-state.matched { color: var(--color-success-ink); }
+.cr-test-state.nomatch { color: var(--color-warning-ink); }
 .cr-test-out {
   margin: var(--space-4) 0 0;
   padding: var(--space-4);
@@ -562,7 +562,7 @@ function matchLabel(r: ClipboardRule): string {
   padding: 1px var(--space-3);
   font-size: var(--text-2xs);
   border-radius: var(--radius-sm);
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   background: var(--color-warning-bg);
 }
 .cr-icon-btn {
@@ -580,7 +580,7 @@ function matchLabel(r: ClipboardRule): string {
   transition: color var(--transition-fast), background-color var(--transition-fast);
 }
 .cr-icon-btn:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
-.cr-icon-btn.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.cr-icon-btn.danger:hover { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 .cr-empty { margin: 0; padding: var(--space-5) var(--space-5); text-align: center; font-size: var(--text-sm); color: var(--color-text-muted); }
 .cr-add { display: inline-flex; align-items: center; gap: var(--space-3); margin-top: var(--space-5); }
 
@@ -604,8 +604,8 @@ function matchLabel(r: ClipboardRule): string {
   width: 16px; height: 16px; padding: 0; border: none; border-radius: var(--radius-xs);
   background: transparent; color: var(--color-text-muted); cursor: pointer;
 }
-.cr-ignore-del:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.cr-ignore-del:hover { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 .cr-pause-row { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
 .cr-pause-select { width: auto; min-width: 160px; }
-.cr-capture-state { font-size: var(--text-xs); color: var(--color-warning); }
+.cr-capture-state { font-size: var(--text-xs); color: var(--color-warning-ink); }
 </style>

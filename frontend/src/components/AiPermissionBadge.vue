@@ -252,7 +252,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
 .ai-perm-badge.is-full {
   border-color: var(--color-warning-border);
   background: var(--color-warning-bg);
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
 }
 
 .ai-perm-badge.is-readonly {
@@ -260,7 +260,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
   color: var(--color-text-secondary);
 }
 
-.ai-perm-badge.is-disabled { opacity: var(--opacity-disabled); cursor: default; }
+.ai-perm-badge.is-disabled { color: var(--color-text-disabled); cursor: default; }
 
 /* 点外面收起菜单。z-index 比菜单低一层，菜单内部点击不受影响。 */
 .ai-perm-backdrop {
@@ -311,7 +311,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
 
 .ai-perm-opt.is-active { background: var(--color-bg-active); color: var(--color-text-primary); }
 
-.ai-perm-opt.is-risk svg { color: var(--color-warning); }
+.ai-perm-opt.is-risk svg { color: var(--color-warning-ink); }
 
 .ai-perm-opt-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 
@@ -348,7 +348,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
 
 .ai-perm-dialog-head { display: flex; align-items: center; gap: var(--space-4); }
 
-.ai-perm-dialog-icon { flex: none; color: var(--color-danger); }
+.ai-perm-dialog-icon { flex: none; color: var(--color-danger-ink); }
 
 .ai-perm-dialog-title { flex: 1; min-width: 0; font-size: var(--text-base); font-weight: 600; color: var(--color-text-primary); }
 

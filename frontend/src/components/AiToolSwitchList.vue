@@ -284,7 +284,7 @@ defineExpose({ reload: load })
   gap: var(--space-2);
   margin: var(--space-3) 0 0;
   font-size: var(--text-xs);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 
 .ai-tools-group {
@@ -351,12 +351,12 @@ defineExpose({ reload: load })
 }
 
 .ai-tools-tag.is-write {
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   border-color: var(--color-warning);
 }
 
 .ai-tools-tag.is-risk {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   border-color: var(--color-danger);
 }
 

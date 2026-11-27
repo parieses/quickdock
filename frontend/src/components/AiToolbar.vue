@@ -282,8 +282,8 @@ const startedClock = computed(() => {
 .ai-icon-btn.is-active { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
 /* 清理按钮的「已上膛」态：与普通激活态区分开——它表示「再点一次就真删」，
    用 warning 而不是 accent，避免和「面板已打开」那种无害的激活混淆。 */
-.ai-icon-btn.is-armed { color: var(--color-warning); border-color: var(--color-warning); background: transparent; }
-.ai-icon-btn:disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
+.ai-icon-btn.is-armed { color: var(--color-warning-ink); border-color: var(--color-warning); background: transparent; }
+.ai-icon-btn:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
 
 /* 后台任务按钮：运行中数量做成右上角的小徽标。
    不用「(2)」写在图标旁边——那会让按钮变宽，工具栏右组在窄窗口下要换行。 */

@@ -1381,11 +1381,11 @@ onUnmounted(() => {
   font-size: var(--text-2xs); transition: background-color 100ms, color 100ms, border-color 100ms;
 }
 .action-top-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.action-top-btn.btn-stop-top:hover { color: var(--color-warning); }
-.action-top-btn.btn-kill-top:hover { color: var(--color-danger); }
+.action-top-btn.btn-stop-top:hover { color: var(--color-warning-ink); }
+.action-top-btn.btn-kill-top:hover { color: var(--color-danger-ink); }
 .action-top-btn.btn-open-top:hover { color: var(--color-accent); }
 .action-top-btn.btn-reinstall-top:hover { color: var(--color-accent); }
-.action-top-btn.btn-uninstall-top:hover { color: var(--color-danger); }
+.action-top-btn.btn-uninstall-top:hover { color: var(--color-danger-ink); }
 
 /* ---- 第一层：头 ---- */
 .card-head { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
@@ -1434,15 +1434,15 @@ onUnmounted(() => {
 @media (prefers-reduced-motion: reduce) {
   .badge-running .badge-dot, .badge-starting .badge-dot { animation: none; }
 }
-.badge-running { background: var(--color-success-bg); color: var(--color-success); }
+.badge-running { background: var(--color-success-bg); color: var(--color-success-ink); }
 /* 未激活 / 已停止一律退回中性灰：它们是"没开"，不该和运行中抢视线 */
 .badge-stopped { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 /* disabled 是中性「被关掉」，不该和 crashed 同为红色；红色只留给真正的崩溃 */
 .badge-disabled { background: var(--color-bg-tertiary); color: var(--color-text-disabled); }
-.badge-crashed { background: var(--color-danger-bg); color: var(--color-danger); }
+.badge-crashed { background: var(--color-danger-bg); color: var(--color-danger-ink); }
 .badge-registered { background: var(--color-accent-bg); color: var(--color-accent); }
-.badge-starting { background: var(--color-warning-bg); color: var(--color-warning); }
-.badge-unresponsive { background: var(--color-warning-bg); color: var(--color-warning); }
+.badge-starting { background: var(--color-warning-bg); color: var(--color-warning-ink); }
+.badge-unresponsive { background: var(--color-warning-bg); color: var(--color-warning-ink); }
 
 /* 命令与热键：卡片上只露前两条，完整清单在 title 里。
    热键用 kbd 的等宽感是刻意的 —— 它是「按键」而不是「标签」。 */
@@ -1558,7 +1558,7 @@ onUnmounted(() => {
   color: var(--color-accent);
 }
 .card-cta.is-primary:hover { background: var(--color-accent); border-color: transparent; color: var(--color-accent-text); }
-.card-cta:disabled { opacity: var(--opacity-disabled-soft); cursor: default; }
+.card-cta:disabled { color: var(--color-text-disabled); cursor: default; }
 
 /* ---- 分类 Tabs ---- */
 /* 搜索框跟分类 tab 同一行靠右：装得多时先搜再筛，比先筛再翻更快 */
@@ -1661,8 +1661,8 @@ onUnmounted(() => {
 .exec-row.exec-fail { background: var(--color-danger-bg); }
 .exec-row.exec-fail:hover { background: var(--color-danger-bg); }
 .exec-row.exec-expanded { border-color: var(--color-border); }
-.row-ok { color: var(--color-success); flex-shrink: 0; }
-.row-err { color: var(--color-danger); flex-shrink: 0; }
+.row-ok { color: var(--color-success-ink); flex-shrink: 0; }
+.row-err { color: var(--color-danger-ink); flex-shrink: 0; }
 .row-plugin { color: var(--color-text-primary); font-weight: 500; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-cmd { color: var(--color-text-secondary); max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-trigger {
@@ -1680,7 +1680,7 @@ onUnmounted(() => {
 .detail-block { margin-top: var(--space-3); }
 .detail-block:first-child { margin-top: 0; }
 .detail-label { font-size: var(--text-2xs); color: var(--color-text-muted); margin-bottom: 3px; }
-.detail-label.detail-err { color: var(--color-danger); }
+.detail-label.detail-err { color: var(--color-danger-ink); }
 .detail-pre {
   font-family: var(--font-mono); font-size: var(--text-2xs);
   color: var(--color-text-secondary);
@@ -1688,7 +1688,7 @@ onUnmounted(() => {
   padding: var(--space-3) var(--space-4); margin: 0; max-height: 140px; overflow-y: auto;
   white-space: pre-wrap; word-break: break-all;
 }
-.detail-pre-err { color: var(--color-danger); }
+.detail-pre-err { color: var(--color-danger-ink); }
 
 /* 视图切换已改用 .qd-btn + .qd-btn.is-on（见 styles/app.css） */
 
@@ -1747,7 +1747,7 @@ onUnmounted(() => {
   border: 1px solid var(--color-warning-border);
   border-radius: var(--radius-sm);
   background: var(--color-warning-bg);
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   font-size: var(--text-xs);
 }
 .offline-tag {
@@ -1812,6 +1812,6 @@ onUnmounted(() => {
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-muted); cursor: pointer;
 }
-.source-remove:hover { color: var(--color-danger); border-color: var(--color-danger); }
+.source-remove:hover { color: var(--color-danger-ink); border-color: var(--color-danger); }
 
 </style>

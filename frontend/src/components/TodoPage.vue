@@ -8,7 +8,7 @@ import { KEEP_ALIVE } from '../pages/keepAlive'
 defineOptions({ name: KEEP_ALIVE.todo })
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
-import { writeStored } from '../utils/storage'
+import { writeStored, removeStored } from '../utils/storage'
 import ConfirmDialog from './ConfirmDialog.vue'
 import EntityLinkPicker from './EntityLinkPicker.vue'
 import QdSearchBox from './QdSearchBox.vue'
@@ -193,21 +193,19 @@ function focusTitle(id: string): string {
 }
 
 function saveFocus() {
-  try {
-    if (!focusTodoId.value) {
-      localStorage.removeItem(FOCUS_KEY)
-      return
-    }
-    localStorage.setItem(FOCUS_KEY, JSON.stringify({
-      todoId: focusTodoId.value,
-      endAt: focusEndAt,
-      remaining: focusRemaining.value,
-      running: focusRunning.value,
-      total: focusTotalSec.value,
-      minutes: focusMinutes.value,
-      startedAt: focusStartedAt,
-    }))
-  } catch { /* localStorage 不可用（隐私模式等）时只影响跨页恢复 */ }
+  if (!focusTodoId.value) {
+    removeStored(FOCUS_KEY)
+    return
+  }
+  writeStored(FOCUS_KEY, JSON.stringify({
+    todoId: focusTodoId.value,
+    endAt: focusEndAt,
+    remaining: focusRemaining.value,
+    running: focusRunning.value,
+    total: focusTotalSec.value,
+    minutes: focusMinutes.value,
+    startedAt: focusStartedAt,
+  }))
 }
 
 function tickFocus() {
@@ -2065,7 +2063,7 @@ onUnmounted(() => {
 
 .todo-error {
   margin: var(--space-5) var(--space-7) 0; padding: var(--space-4) var(--space-5); font-size: var(--text-sm);
-  color: var(--color-danger); background: var(--color-danger-bg);
+  color: var(--color-danger-ink); background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); flex-shrink: 0;
 }
 
@@ -2173,8 +2171,8 @@ onUnmounted(() => {
   color: var(--color-text-secondary); font-size: var(--text-sm); font-family: inherit;
 }
 .pm-item:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.pm-item.danger:hover:not(:disabled) { color: var(--color-danger); background: var(--color-danger-bg); }
-.pm-item:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.pm-item.danger:hover:not(:disabled) { color: var(--color-danger-ink); background: var(--color-danger-bg); }
+.pm-item:disabled { color: var(--color-text-disabled); cursor: default; }
 .pm-hint {
   margin: var(--space-1) 0 0; padding: var(--space-2) var(--space-3) 0;
   border-top: 1px solid var(--color-border);
@@ -2203,7 +2201,7 @@ onUnmounted(() => {
   border: 1px solid transparent; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .status-pill.st-todo { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
-.status-pill.st-doing { background: var(--color-warning-bg); color: var(--color-warning); border-color: var(--color-warning-border); }
+.status-pill.st-doing { background: var(--color-warning-bg); color: var(--color-warning-ink); border-color: var(--color-warning-border); }
 .status-pill.st-done { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-accent-border); }
 
 /* 子任务（4.1）*/
@@ -2230,7 +2228,7 @@ onUnmounted(() => {
 .sub-move { display: flex; align-items: center; gap: 1px; opacity: 0; }
 .sub-item:hover .sub-move { opacity: 1; }
 .sub-act { width: 18px; height: 18px; }
-.sub-act:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.sub-act:disabled { color: var(--color-text-disabled); cursor: default; }
 .sub-add { margin-top: var(--space-1); }
 .sub-input { height: 28px; font-size: var(--text-sm); }
 
@@ -2270,7 +2268,7 @@ onUnmounted(() => {
 .kanban-card-meta { margin-top: 5px; display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center; }
 /* 卡片上的截止日：逾期改用警示色，扫一眼就知道哪张拖后腿了 */
 .kanban-due { font-size: var(--text-2xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
-.kanban-due.overdue { color: var(--color-danger); font-weight: 500; }
+.kanban-due.overdue { color: var(--color-danger-ink); font-weight: 500; }
 /* 拖拽落点：整列描边提示，比只高亮卡片更容易判断"会落到哪一列" */
 .kanban-col.drag-over { border-color: var(--color-accent); background: var(--color-accent-bg); }
 .kanban-empty {
@@ -2448,7 +2446,7 @@ onUnmounted(() => {
 .todo-main { flex: 1; min-width: 0; }
 .todo-name { font-size: var(--text-md); color: var(--color-text-primary); }
 .todo-meta { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: 3px; display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center; }
-.overdue-text { color: var(--color-danger); }
+.overdue-text { color: var(--color-danger-ink); }
 .meta-pill { display: inline-flex; align-items: center; gap: 3px; color: var(--color-text-muted); }
 .meta-pill.sent { color: var(--color-text-muted); }
 .done-pill { color: var(--color-accent); }
@@ -2468,7 +2466,7 @@ onUnmounted(() => {
   border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .act:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
-.act.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.act.danger:hover { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 .focus-act { font-size: var(--text-xs); font-weight: 600; color: var(--color-accent); min-width: 34px; }
 .focus-act.running { background: var(--color-accent-bg); color: var(--color-accent); }
 
@@ -2486,7 +2484,7 @@ onUnmounted(() => {
 
 /* 弹窗内错误条：页面级 .todo-error 在遮罩下面，弹窗必须自带一处反馈。
    与 SchedulePage / MonitorPage 的 .form-err 同口径。 */
-.form-err { margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3); font-size: var(--text-sm); color: var(--color-danger); background: var(--color-danger-bg); border: 1px solid var(--color-danger-border); border-radius: var(--radius-sm); }
+.form-err { margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3); font-size: var(--text-sm); color: var(--color-danger-ink); background: var(--color-danger-bg); border: 1px solid var(--color-danger-border); border-radius: var(--radius-sm); }
 
 /* 看板卡片：标题与最小操作集同一行。操作按钮常驻但弱化，聚焦时补回对比度，
    避免 hover 才显形导致键盘用户 Tab 到透明按钮上（横向共性里的可达性问题）。 */

@@ -1363,11 +1363,11 @@ async function copyPath(e: SftpEntry) {
 
 .sftp-tool:disabled {
   cursor: default;
-  opacity: var(--opacity-disabled);
+  color: var(--color-text-disabled);
 }
 
 .sftp-tool--danger:hover:not(:disabled) {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   background: var(--color-danger-bg);
 }
 
@@ -1518,12 +1518,12 @@ async function copyPath(e: SftpEntry) {
 }
 
 .sftp-progress-cancel:hover:not(:disabled) {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   border-color: var(--color-danger-border);
 }
 
 .sftp-progress-cancel:disabled {
-  opacity: var(--opacity-disabled);
+  color: var(--color-text-disabled); border-color: var(--color-border);
   cursor: default;
 }
 
@@ -1600,12 +1600,12 @@ async function copyPath(e: SftpEntry) {
 }
 
 .sftp-selbtn:disabled {
-  opacity: var(--opacity-disabled);
+  color: var(--color-text-disabled);
   cursor: not-allowed;
 }
 
 .sftp-selbtn--danger:hover:not(:disabled) {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   border-color: var(--color-danger);
 }
 
@@ -1644,7 +1644,7 @@ async function copyPath(e: SftpEntry) {
   margin: var(--space-4) var(--space-5);
   padding: var(--space-3) var(--space-4);
   font-size: var(--text-sm);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   background: var(--color-danger-bg);
   border-radius: var(--radius-xs);
 }
@@ -1816,13 +1816,13 @@ async function copyPath(e: SftpEntry) {
 }
 
 .op--danger:hover:not(:disabled) {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   background: var(--color-danger-bg);
 }
 
 .op:disabled {
   cursor: default;
-  opacity: var(--opacity-disabled);
+  color: var(--color-text-disabled);
 }
 
 .sftp-note {
@@ -1892,7 +1892,7 @@ async function copyPath(e: SftpEntry) {
 
 .sfp-hint {
   font-size: var(--text-xs);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 
 .sfp-foot {
@@ -1925,7 +1925,7 @@ async function copyPath(e: SftpEntry) {
 
 .sfp-btn--primary:disabled {
   cursor: default;
-  opacity: var(--opacity-disabled);
+  background: var(--color-bg-tertiary); color: var(--color-text-disabled); border-color: var(--color-border);
 }
 
 /* ---- 行右键菜单 ---- */
@@ -1962,7 +1962,7 @@ async function copyPath(e: SftpEntry) {
 }
 .sfp-menu-item:hover:not(:disabled) { background: var(--color-bg-hover); }
 .sfp-menu-item:disabled { color: var(--color-text-disabled); cursor: default; }
-.sfp-menu-item--danger { color: var(--color-danger); }
+.sfp-menu-item--danger { color: var(--color-danger-ink); }
 .sfp-menu-item--danger:hover:not(:disabled) { background: var(--color-danger-bg); }
 .sfp-menu-sep {
   height: 1px;
@@ -2009,7 +2009,7 @@ async function copyPath(e: SftpEntry) {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
-.props-note--warn { color: var(--color-warning); }
+.props-note--warn { color: var(--color-warning-ink); }
 
 .sfp-enter-active,
 .sfp-leave-active {

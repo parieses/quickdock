@@ -1260,7 +1260,7 @@ function shortTime(s: string): string {
   border: 1px solid var(--color-border);
 }
 .nd-chip.is-on {
-  color: var(--color-success);
+  color: var(--color-success-ink);
   background: var(--color-success-bg);
   border-color: transparent;
 }
@@ -1271,7 +1271,7 @@ function shortTime(s: string): string {
 }
 /* 外部网关连不上：既不是运行中也不是「没装」，用警告色区别于普通灰色 */
 .nd-chip.is-warn {
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   background: var(--color-warning-bg);
   border-color: transparent;
 }
@@ -1306,7 +1306,7 @@ function shortTime(s: string): string {
   color: var(--color-text-muted);
 }
 .nd-hero.is-warn {
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   border-color: var(--color-warning-border);
   background: var(--color-warning-bg);
 }
@@ -1354,7 +1354,7 @@ function shortTime(s: string): string {
   cursor: pointer;
 }
 .nd-text-link:hover { text-decoration: underline; }
-.nd-text-link:disabled { opacity: var(--opacity-disabled); cursor: default; text-decoration: none; }
+.nd-text-link:disabled { color: var(--color-text-disabled); cursor: default; text-decoration: none; }
 
 .nd-cta { min-width: 180px; }
 /* 页头纯图标按钮（断开外部网关）：qd-btn 自带左右 padding，收成方形 */
@@ -1447,7 +1447,7 @@ function shortTime(s: string): string {
   gap: var(--space-2);
 }
 .nd-tool.is-danger {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 
 /* ---- 搜索提示 / 批量操作条 ---- */
@@ -1619,7 +1619,7 @@ function shortTime(s: string): string {
   color: var(--color-text-primary);
 }
 .nd-act-btn.is-danger:hover {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 .nd-tip {
   padding: var(--space-9);
@@ -1660,7 +1660,7 @@ function shortTime(s: string): string {
   color: var(--color-accent);
 }
 .nd-job-dir.is-down {
-  color: var(--color-success);
+  color: var(--color-success-ink);
 }
 .nd-job-name {
   overflow: hidden;

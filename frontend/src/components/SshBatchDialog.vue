@@ -59,6 +59,7 @@ import {
 } from '../utils/ssh'
 import { buildSshTree, flattenSshTree } from '../utils/sshTree'
 
+import { writeStored, removeStored } from '../utils/storage'
 const props = defineProps<{
   hosts: SshHost[]
   /** 打开时要预先勾选的主机 id（从分组菜单进来时带上整个子树） */
@@ -643,15 +644,11 @@ function saveLastBatch() {
       summary: summary.value,
       results,
     }
-    localStorage.setItem(LAST_KEY, JSON.stringify(snap))
+    writeStored(LAST_KEY, JSON.stringify(snap))
   } catch {
     // 写不进去（配额满 / 隐私模式）就算了：这是「顺手记一下」，
     // 不该因为它让一次已经执行完的批量跑看起来失败了。
-    try {
-      localStorage.removeItem(LAST_KEY)
-    } catch {
-      /* 连删都失败就彻底放弃，不影响执行 */
-    }
+    removeStored(LAST_KEY)
   }
 }
 
@@ -1109,7 +1106,7 @@ onBeforeUnmount(() => {
 
 .batch-mini:disabled {
   cursor: default;
-  opacity: var(--opacity-disabled);
+  color: var(--color-text-disabled);
 }
 
 .batch-pick-list {
@@ -1149,7 +1146,7 @@ onBeforeUnmount(() => {
 
 .batch-pick-row:disabled {
   cursor: default;
-  opacity: var(--opacity-disabled-soft);
+  color: var(--color-text-disabled); background: var(--color-bg-tertiary); 
 }
 
 /* 自绘勾选框：原生 checkbox 在暗色主题下与整体风格完全脱节，
@@ -1209,7 +1206,7 @@ onBeforeUnmount(() => {
 }
 
 .batch-env.env-staging {
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   background: var(--color-warning-bg);
   border-color: var(--color-warning-border);
 }
@@ -1300,7 +1297,7 @@ onBeforeUnmount(() => {
 }
 
 .batch-warn {
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   background: var(--color-warning-bg);
   border-color: var(--color-warning-border);
 }
@@ -1341,7 +1338,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: var(--space-2);
   font-weight: 600;
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
 }
 
 .batch-skip-hint {
@@ -1420,7 +1417,7 @@ onBeforeUnmount(() => {
 
 .batch-run:disabled {
   cursor: default;
-  opacity: var(--opacity-disabled);
+  background: var(--color-bg-tertiary); color: var(--color-text-disabled); border-color: var(--color-border);
 }
 
 .batch-stop {
@@ -1469,7 +1466,7 @@ onBeforeUnmount(() => {
 .batch-results-last {
   padding: 1px var(--space-2);
   font-size: var(--text-2xs);
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   background: var(--color-bg-secondary);
   border-radius: var(--radius-xs);
 }
@@ -1502,7 +1499,7 @@ onBeforeUnmount(() => {
 }
 
 .batch-results-tool:disabled {
-  opacity: var(--opacity-disabled);
+  color: var(--color-text-disabled);
   cursor: default;
 }
 
@@ -1593,13 +1590,13 @@ onBeforeUnmount(() => {
 }
 
 .batch-badge[data-status='ok'] {
-  color: var(--color-success);
+  color: var(--color-success-ink);
   background: var(--color-success-bg);
   border-color: var(--color-success-border);
 }
 
 .batch-badge[data-status='failed'] {
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   background: var(--color-warning-bg);
   border-color: var(--color-warning-border);
 }
@@ -1647,7 +1644,7 @@ onBeforeUnmount(() => {
   outline: none;
 }
 .batch-snip-select:focus { border-color: var(--color-border-focus-soft); }
-.batch-snip-select:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.batch-snip-select:disabled { color: var(--color-text-disabled); cursor: default; }
 .batch-snip-empty { font-size: var(--text-xs); color: var(--color-text-muted); }
 .batch-snip-btn {
   flex: 0 0 auto;
@@ -1666,7 +1663,7 @@ onBeforeUnmount(() => {
   background: var(--color-danger-bg);
   border-color: var(--color-danger-border);
 }
-.batch-snip-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.batch-snip-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 .batch-snip-save { display: flex; align-items: center; gap: var(--space-2); }
 .batch-snip-input {
   flex: 1 1 auto;

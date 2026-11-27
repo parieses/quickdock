@@ -29,6 +29,7 @@ import { useToast } from '../composables/useToast'
 import { useSaveAs } from '../composables/useSaveAs'
 import AiPanel, { type AiPanelCommand, type AiPanelResult } from './AiPanel.vue'
 
+import { writeStored } from '../utils/storage'
 const props = defineProps<{
   sessionId: string
   /**
@@ -143,12 +144,7 @@ function readThinking(): boolean {
 }
 const thinking = ref(readThinking())
 watch(thinking, (v) => {
-  if (typeof localStorage === 'undefined') return
-  try {
-    localStorage.setItem(THINKING_KEY, v ? '1' : '0')
-  } catch {
-    // 隐私模式 / 存储被禁：退化为「仅本次运行有效」，不影响功能
-  }
+  writeStored(THINKING_KEY, v ? '1' : '0')
 })
 
 /**
@@ -544,13 +540,13 @@ function saveAsResult(e: MouseEvent) {
 }
 
 .ssh-ai-env.is-prod {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   background: var(--color-danger-bg);
   border-color: var(--color-danger-border);
 }
 
 .ssh-ai-env.is-staging {
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   background: var(--color-warning-bg);
   border-color: var(--color-warning-border);
 }
@@ -689,13 +685,13 @@ function saveAsResult(e: MouseEvent) {
  */
 .ssh-ai-btn.run.confirm,
 .ssh-ai-btn.run.confirm:hover {
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   background: var(--color-warning-bg);
 }
 
 .ssh-ai-btn.ok,
 .ssh-ai-btn.ok:hover {
-  color: var(--color-success);
+  color: var(--color-success-ink);
 }
 
 /* 替代「执行」的说明。用 disabled 灰而不是 warning 黄：

@@ -541,8 +541,8 @@ defineExpose({ capturing })
 .hk-reset.is-idle { visibility: hidden; }
 
 .hk-actions { display: flex; align-items: center; gap: var(--space-5); margin-top: var(--space-5); }
-.hk-msg { margin: 0; font-size: var(--text-sm); color: var(--color-success); }
-.hk-msg.is-error { color: var(--color-danger); }
+.hk-msg { margin: 0; font-size: var(--text-sm); color: var(--color-success-ink); }
+.hk-msg.is-error { color: var(--color-danger-ink); }
 
 .hk-tip {
   margin: var(--space-5) 0 0;

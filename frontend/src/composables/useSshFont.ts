@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 
+import { writeStored } from '../utils/storage'
 /**
  * SSH 终端字号：一个进程内共享的偏好。
  *
@@ -42,13 +43,6 @@ export function setSshFontSize(next: number): void {
   const size = clamp(next)
   if (size === sshFontSize.value) return
   sshFontSize.value = size
-  try {
-    localStorage.setItem(FONT_SIZE_KEY, String(size))
-  } catch {
-    /* 存不住也能用，只是下次启动回默认 */
-  }
-}
-
-export function useSshFontSize() {
-  return { sshFontSize, setSshFontSize, SSH_FONT_MIN, SSH_FONT_MAX }
+  // 存不住（配额满 / 隐私模式）由 writeStored 兜住：只是下次启动回默认
+  writeStored(FONT_SIZE_KEY, String(size))
 }

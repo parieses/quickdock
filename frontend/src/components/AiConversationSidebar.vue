@@ -788,7 +788,7 @@ onBeforeUnmount(() => {
   font-family: inherit; cursor: pointer;
 }
 .ai-conv-more:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
-.ai-conv-more:disabled { opacity: var(--opacity-disabled-soft); cursor: default; }
+.ai-conv-more:disabled { color: var(--color-text-disabled); cursor: default; }
 /* 空间内的「更多」跟着任务缩进，否则会和空间名对齐，看着像另一个空间 */
 .ai-conv-more.is-in-space { margin-left: 26px; margin-right: 0; }
 
@@ -840,8 +840,8 @@ onBeforeUnmount(() => {
 }
 .ai-conv-ctx-item:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .ai-conv-ctx-item:hover:not(:disabled) .ai-conv-ctx-ico { opacity: 1; }
-.ai-conv-ctx-item:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.ai-conv-ctx-item:disabled { color: var(--color-text-disabled); cursor: default; }
 /* 删除：平时就用危险色，hover 再加一层淡红底——比「和别的项一样、只是字更红」更容易辨认 */
-.ai-conv-ctx-item.danger { color: var(--color-danger); }
-.ai-conv-ctx-item.danger:hover:not(:disabled) { background: var(--color-danger-bg); color: var(--color-danger); }
+.ai-conv-ctx-item.danger { color: var(--color-danger-ink); }
+.ai-conv-ctx-item.danger:hover:not(:disabled) { background: var(--color-danger-bg); color: var(--color-danger-ink); }
 </style>

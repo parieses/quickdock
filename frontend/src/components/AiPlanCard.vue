@@ -105,7 +105,7 @@ function doneCount(card: { items: Array<{ status: string }> }): number {
   border: 1px solid var(--color-border); border-radius: 50%;
   color: var(--color-accent-text);
 }
-.ai-plan-item.is-done .ai-plan-box { border-color: var(--color-success); color: var(--color-success); }
+.ai-plan-item.is-done .ai-plan-box { border-color: var(--color-success); color: var(--color-success-ink); }
 .ai-plan-item.is-done .ai-plan-text { color: var(--color-text-muted); }
 .ai-plan-item.is-doing .ai-plan-box { border-color: var(--color-accent); }
 .ai-plan-doing {

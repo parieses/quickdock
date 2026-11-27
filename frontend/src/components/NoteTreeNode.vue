@@ -209,7 +209,7 @@ function onDragStart(e: DragEvent) {
 }
 .tn-row.sel-on:hover, .tn-row.active:hover { background: var(--color-select-bg); }
 .tn-icon { flex-shrink: 0; color: var(--color-accent); }
-.tn-doc .tn-icon { color: var(--color-warning); }
+.tn-doc .tn-icon { color: var(--color-warning-ink); }
 .tn-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tn-count { font-size: var(--text-2xs); color: var(--color-text-muted); background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 var(--space-3); flex-shrink: 0; }
 
@@ -223,7 +223,7 @@ function onDragStart(e: DragEvent) {
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 .tn-act:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
-.tn-act.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.tn-act.danger:hover { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 
 .tn-input { flex: 1; min-width: 0; padding: var(--space-1) var(--space-3); border: 1px solid var(--color-accent); border-radius: var(--radius-xs); background: var(--color-bg-primary); color: var(--color-text-primary); font-size: var(--text-sm); outline: none; }
 .tn-children { margin-left: var(--space-5); }

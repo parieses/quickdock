@@ -455,7 +455,7 @@ function onKeydown(e: KeyboardEvent) {
 .cred-err {
   margin: 0 0 10px;
   font-size: var(--text-xs);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 
 .cred-foot {

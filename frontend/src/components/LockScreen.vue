@@ -481,7 +481,7 @@ onUnmounted(() => {
   padding: var(--space-3) var(--space-4);
   font-size: var(--text-sm);
   line-height: 1.5;
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border);
   border-radius: var(--radius-sm);

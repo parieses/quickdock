@@ -4377,7 +4377,7 @@ onUnmounted(() => {
   border: 1px solid var(--color-danger);
   border-radius: var(--radius-sm);
   background: var(--color-danger-bg);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   font-size: var(--text-sm);
 }
 .ai-landing-error-text {
@@ -4392,7 +4392,7 @@ onUnmounted(() => {
   border: 1px solid var(--color-danger);
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   font-size: var(--text-xs);
   cursor: pointer;
 }

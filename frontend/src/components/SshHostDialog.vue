@@ -975,7 +975,7 @@ select.fd-input {
 }
 
 .hd-adv-warn {
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
 }
 
 /* 分段选择器已统一到 QdTabs；这里只保留它作为 flex 子项的对齐方式。 */
@@ -1014,12 +1014,12 @@ select.fd-input {
 }
 
 .hd-msg--err {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   background: var(--color-danger-bg);
 }
 
 .hd-msg--ok {
-  color: var(--color-success);
+  color: var(--color-success-ink);
   background: var(--color-success-bg);
 }
 
@@ -1055,7 +1055,7 @@ select.fd-input {
 
 .btn:disabled {
   cursor: default;
-  opacity: var(--opacity-disabled);
+  color: var(--color-text-disabled);
 }
 
 .btn-outline {

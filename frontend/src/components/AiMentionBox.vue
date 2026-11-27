@@ -87,7 +87,7 @@ function keyOf(m: AIMentionItem, i: number): string {
   cursor: pointer; font-size: var(--text-md); line-height: 1; padding: 0 var(--space-1);
 }
 
-.ai-mention-chip-del:hover { color: var(--color-danger); }
+.ai-mention-chip-del:hover { color: var(--color-danger-ink); }
 
 .ai-mention-pop {
   position: absolute; left: 16px; right: 16px; bottom: calc(100% - 6px);

@@ -635,7 +635,7 @@ onBeforeUnmount(() => {
   border-color: var(--color-danger-border);
 }
 .qex-env.env-staging {
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   background: var(--color-warning-bg);
   border-color: var(--color-warning-border);
 }
@@ -693,7 +693,7 @@ onBeforeUnmount(() => {
   border: 1px solid transparent;
 }
 .qex-warn {
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   background: var(--color-warning-bg);
   border-color: var(--color-warning-border);
 }
@@ -730,7 +730,7 @@ onBeforeUnmount(() => {
   background: var(--color-danger-bg);
   border-color: var(--color-danger-border);
 }
-.qex-run:disabled { cursor: default; opacity: var(--opacity-disabled); }
+.qex-run:disabled { cursor: default; background: var(--color-bg-tertiary); color: var(--color-text-disabled); border-color: var(--color-border); }
 
 .qex-spin { animation: qex-spin 900ms linear infinite; }
 @keyframes qex-spin { to { transform: rotate(360deg); } }
@@ -752,9 +752,9 @@ onBeforeUnmount(() => {
 }
 .qex-result-meta em { font-style: normal; opacity: 0.75; }
 .qex-code { font-family: var(--font-mono); }
-.qex-code[data-ok='1'] { color: var(--color-success); }
-.qex-code[data-ok='0'] { color: var(--color-warning); }
-.qex-trunc { color: var(--color-warning); }
+.qex-code[data-ok='1'] { color: var(--color-success-ink); }
+.qex-code[data-ok='0'] { color: var(--color-warning-ink); }
+.qex-trunc { color: var(--color-warning-ink); }
 .qex-mini {
   display: flex; align-items: center;
   padding: var(--space-1) 5px;
@@ -807,7 +807,7 @@ onBeforeUnmount(() => {
   outline: none;
 }
 .qex-snip-select:focus { border-color: var(--color-border-focus-soft); }
-.qex-snip-select:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.qex-snip-select:disabled { color: var(--color-text-disabled); cursor: default; }
 .qex-snip-empty { font-size: var(--text-xs); color: var(--color-text-muted); }
 .qex-snip-btn {
   flex: 0 0 auto;
@@ -826,7 +826,7 @@ onBeforeUnmount(() => {
   background: var(--color-danger-bg);
   border-color: var(--color-danger-border);
 }
-.qex-snip-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.qex-snip-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 .qex-snip-save { display: flex; align-items: center; gap: var(--space-2); }
 .qex-snip-input {
   flex: 1 1 auto;

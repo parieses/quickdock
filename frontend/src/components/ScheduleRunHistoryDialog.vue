@@ -195,7 +195,7 @@ function close() {
 
 .dlg-error {
   margin-bottom: var(--space-3); padding: var(--space-4) var(--space-5); font-size: var(--text-sm);
-  color: var(--color-danger); background: var(--color-danger-bg);
+  color: var(--color-danger-ink); background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-md);
 }
 
@@ -209,8 +209,8 @@ function close() {
   border: 1px solid var(--card-border-color); border-radius: var(--radius-md);
 }
 .run-status { display: flex; align-items: center; }
-.run-row.ok .run-status { color: var(--color-success); }
-.run-row.fail .run-status { color: var(--color-danger); }
+.run-row.ok .run-status { color: var(--color-success-ink); }
+.run-row.fail .run-status { color: var(--color-danger-ink); }
 .run-row.skipped .run-status { color: var(--color-text-muted); }
 .run-time { font-size: var(--text-sm); color: var(--color-text-secondary); white-space: nowrap; }
 .run-dur { font-size: var(--text-sm); color: var(--color-text-muted); text-align: right; font-variant-numeric: tabular-nums; }

@@ -237,7 +237,7 @@
 .qd-btn-danger, .btn-danger {
   border-color: var(--color-danger-border);
   background: var(--color-danger-bg);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 .qd-btn-danger:hover, .btn-danger:hover {
   background: var(--color-danger);
@@ -590,11 +590,11 @@
 
 .ai-rich-chip:hover .ai-rich-chip-x { opacity: 1; }
 
-.ai-rich-chip-x:hover { color: var(--color-danger); }
+.ai-rich-chip-x:hover { color: var(--color-danger-ink); }
 
 /* 粘贴折叠 chip：用告警色区别于技能胶囊（技能=指令，粘贴=外部数据、需留意）。 */
 .ai-rich-paste-chip { background: var(--color-warning-bg); border-color: var(--color-warning-border); }
-.ai-rich-paste-chip .ai-rich-chip-icon { color: var(--color-warning); }
+.ai-rich-paste-chip .ai-rich-chip-icon { color: var(--color-warning-ink); }
 
 .ai-go-settings {
   padding: 7px var(--space-6); border: none; border-radius: var(--radius-md);
@@ -618,7 +618,7 @@
 
 /* 运行中不让加图：图片要过一次闸门 + 落盘，插不进已经开始跑的那一轮。
    灰掉而不是藏起来——藏起来会让人以为功能坏了。 */
-.ai-tool-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.ai-tool-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 .ai-tool-btn:disabled:hover { color: var(--color-text-muted); border-color: var(--color-border); }
 
 .ai-attach-preview { display: flex; flex-wrap: wrap; gap: var(--space-4); }
@@ -743,7 +743,7 @@
 }
 .op-btn:hover { background: var(--color-bg-primary); color: var(--color-text-primary); }
 .op-btn.on { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-border-focus); }
-.op-btn.danger:hover { background: var(--color-danger-bg); color: var(--color-danger); border-color: var(--color-danger); }
+.op-btn.danger:hover { background: var(--color-danger-bg); color: var(--color-danger-ink); border-color: var(--color-danger); }
 
 .log-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
   height: 28px; padding: 0 11px; font-size: var(--text-sm); cursor: pointer;

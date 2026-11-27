@@ -111,7 +111,7 @@ onMounted(loadEverything)
   max-width: 36em;
   border-radius: var(--radius-sm);
   background: var(--color-warning-bg);
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   font-size: var(--text-sm);
   line-height: 1.6;
   text-align: left;

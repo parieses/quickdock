@@ -80,6 +80,7 @@ import { formatBytes } from '../utils/bytes'
 import { RUNTIME_DOCS } from '../utils/runtimeDocs'
 
 import { reportError } from '../utils/reportError'
+import { writeStored } from '../utils/storage'
 const { t, locale } = useI18n()
 const toast = inject<{ error: (m: string) => void; success: (m: string) => void }>('toast')!
 
@@ -667,11 +668,8 @@ function readSourcePref(id: string): { source: string; custom: string } {
 }
 
 function saveSourcePref(id: string, source: string, custom: string) {
-  try {
-    localStorage.setItem(sourcePrefKey(id), JSON.stringify({ source, custom }))
-  } catch {
-    // 隐私模式或配额满：静默放弃，源选择退回「本次会话内有效」，不影响安装
-  }
+  // 隐私模式或配额满由 writeStored 兜住：静默放弃，源选择退回「本次会话内有效」
+  writeStored(sourcePrefKey(id), JSON.stringify({ source, custom }))
 }
 
 // onSourceChange 切源后立即落盘；自定义源模板变更（失焦）也走这里。
@@ -3648,7 +3646,7 @@ const dialogCtx = reactive({
   border-radius: var(--radius-sm); background: var(--color-warning-bg);
   font-size: var(--text-xs); line-height: 1.6; color: var(--color-text-secondary);
 }
-.doc-pop-tip .doc-pop-label { margin: 0; flex-shrink: 0; color: var(--color-warning); }
+.doc-pop-tip .doc-pop-label { margin: 0; flex-shrink: 0; color: var(--color-warning-ink); }
 .doc-pop-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .doc-chip {
   padding: 1px 7px; border-radius: var(--radius-full);
@@ -3741,7 +3739,7 @@ const dialogCtx = reactive({
 }
 .ollama-ver-label { color: var(--color-text-muted); }
 .ollama-ver-cur { font-family: var(--font-mono); color: var(--color-text-primary); }
-.ollama-ver-new { color: var(--color-warning); }
+.ollama-ver-new { color: var(--color-warning-ink); }
 .ollama-ver-ok { color: var(--color-text-muted); }
 .ollama-ver-refresh { margin-left: auto; }
 .ollama-run-row { grid-template-columns: 1.6fr 0.8fr 1.6fr; }
@@ -3826,9 +3824,9 @@ const dialogCtx = reactive({
 }
 .git-row:not(.git-head) .g-item { font-weight: 600; color: var(--color-text-primary); }
 .g-status { display: inline-flex; align-items: center; gap: var(--space-3); font-size: var(--text-sm); text-transform: capitalize; }
-.g-status.ok { color: var(--color-success); }
-.g-status.warn { color: var(--color-warning); }
-.g-status.fail { color: var(--color-danger); }
+.g-status.ok { color: var(--color-success-ink); }
+.g-status.warn { color: var(--color-warning-ink); }
+.g-status.fail { color: var(--color-danger-ink); }
 .g-status.missing { color: var(--color-text-muted); }
 .g-cmd code { font-size: var(--text-xs); color: var(--color-text-secondary); background: var(--color-bg-primary); padding: var(--space-1) var(--space-3); border-radius: var(--radius-xs); }
 .g-path, .g-result {
@@ -3860,19 +3858,19 @@ const dialogCtx = reactive({
 }
 .col-note { font-family: inherit; }
 .env-badge { font-size: var(--text-xs); padding: var(--space-1) var(--space-4); border-radius: var(--radius-md); width: fit-content; }
-.env-badge.on { background: var(--color-success-bg); color: var(--color-success); }
+.env-badge.on { background: var(--color-success-bg); color: var(--color-success-ink); }
 .env-badge.off { background: var(--color-bg-primary); color: var(--color-text-muted); }
 
 .col-svc { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
 .svc-usage { font-size: var(--text-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .status { display: inline-flex; align-items: center; gap: 5px; font-size: var(--text-xs); color: var(--color-text-muted); }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-text-disabled); }
-.status.on { color: var(--color-success); }
+.status.on { color: var(--color-success-ink); }
 .status.on .status-dot { background: var(--color-success); }
-.status.unknown { color: var(--color-warning); }
+.status.unknown { color: var(--color-warning-ink); }
 .status.unknown .status-dot { background: var(--color-warning); }
 /* 健康探活 pending：进程在但端口没监听，用黄色区别于「运行中」的绿与「停止」的灰 */
-.status.health-pending, .status.on.health-pending { color: var(--color-warning); }
+.status.health-pending, .status.on.health-pending { color: var(--color-warning-ink); }
 .status.health-pending .status-dot, .status.on.health-pending .status-dot { background: var(--color-warning); }
 .status-dot.ok { background: var(--color-success); }
 .status-dot.warn { background: var(--color-warning); }
@@ -3883,12 +3881,12 @@ const dialogCtx = reactive({
   font-family: inherit; color: var(--color-accent-text); transition: opacity var(--transition-fast);
 }
 /* 状态/操作色用 -bg 低透明底 + 同色文字：四个实色块同屏会盖过标题层级。 */
-.svc-btn.start { background: var(--color-success-bg); color: var(--color-success); }
-.svc-btn.stop { background: var(--color-danger-bg); color: var(--color-danger); }
+.svc-btn.start { background: var(--color-success-bg); color: var(--color-success-ink); }
+.svc-btn.stop { background: var(--color-danger-bg); color: var(--color-danger-ink); }
 .svc-btn.restart { background: var(--color-accent-bg); color: var(--color-accent); }
 .svc-btn.console { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .svc-btn:hover { opacity: 0.9; }
-.svc-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.svc-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 .svc-port { font-size: var(--text-xs); color: var(--color-text-muted); }
 
 .port-conflict-banner {
@@ -3900,11 +3898,11 @@ const dialogCtx = reactive({
   border-radius: var(--radius-md);
   background: var(--color-warning-bg);
   border: 1px solid var(--color-warning-border);
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   font-size: var(--text-sm);
   line-height: 1.5;
 }
-.dark .port-conflict-banner { color: var(--color-warning); }
+.dark .port-conflict-banner { color: var(--color-warning-ink); }
 .pc-icon { font-size: var(--text-base); line-height: 1; }
 .svc-port-link {
   padding: 0;
@@ -3916,7 +3914,7 @@ const dialogCtx = reactive({
   transition: color var(--transition-fast);
 }
 .svc-port-link:hover { color: var(--color-accent); text-decoration: underline; }
-.svc-port-link.disabled { cursor: default; opacity: var(--opacity-disabled); }
+.svc-port-link.disabled { cursor: default; color: var(--color-text-disabled); }
 .svc-port-link.disabled:hover { color: var(--color-text-disabled); text-decoration: none; }
 
 /* 端口全景弹窗 */
@@ -3924,12 +3922,12 @@ const dialogCtx = reactive({
 
 .col-ops { position: relative; display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; }
 /* .op-btn 基干已抽到 styles/app.css，这里只留本页差异项。 */
-.op-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.op-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 .op-btn.small { border-radius: var(--radius-sm); padding: var(--space-1) 9px; font-size: var(--text-xs); }
 .op-btn.primary { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
 .op-btn.primary:hover:not(:disabled) { background: var(--color-accent-hover); }
-.badge.ok { background: var(--color-success-bg); color: var(--color-success); }
-.badge.warn { background: var(--color-warning-bg); color: var(--color-warning); }
+.badge.ok { background: var(--color-success-bg); color: var(--color-success-ink); }
+.badge.warn { background: var(--color-warning-bg); color: var(--color-warning-ink); }
 
 
 /* ---- 证书签发面板 ---- */
@@ -3965,12 +3963,12 @@ const dialogCtx = reactive({
 .mcp-tools { display: flex; flex-direction: column; gap: var(--space-2); }
 .mcp-actions { display: flex; gap: var(--space-3); flex-wrap: wrap; margin: 10px 0; }
 .mcp-check { margin: 0 0 var(--space-4); font-size: var(--text-sm); }
-.mcp-check.ok { color: var(--color-success); }
-.mcp-check.err { color: var(--color-danger); }
+.mcp-check.ok { color: var(--color-success-ink); }
+.mcp-check.err { color: var(--color-danger-ink); }
 .mcp-note { margin: 0 0 var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); }
 .mcp-token-value { font-family: var(--font-mono); letter-spacing: .5px; }
 .mcp-token-require { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-1) 0 var(--space-3); font-size: var(--text-sm); color: var(--color-text-secondary); cursor: pointer; }
-.mcp-level-hint { margin: 0 0 var(--space-3); font-size: var(--text-xs); color: var(--color-warning); }
+.mcp-level-hint { margin: 0 0 var(--space-3); font-size: var(--text-xs); color: var(--color-warning-ink); }
 .mcp-client-path { margin: 0 0 var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); word-break: break-all; }
 .mcp-client-actions { display: flex; align-items: center; gap: var(--space-4); flex: none; }
 /* 两条类选择器压过后面的 .env-input{width:100%}：下拉要有确定宽度，
@@ -4022,13 +4020,13 @@ const dialogCtx = reactive({
 }
 .op-item:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
 .op-item.on { color: var(--color-accent-ink); }
-.op-item.danger:hover { background: var(--color-danger-bg); color: var(--color-danger); }
-.op-item:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.op-item.danger:hover { background: var(--color-danger-bg); color: var(--color-danger-ink); }
+.op-item:disabled { color: var(--color-text-disabled); cursor: default; }
 .menu-backdrop { position: fixed; inset: 0; z-index: var(--z-ctx-backdrop); }
 .env-install-btn.danger { background: var(--color-danger); }
 .env-install-btn.danger:hover { opacity: 0.9; }
 .env-header-actions { display: flex; align-items: center; gap: var(--space-4); }
-.path-flag.ok { color: var(--color-success); background: var(--color-success-bg); }
+.path-flag.ok { color: var(--color-success-ink); background: var(--color-success-bg); }
 .path-summary-dot.ok { background: var(--color-success); }
 
 /* .empty-state 基干已抽到 app.css */
@@ -4156,12 +4154,12 @@ const dialogCtx = reactive({
   transition: border-color var(--transition-fast), filter var(--transition-fast);
 }
 .env-badge.clickable:hover { border-color: var(--color-success-border); filter: brightness(0.97); }
-.env-dup-fix { margin-left: auto; border-color: var(--color-warning-border); color: var(--color-warning); }
+.env-dup-fix { margin-left: auto; border-color: var(--color-warning-border); color: var(--color-warning-ink); }
 .env-dup-fix:hover { background: transparent; border-color: var(--color-warning); }
 
 .install-grid { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
 .cur-ver { font-weight: 600; color: var(--color-text-primary); font-family: var(--font-mono); }
-.up-to-date { color: var(--color-success); font-size: var(--text-sm); font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
+.up-to-date { color: var(--color-success-ink); font-size: var(--text-sm); font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
 .install-input-wrap { flex: 1; min-width: 160px; }
 .env-input, .env-select {
   width: 100%; min-width: 0;
@@ -4185,8 +4183,8 @@ const dialogCtx = reactive({
   font-family: inherit; transition: background var(--transition-fast);
 }
 .link-btn:hover { background: var(--color-accent-bg); }
-.link-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
-.link-btn.danger { color: var(--color-danger); border-color: var(--color-danger); }
+.link-btn:disabled { color: var(--color-text-disabled); border-color: var(--color-border); cursor: default; }
+.link-btn.danger { color: var(--color-danger-ink); border-color: var(--color-danger); }
 .link-btn.danger:hover { background: var(--color-danger-bg); }
 .env-install-btn {
   flex-shrink: 0; padding: var(--space-4) var(--space-6); border-radius: var(--radius-sm); border: none;
@@ -4195,7 +4193,7 @@ const dialogCtx = reactive({
 }
 .env-install-btn:hover { opacity: 0.9; }
 .env-install-btn.busy { opacity: 0.7; cursor: default; }
-.env-install-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.env-install-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 
 .env-progress { display: flex; flex-direction: column; gap: 5px; margin-top: var(--space-5); }
 .env-progress-bar { height: 6px; background: var(--color-bg-tertiary); border-radius: var(--radius-xs); overflow: hidden; }
@@ -4205,7 +4203,7 @@ const dialogCtx = reactive({
 .env-progress-text { display: flex; justify-content: space-between; font-size: var(--text-xs); color: var(--color-text-muted); }
 .env-cancel-install { align-self: flex-start; font-size: var(--text-xs); }
 .env-msg { font-size: var(--text-xs); color: var(--color-text-muted); margin: 10px 0 0; word-break: break-all; user-select: text; -webkit-user-select: text; }
-.env-msg.error { color: var(--color-danger); }
+.env-msg.error { color: var(--color-danger-ink); }
 .ftp-form .env-input { margin-bottom: var(--space-3); }
 .env-update-hint {
   display: flex; align-items: center; gap: var(--space-4); margin-top: var(--space-5);
@@ -4266,8 +4264,8 @@ const dialogCtx = reactive({
    所以 .log-toolbar / .log-filter / .log-count 一并去掉，只留按钮样式给 slot 用。 */
 
 /* ===== 维护面板（源体检 / 磁盘 / 镜像 / 清单）===== */
-.maint-status.ok { color: var(--color-success); background: var(--color-success-bg); }
-.maint-status.warn { color: var(--color-warning); background: var(--color-warning-bg); }
+.maint-status.ok { color: var(--color-success-ink); background: var(--color-success-bg); }
+.maint-status.warn { color: var(--color-warning-ink); background: var(--color-warning-bg); }
 .maint-status.off { color: var(--color-text-muted); background: var(--color-bg-tertiary); }
 /* 系统环境变量面板：PATH 行是「路径 + 删除」，变量行是「名 + 值 + 删除」，列宽各自定制 */
 /* 行尾两个按钮（编辑 / 删除，或 保存 / 取消）：右对齐，不占额外列宽 */
@@ -4298,14 +4296,14 @@ const dialogCtx = reactive({
 /* 项目体检：版本要求 / 依赖状态两块，小标题与卡片共用一套间距。
    卡片用 auto-fit 网格，760px 弹窗里两个生态并排，窄窗自动换行。 */
 /* GitHub 下载加速开关（体检页内） */
-.manifest-tag.warn { color: var(--color-warning); background: var(--color-warning-bg); }
-.manifest-tag.ok { color: var(--color-success); background: var(--color-success-bg); }
+.manifest-tag.warn { color: var(--color-warning-ink); background: var(--color-warning-bg); }
+.manifest-tag.ok { color: var(--color-success-ink); background: var(--color-success-bg); }
 
 /* Everything 文件搜索面板 */
-.ev-state-running { color: var(--color-success); }
-.ev-state-stopped { color: var(--color-warning); }
+.ev-state-running { color: var(--color-success-ink); }
+.ev-state-stopped { color: var(--color-warning-ink); }
 .ev-state-missing_es,
-.ev-state-not_installed { color: var(--color-danger); }
+.ev-state-not_installed { color: var(--color-danger-ink); }
 .ev-actions { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-top: 14px; }
 .ev-settings { margin-top: var(--space-2); }
 .ev-toggle { display: flex; align-items: center; gap: var(--space-4); font-size: var(--text-md); color: var(--color-text-primary); }

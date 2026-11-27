@@ -343,7 +343,7 @@ function dismissRecovery() {
 .sec-msg {
   margin: var(--space-4) 0 0;
   font-size: var(--text-sm);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 .sec-msg.is-ok {
   color: var(--color-accent);

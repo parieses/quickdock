@@ -1784,7 +1784,7 @@ onUnmounted(() => {
 
 /* 页头「更多」：导出 / 清空 */
 .cb-head-menu { min-width: 150px; }
-.cb-head-menu .save-menu-item.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.cb-head-menu .save-menu-item.danger:hover { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 
 /* 页头「选择」按钮：带文字，省得用户猜图标是干啥的 */
 .cb-select-toggle { gap: var(--space-2); }
@@ -1809,8 +1809,8 @@ onUnmounted(() => {
   transition: color var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast);
 }
 .cb-batch-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
-.cb-batch-btn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); background: var(--color-danger-bg); }
-.cb-batch-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.cb-batch-btn.danger:hover:not(:disabled) { color: var(--color-danger-ink); border-color: var(--color-danger); background: var(--color-danger-bg); }
+.cb-batch-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 
 /* 搜索命中高亮：明显区分 —— 主题蓝字 + 半粗 + 极淡蓝底，
    一眼能看清命中词，又不刺眼 */
@@ -1952,7 +1952,7 @@ onUnmounted(() => {
 }
 .cb-card:hover .cb-file-reveal { opacity: 1; }
 .cb-file-reveal:hover { color: var(--color-accent); background: var(--color-accent-bg); }
-.cb-file-reveal:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.cb-file-reveal:disabled { color: var(--color-text-disabled); cursor: default; }
 
 /* ---- 元数据：图标 + 提亮一档的次要色 ---- */
 .cb-meta { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; min-width: 0; }
@@ -1977,7 +1977,7 @@ onUnmounted(() => {
   transition: opacity var(--transition-fast), color var(--transition-fast);
 }
 .cb-card:hover .cb-source-block, .cb-source-block:focus-visible { opacity: 1; }
-.cb-source-block:hover { color: var(--color-danger); }
+.cb-source-block:hover { color: var(--color-danger-ink); }
 
 /* ---- 悬停操作栏 ----
    压在卡片右上角、半透明浮层：以前置顶/删除缩在内容行尾部，鼠标划过时
@@ -2009,7 +2009,7 @@ onUnmounted(() => {
 }
 .cb-act:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .cb-act.on { color: var(--color-star); }
-.cb-act.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.cb-act.danger:hover { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 
 /* 收藏标记：操作栏收起时也能看出这条收藏过；悬停后让位给操作栏 */
 .cb-pin-flag {
@@ -2084,7 +2084,7 @@ onUnmounted(() => {
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .clipboard-pagination .page-btn:hover:not(:disabled) { background: var(--color-bg-active); color: var(--color-text-primary); }
-.clipboard-pagination .page-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.clipboard-pagination .page-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 .clipboard-pagination .page-btn.active { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
 .clipboard-pagination .page-ellipsis { color: var(--color-text-muted); font-size: var(--text-xs); width: 18px; text-align: center; }
 .clipboard-pagination .page-total { margin-left: var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); }
@@ -2165,7 +2165,7 @@ onUnmounted(() => {
   border-color: var(--color-accent-border);
   background: var(--color-accent-bg);
 }
-.qd-icon-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.qd-icon-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 
 /* 粘贴队列条：贴在标签栏下方，队列为空时整条不渲染。 */
 .cb-queue-bar {

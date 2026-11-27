@@ -38,7 +38,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ (e: 'close'): void }>()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const panelRef = ref<HTMLElement | null>(null)
 const { onKeydown: onKeydownTrap } = useFocusTrap(toRef(props, 'visible'), panelRef)
@@ -94,10 +94,24 @@ const subjectText = computed(() => detail.value?.subject || props.fallback?.subj
 const fromText = computed(() => detail.value?.from || props.fallback?.from || '-')
 const toText = computed(() => detail.value?.to || '-')
 const accountText = computed(() => detail.value?.account || props.fallback?.account || '-')
+// 邮件头 Date 自带时区（如 "Fri, 27 Nov 2026 08:43:12 +0800"）。用
+// new Date(raw).toLocaleString() 会按 WebView 所在时区重算——8:43 的邮件在
+// UTC 环境里显示成 0:43，用户看到的就是「时间不对」。这里只做格式本地化，
+// 原样保留邮件头里的时刻和时区偏移。
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+function formatMailDate(raw: string): string {
+  const m = raw.match(/^\s*(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s*)?(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2})(?:\s*([+-]\d{4}))?/)
+  if (!m) return raw
+  const mon = MONTHS.findIndex((x) => x.toLowerCase() === m[2].toLowerCase())
+  if (mon < 0) return raw
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${m[3]}/${pad(mon + 1)}/${pad(Number(m[1]))} ${m[4]}${m[5] ? ' ' + m[5] : ''}`
+}
 const dateText = computed(() => {
-  if (detail.value?.date) return detail.value.date
+  const raw = detail.value?.date
+  if (raw) return formatMailDate(raw)
   const ts = props.fallback?.received
-  return ts ? new Date(ts).toLocaleString() : '-'
+  return ts ? new Date(ts).toLocaleString(locale.value === 'en-US' ? 'en-US' : 'zh-CN') : '-'
 })
 
 async function copyAll() {
@@ -230,7 +244,7 @@ onUnmounted(() => { if (copyTimer) clearTimeout(copyTimer) })
 /* 勾选框尺寸/勾型由 style.css 的全局自绘规则唯一负责，这里只留布局。 */
 .md-remote input { margin: 0; }
 .md-hint { margin-left: auto; font-size: var(--text-2xs); color: var(--color-text-muted); white-space: nowrap; }
-.md-trunc { flex: 0 0 auto; margin: -2px 0 var(--space-3); font-size: var(--text-2xs); color: var(--color-warning); }
+.md-trunc { flex: 0 0 auto; margin: -2px 0 var(--space-3); font-size: var(--text-2xs); color: var(--color-warning-ink); }
 
 .md-body-wrap {
   flex: 1; min-height: 0; overflow: hidden;
@@ -262,7 +276,7 @@ onUnmounted(() => { if (copyTimer) clearTimeout(copyTimer) })
   color: var(--color-text-secondary); font-family: inherit; font-size: var(--text-sm); cursor: pointer;
 }
 .md-btn:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.md-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.md-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 .md-btn.primary { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent); }
 
 .dialog-enter-active { transition: opacity .2s ease-out, transform .2s ease-out; }

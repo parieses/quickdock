@@ -547,8 +547,8 @@ const navItems = computed<NavItemView[]>(() =>
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 .nav-menu button:hover:not(:disabled) { background: var(--color-bg-active); color: var(--color-text-primary); }
-.nav-menu button:disabled { opacity: var(--opacity-disabled); cursor: default; }
-.nav-menu button.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.nav-menu button:disabled { color: var(--color-text-disabled); cursor: default; }
+.nav-menu button.danger:hover { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 .nav-menu-divider { height: 1px; background: var(--color-border); margin: var(--space-2) var(--space-1); }
 
 /* 底部固定：设置 + 收起 */

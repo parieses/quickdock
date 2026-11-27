@@ -88,6 +88,15 @@ window.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) => {
   reportFrontendError('unhandledrejection', msg, r?.stack || '')
 })
 
+// 文字大小在 mount 之前恢复，避免首帧先按 100% 画出来再跳到用户设定的字号。
+// 设置页写的是同一个 key（qd.fontScale），读侧在这里只做区间校验，非法值回落 1。
+try {
+  const saved = Number(localStorage.getItem('qd.fontScale'))
+  if (Number.isFinite(saved) && saved >= 1 && saved <= 1.5) {
+    document.documentElement.style.setProperty('--font-scale', String(saved))
+  }
+} catch { /* 存储被禁：保持 100%，不影响启动 */ }
+
 const app = createApp(App)
 const pinia = createPinia()
 app.use(pinia)

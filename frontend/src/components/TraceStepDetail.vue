@@ -107,7 +107,7 @@ function detailText(text: string): string {
 
 .step-detail-tab:hover { color: var(--color-text-primary); }
 .step-detail-tab.is-on { color: var(--color-accent-text); border-bottom-color: var(--color-accent); }
-.step-detail-tab.is-bad { color: var(--color-danger); }
+.step-detail-tab.is-bad { color: var(--color-danger-ink); }
 .step-detail-tab.is-bad.is-on { border-bottom-color: var(--color-danger); }
 
 .step-detail-body {

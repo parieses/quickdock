@@ -397,7 +397,7 @@ function clearDrag() {
 
 .tabs-act:disabled {
   cursor: default;
-  opacity: var(--opacity-disabled);
+  color: var(--color-text-disabled);
 }
 
 /* 字号控制：三个元素紧贴成一组，与右侧文件面板按钮之间留一条分隔线，

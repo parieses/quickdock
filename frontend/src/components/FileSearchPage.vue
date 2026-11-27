@@ -808,7 +808,7 @@ function onKeydown(e: KeyboardEvent) {
   margin: 0;
   padding: var(--space-3) var(--space-6);
   font-size: var(--text-sm);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   background: var(--color-danger-bg);
 }
 

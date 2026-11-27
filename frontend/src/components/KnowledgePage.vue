@@ -1693,7 +1693,7 @@ onScopeDispose(() => {
 }
 
 .kb-doc-meta.bad {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 
 /* 操作按钮常驻占位、靠透明度显隐。
@@ -1735,7 +1735,7 @@ onScopeDispose(() => {
 }
 
 .kb-doc-remove:hover {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   background: var(--color-danger-bg);
 }
 
@@ -1949,7 +1949,7 @@ onScopeDispose(() => {
 }
 
 .kb-tag.both {
-  color: var(--color-success);
+  color: var(--color-success-ink);
   background: var(--color-success-bg);
 }
 
@@ -2097,7 +2097,7 @@ onScopeDispose(() => {
   color: var(--color-accent);
 }
 
-.kb-scope-chip:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.kb-scope-chip:disabled { color: var(--color-text-disabled); cursor: default; }
 
 .kb-scope-name {
   overflow: hidden;
@@ -2428,7 +2428,7 @@ onScopeDispose(() => {
 }
 
 .kb-ov-ask-send:disabled {
-  opacity: var(--opacity-disabled);
+  color: var(--color-text-disabled); border-color: var(--color-border);
   cursor: default;
 }
 
@@ -2557,7 +2557,7 @@ onScopeDispose(() => {
 }
 
 .kb-hint.warn {
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
 }
 
 /* 终态的部分失败提示：跟在页头下方，和进度条占同一位置，不额外撑高页面。 */
@@ -2736,7 +2736,7 @@ onScopeDispose(() => {
 
 .kb-lib-btn.danger:hover {
   background: var(--color-danger-bg);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 
 .kb-hit-lib {

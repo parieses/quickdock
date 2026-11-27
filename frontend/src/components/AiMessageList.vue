@@ -1332,11 +1332,11 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
    弯的短线，看着像个没闭合的括号，还和图标断开——一行辅助信息不该有第二个焦点。 */
 .ai-tool-icon { flex: 0 0 auto; color: var(--color-text-muted); }
 
-.ai-tool.is-err .ai-tool-icon { color: var(--color-danger); opacity: 1; }
+.ai-tool.is-err .ai-tool-icon { color: var(--color-danger-ink); opacity: 1; }
 
 .ai-tool.is-run .ai-tool-icon { color: var(--color-accent); opacity: 1; }
 
-.ai-tool.is-ask .ai-tool-icon { color: var(--color-warning); opacity: 1; }
+.ai-tool.is-ask .ai-tool-icon { color: var(--color-warning-ink); opacity: 1; }
 
 .ai-tool-verb { flex: 0 0 auto; font-size: var(--text-sm); color: var(--color-text-primary); }
 
@@ -1357,9 +1357,9 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-tool-diff { display: flex; gap: var(--space-2); flex: 0 0 auto; font-family: var(--font-mono); font-size: var(--text-xs); }
 
-.ai-diff-add { color: var(--color-success); font-style: normal; }
+.ai-diff-add { color: var(--color-success-ink); font-style: normal; }
 
-.ai-diff-del { color: var(--color-danger); font-style: normal; }
+.ai-diff-del { color: var(--color-danger-ink); font-style: normal; }
 
 /* 时长/状态跟在增删数后面，用最弱的一档颜色——它只是参考信息，
    用户真正关心的是「动的是哪个文件、改了几行」。不再用胶囊底色：
@@ -1373,7 +1373,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   color: var(--color-text-muted);
 }
 
-.ai-tool-ms.is-ask { background: none; color: var(--color-warning); }
+.ai-tool-ms.is-ask { background: none; color: var(--color-warning-ink); }
 
 .ai-tool-ms.is-denied { color: var(--color-text-muted); }
 
@@ -1411,7 +1411,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   border-left: 2px solid var(--color-warning);
 }
 
-.ai-approval-hint { font-size: var(--text-xs); color: var(--color-warning); }
+.ai-approval-hint { font-size: var(--text-xs); color: var(--color-warning-ink); }
 
 .ai-approval-done { font-size: var(--text-xs); color: var(--color-text-muted); }
 
@@ -1473,7 +1473,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   color: var(--color-text-secondary);
 }
 
-.ai-compact-warn { flex: none; color: var(--color-warning); }
+.ai-compact-warn { flex: none; color: var(--color-warning-ink); }
 
 /* 压缩进行中给一点强调色：那是唯一一个「正在花你的钱等几秒」的状态 */
 .ai-compact.is-running { color: var(--color-text-secondary); }
@@ -1481,7 +1481,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 
 .ai-tool-err {
-  font-size: var(--text-xs); color: var(--color-danger);
+  font-size: var(--text-xs); color: var(--color-danger-ink);
   word-break: break-word;
 }
 
@@ -1654,7 +1654,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   cursor: pointer;
 }
 .ai-load-older:hover { color: var(--color-text-primary); border-color: var(--color-border-light); }
-.ai-load-older:disabled { opacity: var(--opacity-disabled-soft); cursor: default; }
+.ai-load-older:disabled { color: var(--color-text-disabled); cursor: default; }
 
 .ai-msg.user { align-self: flex-end; align-items: flex-end; }
 
@@ -1766,7 +1766,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-msg-stopped {
   font-size: var(--text-2xs); padding: 1px var(--space-3); border-radius: var(--radius-xs);
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   background: var(--color-warning-bg);
   border: 1px solid var(--color-warning-border);
   cursor: default;
@@ -1788,7 +1788,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 .ai-error {
   align-self: flex-start;
   padding: 10px 14px; border-radius: var(--radius-lg);
-  background: var(--color-danger-bg); color: var(--color-danger);
+  background: var(--color-danger-bg); color: var(--color-danger-ink);
   font-size: var(--text-md); max-width: 80%;
   /* 错误文案 + 重试按钮同一行；长错误换行，按钮不跟着被挤压 */
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -1800,7 +1800,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   flex: 0 0 auto;
   padding: 3px var(--space-5); border-radius: var(--radius-sm);
   border: 1px solid var(--color-danger-border);
-  background: transparent; color: var(--color-danger);
+  background: transparent; color: var(--color-danger-ink);
   font-size: var(--text-sm); font-family: inherit; cursor: pointer;
   transition: background-color var(--transition-fast);
 }
@@ -1919,7 +1919,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-md :deep(.md-code-copy:hover) { background: var(--color-bg-hover); color: var(--color-accent); }
 
-.ai-md :deep(.md-code-copy.copied) { color: var(--color-success); }
+.ai-md :deep(.md-code-copy.copied) { color: var(--color-success-ink); }
 
 .ai-md :deep(.md-code-copy svg) { width: 13px; height: 13px; }
 

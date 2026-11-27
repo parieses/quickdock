@@ -1402,7 +1402,7 @@ watch(() => props.visible, (v) => {
   padding: 0 var(--space-2);
   border-radius: var(--radius-sm);
   background: var(--color-danger-bg);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   font-size: var(--text-xs);
   line-height: 1;
 }

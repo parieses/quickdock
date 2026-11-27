@@ -239,10 +239,10 @@ function selSaveAs(e: MouseEvent) {
   font-size: var(--text-sm); padding: 3px var(--space-4); border-radius: var(--radius-sm); cursor: pointer;
   background: var(--color-accent); color: var(--color-accent-text); border: none;
 }
-.note-ask:disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
+.note-ask:disabled { background: var(--color-bg-tertiary); color: var(--color-text-disabled);  cursor: not-allowed; }
 .note-status { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--color-text-muted); }
-.note-status.saved { color: var(--color-success); }
-.note-status.error { color: var(--color-danger); }
+.note-status.saved { color: var(--color-success-ink); }
+.note-status.error { color: var(--color-danger-ink); }
 .spin { animation: note-spin 1s linear infinite; }
 @keyframes note-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 /* 编辑区：CodeMirror 撑满剩余高度。内边距落在 .cm-content 上，

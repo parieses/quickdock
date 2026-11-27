@@ -213,6 +213,6 @@ watch(() => props.visible, (v) => {
 
 <style scoped>
 .result-hint.error {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 </style>

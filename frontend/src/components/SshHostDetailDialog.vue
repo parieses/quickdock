@@ -281,7 +281,7 @@ async function copyTarget() {
 .hdd-sub { color: var(--color-text-muted); font-size: var(--text-xs); margin-left: 3px; }
 
 .hdd-note { margin-top: var(--space-4); font-size: var(--text-xs); color: var(--color-text-muted); }
-.hdd-note--warn { color: var(--color-warning); }
+.hdd-note--warn { color: var(--color-warning-ink); }
 
 .hdd-foot {
   display: flex; align-items: center; gap: var(--space-4);

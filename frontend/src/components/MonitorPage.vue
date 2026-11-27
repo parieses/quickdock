@@ -63,6 +63,7 @@ import {
   TrendingUp, TrendingDown, Minus, Ellipsis, AlertTriangle, History,
 } from '@lucide/vue'
 
+import { writeStored } from '../utils/storage'
 const { t } = useI18n()
 const toast = useToast()
 const sa = useSaveAs()
@@ -1012,7 +1013,7 @@ function applyAutoRefresh() {
 }
 
 watch(refreshSec, (v) => {
-  if (typeof localStorage !== 'undefined') localStorage.setItem(LS_REFRESH_KEY, String(v))
+  writeStored(LS_REFRESH_KEY, String(v))
   applyAutoRefresh()
 })
 
@@ -1691,7 +1692,7 @@ onUnmounted(() => {
 
 .mon-error {
   margin: var(--space-5) var(--space-7) 0; padding: var(--space-4) var(--space-5); font-size: var(--text-sm);
-  color: var(--color-danger); background: var(--color-danger-bg);
+  color: var(--color-danger-ink); background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); flex-shrink: 0;
 }
 
@@ -1722,10 +1723,10 @@ onUnmounted(() => {
   display: inline-flex; align-items: center; gap: 2px; min-width: 0;
   font-size: var(--text-2xs); color: var(--color-text-muted); white-space: nowrap;
 }
-.sum-trend.up { color: var(--color-danger); }
-.sum-trend.down { color: var(--color-success); }
-.sum-item.up .sum-num { color: var(--color-success); }
-.sum-item.down .sum-num { color: var(--color-danger); }
+.sum-trend.up { color: var(--color-danger-ink); }
+.sum-trend.down { color: var(--color-success-ink); }
+.sum-item.up .sum-num { color: var(--color-success-ink); }
+.sum-item.down .sum-num { color: var(--color-danger-ink); }
 
 .mon-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); padding: 0 var(--space-7) var(--space-6); }
 
@@ -1780,8 +1781,8 @@ onUnmounted(() => {
   display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap;
 }
 .mon-selbtn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
-.mon-selbtn:disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
-.mon-selbtn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); }
+.mon-selbtn:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
+.mon-selbtn.danger:hover:not(:disabled) { color: var(--color-danger-ink); border-color: var(--color-danger); }
 /* 勾选态把整条工具条换成强调底：批量动作只在选中后出现，
    如果还跟搜索框混在同一条灰底里，等于没有提示。 */
 .mon-tools-batch {
@@ -1822,7 +1823,7 @@ onUnmounted(() => {
   border-radius: var(--radius-md); transition: background var(--transition-fast);
 }
 .mon-item:hover { background: var(--color-bg-hover); }
-.mon-item.disabled { opacity: var(--opacity-disabled); }
+.mon-item.disabled { color: var(--color-text-disabled); }
 /* 勾选行的高亮不能只靠 checkbox：停用行本身半透明，只多一个小勾很难看出来 */
 .mon-item.picked { border-color: var(--color-accent); }
 /* 拖拽中：半透明 + 虚线框，告诉用户「这条正在被拖」而不是页面卡了 */
@@ -1841,7 +1842,7 @@ onUnmounted(() => {
 /* 回收站里的条目：只读展示，没有展开/勾选那套交互 */
 
 /* 维护 / 静默已收进第一行的 .item-tag，原来的 .meta-maint / .meta-mute 随之删除 */
-.mon-item .act.active { color: var(--color-warning); }
+.mon-item .act.active { color: var(--color-warning-ink); }
 
 /* 视图切换 tab：活动列表 / 状态页，像标签页一样一眼分清当前在哪 */
 .mon-viewtabs { display: flex; gap: var(--space-2); padding: 0 var(--space-7) 10px; }
@@ -1852,7 +1853,7 @@ onUnmounted(() => {
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--color-bg-tertiary); color: var(--color-text-muted); font-size: var(--text-xs);
 }
-.vt-count.warn { background: var(--color-danger-bg); color: var(--color-danger); }
+.vt-count.warn { background: var(--color-danger-bg); color: var(--color-danger-ink); }
 .mon-state { display: flex; align-items: center; gap: var(--space-4); justify-content: center; padding: var(--space-8); color: var(--color-text-muted); }
 
 .item-head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-5) 14px; cursor: pointer; }
@@ -1878,13 +1879,13 @@ onUnmounted(() => {
   border-radius: var(--radius-full); border: 1px solid transparent;
   background: transparent;
 }
-.status-badge.up { background: var(--color-success-bg); color: var(--color-success); border-color: var(--color-success-border); }
-.status-badge.down { background: var(--color-danger-bg); color: var(--color-danger); border-color: var(--color-danger-border); }
+.status-badge.up { background: var(--color-success-bg); color: var(--color-success-ink); border-color: var(--color-success-border); }
+.status-badge.down { background: var(--color-danger-bg); color: var(--color-danger-ink); border-color: var(--color-danger-border); }
 /* 维护 / 静默标记：与状态徽标同高但更轻，不抢「正常/故障」的判断 */
 .item-tag {
   display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0;
   height: 17px; padding: 0 6px; border-radius: var(--radius-full);
-  font-size: var(--text-2xs); color: var(--color-warning);
+  font-size: var(--text-2xs); color: var(--color-warning-ink);
   background: var(--color-warning-bg); border: 1px solid var(--color-warning-border);
   white-space: nowrap;
 }
@@ -1916,7 +1917,7 @@ onUnmounted(() => {
 .meta-lat { color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
 .meta-lat-num { font-weight: 500; }
 .meta-sub { color: var(--color-text-muted); }
-.meta-down { color: var(--color-warning); }
+.meta-down { color: var(--color-warning-ink); }
 /* 延迟刻度：占超时阈值的比例。细到 3px，只做「离超时还有多远」的暗示，不喧宾夺主。 */
 .lat-bar {
   display: inline-block; width: 34px; height: 3px; flex-shrink: 0;
@@ -1926,7 +1927,7 @@ onUnmounted(() => {
 .lat-bar.warn > i { background: var(--color-warning); }
 .lat-bar.bad > i { background: var(--color-danger); }
 .meta-cert { color: var(--color-text-muted); }
-.meta-cert.warn { color: var(--color-warning); font-weight: 500; }
+.meta-cert.warn { color: var(--color-warning-ink); font-weight: 500; }
 
 .item-actions { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
 .act {
@@ -1935,8 +1936,8 @@ onUnmounted(() => {
   border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .act:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-active); }
-.act:disabled { opacity: var(--opacity-disabled); cursor: default; }
-.act.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.act:disabled { color: var(--color-text-disabled); cursor: default; }
+.act.danger:hover { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 /* 行操作默认收起，只留启用开关（那是状态信号，必须常驻）。
    与知识库 .kb-doc-actions 同一套「常驻占位 + 透明度切换」，不用
    display:none —— 那会让 hover 时行凭空变宽、整行跳一下。
@@ -1972,7 +1973,7 @@ onUnmounted(() => {
   text-align: left; cursor: pointer; white-space: nowrap;
 }
 .mon-menu-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.mon-menu-item.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.mon-menu-item.danger:hover { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 .mm-hint { margin-left: auto; font-size: var(--text-2xs); color: var(--color-text-muted); }
 
 /* 故障告警条：淡红底 + 红字，与正常指标行彻底分开。
@@ -1983,7 +1984,7 @@ onUnmounted(() => {
   background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border);
   border-radius: var(--radius-sm);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 .eb-icon { flex-shrink: 0; margin-top: 1px; }
 .eb-main { flex: 1; min-width: 0; }
@@ -1996,11 +1997,11 @@ onUnmounted(() => {
 .eb-retry {
   display: inline-flex; align-items: center; gap: var(--space-2); flex-shrink: 0;
   height: 22px; padding: 0 var(--space-4); font-family: inherit; font-size: var(--text-xs);
-  color: var(--color-danger); background: transparent; cursor: pointer;
+  color: var(--color-danger-ink); background: transparent; cursor: pointer;
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-xs);
 }
 .eb-retry:hover:not(:disabled) { background: var(--color-danger-bg); }
-.eb-retry:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.eb-retry:disabled { color: var(--color-text-disabled); border-color: var(--color-border); cursor: default; }
 
 /* 最近故障时间线：margin-top:auto 让它在监控少时落到页面底部填白，
    监控多时自然跟在列表末尾一起滚。 */
@@ -2042,10 +2043,10 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 .logs-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
-.logs-btn:disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
-.logs-btn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); }
+.logs-btn:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
+.logs-btn.danger:hover:not(:disabled) { color: var(--color-danger-ink); border-color: var(--color-danger); }
 .logs-empty { font-size: var(--text-xs); color: var(--color-text-muted); padding: var(--space-3) 0; }
-.logs-load-error { display: inline-flex; align-items: center; gap: var(--space-3); font-size: var(--text-xs); color: var(--color-danger); padding: var(--space-3) 0; }
+.logs-load-error { display: inline-flex; align-items: center; gap: var(--space-3); font-size: var(--text-xs); color: var(--color-danger-ink); padding: var(--space-3) 0; }
 
 /* 日志可视化：正常率环（原生 SVG）+ 延迟折线（QdLineChart） */
 .logs-viz { display: flex; align-items: stretch; gap: var(--space-5); }
@@ -2079,8 +2080,8 @@ onUnmounted(() => {
 .ring-pct i { font-size: var(--text-2xs); font-style: normal; color: var(--color-text-muted); margin-left: 1px; }
 .ring-lbl { font-size: var(--text-xs); color: var(--color-text-muted); }
 .ring-legend { display: flex; gap: var(--space-4); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
-.ring-legend .ok { color: var(--color-success); }
-.ring-legend .bad { color: var(--color-danger); }
+.ring-legend .ok { color: var(--color-success-ink); }
+.ring-legend .bad { color: var(--color-danger-ink); }
 
 /* ---- 停机日历 ---- */
 .down-cal { margin-top: 10px; }
@@ -2128,7 +2129,7 @@ onUnmounted(() => {
 /* 弹窗内校验提示：弹窗自己有内边距，这里不再加外边距 */
 .form-err {
   margin: var(--space-3) 0 0; padding: 7px 10px; font-size: var(--text-sm);
-  color: var(--color-danger); background: var(--color-danger-bg);
+  color: var(--color-danger-ink); background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-md);
 }
 </style>

@@ -261,7 +261,7 @@ defineExpose({ markSaved, focus })
   padding: 5px 10px;
   background: var(--color-warning-bg);
   border-bottom: 1px solid var(--color-border);
-  font-size: var(--text-xs); color: var(--color-warning);
+  font-size: var(--text-xs); color: var(--color-warning-ink);
 }
 .ce-fb-text { flex: 1 1 auto; line-height: 1.5; }
 .ce-fb-retry {
@@ -294,9 +294,9 @@ defineExpose({ markSaved, focus })
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .ce-st-sep { color: var(--color-text-muted); }
-.ce-dirty { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--color-warning); }
+.ce-dirty { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--color-warning-ink); }
 .ce-dirty-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-warning); }
-.ce-st-warn { color: var(--color-warning); }
+.ce-st-warn { color: var(--color-warning-ink); }
 .ce-spacer { flex: 1 1 auto; }
 .ce-keys { color: var(--color-text-muted); }
 </style>

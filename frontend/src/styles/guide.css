@@ -82,7 +82,7 @@
   border-color: var(--color-accent-hover);
   box-shadow: 0 4px 12px var(--color-accent-border-strong);
 }
-.qd-guide-cta:disabled { opacity: var(--opacity-disabled-soft); cursor: default; box-shadow: none; }
+.qd-guide-cta:disabled { background: var(--color-bg-tertiary); color: var(--color-text-disabled); border-color: var(--color-border); cursor: default; box-shadow: none; }
 
 /* 步骤：横排三列更紧凑（竖排三张卡片 + 连接线的总高度会把页面撑出滚动条）。
    窄窗口自动折成一列，不靠新式选择器。 */

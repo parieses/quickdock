@@ -332,7 +332,7 @@ onMounted(load)
 }
 
 .sfe-state--err {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 
 .sfe-state-text {
@@ -343,7 +343,7 @@ onMounted(load)
 }
 
 .sfe-warn-icon {
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
 }
 
 .sfe-banner {
@@ -354,7 +354,7 @@ onMounted(load)
   margin: 0;
   padding: var(--space-3) var(--space-5);
   font-size: var(--text-xs);
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   background: var(--color-warning-bg);
   border-bottom: 1px solid var(--color-border);
 }
@@ -383,7 +383,7 @@ onMounted(load)
 .sfe-dirty {
   margin-left: auto;
   font-size: var(--text-xs);
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
 }
 
 .sfe-foot .sfe-btn:first-of-type {
@@ -422,7 +422,7 @@ onMounted(load)
 
 .sfe-btn--primary:disabled {
   cursor: default;
-  opacity: var(--opacity-disabled);
+  background: var(--color-bg-tertiary); color: var(--color-text-disabled); border-color: var(--color-border);
 }
 
 .spinning {

@@ -303,7 +303,7 @@ async function setDefault(tool: OpenTool) {
 }
 .tool-error {
   font-size: var(--text-sm);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   margin: 0;
 }
 
@@ -443,7 +443,7 @@ async function setDefault(tool: OpenTool) {
   color: var(--color-text-primary);
 }
 .tool-action.danger:hover {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   background: var(--color-danger-bg);
 }
 

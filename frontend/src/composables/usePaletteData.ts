@@ -27,6 +27,7 @@ import type { CollectionItem, ToastAPI } from '../types'
 import type { PluginCmdIndex } from './usePluginIndex'
 import type { CmdNote, CmdRepo, CmdScene, CmdCollection, CmdSshHost, InstalledApp, RecentEntry } from './useCommandSearch'
 
+import { writeStored } from '../utils/storage'
 export interface PaletteDataDeps {
   items: Ref<CollectionItem[]>
   installedApps: Ref<InstalledApp[]>
@@ -85,14 +86,11 @@ export function usePaletteData(deps: PaletteDataDeps) {
   }
 
   function writeIconCache(theme: string, icons: Record<string, IconCacheEntry>) {
-    try {
-      const json = JSON.stringify({ theme, icons })
-      // 超限就整份放弃（图标是可丢数据）：写一半会让下次读到的结构残缺
-      if (json.length > ICON_CACHE_MAX_CHARS) return
-      localStorage.setItem(ICON_CACHE_KEY, json)
-    } catch {
-      // 配额满 / 隐私模式禁用 storage：降级成「每次都取」，不影响功能
-    }
+    const json = JSON.stringify({ theme, icons })
+    // 超限就整份放弃（图标是可丢数据）：写一半会让下次读到的结构残缺
+    if (json.length > ICON_CACHE_MAX_CHARS) return
+    // 配额满 / 隐私模式禁用 storage 由 writeStored 兜住，降级成「每次都取」
+    writeStored(ICON_CACHE_KEY, json)
   }
 
   const themeName = useThemeName()

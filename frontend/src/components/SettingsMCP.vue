@@ -991,7 +991,7 @@ watch(() => props.visible, (v) => {
 }
 .ai-ext-tool-off {
   font-size: var(--text-2xs);
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
 }
 .ai-ext-tool-desc {
   font-size: var(--text-xs);

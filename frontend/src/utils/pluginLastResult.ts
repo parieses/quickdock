@@ -8,6 +8,8 @@
 //   - 一键重跑：acceptsInput 命令直接沿用上次输入
 //   - 动作菜单「复制上次结果」「分离为独立窗口（带上次输入）」
 
+import { writeStored } from './storage'
+
 export interface PluginLastResult {
   result: string      // 执行结果正文（截断 2000 字符，防撑爆 localStorage）
   pluginName: string
@@ -37,9 +39,7 @@ function load(): Record<string, PluginLastResult> {
 }
 
 function persist() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(memory))
-  } catch { /* 空间满/被禁用时忽略，本轮会话内存态仍可用 */ }
+  writeStored(STORAGE_KEY, JSON.stringify(memory))
 }
 
 export function pluginCmdKey(pluginId: string, commandId: string): string {

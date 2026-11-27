@@ -684,7 +684,7 @@ function onTestTrusted() {
 
 .tree-import-skipped-title {
   margin: var(--space-3) 0 var(--space-1);
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
 }
 
 .tree-import-skipped {
@@ -977,13 +977,13 @@ function onTestTrusted() {
 }
 
 .tree-env.env-prod {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   background: var(--color-danger-bg);
   border-color: var(--color-danger-bg);
 }
 
 .tree-env.env-staging {
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   background: var(--color-warning-bg);
   border-color: var(--color-warning-bg);
 }
@@ -1029,7 +1029,7 @@ function onTestTrusted() {
 }
 
 .tree-act--danger:hover {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   border-color: var(--color-danger-bg);
   background: var(--color-danger-bg);
 }
@@ -1046,12 +1046,12 @@ function onTestTrusted() {
 }
 
 .tree-test-status.is-ok {
-  color: var(--color-success);
+  color: var(--color-success-ink);
   background: var(--color-success-bg);
 }
 
 .tree-test-status.is-err {
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   background: var(--color-warning-bg);
 }
 

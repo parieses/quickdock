@@ -8,7 +8,7 @@
  *   components.d.ts  -> GridComponent / TooltipComponent / LegendComponent /
  *                       DataZoomComponent / MarkLineComponent
  *   renderers.d.ts   -> CanvasRenderer
- *   core.d.ts        -> init / use / EChartsType / EChartsInitOpts / ComposeOption
+ *   core.d.ts        -> init / use / EChartsType / EChartsInitOpts
  */
 import { init, use } from 'echarts/core'
 import { BarChart, LineChart } from 'echarts/charts'
@@ -20,15 +20,7 @@ import {
   MarkLineComponent,
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
-import type { EChartsType, EChartsInitOpts, ComposeOption } from 'echarts/core'
-import type { BarSeriesOption, LineSeriesOption } from 'echarts/charts'
-import type {
-  GridComponentOption,
-  TooltipComponentOption,
-  LegendComponentOption,
-  DataZoomComponentOption,
-  MarkLineComponentOption,
-} from 'echarts/components'
+import type { EChartsType, EChartsInitOpts } from 'echarts/core'
 
 use([
   BarChart, LineChart,
@@ -37,20 +29,7 @@ use([
   CanvasRenderer,
 ])
 
-/**
- * 组合后的强类型 option：只含本项目实际用到的系列与组件。
- * 组件可用它标注自己构造的 option；setOption 本身仍接受宽松的 EChartsCoreOption。
- */
-export type EChartsOption = ComposeOption<
-  | BarSeriesOption
-  | LineSeriesOption
-  | GridComponentOption
-  | TooltipComponentOption
-  | LegendComponentOption
-  | DataZoomComponentOption
-  | MarkLineComponentOption
->
-
+/** 透传 EChartsType：调用方标注图表实例时不必再单独 import echarts/core。 */
 export type { EChartsType }
 
 /**

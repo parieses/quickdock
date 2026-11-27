@@ -614,7 +614,7 @@ onBeforeUnmount(() => {
   color: var(--color-text-muted);
 }
 
-.ai-plus-item.is-bad .ai-plus-item-desc { color: var(--color-danger); }
+.ai-plus-item.is-bad .ai-plus-item-desc { color: var(--color-danger-ink); }
 
 .ai-plus-item.is-picked .ai-plus-item-name { color: var(--color-accent); }
 

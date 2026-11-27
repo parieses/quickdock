@@ -65,9 +65,10 @@ type Config struct {
 	Enabled  bool   `json:"enabled"`
 }
 
-// Message 是一封识别出的候选邮件。卡片只收两类：
+// Message 是一封识别出的候选邮件。卡片只收三类：
 //   - kind=code：Code 非空，可直接复制的验证码；
-//   - kind=password / login：账号安全事件，没有码，只作提醒，Code 恒为空。
+//   - kind=password / login：账号安全事件，没有码，只作提醒，Code 恒为空；
+//   - kind=reset：请求重置密码的邮件，链接/重置码在正文里，点开看原文取。
 //
 // Kind 为空串按 code 处理：内存快照可能来自旧构建，前端不必区分版本。
 type Message struct {
@@ -1106,7 +1107,7 @@ var hypotheticalRE = regexp.MustCompile(`(?i)(?:if\s+(?:you|this|it)\s+(?:did|wa
 // 入口，"password will be reset" 是未来时，两者都不是「密码已经被改了」。
 var nonEventRE = regexp.MustCompile(`(?i)^(?:please\s+)?(?:reset|change|update|modify)\s+(?:your\s+|the\s+|account\s+)?password\b|\b(?:will|would|can|may|must|should|need\s+to)\s+(?:be\s+)?(?:reset|change|changed|updated|modified)\b`)
 
-// ClassifySecurity 返回 "password" / "login"，都不是则返回空串。
+// ClassifySecurity 返回 "password" / "login" / "reset"，都不是则返回空串。
 // 正文只看开头 800 字节：页脚的安全建议与法律声明离事件最远、误报最多。
 func ClassifySecurity(subject, body string) string {
 	flat := flattenText(body)
@@ -1138,7 +1139,35 @@ func ClassifySecurity(subject, body string) string {
 			}
 		}
 	}
+	// 重置请求邮件没有码，也不是「已发生」的安全事件：上面两类都不认它。
+	// 它在安全事件之后判定，避免「密码已重置」被降格成重置请求。
+	if ClassifyReset(subject) {
+		return "reset"
+	}
 	return ""
+}
+
+// ClassifyReset 识别「请求重置密码」邮件：主题写着重置/找回密码、正文带
+// 重置链接或重置码，用户需要点开原文拿到它。只认主题、不认正文——验证码
+// 邮件页脚与营销邮件正文满是 "reset your password"，拿正文判断会误收一大片。
+var resetSubjectRules = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\b(?:reset|forgot|change)\s+(?:your\s+|the\s+|my\s+|account\s+)?password\b`),
+	regexp.MustCompile(`(?i)\bpassword\s+(?:reset|recovery)\b`),
+	regexp.MustCompile(`(?:重置|重设|找回|忘记|修改)(?:您的?|你的?|账号|帐户|账户|登录|登陆)?\s*密码`),
+	regexp.MustCompile(`(?:账号|帐户|账户|邮箱|登录|登陆)?\s*密码\s*(?:需要|请|待|需)?\s*(?:重置|重设|找回|修改)`),
+}
+
+func ClassifyReset(subject string) bool {
+	s := normalizeMailText(subject)
+	if s == "" {
+		return false
+	}
+	for _, re := range resetSubjectRules {
+		if re.MatchString(s) {
+			return true
+		}
+	}
+	return false
 }
 
 // looksLikeNoise 排除一看就不是验证码的数字：年份、手机号片段、纯 0。

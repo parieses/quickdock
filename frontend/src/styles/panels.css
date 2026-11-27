@@ -107,7 +107,7 @@
 .qd-search-box:focus-within {
   border-color: var(--color-border-focus-soft);
 }
-.qd-search-box.is-disabled { opacity: var(--opacity-disabled-soft); }
+.qd-search-box.is-disabled { color: var(--color-text-disabled); }
 
 /* ---- 三栏过滤行布局：与 QdSearchBox 叠加使用 ----
    项目栏是 flex:1 的宽面板，不限宽的话搜索框会拉满上千像素，
@@ -263,7 +263,7 @@
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 .qd-row-btn:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
-.qd-row-btn.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.qd-row-btn.danger:hover { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 .qd-row-btn:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
 .qd-row-btn:disabled:hover { color: var(--color-text-disabled); background: none; }
 
@@ -349,9 +349,9 @@
 .qd-run[open] > .qd-run-sum .qd-run-caret { transform: rotate(0deg); }
 .qd-run-state { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-muted); }
 .qd-run-state.is-running { color: var(--color-accent); }
-.qd-run-state.is-done { color: var(--color-success); }
-.qd-run-state.is-failed { color: var(--color-danger); }
-.qd-run-state.is-canceled { color: var(--color-warning); }
+.qd-run-state.is-done { color: var(--color-success-ink); }
+.qd-run-state.is-failed { color: var(--color-danger-ink); }
+.qd-run-state.is-canceled { color: var(--color-warning-ink); }
 
 .qd-run-body {
   border: 1px solid var(--color-border); border-top: none;
@@ -360,7 +360,7 @@
   padding: var(--space-3) 9px;
 }
 .qd-run-hint { font-size: var(--text-sm); color: var(--color-text-muted); padding: var(--space-1) 0; }
-.qd-run-hint.is-err { color: var(--color-danger); }
+.qd-run-hint.is-err { color: var(--color-danger-ink); }
 
 .qd-run-node {
   margin: 3px 0; padding-left: var(--space-4);
@@ -475,9 +475,9 @@
 .qd-run-avatar--stack { margin-left: -4px; }
 .qd-run-avatar--more { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .qd-run-avatar.tone-a { background: var(--color-accent-bg); color: var(--color-accent); }
-.qd-run-avatar.tone-b { background: var(--color-success-bg); color: var(--color-success); }
-.qd-run-avatar.tone-c { background: var(--color-warning-bg); color: var(--color-warning); }
-.qd-run-avatar.tone-d { background: var(--color-danger-bg); color: var(--color-danger); }
+.qd-run-avatar.tone-b { background: var(--color-success-bg); color: var(--color-success-ink); }
+.qd-run-avatar.tone-c { background: var(--color-warning-bg); color: var(--color-warning-ink); }
+.qd-run-avatar.tone-d { background: var(--color-danger-bg); color: var(--color-danger-ink); }
 
 .qd-run-body { display: flex; flex-direction: column; gap: 5px; }
 .qd-run-member {
@@ -499,9 +499,9 @@
   font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap;
 }
 .qd-run-member-status.is-running { color: var(--color-accent); }
-.qd-run-member-status.is-done { color: var(--color-success); }
-.qd-run-member-status.is-failed { color: var(--color-danger); }
-.qd-run-member-status.is-canceled { color: var(--color-warning); }
+.qd-run-member-status.is-done { color: var(--color-success-ink); }
+.qd-run-member-status.is-failed { color: var(--color-danger-ink); }
+.qd-run-member-status.is-canceled { color: var(--color-warning-ink); }
 .qd-run-member-arrow { color: var(--color-text-muted); transition: transform var(--transition-fast); flex-shrink: 0; }
 .qd-run-member[open] > summary .qd-run-member-arrow { transform: rotate(90deg); }
 .qd-run-member-body {
@@ -543,9 +543,9 @@
    不用 color-mix：WebView2 的版本不保证支持，而不支持的后果是整行没有背景
    ——静默失效最难发现。 */
 .qd-diff-line.is-add { background: var(--color-success-bg); }
-.qd-diff-line.is-add .qd-diff-sign { color: var(--color-success); opacity: 1; }
+.qd-diff-line.is-add .qd-diff-sign { color: var(--color-success-ink); opacity: 1; }
 .qd-diff-line.is-del { background: var(--color-danger-bg); }
-.qd-diff-line.is-del .qd-diff-sign { color: var(--color-danger); opacity: 1; }
+.qd-diff-line.is-del .qd-diff-sign { color: var(--color-danger-ink); opacity: 1; }
 .qd-diff-line.is-hunk { color: var(--color-text-muted); background: var(--color-bg-active); }
 .qd-diff-line.is-ctx { color: var(--color-text-secondary); }
 .qd-diff-more {

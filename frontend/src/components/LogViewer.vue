@@ -592,8 +592,9 @@ onMounted(async () => {
     if (isTail.value && activeTab.value) void loadTailStats()
   }, TAIL_STATS_INTERVAL_MS)
   await loadFiles()
-  await loadStorage()
-  await loadContent()
+  // 占用统计与正文互不相依，串行会白等一次 IPC 往返——进日志页那一下的卡顿
+  // 有相当一部分就是这三个请求排队。正文仍必须在 loadFiles 之后（要拿 selected）。
+  await Promise.all([loadStorage(), loadContent()])
 })
 onUnmounted(() => {
   // stopAllTails 是异步的，卸载时不 await：停止请求已经发出，
@@ -902,14 +903,14 @@ onUnmounted(() => {
 .crash-new {
   padding: 0 5px; border-radius: var(--radius-full);
   font-size: var(--text-2xs); font-weight: 600; white-space: nowrap;
-  background: var(--color-danger-bg); color: var(--color-danger);
+  background: var(--color-danger-bg); color: var(--color-danger-ink);
 }
 .crash-jump {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   background: var(--color-danger-bg);
   border-color: var(--color-danger-border);
 }
-.crash-jump:hover { color: var(--color-danger); border-color: var(--color-danger); }
+.crash-jump:hover { color: var(--color-danger-ink); border-color: var(--color-danger); }
 
 .log-file-list {
   flex: 1 1 auto; min-height: 72px;
@@ -961,7 +962,7 @@ onUnmounted(() => {
   background: var(--color-bg-tertiary); color: var(--color-text-muted);
 }
 .crash-badge[data-kind='panic'] { background: var(--color-danger-bg); color: var(--color-danger-text); }
-.crash-badge[data-kind='js'] { background: var(--color-warning-bg); color: var(--color-warning); }
+.crash-badge[data-kind='js'] { background: var(--color-warning-bg); color: var(--color-warning-ink); }
 .log-file.active .crash-badge { background: transparent; color: inherit; }
 
 .crash-actions { padding: var(--space-4); border-top: 1px solid var(--color-border); flex-shrink: 0; }
@@ -1010,7 +1011,7 @@ onUnmounted(() => {
 .tail-error {
   margin: 0 0 var(--space-4); padding: var(--space-3) 10px;
   border-radius: var(--radius-sm);
-  background: var(--color-warning-bg); color: var(--color-warning);
+  background: var(--color-warning-bg); color: var(--color-warning-ink);
 }
 
 /* === 日志占用：主区底部的一行状态条 ===
@@ -1072,7 +1073,7 @@ onUnmounted(() => {
 }
 .log-context-main { display: flex; align-items: center; gap: var(--space-4); flex: 1 1 auto; min-width: 0; }
 .log-context-icon { flex-shrink: 0; color: var(--color-accent); }
-.log-context-icon.is-crash { color: var(--color-danger); }
+.log-context-icon.is-crash { color: var(--color-danger-ink); }
 .log-context-name {
   min-width: 0;
   font-family: var(--font-mono); font-size: var(--text-sm); font-weight: 600;
@@ -1099,9 +1100,9 @@ onUnmounted(() => {
   font-size: var(--text-xs); color: var(--color-text-muted);
   font-variant-numeric: tabular-nums; white-space: nowrap; padding-right: var(--space-1);
 }
-.log-capped { color: var(--color-warning); }
+.log-capped { color: var(--color-warning-ink); }
 /* 轮转次数是"日志被换掉过"的信号，用警示色跟普通统计区分开 */
-.tail-rotate { color: var(--color-warning); }
+.tail-rotate { color: var(--color-warning-ink); }
 
 /* 级别开关：开着的按钮有淡底，关掉的透明且半透明——状态一眼可辨，
    比原来「都一样、只差 0.3 透明度」清楚 */
@@ -1119,7 +1120,7 @@ onUnmounted(() => {
 .lv:not(.off) { background: var(--color-bg-tertiary); }
 .lv.off { opacity: 0.32; }
 .lv.I { color: var(--color-log-info); }
-.lv.W { color: var(--color-warning); }
+.lv.W { color: var(--color-warning-ink); }
 .lv.E { color: var(--color-log-error); }
 .lv:hover { opacity: 1; }
 
@@ -1155,7 +1156,7 @@ onUnmounted(() => {
               border-color var(--transition-fast);
 }
 .log-btn:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.log-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.log-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 
 /* === 日志正文 === */
 .log-body {
@@ -1168,6 +1169,10 @@ onUnmounted(() => {
 .log-line-row {
   position: relative;
   display: grid;
+  /* 一次读 3000 行、每行 4 个子节点（含 v-html），全量布局就是进日志页那一下的
+     卡顿来源。视口外的行跳过布局/绘制，滚动条高度用估计行高撑住。 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 20px;
   /* 时间戳列宽按 "2026-10-23 21:06:29.648" 在 11px 等宽下量出，再留一点余量；
      三列共用同一套栅格，栈追踪这类没有前缀的行也自动对齐到正文列。 */
   grid-template-columns: 154px 14px minmax(0, 1fr);
@@ -1190,7 +1195,7 @@ onUnmounted(() => {
 }
 /* info 是基线，不上色：一旦整屏每行都带颜色，警告和错误就失去信号意义 */
 .log-lv { font-size: var(--text-xs); font-weight: 600; text-align: center; color: var(--color-text-muted); }
-.lv-W .log-lv { color: var(--color-warning); }
+.lv-W .log-lv { color: var(--color-warning-ink); }
 .lv-E .log-lv { color: var(--color-log-error); }
 
 .log-line {

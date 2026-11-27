@@ -165,14 +165,14 @@ onUnmounted(() => {
 /* 盒子皮肤由 QdSearchBox 统一提供；这里只保底宽，避免在页头动作区被压成一条。 */
 .port-search { min-width: 200px; }
 .port-btn { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); height: 28px; padding: 0 11px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--color-border); background: var(--color-bg-secondary); color: var(--color-text-primary); }
-.port-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.port-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 .port-btn.is-loading .port-btn-icon { animation: port-spin 0.8s linear infinite; }
 @keyframes port-spin { to { transform: rotate(360deg); } }
 
 .port-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); padding: var(--space-9) var(--space-4); color: var(--color-text-muted); }
 .port-spinner { width: 26px; height: 26px; border-radius: 50%; border: 2.5px solid var(--color-border); border-top-color: var(--color-accent); animation: port-spin 0.8s linear infinite; }
 
-.port-error { margin-bottom: var(--space-4); padding: var(--space-4) var(--space-5); font-size: var(--text-sm); color: var(--color-danger); background: var(--color-danger-bg); border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); flex-shrink: 0; }
+.port-error { margin-bottom: var(--space-4); padding: var(--space-4) var(--space-5); font-size: var(--text-sm); color: var(--color-danger-ink); background: var(--color-danger-bg); border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); flex-shrink: 0; }
 
 .port-list { display: flex; flex-direction: column; gap: var(--space-2); }
 .port-empty { text-align: center; padding: var(--space-9) var(--space-4); color: var(--color-text-muted); }
@@ -202,11 +202,11 @@ onUnmounted(() => {
 .port-self-badge { margin-left: var(--space-3); font-size: var(--text-2xs); font-weight: 600; padding: 1px 5px; border-radius: var(--radius-xs); background: var(--color-accent); color: var(--color-accent-text); white-space: nowrap; }
 .port-num { font-size: var(--text-base); font-weight: 600; color: var(--color-text-primary); font-variant-numeric: tabular-nums; min-width: 64px; }
 .port-proto { font-size: var(--text-2xs); font-weight: 600; padding: 1px var(--space-3); border-radius: var(--radius-xs); background: var(--color-bg-tertiary); color: var(--color-text-muted); min-width: 38px; text-align: center; }
-.port-proto.proto-udp { color: var(--color-warning); }
+.port-proto.proto-udp { color: var(--color-warning-ink); }
 .port-pid { font-size: var(--text-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .port-name { flex: 1; min-width: 0; font-size: var(--text-md); color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .port-path { flex: 1.6; min-width: 0; font-size: var(--text-sm); color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.port-kill { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); padding: var(--space-2) 9px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--color-border); background: transparent; color: var(--color-danger); transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast); }
+.port-kill { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); padding: var(--space-2) 9px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--color-border); background: transparent; color: var(--color-danger-ink); transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast); }
 .port-kill:hover { background: var(--color-danger-bg); border-color: var(--color-danger-border); }
-.port-kill:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.port-kill:disabled { color: var(--color-text-disabled); border-color: var(--color-border); cursor: default; }
 </style>

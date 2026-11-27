@@ -567,9 +567,9 @@ async function confirmDeleteVar(name: string) {
   100% { margin-left: 0; }
 }
 
-.g-status.ok { color: var(--color-success); }
+.g-status.ok { color: var(--color-success-ink); }
 
-.g-status.warn { color: var(--color-warning); }
+.g-status.warn { color: var(--color-warning-ink); }
 
 .status-dot.ok { background: var(--color-success); box-shadow: 0 0 5px var(--color-success-border); }
 
@@ -579,7 +579,7 @@ async function confirmDeleteVar(name: string) {
 
 /* .op-btn 基干已抽到 styles/app.css（与 EnvCoreDialogs / EnvironmentPage 三份逐字重复），
    这里只留组件自己的差异项。 */
-.op-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.op-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 
 .op-btn.small { border-radius: var(--radius-sm); padding: var(--space-1) 9px; font-size: var(--text-xs); }
 
@@ -587,17 +587,17 @@ async function confirmDeleteVar(name: string) {
 
 .op-btn.primary:hover:not(:disabled) { background: var(--color-accent-hover); }
 
-.badge.ok { background: var(--color-success-bg); color: var(--color-success); }
+.badge.ok { background: var(--color-success-bg); color: var(--color-success-ink); }
 
-.badge.warn { background: var(--color-warning-bg); color: var(--color-warning); }
+.badge.warn { background: var(--color-warning-bg); color: var(--color-warning-ink); }
 
 .cert-root-line .op-btn { margin-left: auto; }
 
 .cert-dir-row .env-input { flex: 1; }
 
-.mcp-check.ok { color: var(--color-success); }
+.mcp-check.ok { color: var(--color-success-ink); }
 
-.op-item.danger:hover { background: var(--color-danger-bg); color: var(--color-danger); }
+.op-item.danger:hover { background: var(--color-danger-bg); color: var(--color-danger-ink); }
 
 .env-install-btn.danger { background: var(--color-danger); }
 
@@ -625,9 +625,9 @@ async function confirmDeleteVar(name: string) {
 
 .path-flag-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
-.path-flag.ok { color: var(--color-success); background: var(--color-success-bg); }
+.path-flag.ok { color: var(--color-success-ink); background: var(--color-success-bg); }
 
-.path-flag.no { color: var(--color-danger); background: var(--color-danger-bg); }
+.path-flag.no { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 
 .path-empty { color: var(--color-text-muted); font-size: var(--text-sm); padding: 10px var(--space-1); text-align: center; }
 
@@ -670,7 +670,7 @@ async function confirmDeleteVar(name: string) {
 
 .env-select:focus, .env-input:focus, .env-textarea:focus { border-color: var(--color-border-focus-soft); }
 
-.link-btn.danger { color: var(--color-danger); border-color: var(--color-danger); }
+.link-btn.danger { color: var(--color-danger-ink); border-color: var(--color-danger); }
 
 .link-btn.danger:hover { background: var(--color-danger-bg); }
 
@@ -684,13 +684,13 @@ async function confirmDeleteVar(name: string) {
 
 .env-install-btn.busy { opacity: 0.7; cursor: default; }
 
-.env-install-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.env-install-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 
 @keyframes env-indet { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
 
 .env-msg { font-size: var(--text-xs); color: var(--color-text-muted); margin: 10px 0 0; word-break: break-all; user-select: text; -webkit-user-select: text; }
 
-.env-msg.error { color: var(--color-danger); }
+.env-msg.error { color: var(--color-danger-ink); }
 
 .ftp-form { padding: var(--space-2) var(--space-1) 0; display: flex; flex-direction: column; gap: var(--space-2); }
 
@@ -890,7 +890,7 @@ async function confirmDeleteVar(name: string) {
   color: var(--color-text-secondary);
 }
 
-.maint-src em { font-style: normal; color: var(--color-warning); }
+.maint-src em { font-style: normal; color: var(--color-warning-ink); }
 
 .maint-status {
   font-size: var(--text-xs);
@@ -899,11 +899,11 @@ async function confirmDeleteVar(name: string) {
   text-align: center;
 }
 
-.maint-status.ok { color: var(--color-success); background: var(--color-success-bg); }
+.maint-status.ok { color: var(--color-success-ink); background: var(--color-success-bg); }
 
-.maint-status.bad { color: var(--color-danger); background: var(--color-danger-bg); }
+.maint-status.bad { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 
-.maint-status.warn { color: var(--color-warning); background: var(--color-warning-bg); }
+.maint-status.warn { color: var(--color-warning-ink); background: var(--color-warning-bg); }
 
 .maint-status.off { color: var(--color-text-muted); background: var(--color-bg-tertiary); }
 
@@ -1033,13 +1033,13 @@ async function confirmDeleteVar(name: string) {
   border-radius: var(--radius-full);
 }
 
-.manifest-tag.bad { color: var(--color-danger); background: var(--color-danger-bg); }
+.manifest-tag.bad { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 
-.manifest-tag.warn { color: var(--color-warning); background: var(--color-warning-bg); }
+.manifest-tag.warn { color: var(--color-warning-ink); background: var(--color-warning-bg); }
 
 .manifest-tag.extra { color: var(--color-text-secondary); background: var(--color-bg-tertiary); }
 
-.manifest-tag.ok { color: var(--color-success); background: var(--color-success-bg); }
+.manifest-tag.ok { color: var(--color-success-ink); background: var(--color-success-bg); }
 
 .hidden-file { display: none; }
 

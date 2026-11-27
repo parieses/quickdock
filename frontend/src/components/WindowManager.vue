@@ -220,7 +220,7 @@ onUnmounted(() => {
 }
 .wm-target-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
 .wm-target-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wm-target-none { background: transparent; color: var(--color-warning); }
+.wm-target-none { background: transparent; color: var(--color-warning-ink); }
 
 /* 本屏可参与排版的窗口数：让「有些格子空着」变得可解释 */
 .wm-peers {
@@ -230,8 +230,8 @@ onUnmounted(() => {
 
 .wm-body { flex: 1; overflow-y: auto; padding: 10px var(--space-6) 14px; }
 .wm-hint { font-size: var(--text-xs); color: var(--color-text-muted); margin: 0 0 10px; }
-.wm-hint-warn { color: var(--color-warning); }
-.wm-hint-ok { color: var(--color-success); }
+.wm-hint-warn { color: var(--color-warning-ink); }
+.wm-hint-ok { color: var(--color-success-ink); }
 
 /* 模板网格：每张卡片里的每个小块都是命中区 */
 .wm-tpl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }

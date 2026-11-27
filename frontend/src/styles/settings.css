@@ -251,16 +251,7 @@
 .spinning { animation: spin 1s linear infinite; }
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
-/* 主题/语言选择器 */
-.theme-selector { display: flex; gap: var(--space-5); }
-.theme-card {
-  flex: 1; display: flex; flex-direction: column; align-items: center; gap: var(--space-4);
-  padding: var(--space-6) var(--space-5); border: 1px solid var(--color-border); border-radius: var(--radius-md);
-  background: transparent; color: var(--color-text-muted); font-size: var(--text-sm); cursor: pointer;
-  font-family: inherit; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
-}
-.theme-card:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
-.theme-card.active { border-color: var(--color-accent); background: var(--color-accent-bg); color: var(--color-accent); }
+/* 主题已收编到 QdTabs（与语言同款分段控件），原先三张纵向大卡片各占一整行。 */
 .locale-selector { display: flex; gap: var(--space-4); }
 .locale-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
   height: 32px; padding: 0 var(--space-6); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
@@ -299,10 +290,12 @@
   padding-bottom: var(--space-5);
   border-bottom: 1px solid var(--color-border);
 }
-.section + .section { margin-top: 28px; }
-.section-title { font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); margin: 0 0 var(--space-3); }
+/* 段间距 28→20px、说明与控件 20→8px、说明压成小字：一屏能多看一段。
+   原先段落过松——标题、说明、控件各自拉开，整页像被拆散。 */
+.section + .section { margin-top: var(--space-7); }
+.section-title { font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); margin: 0 0 var(--space-4); }
 /* 说明文字用 muted 而不是 disabled：后者是「不可用」的语义色，长句读起来发虚 */
-.section-desc { font-size: var(--text-sm); line-height: 1.6; color: var(--color-text-muted); margin: 0 0 var(--space-7); }
+.section-desc { font-size: var(--text-xs); line-height: 1.5; color: var(--color-text-muted); margin: 0 0 var(--space-4); }
 .setting-row { display: flex; align-items: center; gap: var(--space-5); margin-bottom: 14px; }
 /* 104 而不是 80：「当前存储位置」这类 6 字标签在 80 里会被压成两行，同一列表的
    标签列宽就会忽宽忽窄。flex-shrink:0 保证它不被长控件挤扁。 */
@@ -342,7 +335,7 @@
 .modal-input:focus { border-color: var(--color-border-focus-soft); }
 /* 唯一补遗：qd-btn 只对 primary 单独定义了 disabled，其余语气沿用通用
    .qd-btn:disabled。历史设置页这几个变体原本带 0.5 透明度，保留观感。 */
-.btn-secondary:disabled, .btn-ghost:disabled, .btn-danger:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.btn-secondary:disabled, .btn-ghost:disabled, .btn-danger:disabled { color: var(--color-text-disabled); cursor: default; }
 
 /* 开关本体已全部收编到 QdSwitch（34×18）。这里只留它旁边的
    「开/关」文字标签，与 .toggle-field 的行内布局骨架。 */
@@ -380,7 +373,7 @@
 .webdav-form { display: flex; flex-direction: column; gap: 14px; margin-top: var(--space-6); }
 .webdav-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .webdav-actions .btn { flex: 0 0 auto; }
-.result-error { color: var(--color-danger) !important; }
+.result-error { color: var(--color-danger-ink) !important; }
 
 .ai-hint { font-size: var(--text-sm); color: var(--color-text-muted); margin: 10px 0 0; line-height: 1.5; }
 
@@ -408,7 +401,7 @@
   display: flex; align-items: center; justify-content: center; width: 22px; height: 22px;
   border-radius: var(--radius-sm); flex-shrink: 0;
 }
-.ai-profile-del:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.ai-profile-del:hover { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 .ai-profile-add {
   display: flex; align-items: center; justify-content: center; gap: var(--space-2);
   padding: 7px; border: 1px dashed var(--color-border); background: transparent;
@@ -455,7 +448,7 @@
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
 }
 .action-btn:hover { color: var(--color-text-primary); background: var(--color-bg-hover); border-color: var(--color-border-light); }
-.action-btn:disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
+.action-btn:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
 
 /* 存储位置（与其他设置页复用 section/setting-row/btn 体系） */
 .storage-current-path {
@@ -572,7 +565,7 @@
   padding: var(--space-1) 0; cursor: pointer;
 }
 .ai-memory-check { margin: 0; cursor: pointer; }
-.ai-memory-check:disabled { cursor: progress; opacity: var(--opacity-disabled-soft); }
+.ai-memory-check:disabled { cursor: progress; color: var(--color-text-disabled); }
 .ai-memory-label { font-size: var(--text-sm); color: var(--color-text-primary); }
 
 /* ── 工具审批策略表（设置 → AI） ─────────────────────────────────── */
@@ -589,7 +582,7 @@
 .approval-rules tr.is-custom td:first-child { box-shadow: inset 2px 0 0 var(--color-accent); padding-left: var(--space-4); }
 .approval-risk-tag {
   margin-left: var(--space-3); padding: 0 5px; border-radius: var(--radius-sm);
-  background: var(--color-warning-bg); color: var(--color-warning);
+  background: var(--color-warning-bg); color: var(--color-warning-ink);
   font-size: var(--text-2xs); line-height: 16px; display: inline-block;
 }
 /* 「仅内置 AI」不是风险提示，用强调色：它是「外部客户端看不到」这种中性事实。 */
@@ -617,7 +610,7 @@
   padding: 3px var(--space-5); font-size: var(--text-xs); border-radius: var(--radius-xs); cursor: pointer;
   border: 1px solid var(--color-accent); background: var(--color-accent); color: var(--color-accent-text);
 }
-.ai-hook-ok:disabled { opacity: var(--opacity-disabled-soft); cursor: default; }
+.ai-hook-ok:disabled { color: var(--color-text-disabled); cursor: default; }
 .ai-hook-no {
   padding: 3px var(--space-5); font-size: var(--text-xs); border-radius: var(--radius-xs); cursor: pointer;
   border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
@@ -700,10 +693,10 @@
   font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.ai-ext-err { color: var(--color-danger); }
+.ai-ext-err { color: var(--color-danger-ink); }
 .ai-ext-item-ops { display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; }
 
-.ai-hook-no.is-danger { color: var(--color-danger); border-color: var(--color-danger-border); }
+.ai-hook-no.is-danger { color: var(--color-danger-ink); border-color: var(--color-danger-border); }
 .ai-hook-no.is-danger:hover { background: var(--color-danger-bg); }
 
 .ai-ext-import { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-4); }
@@ -711,7 +704,7 @@
 .ext-status { margin-left: var(--space-4); font-size: var(--text-xs); }
 .ext-status.ok { color: var(--color-accent); }
 .ext-status.disabled { color: var(--color-text-disabled); }
-.ext-status.error { color: var(--color-danger); }
+.ext-status.error { color: var(--color-danger-ink); }
 
 /* 只读行的策略是固定的，用文字而不是下拉框——给个灰掉的 select 会让人
    以为是自己没权限点，反而更想找地方改。 */
@@ -775,9 +768,9 @@
   cursor: pointer; transition: all 0.12s;
 }
 .model-fetch-btn:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-text-primary); }
-.model-fetch-btn:disabled { opacity: var(--opacity-disabled-soft); cursor: default; }
+.model-fetch-btn:disabled { color: var(--color-text-disabled); background: var(--color-bg-tertiary); border-color: var(--color-border); cursor: default; }
 .model-fetch-msg { font-size: var(--text-xs); color: var(--color-text-muted); }
-.model-fetch-msg.error { color: var(--color-danger); }
+.model-fetch-msg.error { color: var(--color-danger-ink); }
 .field-textarea textarea { resize: vertical; min-height: 60px; font-family: inherit; }
 .field-row { display: flex; gap: var(--space-5); }
 .field-half { flex: 1; min-width: 0; }
@@ -800,7 +793,7 @@
 }
 .snapshot-item-actions .action-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .snapshot-item-actions .restore-btn:hover { color: var(--color-accent); }
-.snapshot-item-actions .action-btn.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.snapshot-item-actions .action-btn.danger:hover { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 .snapshot-item-actions .action-btn.enabled-btn { color: var(--color-accent); }
 
 /* 占位 */

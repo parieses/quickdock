@@ -720,7 +720,7 @@ function onKeyDown(e: KeyboardEvent) {
   cursor: text;
 }
 
-.ai-rich.is-disabled { opacity: var(--opacity-disabled-soft); cursor: not-allowed; }
+.ai-rich.is-disabled { color: var(--color-text-disabled); cursor: not-allowed; }
 
 /* 占位提示用伪元素：contenteditable 没有 placeholder 属性。
    撑满整行的空格提示放在有胶囊时不显示（那时已有内容，isEmpty 为 false）。 */

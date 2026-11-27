@@ -439,7 +439,7 @@ onUnmounted(stopPoll)
 }
 
 .ai-job.is-failed .ai-job-status {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 
 .ai-job-cwd {
@@ -476,19 +476,19 @@ onUnmounted(stopPoll)
 }
 
 .ai-job-act:disabled {
-  opacity: var(--opacity-disabled);
+  color: var(--color-text-disabled);
   cursor: default;
 }
 
 .ai-job-act.is-danger:hover {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   background: var(--color-danger-bg);
 }
 
 .ai-job-err {
   margin: var(--space-2) 0 0 13px;
   font-size: var(--text-xs);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   word-break: break-word;
 }
 
@@ -522,7 +522,7 @@ onUnmounted(stopPoll)
 }
 
 .ai-jobs-empty.is-err {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 
 .ai-jobs-hint {

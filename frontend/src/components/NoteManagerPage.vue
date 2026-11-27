@@ -2005,8 +2005,8 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
   transition: background var(--transition-fast), color var(--transition-fast);
 }
 .tree-empty-btn:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
-.tree-error { color: var(--color-danger); display: flex; flex-direction: column; align-items: center; gap: var(--space-3); }
-.tree-retry { padding: var(--space-1) var(--space-3); border: 1px solid var(--color-danger); border-radius: var(--radius-sm); background: transparent; color: var(--color-danger); font-size: var(--text-sm); cursor: pointer; }
+.tree-error { color: var(--color-danger-ink); display: flex; flex-direction: column; align-items: center; gap: var(--space-3); }
+.tree-retry { padding: var(--space-1) var(--space-3); border: 1px solid var(--color-danger); border-radius: var(--radius-sm); background: transparent; color: var(--color-danger-ink); font-size: var(--text-sm); cursor: pointer; }
 .tree-retry:hover { background: var(--color-danger); color: var(--color-bg-primary); }
 .sr-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3); margin-bottom: 0; min-height: 26px; border-radius: var(--radius-sm); cursor: pointer; font-size: var(--text-md); }
 .sr-row:hover { background: var(--color-bg-hover); }
@@ -2267,7 +2267,7 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 .tb-count { flex: 1; font-size: var(--text-xs); color: var(--color-text-muted); }
 .tb-clear { border: none; background: none; color: var(--color-text-muted); cursor: pointer; font-size: var(--text-xs); padding: var(--space-1) var(--space-3); border-radius: var(--radius-xs); }
 .tb-clear:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.tb-clear:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.tb-clear:disabled { color: var(--color-text-disabled); cursor: default; }
 .tb-input, .tb-select { flex: 1; min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: var(--text-sm); outline: none; font-family: inherit; }
 .tb-input:focus, .tb-select:focus { border-color: var(--color-border-focus-soft); }
 
@@ -2366,8 +2366,8 @@ onActivated(() => { if (pendingRecentLocate.value) void locateRecentEdited() })
 /* 保存态：挤在 ne-head 那一行，不新增高度 */
 .ne-save { display: inline-flex; align-items: center; gap: var(--space-1); flex-shrink: 0; font-size: var(--text-xs); color: var(--color-text-muted); }
 .ne-save.saving { color: var(--color-text-muted); }
-.ne-save.saved { color: var(--color-success); }
-.ne-save.failed { color: var(--color-danger); }
+.ne-save.saved { color: var(--color-success-ink); }
+.ne-save.failed { color: var(--color-danger-ink); }
 .ne-save-spin { animation: ne-save-rotate 1s linear infinite; }
 @keyframes ne-save-rotate { to { transform: rotate(360deg); } }
 .ne-updated { flex-shrink: 0; font-size: var(--text-xs); color: var(--color-text-muted); }

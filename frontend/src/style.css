@@ -92,19 +92,22 @@
      中文字面高度比同号西文大，13px 是这套工具的正文档位。
      注意 --text-base 虽叫 base，但它不是阶梯起点：13px 的 --text-md 才是
      界面正文基准，这一档是给「长文」单独加的一级，命名沿用既有约定。 */
-  --text-2xs: 10px;
-  --text-xs: 11px;
-  --text-sm: 12px;
-  --text-md: 13px;
-  --text-base: 14px;
-  --text-lg: 15px;
-  --text-xl: 18px;
-  --text-2xl: 24px;
+  /* 文字大小：只缩放字号，不动间距/图标/窗口。设置页「文字大小」实时改这个变量，
+     全站字号都读 --text-*，因此一处改动即整站生效；与界面缩放（WebView Zoom）正交。 */
+  --font-scale: 1;
+  --text-2xs: calc(10px * var(--font-scale));
+  --text-xs: calc(11px * var(--font-scale));
+  --text-sm: calc(12px * var(--font-scale));
+  --text-md: calc(13px * var(--font-scale));
+  --text-base: calc(14px * var(--font-scale));
+  --text-lg: calc(15px * var(--font-scale));
+  --text-xl: calc(18px * var(--font-scale));
+  --text-2xl: calc(24px * var(--font-scale));
   /* 展示档：空状态图标 / 大数字读数。它们不参与正文阶梯，但同样是「一档一个用途」，
      不能留成散落在组件里的 28 / 34 / 48 字面量。 */
-  --text-3xl: 28px;
-  --text-4xl: 34px;
-  --text-5xl: 48px;
+  --text-3xl: calc(28px * var(--font-scale));
+  --text-4xl: calc(34px * var(--font-scale));
+  --text-5xl: calc(48px * var(--font-scale));
 
   /* 禁用态透明度：只有两档，避免同一个「不可点」在 60 个组件里有六种长相
      （存量散布 0.25/0.35/0.38/0.4/0.45/0.5/0.55/0.6）。
@@ -197,14 +200,19 @@
   --color-accent: #5b8cff;
   --color-accent-hover: #4a7af0;
   --color-accent-text: #fff;
-  /* accent 作文字/图标色时的专用档：深色底上 --color-accent 本身够亮，直接复用。 */
+  /* 语义色作文字/图标色时的专用档：深色底上原色本身够亮（4.6~8:1），直接复用。
+     浅色档压深一档，否则 #22c55e / #f59e0b 压在白卡片上只有 2:1，状态字读不清。
+     实心按钮/边框/光晕仍用原色，品牌观感不变。 */
   --color-accent-ink: #5b8cff;
   --color-danger: #ef4444;
+  --color-danger-ink: #ef4444;
   --color-danger-bg: rgba(239, 68, 68, 0.12);
   --color-danger-text: #ffffff;
   --color-success: #22c55e;
+  --color-success-ink: #22c55e;
   --color-success-bg: rgba(34, 197, 94, 0.12);
   --color-warning: #f59e0b;
+  --color-warning-ink: #f59e0b;
   --color-warning-bg: rgba(245, 158, 11, 0.12);
   --color-warning-border: rgba(245, 158, 11, 0.4);
   /* 状态色的「描边」档：徽章/按钮边框此前在各组件里散写 rgba(...,0.4~0.45)，
@@ -385,21 +393,21 @@
 [data-theme="light"] {
   /* 浅色同阶：底色留一点灰、面板给到纯白 —— 浅色主题的纵深应该反向读
      （深色靠"提亮"，浅色靠"更白"），以前面板灰得比底还沉，看起来像压了一层脏膜。 */
-  --color-bg-primary: #f6f7f9;
-  --color-bg-secondary: #ffffff;
-  --color-bg-tertiary: #eef0f4;
-  --color-bg-hover: #eceff4;
-  --color-bg-active: #e0e5ed;
+  --color-bg-primary: #eef0f3;
+  --color-bg-secondary: #fafbfc;
+  --color-bg-tertiary: #e9ecf1;
+  --color-bg-hover: #e6eaf0;
+  --color-bg-active: #dde3ec;
   --color-bg-overlay: rgba(15, 18, 24, 0.16);
   --color-bg-overlay-deep: rgba(15, 18, 24, 0.64); /* 与暗色主题同名 token，一一对应 */
-  --color-surface: #ffffff;
-  --color-surface-elevated: #f4f6f9;
+  --color-surface: #fafbfc;
+  --color-surface-elevated: #f2f4f7;
   /* 与深色档一一对应：浮层窗口（qd-backdrop）用 bg-primary 实色底，
      浅色下少了这个别名会静默变透明，透出被盖住的主窗口。 */
   --color-settings-bg: var(--color-bg-primary);
-  --color-text-primary: #1a1f27;
-  --color-text-secondary: #525b68;
-  --color-text-muted: #6a727e;
+  --color-text-primary: #232933;
+  --color-text-secondary: #5b6472;
+  --color-text-muted: #717a86;
   --color-text-disabled: #9aa2ae;
   --color-border: #dde1e8;
   --color-border-light: #c9cfd9;
@@ -414,11 +422,15 @@
      实心按钮/焦点环仍用 --color-accent，品牌色不变。 */
   --color-accent-ink: #3563c9;
   --color-danger: #ef4444;
+  /* ink 档压深到 4.5:1 以上（浅卡 5.43 / 浅底 4.92）；原色留给实心按钮、边框、光晕 */
+  --color-danger-ink: #c62828;
   --color-danger-bg: rgba(239, 68, 68, 0.1);
   --color-danger-text: #ffffff;
   --color-success: #22c55e;
+  --color-success-ink: #137a37;
   --color-success-bg: rgba(34, 197, 94, 0.12);
   --color-warning: #f59e0b;
+  --color-warning-ink: #a94e08;
   --color-warning-bg: rgba(245, 158, 11, 0.14);
   /* 浅色底上描边要更实一点才看得清，故比深色档略高 */
   --color-warning-border: rgba(217, 119, 6, 0.45);
@@ -492,7 +504,7 @@
   /* 与深色同名 token 一一对应：浅色卡片是纯白压 --color-bg-primary，
      白压白没有边界，所以必须保留 1px 描边（用 --color-border），
      投影只留一层极淡的，不再叠内高光。 */
-  --color-card-bg: #ffffff;
+  --color-card-bg: #fafbfc;
   --card-border-color: var(--color-border);
   --color-select-bg: rgba(91, 140, 255, 0.12);
   --color-active-line: rgba(15, 18, 24, 0.045);
@@ -917,7 +929,7 @@ input[type='radio']:disabled { cursor: not-allowed; opacity: var(--opacity-disab
 .text-muted { color: var(--color-text-muted); }
 .text-disabled { color: var(--color-text-disabled); }
 .text-accent { color: var(--color-accent); }
-.text-danger { color: var(--color-danger); }
+.text-danger { color: var(--color-danger-ink); }
 
 /* ==================== 选中文本 ==================== */
 /* 选中文本：整块实心强调色在密集界面里像"贴了张便签"，半透明底 + 原文字色
@@ -972,7 +984,7 @@ svg[stroke='currentColor'] { stroke-width: 1.75; }
   z-index: 1;
 }
 .version-toggle-btn:hover:not(:disabled) { opacity: 0.85; }
-.version-toggle-btn:disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
+.version-toggle-btn:disabled { background: var(--color-bg-tertiary); color: var(--color-text-disabled); cursor: not-allowed; }
 .version-list-panel {
   position: absolute;
   top: 100%;
@@ -996,7 +1008,7 @@ svg[stroke='currentColor'] { stroke-width: 1.75; }
   cursor: default;
 }
 .version-list-loading { color: var(--color-text-muted); }
-.version-list-error { color: var(--color-danger); }
+.version-list-error { color: var(--color-danger-ink); }
 .version-list-empty { color: var(--color-accent); cursor: pointer; }
 .version-list-empty:hover { opacity: 0.8; }
 .retry-link { color: var(--color-accent); margin-left: var(--space-3); }

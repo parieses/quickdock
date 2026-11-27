@@ -550,7 +550,7 @@ function exportSnapshot() {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: var(--space-3); min-height: 160px; font-size: var(--text-md); color: var(--color-text-muted);
 }
-.st-state-error { color: var(--color-danger); }
+.st-state-error { color: var(--color-danger-ink); }
 .st-state-hint { margin: 0; font-size: var(--text-sm); color: var(--color-text-muted); }
 
 .st-banner {
@@ -572,8 +572,8 @@ function exportSnapshot() {
 }
 .st-banner-metrics b { font-size: var(--text-lg); color: var(--color-text-primary); margin-right: var(--space-2); }
 .st-updated { color: var(--color-text-muted); }
-.st-stale { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--color-warning); }
-.st-cells-error { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--color-danger); }
+.st-stale { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--color-warning-ink); }
+.st-cells-error { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--color-danger-ink); }
 .qd-btn.st-retry { height: 22px; padding: 0 var(--space-2); font-size: var(--text-xs); }
 
 .st-group-title { margin: var(--space-2) 0 var(--space-3); font-size: var(--text-md); font-weight: 600; color: var(--color-text-secondary); }

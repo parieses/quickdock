@@ -925,7 +925,7 @@ watch(() => props.visible, async (v) => {
 .dsh-node-hint {
   margin-top: var(--space-4);
   font-size: var(--text-sm);
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   line-height: 1.5;
 }
 .dsh-goto-link {
@@ -954,11 +954,11 @@ watch(() => props.visible, async (v) => {
   border-radius: var(--radius-md);
   font-size: var(--text-xs);
   background: var(--color-warning-bg);
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
 }
 .dsh-update-badge.ok {
   background: var(--color-success-bg);
-  color: var(--color-success);
+  color: var(--color-success-ink);
 }
 .dsh-dot {
   display: inline-block;
@@ -993,7 +993,7 @@ watch(() => props.visible, async (v) => {
   border-color: var(--color-border-focus-soft);
 }
 .plugin-input:disabled {
-  opacity: var(--opacity-disabled);
+  color: var(--color-text-disabled);
 }
 .plugin-batch {
   padding-top: var(--space-4);
@@ -1038,7 +1038,7 @@ watch(() => props.visible, async (v) => {
   color: var(--color-text-primary);
 }
 .dsh-plugin-reload:disabled {
-  opacity: var(--opacity-disabled);
+  color: var(--color-text-disabled);
   cursor: default;
 }
 .dsh-plugin-empty {
@@ -1106,10 +1106,10 @@ watch(() => props.visible, async (v) => {
 }
 .dsh-plugin-del:hover:not(:disabled) {
   background: var(--color-danger-bg);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 .dsh-plugin-del:disabled {
-  opacity: var(--opacity-disabled);
+  color: var(--color-text-disabled);
   cursor: default;
 }
 .dsh-spin {
@@ -1229,10 +1229,10 @@ watch(() => props.visible, async (v) => {
   color: var(--color-text-muted);
 }
 .dsh-log-line.error {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 .dsh-log-line.error::before {
   content: '✗ ';
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 </style>

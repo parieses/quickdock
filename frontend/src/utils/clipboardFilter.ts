@@ -30,19 +30,6 @@ export interface FilterableEntry {
   textType?: string
 }
 
-/** 标签 id。 */
-export type ClipTagId =
-  | 'all'
-  | 'favorite'
-  | 'text'
-  | 'image'
-  | 'file'
-  | 'url'
-  | 'email'
-  | 'json'
-  | 'code'
-  | 'phone'
-
 /**
  * loadEntries 把标签筛选下推到 SQL 的方式：
  *  - none       ：常规上限载入（all），前端按 isPinned 等逻辑过滤

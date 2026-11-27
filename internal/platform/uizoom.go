@@ -14,9 +14,10 @@ import (
 //
 // 同理，改完不能即时生效，必须重启应用（前端随后调用 AppService.RestartApp）。
 
-// uiZoomLevels 允许的缩放档位。只暴露这三档而非任意数值：
-// 缩放会同时放大窗口尺寸与内容，过小/过大的自定义值很容易得到畸形窗口（内容被裁或溢出）。
-var uiZoomLevels = []float64{1.0, 1.1, 1.2}
+// uiZoomLevels 允许的缩放档位：与设置页刻度一一对应。
+// 窗口尺寸按 uiZoom 等比放大（见 main.go 的 scaledSize），因此档位本身不会裁内容；
+// 只收口到这几档，是为了不让用户填出超出屏幕的任意数值。
+var uiZoomLevels = []float64{1.0, 1.1, 1.15, 1.2, 1.25, 1.5}
 
 // DefaultUiZoom 未配置（或配置值非法）时的档位：1.0 即「标准」，不放大。
 const DefaultUiZoom = 1.0

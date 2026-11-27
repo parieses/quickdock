@@ -343,7 +343,7 @@ const { t } = useI18n()
 
 .svc-port-link:hover { color: var(--color-accent); text-decoration: underline; }
 
-.svc-port-link.disabled { cursor: default; opacity: var(--opacity-disabled); }
+.svc-port-link.disabled { cursor: default; color: var(--color-text-disabled); }
 
 .svc-port-link.disabled:hover { color: var(--color-text-disabled); text-decoration: none; }
 
@@ -381,7 +381,7 @@ const { t } = useI18n()
 .muted { color: var(--color-text-muted); }
 
 /* .op-btn / .log-btn 基干已抽到 styles/app.css，这里只留组件自己的差异项。 */
-.op-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.op-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 
 .op-btn.small { border-radius: var(--radius-sm); padding: var(--space-1) 9px; font-size: var(--text-xs); }
 
@@ -393,7 +393,7 @@ const { t } = useI18n()
 
 .cert-dir-row .env-input { flex: 1; }
 
-.op-item.danger:hover { background: var(--color-danger-bg); color: var(--color-danger); }
+.op-item.danger:hover { background: var(--color-danger-bg); color: var(--color-danger-ink); }
 
 .env-install-btn.danger { background: var(--color-danger); }
 
@@ -442,7 +442,7 @@ const { t } = useI18n()
 
 .env-select:focus, .env-input:focus, .env-textarea:focus { border-color: var(--color-border-focus-soft); }
 
-.link-btn.danger { color: var(--color-danger); border-color: var(--color-danger); }
+.link-btn.danger { color: var(--color-danger-ink); border-color: var(--color-danger); }
 
 .link-btn.danger:hover { background: var(--color-danger-bg); }
 
@@ -456,13 +456,13 @@ const { t } = useI18n()
 
 .env-install-btn.busy { opacity: 0.7; cursor: default; }
 
-.env-install-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.env-install-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 
 @keyframes env-indet { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
 
 .env-msg { font-size: var(--text-xs); color: var(--color-text-muted); margin: 10px 0 0; word-break: break-all; user-select: text; -webkit-user-select: text; }
 
-.env-msg.error { color: var(--color-danger); }
+.env-msg.error { color: var(--color-danger-ink); }
 
 .ftp-form .env-input { margin-bottom: var(--space-3); }
 
@@ -514,9 +514,9 @@ const { t } = useI18n()
 
 .pc-row .env-input { flex: 1; }
 
-.pc-ok { color: var(--color-success); font-family: monospace; font-size: var(--text-xs); }
+.pc-ok { color: var(--color-success-ink); font-family: monospace; font-size: var(--text-xs); }
 
-.pc-bad { color: var(--color-danger); font-size: var(--text-xs); }
+.pc-bad { color: var(--color-danger-ink); font-size: var(--text-xs); }
 
 .pc-select {
   margin-left: var(--space-3); padding: var(--space-1) 5px; font-size: var(--text-xs);
@@ -565,7 +565,7 @@ const { t } = useI18n()
   display: inline-flex; align-items: center; justify-content: center;
   width: 14px; height: 14px; border-radius: 50%;
   font-size: var(--text-2xs); font-weight: 600; cursor: help;
-  color: var(--color-warning); background: var(--color-warning-bg);
+  color: var(--color-warning-ink); background: var(--color-warning-bg);
 }
 
 .pd-path {

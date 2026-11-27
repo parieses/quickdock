@@ -1874,7 +1874,7 @@ onBeforeUnmount(() => {
   transition: border-color var(--transition-fast), background-color var(--transition-fast);
 }
 .scr-tpl:hover:not(:disabled) { border-color: var(--color-accent-border); background: var(--color-bg-hover); }
-.scr-tpl:disabled { opacity: var(--opacity-disabled-soft); cursor: default; }
+.scr-tpl:disabled { color: var(--color-text-disabled); background: var(--color-bg-tertiary); border-color: var(--color-border); cursor: default; }
 .scr-tpl-head { display: flex; align-items: center; justify-content: space-between; }
 .scr-tpl-lang {
   padding: 0 6px; line-height: 16px; border-radius: var(--radius-full);
@@ -1891,10 +1891,10 @@ onBeforeUnmount(() => {
 .scr-btn { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-secondary); font-size: var(--text-sm); font-family: inherit; cursor: pointer; }
 .scr-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .scr-btn.primary { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent); }
-.scr-btn.danger { color: var(--color-danger); }
+.scr-btn.danger { color: var(--color-danger-ink); }
 .scr-btn.sm { height: 26px; font-size: var(--text-xs); padding: 0 var(--space-2); }
 .scr-btn.ghost { background: transparent; border-color: transparent; }
-.scr-btn:disabled { opacity: var(--opacity-disabled-soft); cursor: default; }
+.scr-btn:disabled { color: var(--color-text-disabled); background: var(--color-bg-tertiary); border-color: var(--color-border); cursor: default; }
 .scr-btn.ghost.active { background: var(--color-accent-bg); color: var(--color-accent); }
 /* 筛选胶囊：语言下拉与「只看失败」共用一套外观，替代原来的裸 select + 复选框 */
 .scr-pill {
@@ -1917,7 +1917,7 @@ onBeforeUnmount(() => {
 .scr-search.sm { width: 110px; }
 .scr-search.grow { flex: 1 1 auto; width: auto; }
 .scr-banner { display: flex; align-items: center; gap: var(--space-2); margin: 0 var(--space-4) var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-secondary); font-size: var(--text-xs); color: var(--color-text-secondary); }
-.scr-banner.warn { border-color: var(--color-warning); color: var(--color-warning); }
+.scr-banner.warn { border-color: var(--color-warning); color: var(--color-warning-ink); }
 .scr-banner span { flex: 1 1 auto; }
 .scr-bindings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .scr-bindings li { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-xs); padding: 4px var(--space-2); background: var(--color-bg-tertiary); border-radius: var(--radius-sm); }
@@ -2030,13 +2030,13 @@ onBeforeUnmount(() => {
 .scr-field input, .scr-field select { background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 6px var(--space-3); color: var(--color-text-primary); font-size: var(--text-sm); font-family: inherit; }
 .scr-field input:focus, .scr-field select:focus { outline: none; border-color: var(--color-accent-border); }
 .scr-field-hint { font-size: 11px; color: var(--color-text-muted); }
-.scr-field-hint.warn { color: var(--color-warning); }
+.scr-field-hint.warn { color: var(--color-warning-ink); }
 .scr-row2 { display: flex; gap: var(--space-3); }
 .scr-inline { display: flex; align-items: center; gap: var(--space-2); }
 .scr-inline input { flex: 1 1 auto; }
 .scr-switches { display: flex; gap: var(--space-6); font-size: var(--text-sm); color: var(--color-text-secondary); }
 .scr-switches label { display: inline-flex; align-items: center; gap: var(--space-2); cursor: pointer; }
-.scr-danger-hint { display: flex; gap: 5px; align-items: flex-start; font-size: var(--text-xs); color: var(--color-warning); margin: 0; line-height: 1.5; }
+.scr-danger-hint { display: flex; gap: 5px; align-items: flex-start; font-size: var(--text-xs); color: var(--color-warning-ink); margin: 0; line-height: 1.5; }
 .scr-form-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
 
 .scr-log { flex-shrink: 0; height: 220px; display: flex; flex-direction: column; border-top: 1px solid var(--color-border); background: var(--color-bg-secondary); }
@@ -2047,7 +2047,7 @@ onBeforeUnmount(() => {
 .scr-log-body { flex: 1 1 auto; overflow: auto; padding: var(--space-2) var(--space-5); }
 .scr-log-pre { margin: 0; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; color: var(--color-text-secondary); white-space: pre-wrap; word-break: break-all; }
 .scr-log-pre.tall { flex: 1 1 auto; overflow: auto; max-height: 52vh; }
-.scr-line-err { color: var(--color-danger); }
+.scr-line-err { color: var(--color-danger-ink); }
 
 .scr-detail { display: flex; flex-direction: column; gap: var(--space-3); }
 .scr-detail-meta { display: flex; align-items: center; gap: var(--space-4); font-size: var(--text-xs); color: var(--color-text-muted); }

@@ -380,10 +380,11 @@ function openMailGuide() {
 
 function isMailExpired(received: number) { return nowTick.value - received > MAIL_EXPIRE_MS }
 // 安全提醒没有验证码，也不受 10 分钟时效约束；它只是「发生过的一件事」。
-function isSecurityMail(m: MailCode) { return m.kind === 'password' || m.kind === 'login' }
+function isSecurityMail(m: MailCode) { return m.kind === 'password' || m.kind === 'login' || m.kind === 'reset' }
 function mailKindText(kind?: string) {
   return kind === 'password' ? t('mailSecurityPassword')
-    : kind === 'login' ? t('mailSecurityLogin') : ''
+    : kind === 'login' ? t('mailSecurityLogin')
+    : kind === 'reset' ? t('mailSecurityReset') : ''
 }
 function mailTimeText(received: number) {
   return new Date(received).toLocaleTimeString(locale.value === 'en-US' ? 'en-US' : 'zh-CN', {
@@ -2937,11 +2938,11 @@ onUnmounted(() => {
   font-size: var(--text-xs); color: var(--color-text-muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.r-foot.danger { color: var(--color-danger); }
+.r-foot.danger { color: var(--color-danger-ink); }
 /* 异常读数只染数字——一排四个数字里，颜色比符号更快被看见。
    再加一档很轻的呼吸（2.4s、opacity 1→0.55）：静止的红字在深色底上容易被当成装饰，
    动起来才会被真正读到；幅度压得很小，不是闪烁。 */
-.readout.alert .r-num { color: var(--color-danger); animation: dash-alert 2.4s ease-in-out infinite; }
+.readout.alert .r-num { color: var(--color-danger-ink); animation: dash-alert 2.4s ease-in-out infinite; }
 @keyframes dash-alert { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 @media (prefers-reduced-motion: reduce) { .readout.alert .r-num { animation: none; } }
 
@@ -2950,8 +2951,8 @@ onUnmounted(() => {
  * align-items 保持默认 stretch —— 同一行的卡片等高，底边对齐，比参差的下边缘好读。
  */
 /* 数据新鲜度：过期数字不能被当成实时状态 */
-.band-head-meta.stale { color: var(--color-warning); }
-.band-head-meta.old { color: var(--color-danger); }
+.band-head-meta.stale { color: var(--color-warning-ink); }
+.band-head-meta.old { color: var(--color-danger-ink); }
 .band-head-meta.unknown { color: var(--color-text-muted); }
 .band-refresh { margin-left: var(--space-1); }
 .readout.is-failed { opacity: 0.72; }
@@ -3036,7 +3037,7 @@ onUnmounted(() => {
   font-size: var(--text-2xs); line-height: 15px; padding: 0 var(--space-3); border-radius: var(--radius-full);
   color: var(--color-text-muted); background: var(--color-bg-tertiary);
 }
-.card-count.bad { color: var(--color-danger); background: var(--color-danger-bg); }
+.card-count.bad { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 .card-link {
   display: inline-flex; align-items: center; gap: 1px; margin-left: auto;
   background: none; border: 0; padding: 0; cursor: pointer;
@@ -3070,9 +3071,9 @@ onUnmounted(() => {
 .ribbon-label { font-size: var(--text-xs); color: var(--color-text-muted); }
 .ribbon-pct {
   margin-left: auto; font-size: var(--text-md); font-weight: 600;
-  font-variant-numeric: tabular-nums; color: var(--color-success);
+  font-variant-numeric: tabular-nums; color: var(--color-success-ink);
 }
-.ribbon-pct.bad { color: var(--color-danger); }
+.ribbon-pct.bad { color: var(--color-danger-ink); }
 
 .ribbon { display: flex; gap: var(--space-1); height: 16px; }
 .cell { flex: 1 1 0; min-width: 0; border-radius: var(--radius-2xs); background: var(--color-bg-tertiary); }
@@ -3133,11 +3134,11 @@ onUnmounted(() => {
 }
 .qc-link:hover { text-decoration: underline; }
 .qc-more { padding: var(--space-2) 0 var(--space-1); font-size: var(--text-2xs); }
-.qc-error { color: var(--color-danger); }
+.qc-error { color: var(--color-danger-ink); }
 .qc-conn { display: block; margin-top: var(--space-3); font-size: var(--text-2xs); line-height: 1.4; }
 .qc-conn.ok { color: var(--color-text-muted); }
-.qc-conn.bad { color: var(--color-danger); word-break: break-word; }
-.qc-ok { color: var(--color-success); }
+.qc-conn.bad { color: var(--color-danger-ink); word-break: break-word; }
+.qc-ok { color: var(--color-success-ink); }
 .qc-list { list-style: none; margin: 0; padding: 0; }
 .qc-row {
   display: flex; align-items: center; gap: var(--space-2);
@@ -3166,7 +3167,7 @@ onUnmounted(() => {
 .qc-alert {
   flex-shrink: 0; min-width: 78px;
   display: inline-flex; align-items: center; gap: 5px;
-  color: var(--color-warning); font-size: var(--text-xs); font-weight: 500;
+  color: var(--color-warning-ink); font-size: var(--text-xs); font-weight: 500;
 }
 .qc-alert span { color: var(--color-text-secondary); font-size: var(--text-xs); font-weight: 400; }
 .qc-slot { pointer-events: none; }
@@ -3225,12 +3226,12 @@ onUnmounted(() => {
 }
 .qc-acct-row.active .qc-acct-name { color: var(--color-text-primary); }
 .qc-acct-state { font-size: var(--text-2xs); flex-shrink: 0; }
-.qc-acct-state.ok { color: var(--color-success); }
-.qc-acct-state.bad { color: var(--color-danger); }
+.qc-acct-state.ok { color: var(--color-success-ink); }
+.qc-acct-state.bad { color: var(--color-danger-ink); }
 .qc-acct-state.pending, .qc-acct-state.off { color: var(--color-text-muted); }
 .qc-acct-del { opacity: .55; }
 .qc-acct-row:hover .qc-acct-del, .qc-acct-row.active .qc-acct-del { opacity: 1; }
-.qc-acct-row .qc-acct-del:hover { color: var(--color-danger); }
+.qc-acct-row .qc-acct-del:hover { color: var(--color-danger-ink); }
 .qc-acct-empty {
   margin: 0; padding: 9px 10px;
   border: 1px dashed var(--color-border); border-radius: var(--radius-sm);
@@ -3419,7 +3420,7 @@ onUnmounted(() => {
 }
 .row:hover .check { color: var(--color-text-muted); border-color: var(--color-text-muted); }
 .row .check:hover {
-  color: var(--color-success); border-color: var(--color-success); background: var(--color-success-bg);
+  color: var(--color-success-ink); border-color: var(--color-success); background: var(--color-success-bg);
 }
 
 .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: var(--color-text-disabled); }
@@ -3433,7 +3434,7 @@ onUnmounted(() => {
   flex-shrink: 0; font-size: var(--text-2xs); line-height: 1.6; padding: 0 5px;
   border-radius: var(--radius-xs); color: var(--color-text-muted); background: var(--color-bg-tertiary);
 }
-.due.warn { color: var(--color-danger); background: var(--color-danger-bg); }
+.due.warn { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 
 .port {
   width: 44px; flex-shrink: 0;
@@ -3448,9 +3449,9 @@ onUnmounted(() => {
 .mono { font-family: var(--font-mono); }
 
 /* Git 行的 ↑↓ 与干净标记 */
-.git-ab { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-warning); flex-shrink: 0; }
+.git-ab { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-warning-ink); flex-shrink: 0; }
 .git-ab.down { color: var(--color-accent); }
-.git-ok { display: flex; color: var(--color-success); flex-shrink: 0; }
+.git-ok { display: flex; color: var(--color-success-ink); flex-shrink: 0; }
 
 .spin { animation: dash-spin 900ms linear infinite; }
 @keyframes dash-spin { to { transform: rotate(360deg); } }
@@ -3556,8 +3557,8 @@ onUnmounted(() => {
   flex-shrink: 0; padding: 0 5px; border-radius: var(--radius-xs);
   background: var(--color-bg-tertiary); font-size: var(--text-2xs); font-weight: 600; line-height: 16px;
 }
-.yj-tag.yi, .yj-label.yi { color: var(--color-success); }
-.yj-tag.ji, .yj-label.ji { color: var(--color-danger); }
+.yj-tag.yi, .yj-label.yi { color: var(--color-success-ink); }
+.yj-tag.ji, .yj-label.ji { color: var(--color-danger-ink); }
 .yj-words {
   flex: 0 1 auto; min-width: 0; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
@@ -3596,7 +3597,7 @@ onUnmounted(() => {
 .db-key-row { display: flex; align-items: center; gap: var(--space-4); margin-top: var(--space-3); }
 .db-key-row .btn { flex-shrink: 0; }
 .db-key-row .db-pref-hint { margin: 0; }
-.db-key-warn { display: block; margin-top: var(--space-1); color: var(--color-warning); }
+.db-key-warn { display: block; margin-top: var(--space-1); color: var(--color-warning-ink); }
 
 /* 邮箱配置教程：链接用按钮 + openExternal，不用裸 <a>（WebView 会把应用界面导航走）。 */
 .mail-guide { margin-top: var(--space-3); }
@@ -3656,7 +3657,7 @@ onUnmounted(() => {
 }
 .db-icon-btn:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-accent); }
 .db-icon-btn:focus-visible { outline: 1px solid var(--color-accent-border-strong); outline-offset: 2px; }
-.db-icon-btn:disabled { cursor: default; opacity: var(--opacity-disabled); }
+.db-icon-btn:disabled { cursor: default; color: var(--color-text-disabled); }
 .db-text-btn {
   background: none; border: 0; padding: 0; cursor: pointer;
   font: inherit; font-size: var(--text-xs); color: var(--color-accent);

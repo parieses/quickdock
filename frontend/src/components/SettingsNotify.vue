@@ -383,7 +383,7 @@ watch(() => props.visible, (v) => {
 .nt-row { display: flex; gap: var(--space-2); align-items: center; }
 .nt-row .qd-input { flex: 1; min-width: 0; }
 .nt-msg { margin-top: var(--space-3); font-size: var(--text-sm); color: var(--color-text-secondary); word-break: break-all; line-height: 1.5; }
-.nt-msg.ok { color: var(--color-success); }
+.nt-msg.ok { color: var(--color-success-ink); }
 .nt-actions { display: flex; justify-content: flex-end; margin-top: var(--space-4); }
 /* 扩展渠道行：字段较多，用 flex-wrap 让窄面板自动换行，不挤成横向滚动条 */
 .ntx-empty { font-size: var(--text-sm); color: var(--color-text-muted); margin: var(--space-3) 0; }
@@ -404,7 +404,7 @@ watch(() => props.visible, (v) => {
 .nt-send-summary { font-size: var(--text-sm); color: var(--color-text-secondary); margin-bottom: var(--space-2); }
 .nt-send-row { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; font-size: var(--text-sm); padding: var(--space-1) 0; }
 .nt-send-row-channel { color: var(--color-text-primary); }
-.nt-send-row-flag.ok { color: var(--color-success); }
-.nt-send-row-flag.fail { color: var(--color-danger); }
+.nt-send-row-flag.ok { color: var(--color-success-ink); }
+.nt-send-row-flag.fail { color: var(--color-danger-ink); }
 .nt-send-row-error { color: var(--color-text-muted); font-size: var(--text-xs); word-break: break-all; }
 </style>

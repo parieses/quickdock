@@ -31,7 +31,6 @@ import { reportError } from '../utils/reportError'
 /** 模块级文案：composable 不在 setup 上下文里，用导出的 i18n 实例取 t。 */
 const t = (key: string) => i18n.global.t(key)
 
-export type SaveTarget = 'note' | 'todo' | 'kb'
 export type SaveSource =
   | 'download' | 'filesearch' | 'clipboard' | 'ssh' | 'ai' | 'monitor' | 'note'
 
@@ -167,12 +166,4 @@ export function useSaveAs() {
     addToKB,
     firstLineAsTitle,
   }
-}
-
-// 供 QdSaveAsMenu 内部读取的类型化引用（避免重复 import composable 内部状态）
-export type SaveAsState = {
-  state: Ref<SaveAsPayload | null>
-  visible: ComputedRef<boolean>
-  floatingRef: Ref<HTMLElement | null>
-  floatingStyles: ComputedRef<CSSProperties>
 }

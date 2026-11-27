@@ -391,7 +391,7 @@ watch(() => props.visible, (v) => {
 .prompt-dialog-error {
   margin: 0;
   font-size: var(--text-sm);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 
 /* 模板正文按代码排版：缩进与换行本身是提示词的一部分 */

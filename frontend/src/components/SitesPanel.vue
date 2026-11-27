@@ -768,7 +768,7 @@ onMounted(() => { load(); loadCert() })
 .block-head { display: flex; align-items: center; justify-content: space-between; }
 .block-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
 .block-hint { font-size: var(--text-xs); color: var(--color-text-muted); margin: 0; }
-.block-hint.warn { color: var(--color-danger); }
+.block-hint.warn { color: var(--color-danger-ink); }
 .status-grid { display: flex; flex-direction: column; gap: var(--space-3); }
 .status-item { display: flex; align-items: center; gap: 10px; font-size: var(--text-sm); }
 .status-label { width: 96px; flex: 0 0 auto; color: var(--color-text-muted); }
@@ -802,7 +802,7 @@ onMounted(() => { load(); loadCert() })
   font-size: var(--text-xs); color: var(--color-text-muted); overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; max-width: 240px;
 }
-.site-off { font-size: var(--text-xs); color: var(--color-danger); }
+.site-off { font-size: var(--text-xs); color: var(--color-danger-ink); }
 .site-ops { display: flex; gap: var(--space-3); flex: 0 0 auto; }
 .op-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
   height: 24px; padding: 0 var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
@@ -810,9 +810,9 @@ onMounted(() => { load(); loadCert() })
   font-size: var(--text-xs); font-family: inherit; cursor: pointer;
 }
 .op-btn:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
-.op-btn.danger { color: var(--color-danger); }
+.op-btn.danger { color: var(--color-danger-ink); }
 .op-btn.primary { background: var(--color-accent); color: var(--color-accent-text); border-color: transparent; }
-.op-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.op-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 .link-btn {
   background: none; border: none; padding: 0; font-size: var(--text-sm); font-family: inherit;
   color: var(--color-accent); cursor: pointer;
@@ -885,7 +885,7 @@ onMounted(() => { load(); loadCert() })
   padding: var(--space-3) var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); cursor: pointer;
 }
-.gen-mod.disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
+.gen-mod.disabled { color: var(--color-text-disabled); cursor: not-allowed; }
 .gen-mod input { grid-row: 1 / 3; width: 14px; height: 14px; align-self: center; }
 .gen-mod-label { font-size: var(--text-sm); color: var(--color-text-primary); }
 .gen-mod-desc { font-size: var(--text-2xs); color: var(--color-text-muted); line-height: 1.3; }

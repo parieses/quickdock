@@ -72,7 +72,7 @@ const parsed = computed(() => splitPasteLines(props.data, 6))
 <style scoped>
 /* 外壳（遮罩 / 卡片 / 头部 / 底部）由 QdModal 提供，这里只留内容样式。 */
 .paste-warn-icon {
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   flex: 0 0 auto;
 }
 
@@ -128,6 +128,6 @@ const parsed = computed(() => splitPasteLines(props.data, 6))
   margin: var(--space-4) 0 0;
   font-size: var(--text-xs);
   line-height: 1.6;
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
 }
 </style>

@@ -1499,8 +1499,8 @@ onMounted(() => {
   font-size: var(--text-2xs); font-variant-numeric: tabular-nums;
   border: 1px solid transparent;
 }
-.bm-flag.is-broken { color: var(--color-danger); border-color: var(--color-danger-border); background: var(--color-danger-bg); }
-.bm-flag.is-blocked { color: var(--color-warning); border-color: var(--color-warning-border); background: var(--color-warning-bg); }
+.bm-flag.is-broken { color: var(--color-danger-ink); border-color: var(--color-danger-border); background: var(--color-danger-bg); }
+.bm-flag.is-blocked { color: var(--color-warning-ink); border-color: var(--color-warning-border); background: var(--color-warning-bg); }
 .bm-flag.is-moved,
 .bm-flag.is-changed { color: var(--color-accent); border-color: var(--color-accent-border); background: var(--color-accent-bg); }
 
@@ -1553,15 +1553,15 @@ onMounted(() => {
 }
 /* 徽标只留描边 + 文字色，不铺底：一屏里死链、被挡、地址已变的条目混排时，
    三块实心色块会把整行的重量从标题抢到右侧边缘。 */
-.bm-badge.is-broken { border-color: var(--color-danger-border); color: var(--color-danger); }
-.bm-badge.is-blocked { border-color: var(--color-warning-border); color: var(--color-warning); }
+.bm-badge.is-broken { border-color: var(--color-danger-border); color: var(--color-danger-ink); }
+.bm-badge.is-blocked { border-color: var(--color-warning-border); color: var(--color-warning-ink); }
 .bm-badge.is-moved,
 .bm-badge.is-changed { border-color: var(--color-accent-border); color: var(--color-accent); }
-.bm-badge.is-ok { border-color: var(--color-success-border); color: var(--color-success); }
+.bm-badge.is-ok { border-color: var(--color-success-border); color: var(--color-success-ink); }
 
 .bm-none { padding: var(--space-6); text-align: center; font-size: var(--text-sm); color: var(--color-text-muted); }
 .bm-hint { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--color-text-muted); }
-.bm-hint-warn { color: var(--color-warning); }
+.bm-hint-warn { color: var(--color-warning-ink); }
 
 /* ---- 导入弹窗 ---- */
 .bm-src-head { display: flex; align-items: flex-start; gap: var(--space-4); margin-bottom: var(--space-2); }
@@ -1581,7 +1581,7 @@ onMounted(() => {
   flex-shrink: 0; font-size: var(--text-xs); color: var(--color-text-muted);
   font-variant-numeric: tabular-nums; white-space: nowrap;
 }
-.bm-src-count.is-bad { color: var(--color-danger); }
+.bm-src-count.is-bad { color: var(--color-danger-ink); }
 
 .bm-or {
   display: flex; align-items: center; gap: var(--space-4);
@@ -1600,7 +1600,7 @@ onMounted(() => {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: var(--text-sm); color: var(--color-text-secondary);
 }
-.bm-preview-note { margin: 0 0 var(--space-4); font-size: var(--text-xs); color: var(--color-warning); }
+.bm-preview-note { margin: 0 0 var(--space-4); font-size: var(--text-xs); color: var(--color-warning-ink); }
 
 .bm-stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); margin-bottom: var(--space-4); }
 .bm-stat-grid-4 { grid-template-columns: repeat(4, 1fr); }
@@ -1633,7 +1633,7 @@ onMounted(() => {
   display: flex; align-items: center; gap: var(--space-2); margin: 0;
   font-size: var(--text-sm); color: var(--color-text-secondary);
 }
-.bm-advice-row b { font-variant-numeric: tabular-nums; color: var(--color-warning); }
+.bm-advice-row b { font-variant-numeric: tabular-nums; color: var(--color-warning-ink); }
 
 .spin { animation: bm-spin 1s linear infinite; }
 @keyframes bm-spin { to { transform: rotate(360deg); } }

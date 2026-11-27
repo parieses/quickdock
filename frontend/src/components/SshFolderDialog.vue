@@ -241,7 +241,7 @@ function onKeydown(e: KeyboardEvent) {
 .fd-err {
   margin: var(--space-3) 0 0;
   font-size: var(--text-xs);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 
 .fd-foot {

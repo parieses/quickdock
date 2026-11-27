@@ -704,8 +704,8 @@ defineExpose({ flashItemById })
   text-align: left; cursor: pointer;
 }
 .ctx-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.ctx-item.danger { color: var(--color-danger); }
-.ctx-item.danger:hover { background: var(--color-danger-bg); color: var(--color-danger); }
+.ctx-item.danger { color: var(--color-danger-ink); }
+.ctx-item.danger:hover { background: var(--color-danger-bg); color: var(--color-danger-ink); }
 
 .item-usage {
   flex-shrink: 0;

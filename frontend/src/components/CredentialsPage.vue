@@ -28,6 +28,7 @@ import {
 import { LockStatus, SelectLocalFile, SelectSavePath } from '../../bindings/quickdock/services/appservice'
 
 import { reportError } from '../utils/reportError'
+import { writeStored } from '../utils/storage'
 const { t } = useI18n()
 const toast = useToast()
 
@@ -149,11 +150,7 @@ function maskUser(value: string): string {
 
 function toggleShowUser() {
   showUser.value = !showUser.value
-  try {
-    localStorage.setItem('quickdock.credentials.showUser', showUser.value ? '1' : '0')
-  } catch {
-    // 隐私模式下 localStorage 可能不可写：本次会话仍然生效，不打扰用户。
-  }
+  writeStored('quickdock.credentials.showUser', showUser.value ? '1' : '0')
 }
 
 /**
@@ -978,7 +975,7 @@ onUnmounted(() => {
   flex-shrink: 0;
   padding: var(--space-4) var(--space-6);
   font-size: var(--text-xs);
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
 }
@@ -1137,7 +1134,7 @@ onUnmounted(() => {
   gap: var(--space-3);
   margin: var(--space-5) var(--space-3);
   font-size: var(--text-xs);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 
 /* 首次加载的空窗期：空态被 !loading 挡住，给几条骨架免得整块空白。 */
@@ -1364,13 +1361,13 @@ onUnmounted(() => {
 .cred-del {
   background: none;
   border-color: transparent;
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 
 .cred-del:hover {
   background: var(--color-danger-bg);
   border-color: var(--color-danger-border);
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 
 .cred-save {

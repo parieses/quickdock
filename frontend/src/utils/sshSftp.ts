@@ -21,13 +21,6 @@ export interface SftpEntry {
   ext: string
 }
 
-export interface SftpListing {
-  path: string
-  parent: string
-  entries: SftpEntry[]
-  truncated: boolean
-}
-
 /** 面包屑的一段。 */
 export interface Crumb {
   name: string

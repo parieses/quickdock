@@ -195,10 +195,8 @@ function recallRepo(): string {
   try { return localStorage.getItem(LAST_REPO_KEY) || '' } catch { return '' }
 }
 function rememberRepo(p: string) {
-  try {
-    if (p) localStorage.setItem(LAST_REPO_KEY, p)
-    else localStorage.removeItem(LAST_REPO_KEY)
-  } catch { /* 隐私模式/配额满：记不住就算了，不影响主流程 */ }
+  if (p) writeStored(LAST_REPO_KEY, p)
+  else removeStored(LAST_REPO_KEY)
 }
 
 // ---- Git 环境 ----
@@ -3308,7 +3306,7 @@ const dialogCtx = reactive({
   font-size: var(--text-xs); color: var(--color-text-muted); font-family: var(--font-mono);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
 }
-.bar-dirty { font-size: var(--text-xs); color: var(--color-warning); flex-shrink: 0; }
+.bar-dirty { font-size: var(--text-xs); color: var(--color-warning-ink); flex-shrink: 0; }
 .bar-actions { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
 .bar-actions .qd-btn { height: 26px; }
 .qd-btn-ghost.on { background: var(--color-bg-hover); color: var(--color-text-primary); }
@@ -3339,7 +3337,7 @@ const dialogCtx = reactive({
 
 .git-error {
   margin: 0; padding: var(--space-3) var(--space-5); font-size: var(--text-sm); flex-shrink: 0;
-  color: var(--color-danger); background: var(--color-danger-bg);
+  color: var(--color-danger-ink); background: var(--color-danger-bg);
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -3350,7 +3348,7 @@ const dialogCtx = reactive({
   padding: var(--space-4) var(--space-5);
   background: var(--color-warning-bg); border-bottom: 1px solid var(--color-border);
 }
-.gw-ic { color: var(--color-warning); flex-shrink: 0; }
+.gw-ic { color: var(--color-warning-ink); flex-shrink: 0; }
 .gw-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
 .gw-text b { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); }
 .gw-text span { font-size: var(--text-xs); color: var(--color-text-muted); }
@@ -3435,9 +3433,9 @@ const dialogCtx = reactive({
   cursor: pointer; color: var(--color-text-muted);
 }
 .item:hover .item-x { display: grid; }
-.item-x:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.item-x:hover { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 .ab { display: inline-flex; align-items: center; gap: 1px; font-family: var(--font-mono); font-size: var(--text-2xs); flex-shrink: 0; }
-.ab.up { color: var(--color-warning); }
+.ab.up { color: var(--color-warning-ink); }
 .ab.down { color: var(--color-accent); }
 
 /* ---- 右栏 ---- */
@@ -3566,7 +3564,7 @@ const dialogCtx = reactive({
    底色只用 8.5% 的 accent-bg，比实底克制，整列连起来也不抢摘要。 */
 .ref-branch { background: var(--color-accent-bg); color: var(--color-accent); font-weight: 600; }
 .ref-remote { background: var(--color-bg-tertiary); color: var(--color-accent); }
-.ref-tag { background: var(--color-warning-bg); color: var(--color-warning); }
+.ref-tag { background: var(--color-warning-bg); color: var(--color-warning-ink); }
 .ref-more { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 
 /* 作者靠右：摘要与分支标记留在左侧，作者与时间固定在右边缘。
@@ -3594,14 +3592,14 @@ const dialogCtx = reactive({
   display: flex; align-items: center; gap: 5px; height: 30px; flex-shrink: 0;
   padding: 0 var(--space-4); border-bottom: 1px solid var(--color-border);
 }
-.wt-ic { flex-shrink: 0; color: var(--color-warning); }
+.wt-ic { flex-shrink: 0; color: var(--color-warning-ink); }
 /* 没有未提交改动时不该还是警告色：黄图标在「一切正常」的状态下读起来像出了事 */
 .wt-ic.clean { color: var(--color-text-muted); }
 .wt-name { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); }
 .wt-n {
   min-width: 16px; height: 16px; padding: 0 var(--space-2); border-radius: var(--radius-full);
   display: inline-flex; align-items: center; justify-content: center;
-  background: var(--color-warning-bg); color: var(--color-warning);
+  background: var(--color-warning-bg); color: var(--color-warning-ink);
   font-family: var(--font-mono); font-size: var(--text-2xs);
 }
 /* 「全部改动」：只看整份工作区 diff（不清空选中文件时的默认态） */
@@ -3652,7 +3650,7 @@ const dialogCtx = reactive({
   font: inherit; font-size: var(--text-2xs); color: var(--color-text-muted); cursor: pointer;
 }
 .pane-act:hover:not(:disabled) { color: var(--color-accent); }
-.pane-act:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.pane-act:disabled { color: var(--color-text-disabled); cursor: default; }
 /* 「全部暂存」后面紧跟的丢弃按钮不该再抢一次 auto 边距，否则两个动作被推到两端 */
 .pane-act + .pane-ic { margin-left: 0; }
 
@@ -3675,7 +3673,7 @@ const dialogCtx = reactive({
 }
 .cb-mini:first-of-type { margin-left: auto; }
 .cb-mini:hover:not(:disabled) { color: var(--color-accent); background: var(--color-accent-bg); }
-.cb-mini:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.cb-mini:disabled { color: var(--color-text-disabled); cursor: default; }
 /* amend 是开关，选中态要与悬停态一眼区分 */
 .cb-mini.is-on { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent); }
 .cb-input {
@@ -3753,7 +3751,7 @@ const dialogCtx = reactive({
 }
 .file-state { padding: var(--space-5); color: var(--color-text-muted); font-size: var(--text-sm); }
 /* 详情加载失败：文案 + 重试并排，和左侧空态的灰字区分开。 */
-.file-state.detail-failed { display: flex; align-items: center; gap: var(--space-3); color: var(--color-danger); }
+.file-state.detail-failed { display: flex; align-items: center; gap: var(--space-3); color: var(--color-danger-ink); }
 .file-rows { list-style: none; margin: 0; padding: var(--space-1); overflow-y: auto; flex: 1; min-height: 0; }
 .file-row {
   position: relative;
@@ -3774,7 +3772,7 @@ const dialogCtx = reactive({
 .tree-dir .file-quick { margin-left: auto; }
 .tree-dir:hover .file-quick, .tree-dir:focus-within .file-quick { display: grid; }
 .file-quick:hover { color: var(--color-accent); background: var(--color-accent-bg); }
-.file-quick:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.file-quick:disabled { color: var(--color-text-disabled); cursor: default; }
 /* 目录行：只承担分组与折叠，不参与选中（点它折叠/展开） */
 .tree-dir {
   display: flex; align-items: center; gap: 3px; min-height: 20px;
@@ -3797,12 +3795,12 @@ const dialogCtx = reactive({
   width: 14px; flex-shrink: 0; text-align: center;
   font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--color-text-secondary);
 }
-.file-badge.add { color: var(--color-success); }
-.file-badge.del { color: var(--color-danger); }
-.file-badge.mod { color: var(--color-warning); }
+.file-badge.add { color: var(--color-success-ink); }
+.file-badge.del { color: var(--color-danger-ink); }
+.file-badge.mod { color: var(--color-warning-ink); }
 .file-badge.ren { color: var(--color-accent); }
-.file-badge.new { color: var(--color-success); }
-.file-badge.conflict { color: var(--color-danger); }
+.file-badge.new { color: var(--color-success-ink); }
+.file-badge.conflict { color: var(--color-danger-ink); }
 .file-path {
   flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--text-xs);
   color: var(--color-text-secondary);
@@ -3810,8 +3808,8 @@ const dialogCtx = reactive({
 }
 .file-num { display: flex; gap: 3px; flex-shrink: 0; font-family: var(--font-mono); font-size: var(--text-2xs); }
 .file-num b { font-weight: 500; }
-.file-num .add { color: var(--color-success); }
-.file-num .del { color: var(--color-danger); }
+.file-num .add { color: var(--color-success-ink); }
+.file-num .del { color: var(--color-danger-ink); }
 
 .diff-title {
   font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-secondary);
@@ -3830,8 +3828,8 @@ const dialogCtx = reactive({
   color: var(--color-text-secondary); white-space: pre;
 }
 .diff span { display: block; padding: 0 var(--space-4); }
-.diff span.add { color: var(--color-success); background: var(--color-success-bg); }
-.diff span.del { color: var(--color-danger); background: var(--color-danger-bg); }
+.diff span.add { color: var(--color-success-ink); background: var(--color-success-bg); }
+.diff span.del { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 .diff span.hunk { color: var(--color-accent); background: var(--color-bg-tertiary); }
 .diff span.meta { color: var(--color-text-muted); }
 .diff span.trunc { color: var(--color-text-muted); }
@@ -3861,8 +3859,8 @@ const dialogCtx = reactive({
   border-right: 1px solid var(--color-border); user-select: none;
 }
 .sd-code { padding: 0 var(--space-4); white-space: pre-wrap; word-break: break-all; vertical-align: top; }
-.side-table td.del { background: var(--color-danger-bg); color: var(--color-danger); }
-.side-table td.add { background: var(--color-success-bg); color: var(--color-success); }
+.side-table td.del { background: var(--color-danger-bg); color: var(--color-danger-ink); }
+.side-table td.add { background: var(--color-success-bg); color: var(--color-success-ink); }
 .side-table td.blank { background: var(--color-bg-secondary); }
 /* 左右两栏的分界线：没有它，上下文行两边的同文会看起来像连成一片 */
 .side-table td:nth-of-type(2) { border-right: 1px solid var(--color-border); }
@@ -3881,8 +3879,8 @@ const dialogCtx = reactive({
 /* diff 头最左的「收起文件列」按钮：不属于右侧动作组，要抵消 margin-left:auto */
 .pane-ic.lead { margin-left: 0; margin-right: 2px; }
 .pane-ic.lead.on { color: var(--color-accent); background: var(--color-accent-bg); }
-.pane-ic.danger:hover:not(:disabled) { color: var(--color-danger); background: var(--color-danger-bg); }
-.pane-ic:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.pane-ic.danger:hover:not(:disabled) { color: var(--color-danger-ink); background: var(--color-danger-bg); }
+.pane-ic:disabled { color: var(--color-text-disabled); cursor: default; }
 .pane-ic + .pane-act { margin-left: var(--space-3); }
 .pick-bar {
   position: sticky; bottom: 8px; z-index: 3; margin: var(--space-2) var(--space-4) 0;
@@ -3899,8 +3897,8 @@ const dialogCtx = reactive({
   border: 1px solid var(--color-border);
 }
 .pb-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
-.pb-btn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); }
-.pb-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.pb-btn.danger:hover:not(:disabled) { color: var(--color-danger-ink); border-color: var(--color-danger); }
+.pb-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 .pb-x {
   margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
   width: 20px; height: 20px; border: 0; background: none; cursor: pointer;
@@ -3930,7 +3928,7 @@ const dialogCtx = reactive({
    圆点是「这里有未提交的东西」的固定信号，扫一眼状态栏就能发现。 */
 .st-dirty {
   display: inline-flex; align-items: center; gap: 4px;
-  color: var(--color-warning); font-size: var(--text-xs);
+  color: var(--color-warning-ink); font-size: var(--text-xs);
 }
 .st-dirty b { font-family: var(--font-mono); font-weight: 600; font-size: var(--text-xs); }
 .st-dot {
@@ -3966,8 +3964,8 @@ const dialogCtx = reactive({
   text-align: left; cursor: pointer; white-space: nowrap;
 }
 .ctx-item:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.ctx-item.danger { color: var(--color-danger); }
-.ctx-item.danger:hover:not(:disabled) { background: var(--color-danger-bg); color: var(--color-danger); }
+.ctx-item.danger { color: var(--color-danger-ink); }
+.ctx-item.danger:hover:not(:disabled) { background: var(--color-danger-bg); color: var(--color-danger-ink); }
 .ctx-item:disabled { color: var(--color-text-disabled); cursor: default; }
 .ctx-sep { height: 1px; margin: 3px var(--space-3); background: var(--color-border); }
 
@@ -3999,8 +3997,8 @@ const dialogCtx = reactive({
 .sub-state.diff { color: var(--color-accent); background: var(--color-accent-bg); }
 
 /* ---- 分支对比 ---- */
-.cmp-pill.add { color: var(--color-success); background: var(--color-success-bg); }
-.cmp-pill.del { color: var(--color-danger); background: var(--color-danger-bg); }
+.cmp-pill.add { color: var(--color-success-ink); background: var(--color-success-bg); }
+.cmp-pill.del { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 
 /* SSH 分区 */
 

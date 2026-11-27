@@ -591,7 +591,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 }
 .filter-chip:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
 .filter-chip.active { background: var(--color-accent-bg); border-color: var(--color-accent-border); color: var(--color-accent); }
-.filter-chip:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.filter-chip:disabled { color: var(--color-text-disabled); cursor: default; }
 .chip-count {
   font-size: var(--text-2xs); padding: 0 var(--space-3); border-radius: var(--radius-md); background: var(--color-accent-bg);
   color: var(--color-accent); font-weight: 600;
@@ -661,8 +661,8 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
    会撑出很大的 min-content 宽度把列顶宽；anywhere 让它在窄列里也能断行。 */
 .card-id { font-size: var(--text-xs); color: var(--color-text-muted); font-family: var(--font-mono); width: 100%; overflow-wrap: anywhere; }
 .badge { font-size: var(--text-2xs); padding: 1px 7px; border-radius: var(--radius-md); background: var(--color-accent-bg); color: var(--color-accent); }
-.badge-installed { background: var(--color-success-bg); color: var(--color-success); }
-.badge-upgrade { background: var(--color-warning-bg); color: var(--color-warning); }
+.badge-installed { background: var(--color-success-bg); color: var(--color-success-ink); }
+.badge-upgrade { background: var(--color-warning-bg); color: var(--color-warning-ink); }
 /* 描述：固定两行高度（12px × 1.5 × 2 = 36px），卡片等高、按行对齐；
    超出部分 line-clamp 裁掉，鼠标移入由 applyOverflowTitle 补 title 看全文。
    卡片是 flex column，desc 默认 stretch 到容器宽，但超长无空格词（英文描述/URL）
@@ -701,10 +701,10 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
   font-size: var(--text-sm); cursor: pointer; transition: all .15s;
 }
 .action-btn:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
-.action-btn:disabled { opacity: var(--opacity-disabled-soft); cursor: default; }
+.action-btn:disabled { color: var(--color-text-disabled); background: var(--color-bg-tertiary); border-color: var(--color-border); cursor: default; }
 .btn-install { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
 .btn-install:hover:not(:disabled) { opacity: .9; color: var(--color-accent-text); }
-.btn-upgrade { background: var(--color-warning-bg); color: var(--color-warning); border-color: var(--color-warning-border); }
+.btn-upgrade { background: var(--color-warning-bg); color: var(--color-warning-ink); border-color: var(--color-warning-border); }
 .btn-reinstall { color: var(--color-text-secondary); }
 .btn-disabled { color: var(--color-text-disabled); }
 
@@ -718,7 +718,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
   font-family: inherit; transition: background .15s, color .15s; white-space: nowrap;
 }
 .op-btn:hover { background: var(--color-bg-primary); color: var(--color-text-primary); }
-.op-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.op-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 .detail-head { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-5); }
 .detail-icon { width: 44px; height: 44px; border-radius: var(--radius-md); background: var(--color-bg-tertiary); padding: var(--space-3); }
 .detail-icon-fallback { color: var(--color-text-muted); }
@@ -737,7 +737,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .detail-perms { display: flex; flex-direction: column; gap: var(--space-4); }
 .detail-perm { display: flex; flex-direction: column; gap: var(--space-2); }
 .detail-perm-label { font-size: var(--text-xs); font-weight: 600; color: var(--color-text-secondary); }
-.detail-perm-on { font-size: var(--text-xs); color: var(--color-success); }
+.detail-perm-on { font-size: var(--text-xs); color: var(--color-success-ink); }
 .detail-tag-path { font-family: var(--font-mono); word-break: break-all; }
 .detail-changelog {
   font-size: var(--text-xs); line-height: 1.5; color: var(--color-text-secondary);

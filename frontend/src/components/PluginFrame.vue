@@ -126,7 +126,7 @@ defineExpose({ reload })
   user-select: none;
 }
 .pf-error {
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
   padding: 0 var(--space-8);
   text-align: center;
   line-height: 1.6;

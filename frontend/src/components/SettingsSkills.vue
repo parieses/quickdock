@@ -212,7 +212,7 @@ watch(() => props.visible, (v) => {
   background: var(--color-danger-bg);
   font-size: var(--text-2xs);
   font-weight: 500;
-  color: var(--color-danger);
+  color: var(--color-danger-ink);
 }
 .skill-desc {
   margin-top: var(--space-1);
@@ -254,7 +254,7 @@ watch(() => props.visible, (v) => {
 }
 .skill-check:disabled {
   cursor: not-allowed;
-  opacity: var(--opacity-disabled-soft);
+  color: var(--color-text-disabled);
 }
 .skill-act {
   display: grid;

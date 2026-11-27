@@ -80,7 +80,7 @@ function onConfirm() {
   padding: var(--space-8); text-align: center;
   box-shadow: 0 12px 48px var(--color-bg-overlay);
 }
-.confirm-icon { color: var(--color-warning); margin-bottom: var(--space-5); }
+.confirm-icon { color: var(--color-warning-ink); margin-bottom: var(--space-5); }
 .confirm-message { font-size: var(--text-base); color: var(--color-text-primary); margin: 0 0 var(--space-8); line-height: 1.6; }
 /* 明细清单：等宽左对齐，权限声明这类内容需要逐字可核对 */
 .confirm-details {

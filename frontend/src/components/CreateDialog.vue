@@ -209,7 +209,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 .field-textarea { resize: vertical; min-height: 220px; font-family: var(--font-mono); line-height: 1.5; }
 .field-error {
-  font-size: var(--text-sm); color: var(--color-danger); margin: -8px 0 0; padding: 0;
+  font-size: var(--text-sm); color: var(--color-danger-ink); margin: -8px 0 0; padding: 0;
 }
 .field-hint {
   font-size: var(--text-xs); color: var(--color-text-muted); margin: var(--space-1) 0 0; padding: 0;

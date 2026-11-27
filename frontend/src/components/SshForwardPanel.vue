@@ -562,9 +562,9 @@ onBeforeUnmount(() => {
   background: var(--color-bg-tertiary); color: var(--color-text-muted); font-size: var(--text-2xs);
 }
 .sfp-status { flex: 0 0 auto; font-size: var(--text-2xs); color: var(--color-text-muted); }
-.sfp-row.is-running .sfp-status { color: var(--color-success); }
-.sfp-row.is-error .sfp-status { color: var(--color-danger); }
-.sfp-row.is-retrying .sfp-status, .sfp-row.is-starting .sfp-status { color: var(--color-warning); }
+.sfp-row.is-running .sfp-status { color: var(--color-success-ink); }
+.sfp-row.is-error .sfp-status { color: var(--color-danger-ink); }
+.sfp-row.is-retrying .sfp-status, .sfp-row.is-starting .sfp-status { color: var(--color-warning-ink); }
 
 .sfp-line { display: flex; align-items: baseline; gap: var(--space-2); margin-top: var(--space-1); }
 .sfp-k { flex: 0 0 auto; font-size: var(--text-2xs); color: var(--color-text-muted); }
@@ -577,9 +577,9 @@ onBeforeUnmount(() => {
 }
 .sfp-active {
   padding: 0 var(--space-2); border-radius: var(--radius-xs);
-  background: var(--color-success-bg); color: var(--color-success);
+  background: var(--color-success-bg); color: var(--color-success-ink);
 }
-.sfp-err { margin-top: var(--space-1); font-size: var(--text-2xs); color: var(--color-danger); word-break: break-word; }
+.sfp-err { margin-top: var(--space-1); font-size: var(--text-2xs); color: var(--color-danger-ink); word-break: break-word; }
 
 .sfp-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); margin-top: var(--space-2); }
 .sfp-act {
@@ -589,10 +589,10 @@ onBeforeUnmount(() => {
   font: inherit; font-size: var(--text-xs); cursor: pointer; white-space: nowrap;
 }
 .sfp-act:hover { color: var(--color-accent); background: var(--color-bg-active); }
-.sfp-act.is-danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.sfp-act.is-danger:hover { color: var(--color-danger-ink); background: var(--color-danger-bg); }
 
 .sfp-empty { padding: var(--space-6) var(--space-3); text-align: center; font-size: var(--text-xs); color: var(--color-text-muted); }
-.sfp-empty.is-err { color: var(--color-danger); }
+.sfp-empty.is-err { color: var(--color-danger-ink); }
 
 /* —— 表单 —— */
 .sfp-form { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: var(--space-4); }
@@ -620,7 +620,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--color-warning-border); border-radius: var(--radius-sm);
   background: var(--color-warning-bg);
 }
-.sfp-lan-warn { margin: 0 0 var(--space-3); font-size: var(--text-xs); line-height: 1.5; color: var(--color-warning); }
+.sfp-lan-warn { margin: 0 0 var(--space-3); font-size: var(--text-xs); line-height: 1.5; color: var(--color-warning-ink); }
 .sfp-foot { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-4); }
 .sfp-btn {display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); 
   height: 28px; padding: 0 11px;
@@ -631,6 +631,6 @@ onBeforeUnmount(() => {
 .sfp-btn:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .sfp-btn--primary { color: var(--color-accent-text); background: var(--color-accent); border-color: var(--color-accent); }
 .sfp-btn--primary:hover { color: var(--color-accent-text); background: var(--color-accent-hover); }
-.sfp-btn--primary:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.sfp-btn--primary:disabled { background: var(--color-bg-tertiary); color: var(--color-text-disabled); border-color: var(--color-border); cursor: default; }
 .sfp-btn--danger { color: var(--color-danger-text); background: var(--color-danger); border-color: var(--color-danger); }
 </style>

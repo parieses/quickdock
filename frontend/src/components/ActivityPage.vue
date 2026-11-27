@@ -409,10 +409,10 @@ onUnmounted(() => {
   color: var(--color-text-secondary);
 }
 .tl-dot[data-kind='item'] { color: var(--color-accent); border-color: var(--color-accent-border); }
-.tl-dot[data-kind='ssh'] { color: var(--color-success); border-color: var(--color-success-border); }
-.tl-dot[data-kind='plugin'] { color: var(--color-warning); }
+.tl-dot[data-kind='ssh'] { color: var(--color-success-ink); border-color: var(--color-success-border); }
+.tl-dot[data-kind='plugin'] { color: var(--color-warning-ink); }
 .tl-dot[data-kind='schedule'] { color: var(--color-log-info); }
-.tl-dot[data-kind='ssh_batch'] { color: var(--color-danger); border-color: var(--color-danger-border); }
+.tl-dot[data-kind='ssh_batch'] { color: var(--color-danger-ink); border-color: var(--color-danger-border); }
 .tl-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .tl-line { font-size: var(--text-sm); color: var(--color-text-primary); display: flex; gap: var(--space-2); align-items: baseline; }
 .tl-verb { color: var(--color-text-secondary); flex-shrink: 0; }
