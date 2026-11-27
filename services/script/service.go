@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -28,6 +27,7 @@ import (
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 	"quickdock/internal/scriptrun"
+	"quickdock/internal/sysutil"
 	"quickdock/services"
 )
 
@@ -513,7 +513,7 @@ func (s *ScriptService) goLangVersion(sc *db.Script) string {
 	if err != nil {
 		return fallback
 	}
-	out, err := exec.Command(ip.Exe, "version").Output()
+	out, err := sysutil.Command(ip.Exe, "version").Output()
 	if err != nil {
 		return fallback
 	}

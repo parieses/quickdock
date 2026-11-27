@@ -16,6 +16,7 @@ import (
 
 	dlutil "quickdock/internal/dl"
 	"quickdock/internal/env"
+	"quickdock/internal/httpget"
 	"quickdock/internal/logger"
 	pluginmgr "quickdock/internal/plugin"
 	"quickdock/services"
@@ -122,44 +123,17 @@ var marketProxyHTTP = &http.Client{Timeout: marketPerCallTimeout, Transport: env
 // 「ProxyEnable=1 但本地代理端口没起」，前端 fetch 会全部 ERR_TIMED_OUT。
 // Go 侧显式直连，直连彻底不通才付 env.ProxyTransport() 那一跳。
 func fetchMarketIndex(ctx context.Context, rawURL, sourceID string) (marketIndex, error) {
-	var lastErr error
-	for _, c := range []*http.Client{marketDirectHTTP, marketDirectHTTP, marketProxyHTTP} {
-		if err := ctx.Err(); err != nil {
-			if lastErr == nil {
-				lastErr = err
-			}
-			break
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-		if err != nil {
-			return marketIndex{}, err
-		}
-		req.Header.Set("Accept", "application/json")
-		req.Header.Set("User-Agent", "QuickDock/market")
-
-		resp, err := c.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxMarketIndexSize))
-		_ = resp.Body.Close()
-		if readErr != nil {
-			lastErr = readErr
-			continue
-		}
-		if resp.StatusCode != http.StatusOK {
-			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
-			continue
-		}
-		var idx marketIndex
-		if err := json.Unmarshal(data, &idx); err != nil {
-			lastErr = fmt.Errorf("市场索引不是有效 JSON: %w", err)
-			continue
-		}
-		return idx, nil
+	var idx marketIndex
+	err := httpget.GetJSON(ctx, rawURL, &idx, httpget.Options{
+		Clients:   []*http.Client{marketDirectHTTP, marketDirectHTTP, marketProxyHTTP},
+		UserAgent: "QuickDock/market",
+		MaxBytes:  maxMarketIndexSize,
+		DecodeErr: func(e error) error { return fmt.Errorf("市场索引不是有效 JSON: %w", e) },
+	})
+	if err != nil {
+		return marketIndex{}, fmt.Errorf("市场源 %s 不可达（直连重试与系统代理均失败）: %v", sourceID, err)
 	}
-	return marketIndex{}, fmt.Errorf("市场源 %s 不可达（直连重试与系统代理均失败）: %v", sourceID, lastErr)
+	return idx, nil
 }
 
 // defaultMarketSources 首次运行 / 配置损坏时的兜底：只有官方源。
