@@ -621,7 +621,7 @@ onUnmounted(() => {
           @click="selectFile(f.name, false)"
         >
           <span class="log-file-name" :title="f.name">{{ f.name }}</span>
-          <span class="log-file-meta">{{ (f.size / 1024).toFixed(1) }} KB</span>
+          <span class="log-file-meta">{{ formatBytes(f.size) }}</span>
         </button>
         <p v-if="!logFiles.length" class="log-empty">{{ t('logEmpty') }}</p>
       </div>
@@ -646,7 +646,7 @@ onUnmounted(() => {
           <span class="log-file-name" :title="c.name">
             <span class="crash-badge" :data-kind="c.kind">{{ c.kind }}</span>{{ c.name }}
           </span>
-          <span class="log-file-meta">{{ c.time }} · {{ (c.size / 1024).toFixed(1) }} KB</span>
+          <span class="log-file-meta">{{ c.time }} · {{ formatBytes(c.size) }}</span>
         </button>
         <p v-if="!crashFiles.length" class="log-empty">{{ t('crashEmpty') }}</p>
       </div>
